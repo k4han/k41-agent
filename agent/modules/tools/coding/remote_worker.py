@@ -1,4 +1,4 @@
-"""Standard-library sandbox daemon and file-based RPC client.
+"""Standard-library sandbox daemon and bounded RPC transport.
 
 This module is shipped with the same operation engine used by local tools.
 The application validates inputs and approves exact operation resources;
@@ -8,11 +8,14 @@ the worker checks those resources again at the actual filesystem access.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import socket
 import sys
 import time
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from dataclasses import replace
 from pathlib import Path
 
@@ -26,6 +29,19 @@ from agent.modules.tools.coding.storage import OutputStore, atomic_json, digest
 from agent.shared.thread_ids import resolve_thread_id, thread_id_aliases_var
 
 MAX_REQUEST_BYTES = 64 * 1024 * 1024
+MAX_INLINE_RESPONSE_BYTES = 32 * 1024
+_rpc_timings = ContextVar("sandbox_rpc_timings", default=None)
+
+
+@contextmanager
+def measure_phase(name):
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        timings = _rpc_timings.get()
+        if timings is not None:
+            timings[name] = timings.get(name, 0.0) + time.monotonic() - started
 
 
 def permission_identity(action, resource, metadata):
@@ -94,6 +110,13 @@ class SandboxWorker:
             self.active_calls.pop(request_id, None)
 
     async def _dispatch(self, request):
+        if request.get("operation") == "prepare_batch":
+            results = []
+            for item in request["requests"]:
+                if item.get("operation") != "prepare":
+                    raise CodingError("invalid_input", "A preparation batch cannot execute operations.")
+                results.append(await self.dispatch(item))
+            return {"results": results}
         if request.get("operation") == "workspace_state":
             jobs = {**self.processes.jobs, **self.processes.retiring_jobs}
             root = str(Path(request["workspace"]).resolve())
@@ -130,7 +153,8 @@ class SandboxWorker:
                               authorized=set(request.get("authorized", [])) if operation == "execute" else None)
         engine.files.locks = self.file_locks
         if operation == "prepare":
-            await engine.prepare(name, values, context)
+            with measure_phase("preparation_duration_seconds"):
+                await engine.prepare(name, values, context)
             return {"permissions": list(engine.permissions.requests.values())}
         use_journal = name != "read"
         fingerprint = None
@@ -142,13 +166,15 @@ class SandboxWorker:
             async with lock:
                 if use_journal and context.tool_call_id and self.storage.journal_path(context).exists():
                     return self.storage.begin(context, fingerprint).to_dict()
-                await engine.prepare(name, values, context)
+                with measure_phase("preparation_duration_seconds"):
+                    await engine.prepare(name, values, context)
                 if use_journal:
                     cached = self.storage.begin(context, fingerprint)
                     if cached is not None:
                         return cached.to_dict()
                 try:
-                    result = await engine.execute(name, values, context)
+                    with measure_phase("execution_duration_seconds"):
+                        result = await engine.execute(name, values, context)
                 except (CodingError, OSError, ValueError) as exc:
                     result = failure(exc)
                 content = result.model_content(name)
@@ -183,6 +209,9 @@ async def serve(runtime_dir: Path, output_root: Path, default_root: str):
     async def handle(reader, writer):
         nonlocal last_request
         last_request = time.monotonic()
+        started = time.monotonic()
+        timings = {}
+        timing_token = _rpc_timings.set(timings)
         try:
             header = await reader.readexactly(8)
             size = int.from_bytes(header, "big")
@@ -199,6 +228,10 @@ async def serve(runtime_dir: Path, output_root: Path, default_root: str):
             response = {"error": failure(exc).to_dict()}
         except Exception:
             response = {"error": failure(CodingError("unexpected", "Sandbox execution failed unexpectedly.")).to_dict()}
+        finally:
+            _rpc_timings.reset(timing_token)
+        response["worker_duration_seconds"] = time.monotonic() - started
+        response["worker_timings"] = timings
         try:
             raw = json.dumps(response, ensure_ascii=True).encode()
             writer.write(len(raw).to_bytes(8, "big") + raw)
@@ -226,15 +259,18 @@ async def serve(runtime_dir: Path, output_root: Path, default_root: str):
         socket_path.unlink(missing_ok=True)
 
 
-def rpc(runtime_dir: Path, request_path: Path, response_path: Path):
-    request = json.loads(request_path.read_text())
+def rpc_request(runtime_dir: Path, request):
+    """Dispatch once; a lost response must never trigger an automatic replay."""
     request["token"] = (runtime_dir / "token").read_text()
     raw = json.dumps(request, ensure_ascii=True).encode()
     if len(raw) > MAX_REQUEST_BYTES:
         raise ValueError("Sandbox request is too large.")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.settimeout(120)
-        connection.connect(str(runtime_dir / "worker.sock"))
+        try:
+            connection.connect(str(runtime_dir / "worker.sock"))
+        except (FileNotFoundError, ConnectionRefusedError):
+            return {"error": failure(CodingError("runtime_unavailable", "Sandbox coding worker is not running; no request was sent.")).to_dict()}
         connection.sendall(len(raw).to_bytes(8, "big") + raw)
 
         def receive(size):
@@ -248,8 +284,29 @@ def rpc(runtime_dir: Path, request_path: Path, response_path: Path):
 
         size = int.from_bytes(receive(8), "big")
         response = json.loads(receive(size))
+    return response
+
+
+def rpc(runtime_dir: Path, request_path: Path, response_path: Path):
+    response = rpc_request(runtime_dir, json.loads(request_path.read_text()))
     atomic_json(response_path, response)
     request_path.unlink(missing_ok=True)
+
+
+def rpc_output(runtime_dir: Path, request_path: str, response_path: Path, payload: str):
+    """Return small responses on stdout and spill large responses to a file."""
+    try:
+        raw = Path(request_path).read_bytes() if request_path else base64.b64decode(payload, validate=True)
+        response = rpc_request(runtime_dir, json.loads(raw))
+        output = json.dumps({"response": response}, ensure_ascii=True)
+        if len(output) + 1 > MAX_INLINE_RESPONSE_BYTES:
+            atomic_json(response_path, response)
+            output = json.dumps({"response_file": True})
+        print(output)
+    finally:
+        if request_path:
+            with suppress(OSError):
+                Path(request_path).unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

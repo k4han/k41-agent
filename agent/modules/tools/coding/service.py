@@ -117,6 +117,7 @@ class CodingService(CodingEngine):
     async def prepare_batch(self, invocations: list[CodingInvocation]) -> ToolResult | None:
         """Authorize every operation before a batch can execute any effects."""
         try:
+            remote_invocations = []
             for invocation in invocations:
                 definition, args, context = invocation.definition, invocation.args, invocation.context
                 parsed = definition.input_schema.model_validate(args)
@@ -124,7 +125,14 @@ class CodingService(CodingEngine):
                 if definition.name != "read" and context.tool_call_id and self.storage.journal_path(context).exists():
                     self.storage.begin(context, self.fingerprint(definition.name, parsed.model_dump()))
                     continue
-                await self.prepare(definition.name, parsed.model_dump(), context)
+                if context.backend == "local":
+                    await self.prepare(definition.name, parsed.model_dump(), context)
+                else:
+                    if definition.name in {"write", "edit", "bash", "write_process_input"} and context.project_workspace_id:
+                        from agent.modules.projects import get_project_workspace_service
+                        await get_project_workspace_service().assert_writable(context)
+                    remote_invocations.append((definition.name, parsed.model_dump(), context))
+            await self.remote.prepare_batch(remote_invocations)
         except (CodingError, ValidationError, OSError, ValueError, RuntimeError) as exc:
             result = self.failure(exc)
             result.data["batch_stopped_before_execution"] = True
@@ -137,6 +145,12 @@ class CodingService(CodingEngine):
         return digest(json.dumps([name, args], sort_keys=True, ensure_ascii=True))
 
     async def invoke(self, definition: ToolDefinition, args: dict[str, Any], context: InvocationContext) -> ToolResult:
+        from agent.modules.tools.coding.remote import coding_authorization_scope
+
+        with coding_authorization_scope():
+            return await self._invoke(definition, args, context)
+
+    async def _invoke(self, definition: ToolDefinition, args: dict[str, Any], context: InvocationContext) -> ToolResult:
         try:
             context = await self._resolve_context(definition.name, context)
         except (CodingError, OSError, ValueError, RuntimeError) as exc:

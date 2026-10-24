@@ -15,6 +15,7 @@ from agent.modules.tools import (
     retain_tool_messages,
 )
 from agent.modules.workflows.run_config import WorkflowContext
+from agent.modules.tools.coding.remote import coding_authorization_scope
 
 
 def make_tool_node(tools: list[BaseTool]) -> ToolNode:
@@ -143,17 +144,18 @@ async def tool_node(
     tools = _include_pending_control_tools(state, tools)
     calls = getattr(state.get("messages", [])[-1], "tool_calls", []) if state.get("messages") else []
     next_config = {**config, "configurable": dict(config.get("configurable", {}))}
-    if calls:
-        next_config["configurable"]["coding_message_id"] = str(getattr(state["messages"][-1], "id", "") or "")
-        failure = await prepare_tool_batch(tools, calls, SimpleNamespace(
-            context=runtime.context, state=state, config=next_config,
-        ))
-        if failure is not None:
-            return await retain_tool_messages({"messages": [ToolMessage(
-                content=failure.content, artifact=failure.model_dump(exclude={"content"}),
-                name=call["name"], tool_call_id=call["id"], status="error",
-            ) for call in calls]}, SimpleNamespace(context=runtime.context, config=next_config))
-    result = await ToolNode(tools).ainvoke(state, config=next_config, runtime=runtime)
+    with coding_authorization_scope():
+        if calls:
+            next_config["configurable"]["coding_message_id"] = str(getattr(state["messages"][-1], "id", "") or "")
+            failure = await prepare_tool_batch(tools, calls, SimpleNamespace(
+                context=runtime.context, state=state, config=next_config,
+            ))
+            if failure is not None:
+                return await retain_tool_messages({"messages": [ToolMessage(
+                    content=failure.content, artifact=failure.model_dump(exclude={"content"}),
+                    name=call["name"], tool_call_id=call["id"], status="error",
+                ) for call in calls]}, SimpleNamespace(context=runtime.context, config=next_config))
+        result = await ToolNode(tools).ainvoke(state, config=next_config, runtime=runtime)
     from agent.modules.skills import skill_events
     from langgraph.types import Command
 

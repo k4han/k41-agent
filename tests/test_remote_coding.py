@@ -16,8 +16,8 @@ from types import SimpleNamespace
 import pytest
 
 from agent.modules.tools.coding.adapter import SCHEMAS
-from agent.modules.tools.coding.models import CodingError, InvocationContext, PermissionRule, ToolDefinition
-from agent.modules.tools.coding.remote import BOOTSTRAP, SandboxClient, build_runtime_bundle
+from agent.modules.tools.coding.models import CodingError, CodingInvocation, InvocationContext, PermissionRule, ToolDefinition
+from agent.modules.tools.coding.remote import BOOTSTRAP, SandboxClient, build_runtime_bundle, coding_authorization_scope
 from agent.modules.tools.coding.remote_worker import SandboxWorker, permission_identity
 from agent.modules.tools.coding.service import CodingService
 from agent.modules.workspaces import CommandResult, WorkspaceRef
@@ -236,6 +236,93 @@ async def test_worker_rejects_resources_that_changed_after_authorization(remote_
     assert not (workspace / "target.txt").exists()
 
 
+@pytest.mark.asyncio
+async def test_invocation_prepares_once_and_does_not_cache_across_invocations(remote_coding, monkeypatch):
+    service, context, workspace, _ = remote_coding
+    (workspace / "file.txt").write_text("first")
+    client = await service.remote.client(context)
+    original = client.call
+    operations = []
+
+    async def call(request):
+        operations.append(request["operation"])
+        return await original(request)
+
+    monkeypatch.setattr(client, "call", call)
+    assert (await invoke(service, context, "read", path="file.txt")).status == "success"
+    (workspace / "file.txt").write_text("second")
+    result = await invoke(service, context, "read", path="file.txt")
+    assert "second" in result.content
+    assert operations == ["prepare", "execute", "prepare", "execute"]
+
+
+@pytest.mark.asyncio
+async def test_batch_prepares_once_for_parallel_calls_and_preserves_policy(remote_coding, monkeypatch):
+    service, context, workspace, _ = remote_coding
+    client = await service.remote.client(context)
+    original = client.call
+    operations = []
+
+    async def call(request):
+        operations.append(request["operation"])
+        return await original(request)
+
+    monkeypatch.setattr(client, "call", call)
+
+    async def execute(params, ctx, runtime):
+        return await runtime.execute("write", params.model_dump(), ctx)
+
+    definition = ToolDefinition("write", "Write", SCHEMAS["write"], execute)
+    invocations = [CodingInvocation(definition, {"path": name, "content": "written"},
+                                    replace(context, tool_call_id=name)) for name in ("one.txt", "two.txt")]
+    with coding_authorization_scope():
+        assert await service.prepare_batch(invocations) is None
+        assert not (workspace / "one.txt").exists()
+        results = await asyncio.gather(*(service.invoke(item.definition, item.args, item.context) for item in invocations))
+    assert all(result.status == "success" for result in results)
+    assert operations == ["prepare_batch", "execute", "execute"]
+    assert (workspace / "two.txt").read_text() == "written"
+
+    restricted = replace(context, permission_rules=(PermissionRule(action="edit", resource="*blocked.txt", effect="deny"),))
+    denied = [CodingInvocation(definition, {"path": name, "content": "denied"},
+                               replace(restricted, tool_call_id=name)) for name in ("new.txt", "blocked.txt")]
+    with coding_authorization_scope():
+        failure = await service.prepare_batch(denied)
+    assert failure.error.code == "permission_denied" and failure.data["batch_stopped_before_execution"]
+    assert not (workspace / "new.txt").exists() and not (workspace / "blocked.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_cached_preparation_rechecks_changed_resources_in_worker(remote_coding):
+    service, context, workspace, _ = remote_coding
+    values = SCHEMAS["glob"].model_validate({"pattern": "*.txt"}).model_dump()
+    with coding_authorization_scope():
+        await service.remote.prepare("glob", values, context)
+        (workspace / "new.txt").write_text("created after preparation")
+        with pytest.raises(CodingError, match="changed after"):
+            await service.remote.execute("glob", values, context)
+
+
+@pytest.mark.asyncio
+async def test_preparation_cache_cannot_authorize_a_changed_policy(remote_coding):
+    service, context, workspace, _ = remote_coding
+    values = SCHEMAS["write"].model_validate({"path": "policy.txt", "content": "blocked"}).model_dump()
+    restricted = replace(context, permission_rules=(PermissionRule(action="edit", effect="deny"),))
+    with coding_authorization_scope():
+        await service.remote.prepare("write", values, context)
+        with pytest.raises(CodingError, match="Policy denies"):
+            await service.remote.execute("write", values, restricted)
+    assert not (workspace / "policy.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_preparation_batches_cannot_hide_mutations(remote_coding):
+    _, _, workspace, worker = remote_coding
+    with pytest.raises(CodingError, match="cannot execute"):
+        await worker.dispatch({"operation": "prepare_batch", "requests": [{"operation": "execute"}]})
+    assert not list(workspace.iterdir())
+
+
 def test_bundle_contains_shared_engine_and_minimal_package_initializers():
     with zipfile.ZipFile(io.BytesIO(build_runtime_bundle())) as archive:
         assert "agent/modules/tools/coding/engine.py" in archive.namelist()
@@ -418,9 +505,14 @@ async def test_provider_transport_preserves_large_payloads(backend_name):
         parts = shlex.split(command)
         if parts[2] == BOOTSTRAP:
             return json.dumps({"runtime_dir": "/tmp/runtime", "python": "/usr/bin/python3", "bundle": "/tmp/runtime/runtime.zip"})
-        if "rpc(Path" in parts[2]:
-            request = json.loads(files[parts[5]])
-            files[parts[6]] = json.dumps({"result": request["values"]}, ensure_ascii=True).encode()
+        if "rpc_output(Path" in parts[2]:
+            request = json.loads(files[parts[5]]) if parts[5] else json.loads(base64.b64decode(parts[7]))
+            response = {"result": request["values"]}
+            output = json.dumps({"response": response}, ensure_ascii=True)
+            if len(output) > 32 * 1024:
+                files[parts[6]] = json.dumps(response, ensure_ascii=True).encode()
+                return json.dumps({"response_file": True})
+            return output
         return ""
 
     if backend_name == "daytona":

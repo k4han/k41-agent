@@ -93,14 +93,43 @@ performed inside the sandbox. Local shell configuration applies to the host;
 sandboxes select their own Bash/sh executable.
 
 A daemon owns processes, stdin, byte cursors and file locks across calls.
-Provider filesystem APIs transfer requests/results, avoiding command-line size
-limits and stdout truncation for images and diffs. An authenticated Unix socket
+Requests up to 8 KiB are base64-encoded into the RPC command; larger requests
+use provider filesystem uploads. Responses up to 32 KiB return directly on
+stdout. Larger responses use provider filesystem downloads, so images and
+diffs do not depend on stdout limits. Each request executes once, including
+when its response spills to a file. An authenticated Unix socket
 inside a private runtime directory carries RPC. The application validates tool
 inputs, settles invocations durably and approves canonical sandbox resources.
 The worker checks the exact approved action/resource/metadata again at actual
 access, rejecting resources that changed after preparation. Workspace ownership
 includes backend, sandbox locator, root and thread so identically named paths
 in different sandboxes cannot share results or approvals.
+
+Preparation is grouped into one RPC per sandbox for each workflow tool batch.
+Canonical permission requests are reused only within that batch or a direct
+invocation, keyed by arguments, full context and permission rules. The host
+checks policy again before execution, and the worker still resolves and checks
+resources immediately before access. No preparation cache persists across
+workflow turns or permission interrupts. A changed resource is rejected rather
+than implicitly authorized by a cached request.
+
+Worker bootstrap is skipped while recent RPC activity confirms it is running.
+After 60 seconds without activity, preparation checks the worker and starts it
+if necessary. A confirmed pre-dispatch connection failure invalidates that
+check; the failed operation is not retried automatically.
+
+For a healthy worker and small payloads, a direct invocation normally needs two
+backend calls: preparation and execution. A workflow batch of N operations in
+one sandbox needs one preparation call plus N execution calls. Cold bootstrap,
+large payloads, project persistence and output retention add separate calls.
+
+`agent.modules.tools.coding.remote` logs bootstrap, authorization and RPC timing
+at INFO level. RPC logs include operation, tool, request size, response spill,
+backend call count, total duration, worker duration, preparation duration,
+execution duration and estimated transport duration (total minus worker time).
+Worker duration also includes journaling and output processing. Transport time includes
+provider commands, serialization, transfers and response cleanup; it is not a
+measurement of network latency alone. Arguments and file contents are not logged.
 
 Output and invocation records persist outside the workspace under
 `~/.k41-agent/coding-runtime/<application-namespace>`. The worker also records

@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import io
 import json
 import logging
 import shlex
+import time
 import uuid
 import zipfile
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict
 from pathlib import Path
 
@@ -18,6 +22,22 @@ from agent.modules.tools.coding.remote_worker import permission_identity
 from agent.shared.thread_ids import resolve_thread_id, thread_storage_aliases
 
 logger = logging.getLogger(__name__)
+MAX_INLINE_REQUEST_BYTES = 8 * 1024
+WORKER_CHECK_INTERVAL_SECONDS = 60
+_prepared_permissions = ContextVar("coding_prepared_permissions", default=None)
+
+
+@contextmanager
+def coding_authorization_scope():
+    """Reuse preparation only within one invocation or workflow tool batch."""
+    if _prepared_permissions.get() is not None:
+        yield
+        return
+    token = _prepared_permissions.set({})
+    try:
+        yield
+    finally:
+        _prepared_permissions.reset(token)
 
 RUNTIME_MODULES = (
     "tools/coding/contracts.py", "tools/coding/engine.py", "tools/coding/files.py",
@@ -106,14 +126,19 @@ def build_runtime_bundle() -> bytes:
 class SandboxClient:
     def __init__(self, backend, bundle: bytes, namespace: str, generation: str):
         self.backend = backend
+        self.backend_name = getattr(getattr(backend, "ref", None), "backend", "sandbox")
         self.bundle = bundle
         self.namespace = namespace
         self.generation = generation
         self.endpoint = None
         self.lock = asyncio.Lock()
+        self.last_activity = 0.0
 
     async def ensure_started(self):
         async with self.lock:
+            if self.endpoint is not None and self.last_activity and time.monotonic() - self.last_activity < WORKER_CHECK_INTERVAL_SECONDS:
+                return
+            started = time.monotonic()
             archive = ""
             if self.endpoint is None:
                 archive = f"/tmp/k41-coding-{uuid.uuid4().hex}.zip"
@@ -128,37 +153,80 @@ class SandboxClient:
                 self.endpoint = json.loads(result.output.strip())
             except ValueError as exc:
                 raise CodingError("execution_error", "Invalid sandbox runtime initialization response.") from exc
+            self.last_activity = time.monotonic()
+            logger.info("Sandbox runtime bootstrap backend=%s duration_seconds=%.3f",
+                        self.backend_name, self.last_activity - started)
 
     async def call(self, request):
+        started = time.monotonic()
         endpoint = self.endpoint
         request_id = uuid.uuid4().hex
         request_path = f"{endpoint['runtime_dir']}/{request_id}.request"
         response_path = f"{endpoint['runtime_dir']}/{request_id}.response"
-        await self.backend.upload_coding_file(json.dumps(request, ensure_ascii=True).encode(), request_path)
+        raw_request = json.dumps(request, ensure_ascii=True).encode()
+        inline = len(raw_request) <= MAX_INLINE_REQUEST_BYTES
+        if not inline:
+            await self.backend.upload_coding_file(raw_request, request_path)
         script = ("import sys; sys.path.insert(0, sys.argv[1]); "
-                  "from pathlib import Path; from agent.modules.tools.coding.remote_worker import rpc; "
-                  "rpc(Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4]))")
-        args = [endpoint["bundle"], endpoint["runtime_dir"], request_path, response_path]
+                  "from pathlib import Path; from agent.modules.tools.coding.remote_worker import rpc_output; "
+                  "rpc_output(Path(sys.argv[2]), sys.argv[3], Path(sys.argv[4]), sys.argv[5])")
+        args = [endpoint["bundle"], endpoint["runtime_dir"], "" if inline else request_path, response_path,
+                base64.b64encode(raw_request).decode() if inline else ""]
         command = shlex.quote(endpoint["python"]) + " -c " + shlex.quote(script) + " " + " ".join(map(shlex.quote, args))
         result = await self.backend.execute_coding_command(command, timeout=120)
         if result.exit_code not in (0, None):
+            self.last_activity = 0.0
             raise CodingError("unknown_outcome", "Sandbox runtime disconnected. Inspect side effects before issuing a new call.")
+        from_file = False
         try:
-            raw = await self.backend.download_coding_file(response_path)
-            response = json.loads(raw)
+            envelope = json.loads(result.output)
+            from_file = envelope.get("response_file") is True
+            if from_file:
+                raw = await self.backend.download_coding_file(response_path)
+                response = json.loads(raw)
+            else:
+                response = envelope["response"]
+            if not isinstance(response, dict) or not ({"result", "error"} & response.keys()):
+                raise ValueError("Missing sandbox response payload.")
+        except (ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
+            self.last_activity = 0.0
+            raise CodingError("unknown_outcome", "Invalid sandbox response. Inspect side effects before issuing a new call.") from exc
         finally:
-            # Cleanup must not turn a completed mutation into a reported failure.
-            try:
-                cleanup = "import pathlib,sys; [pathlib.Path(p).unlink(missing_ok=True) for p in sys.argv[1:]]"
-                await self.backend.execute_coding_command(
-                    shlex.quote(endpoint["python"]) + " -c " + shlex.quote(cleanup) + " "
-                    + shlex.quote(request_path) + " " + shlex.quote(response_path), timeout=10)
-            except Exception:
-                logger.debug("Sandbox RPC artifact cleanup failed", exc_info=True)
+            # Only spilled responses need a cleanup command. Never replay execution.
+            if from_file:
+                await self._cleanup_response(endpoint, response_path)
+        self.last_activity = time.monotonic()
+        elapsed = self.last_activity - started
+        worker_elapsed = response.get("worker_duration_seconds", 0.0)
+        timings = response.get("worker_timings", {})
+        preparation_elapsed = timings.get("preparation_duration_seconds", 0.0)
+        execution_elapsed = timings.get("execution_duration_seconds", 0.0)
+        backend_calls = 1 + int(not inline) + 2 * int(from_file)
+        logger.info("Sandbox RPC backend=%s operation=%s tool=%s duration_seconds=%.3f worker_duration_seconds=%.3f transport_duration_seconds=%.3f preparation_duration_seconds=%.3f execution_duration_seconds=%.3f backend_calls=%d request_bytes=%d response_file=%s",
+                    self.backend_name, request["operation"], request.get("name", ""), elapsed,
+                    worker_elapsed, max(0.0, elapsed - worker_elapsed), preparation_elapsed,
+                    execution_elapsed, backend_calls, len(raw_request), from_file,
+                    extra={"rpc_operation": request["operation"], "tool_name": request.get("name", ""),
+                           "duration_seconds": elapsed, "worker_duration_seconds": worker_elapsed,
+                           "preparation_duration_seconds": preparation_elapsed,
+                           "execution_duration_seconds": execution_elapsed, "backend_calls": backend_calls,
+                           "transport_duration_seconds": max(0.0, elapsed - worker_elapsed)})
         if "error" in response:
             error = response["error"]["error"]
+            if error["code"] == "runtime_unavailable":
+                self.last_activity = 0.0
             raise CodingError(error["code"], error["message"], **error.get("details", {}))
         return response["result"]
+
+    async def _cleanup_response(self, endpoint, response_path):
+        """Cleanup must not turn a completed mutation into a reported failure."""
+        try:
+            cleanup = "import pathlib,sys; pathlib.Path(sys.argv[1]).unlink(missing_ok=True)"
+            await self.backend.execute_coding_command(
+                shlex.quote(endpoint["python"]) + " -c " + shlex.quote(cleanup) + " "
+                + shlex.quote(response_path), timeout=10)
+        except Exception:
+            logger.debug("Sandbox RPC artifact cleanup failed", exc_info=True)
 
 
 class RemoteCodingRuntime:
@@ -239,16 +307,56 @@ print(json.dumps({"running": running}))
         return {"operation": operation, "name": name, "values": values, "context": fields,
                 "thread_aliases": thread_storage_aliases(context.thread_id)}
 
-    async def authorize(self, client, name, values, context, *, allow_interrupt):
-        await client.ensure_started()
-        prepared = await client.call(self.request("prepare", name, values, context, workspace=client.backend.root))
+    def preparation_key(self, name, values, context):
+        fields = asdict(context)
+        fields["permission_rules"] = [rule.model_dump() for rule in context.permission_rules]
+        payload = json.dumps([self.namespace, self.generation, name, values, fields,
+                              thread_storage_aliases(context.thread_id)], sort_keys=True, ensure_ascii=True)
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    def approve_permissions(self, prepared, context, *, allow_interrupt):
+        started = time.monotonic()
         approved = []
         for request in prepared["permissions"]:
             action, resource, metadata = request["action"], request["resource"], request["metadata"]
             self.service.permissions.assert_allowed(context, action, resource,
                                                     allow_interrupt=allow_interrupt, **metadata)
             approved.append(permission_identity(action, resource, metadata))
+        logger.info("Sandbox authorization tool_call_id=%s permission_count=%d duration_seconds=%.3f",
+                    context.tool_call_id, len(approved), time.monotonic() - started)
         return approved
+
+    async def authorize(self, client, name, values, context, *, allow_interrupt):
+        cache = _prepared_permissions.get()
+        key = self.preparation_key(name, values, context)
+        prepared = cache.get(key) if cache is not None else None
+        if prepared is None:
+            await client.ensure_started()
+            prepared = await client.call(self.request("prepare", name, values, context, workspace=client.backend.root))
+        approved = self.approve_permissions(prepared, context, allow_interrupt=allow_interrupt)
+        if cache is not None:
+            cache[key] = prepared
+        return approved
+
+    async def prepare_batch(self, invocations):
+        """Prepare each sandbox's operations in one RPC before authorizing effects."""
+        groups = {}
+        for name, values, context in invocations:
+            client = await self.client(context)
+            groups.setdefault(client, []).append((name, values, context))
+        for client, items in groups.items():
+            await client.ensure_started()
+            response = await client.call({"operation": "prepare_batch", "requests": [
+                self.request("prepare", name, values, context, workspace=client.backend.root)
+                for name, values, context in items
+            ]})
+            if len(response["results"]) != len(items):
+                raise CodingError("execution_error", "Sandbox preparation batch response is incomplete.")
+            for (name, values, context), prepared in zip(items, response["results"]):
+                self.approve_permissions(prepared, context, allow_interrupt=True)
+                cache = _prepared_permissions.get()
+                if cache is not None:
+                    cache[self.preparation_key(name, values, context)] = prepared
 
     async def prepare(self, name, values, context):
         client = await self.client(context)

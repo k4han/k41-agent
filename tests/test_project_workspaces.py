@@ -240,7 +240,11 @@ async def test_batch_preparation_recovers_runtime_before_authorization(project_s
         assert (restored / "file.txt").read_text() == "original"
         prepared.append(context)
 
-    monkeypatch.setattr(coding.remote, "prepare", prepare)
+    async def prepare_batch(invocations):
+        for operation, values, context in invocations:
+            await prepare(operation, values, context)
+
+    monkeypatch.setattr(coding.remote, "prepare_batch", prepare_batch)
     execute = AsyncMock()
     definition = ToolDefinition(name, name, SCHEMAS[name], execute)
     args = {"path": "file.txt", **({"content": "updated"} if name == "write" else {})}
