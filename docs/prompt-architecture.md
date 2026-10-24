@@ -48,6 +48,13 @@ values. `context-file-selector` receives `max_candidates` from the workflow.
 Structured response schemas stay in Python. Missing or empty internal card
 prompts raise an error instead of silently using a hardcoded replacement.
 
+System prompt variables describe the workspace execution environment. Local
+workspaces use the coding service's configured shell. Sandbox workspaces read
+OS, shell, and user information from the coding worker inside the sandbox;
+`working_dir` uses the backend's resolved root, while `workspace` keeps its
+friendly label. Runtime lookup failures propagate instead of substituting host
+values. The assembled prompt cache remains scoped to the workspace execution.
+
 GitHub automation policy is shared across issue and review tasks even when a
 repository selects a custom executing agent. Manual repository tasks receive
 their request and repository context without the backend automation policy.

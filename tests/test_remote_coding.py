@@ -327,6 +327,7 @@ def test_bundle_contains_shared_engine_and_minimal_package_initializers():
     with zipfile.ZipFile(io.BytesIO(build_runtime_bundle())) as archive:
         assert "agent/modules/tools/coding/engine.py" in archive.namelist()
         assert "agent/modules/tools/runtime/output_policy.py" in archive.namelist()
+        assert "agent/modules/prompt_variables/environment.py" in archive.namelist()
         assert "agent/bootstrap/container.py" not in archive.namelist()
         assert archive.read("agent/__init__.py") == b""
 

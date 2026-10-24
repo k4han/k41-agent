@@ -110,6 +110,10 @@ class SandboxWorker:
             self.active_calls.pop(request_id, None)
 
     async def _dispatch(self, request):
+        if request.get("operation") == "environment":
+            from agent.modules.prompt_variables.environment import get_execution_environment
+
+            return get_execution_environment(resolve_shell())
         if request.get("operation") == "prepare_batch":
             results = []
             for item in request["requests"]:

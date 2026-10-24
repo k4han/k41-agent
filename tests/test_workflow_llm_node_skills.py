@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 import pytest
@@ -232,7 +233,8 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
     assert builder_calls["working_dir"] == str(Path("D:/repo").resolve())
     assert builder_calls["agent_name"] == "builder-agent"
     assert [tool.name for tool in builder_calls["tools"]] == ["skill", "read"]
-    assert builder_calls["prompt_variables"] == {}
+    assert builder_calls["prompt_variables"]["working_dir"] == builder_calls["working_dir"]
+    assert builder_calls["prompt_variables"]["shell_name"]
     assert builder_calls["skills_catalog_xml"] == "<available_skills/>"
     assert skill_catalog_calls[0]["allowed_names"] == ["repo-docs"]
     assert skill_catalog_calls[0]["thread_id"] == "thread-1"
@@ -252,6 +254,20 @@ async def test_llm_node_keeps_friendly_workspace_label_and_exposes_actual_sandbo
     """{{workspace}} stays as the friendly label, {{working_dir}} carries the real sandbox cwd."""
     captured: dict = {}
     builder_calls: dict = {}
+    from agent.modules.workflows.prompt_builders import build_llm_system_prompt
+
+    environment = {
+        "operating_system": "linux", "host_os": "linux", "shell_name": "bash",
+        "shell_kind": "posix", "user_name": "sandbox-user",
+    }
+    client = SimpleNamespace(
+        backend=SimpleNamespace(root=expected_root), ensure_started=AsyncMock(),
+        call=AsyncMock(return_value=environment),
+    )
+    monkeypatch.setattr(
+        "agent.modules.tools.coding.service.get_coding_service",
+        lambda: SimpleNamespace(remote=SimpleNamespace(client=AsyncMock(return_value=client))),
+    )
 
     class _FakeCatalog:
         def get_agent(self, name: str):
@@ -261,14 +277,17 @@ async def test_llm_node_keeps_friendly_workspace_label_and_exposes_actual_sandbo
                 model="model-x",
                 system_prompt=(
                     "Workspace label: {{workspace}}\n"
-                    "Sandbox cwd: {{working_dir}}"
+                    "Sandbox cwd: {{working_dir}}\n"
+                    "OS: {{operating_system}} / {{host_os}}\n"
+                    "Shell: {{shell_name}} / {{shell_kind}}\n"
+                    "User: {{user_name}}"
                 ),
                 tools=[],
             )
 
     def _fake_builder(**kwargs):
         builder_calls.update(kwargs)
-        return "Prompt built"
+        return build_llm_system_prompt(**kwargs)
 
     monkeypatch.setattr(
         llm_node_module,
@@ -304,21 +323,27 @@ async def test_llm_node_keeps_friendly_workspace_label_and_exposes_actual_sandbo
         },
     }
 
-    await llm_node_module.llm_node(
-        {"messages": [HumanMessage(content="hi")]},
-        {"configurable": {"thread_id": "thread-1"}},
-        SimpleNamespace(
-            context=WorkflowContext(
-                agent_name="sandbox-agent",
-                workspace=sandbox_workspace,
-                context_compact_threshold=75,
-                allowed_tool_names=[],
-            )
-        ),
-    )
+    for _ in range(2):
+        await llm_node_module.llm_node(
+            {"messages": [HumanMessage(content="hi")]},
+            {"configurable": {"thread_id": "thread-1"}},
+            SimpleNamespace(
+                context=WorkflowContext(
+                    agent_name="sandbox-agent",
+                    workspace=sandbox_workspace,
+                    context_compact_threshold=75,
+                    allowed_tool_names=[],
+                )
+            ),
+        )
 
     assert builder_calls["workspace"] == "facebook/react"
     assert builder_calls["working_dir"] == expected_root
+    assert captured["messages"][0].content == (
+        f"Workspace label: facebook/react\nSandbox cwd: {expected_root}\n"
+        "OS: linux / linux\nShell: bash / posix\nUser: sandbox-user"
+    )
+    client.call.assert_awaited_once_with({"operation": "environment"})
 
 
 @pytest.mark.asyncio

@@ -30,9 +30,10 @@ async def _research_system(name, runtime, agent_config):
     from agent.modules.prompt_variables import get_runtime_prompt_variable_values
 
     ctx = runtime.context
-    working_dir = ctx.get_working_dir()
-    workspace = ctx.get_workspace().display_label()
-    prompt_variables = await get_runtime_prompt_variable_values()
+    execution_workspace = ctx.get_workspace()
+    workspace = execution_workspace.display_label()
+    prompt_variables = await get_runtime_prompt_variable_values(execution_workspace)
+    working_dir = prompt_variables.get("working_dir", ctx.get_working_dir())
     instructions = await render_agent_prompt(
         name, working_dir=working_dir, workspace=workspace, prompt_variables=prompt_variables,
     )

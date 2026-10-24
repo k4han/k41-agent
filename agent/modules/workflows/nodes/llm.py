@@ -91,7 +91,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
     system_prompt = get_cached_system_prompt(cache_key, sections=prompt_sections)
 
     if system_prompt is None:
-        prompt_variables = await get_runtime_prompt_variable_values()
+        prompt_variables = await get_runtime_prompt_variable_values(workspace, thread_id=thread_id or "")
         skills_catalog_xml = None
         if any(getattr(tool, "name", "") == "skill" for tool in tools):
             from agent.modules.skills import get_effective_skills_catalog_xml
@@ -104,7 +104,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
             )
         system_prompt = build_llm_system_prompt(
             system_prompt_template=system_prompt_template,
-            working_dir=working_dir,
+            working_dir=prompt_variables.get("working_dir", working_dir),
             workspace=workspace.display_label(),
             agent_name=agent_name,
             tools=tools,

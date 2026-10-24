@@ -59,29 +59,12 @@ def replace_known_prompt_placeholders(
 
 
 def get_system_default_variables(working_dir: str = "", workspace: str = "") -> dict[str, str]:
-    import getpass
-
-    from agent.modules.prompt_variables import (
-        get_environment_defaults,
-        get_host_os,
-    )
-
-    os_name = get_host_os()
-    environment = get_environment_defaults()
-
-    try:
-        username = getpass.getuser()
-    except Exception:
-        username = "user"
+    from agent.modules.prompt_variables.environment import get_execution_environment
 
     return {
-        "operating_system": os_name,
-        "host_os": environment["host_os"],
-        "shell_name": environment["shell_name"],
-        "shell_kind": environment["shell_kind"],
+        **get_execution_environment(),
         "workspace": workspace or working_dir or "",
         "working_dir": working_dir or "",
-        "user_name": username,
     }
 
 

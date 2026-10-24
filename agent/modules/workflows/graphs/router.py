@@ -790,7 +790,7 @@ async def llm_call_router(
     threshold = _resolve_confidence_threshold(config)
 
     if candidates:
-        prompt_variables = await get_runtime_prompt_variable_values()
+        prompt_variables = await get_runtime_prompt_variable_values(ctx.get_workspace())
         selected_agent_name, telemetry = await _route_agent_decision(
             user_input=user_input,
             candidates=candidates,

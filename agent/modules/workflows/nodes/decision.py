@@ -27,6 +27,7 @@ from agent.modules.agents import render_agent_prompt
 from agent.modules.decisions import FILE_SELECTION_INSTRUCTIONS, FILE_INCLUSION_INSTRUCTIONS
 from agent.modules.usage import with_usage_tracking
 from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
+from agent.modules.workspaces import WorkspaceRef
 from agent.shared.infrastructure.parsing import safe_str_strip
 
 logger = logging.getLogger(__name__)
@@ -402,9 +403,12 @@ async def _decide_candidate_files_llm(
     model_kwargs: dict[str, Any],
     max_candidates: int = 8,
     config: RunnableConfig | None = None,
+    workspace: WorkspaceRef | str = "",
 ) -> FileCandidateSelection:
     """Fallback: invoke LLM chat model to select candidate files."""
-    system_prompt = await render_agent_prompt("context-file-selector", values={"max_candidates": max_candidates})
+    system_prompt = await render_agent_prompt(
+        "context-file-selector", values={"max_candidates": max_candidates}, workspace=workspace,
+    )
 
     user_prompt = (
         f"User Request:\n{user_input}\n\n"
@@ -544,10 +548,12 @@ async def decision_node(
 
     # Resolve workspace directory
     workspace_dir = ""
+    execution_workspace: WorkspaceRef | str = ""
     caller_agent_name = "default"
     if runtime is not None and hasattr(runtime, "context"):
         ctx = runtime.context
         workspace_dir = ctx.get_working_dir()
+        execution_workspace = ctx.get_workspace()
         caller_agent_name = ctx.get_agent_name()
     if not workspace_dir:
         configurable = (config or {}).get("configurable", {}) if isinstance(config, dict) else {}
@@ -595,7 +601,7 @@ async def decision_node(
         try:
             resolved, agent_config = _resolve_decision_model(runtime, config)
             llm = resolved.model
-            inclusion_prompt = await render_agent_prompt("context-file-curator")
+            inclusion_prompt = await render_agent_prompt("context-file-curator", workspace=execution_workspace)
             model_kwargs = (
                 get_workflow_reasoning_effort_kwargs(
                     getattr(runtime, "context", None),
@@ -612,7 +618,7 @@ async def decision_node(
                     llm=candidate.model, user_input=original_content, directory_tree=directory_tree,
                     caller_agent_name=caller_agent_name, provider_name=candidate.provider_name,
                     model_name=candidate.model_name, model_kwargs=kwargs,
-                    max_candidates=max_candidates, config=config,
+                    max_candidates=max_candidates, config=config, workspace=execution_workspace,
                 )
 
             candidate_selection = await execute_model_call(resolved, select_candidates)

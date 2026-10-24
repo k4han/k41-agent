@@ -45,6 +45,7 @@ RUNTIME_MODULES = (
     "tools/coding/storage.py", "tools/coding/remote_worker.py", "tools/runtime/sandbox.py",
     "tools/runtime/shell_guard.py", "tools/runtime/output_policy.py", "workspaces/constants.py", "workspaces/search_utils.py",
     "workspaces/posix_utils.py",
+    "prompt_variables/environment.py",
 )
 
 BOOTSTRAP = r'''

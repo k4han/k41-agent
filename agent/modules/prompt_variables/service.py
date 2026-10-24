@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent.modules.workspaces import WorkspaceRef
 
 from agent.modules.prompt_variables.models import PromptVariable
 from agent.modules.prompt_variables.repository import PromptVariableRepository
@@ -192,14 +195,23 @@ async def get_prompt_variable_values() -> dict[str, str]:
     return await get_prompt_variable_service().value_map()
 
 
-async def get_runtime_prompt_variable_values() -> dict[str, str]:
+async def get_runtime_prompt_variable_values(
+    workspace: WorkspaceRef | None = None, *, thread_id: str = "",
+) -> dict[str, str]:
+    """Resolve configured variables and, when supplied, the execution environment."""
     try:
-        return await get_prompt_variable_values()
+        variables = await get_prompt_variable_values()
     except RuntimeError as exc:
         if "Async engine not initialized" in str(exc):
             logger.debug("Prompt variables skipped because persistence is not initialized.")
-            return {}
-        raise
+            variables = {}
+        else:
+            raise
+    if workspace is not None:
+        from agent.modules.prompt_variables.environment import get_runtime_system_variables
+
+        variables.update(await get_runtime_system_variables(workspace, thread_id=thread_id))
+    return variables
 
 
 __all__ = [

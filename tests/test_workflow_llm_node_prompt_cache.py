@@ -67,7 +67,7 @@ def cached_llm_node(monkeypatch):
         ))
         return f"Prompt build #{calls['builder']}"
 
-    async def _fake_prompt_variables():
+    async def _fake_prompt_variables(workspace, *, thread_id=""):
         calls["prompt_variables"] += 1
         return {}
 

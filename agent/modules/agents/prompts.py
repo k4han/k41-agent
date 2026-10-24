@@ -1,6 +1,11 @@
 """Render reusable agent card instructions with runtime values."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent.modules.workspaces import WorkspaceRef
 
 
 def get_agent_prompt_template(name: str) -> str:
@@ -21,18 +26,25 @@ async def render_agent_prompt(
     *,
     values: dict[str, Any] | None = None,
     working_dir: str = "",
-    workspace: str = "",
+    workspace: str | WorkspaceRef = "",
     prompt_variables: dict[str, str] | None = None,
 ) -> str:
-    """Use runtime values in preference to configured variables and host defaults."""
+    """Resolve card instructions against the supplied execution workspace."""
     from agent.modules.prompt_variables import get_runtime_prompt_variable_values
+    from agent.modules.prompt_variables.environment import get_runtime_system_variables
+    from agent.modules.workspaces import WorkspaceRef
     from agent.modules.workflows import (
         get_system_default_variables, replace_known_prompt_placeholders, resolve_prompt_variables,
     )
 
     template = get_agent_prompt_template(name)
+    defaults = (
+        await get_runtime_system_variables(workspace)
+        if isinstance(workspace, WorkspaceRef)
+        else get_system_default_variables(working_dir, workspace)
+    )
     variables = {
-        **get_system_default_variables(working_dir, workspace),
+        **defaults,
         **(prompt_variables if prompt_variables is not None else await get_runtime_prompt_variable_values()),
         **{key: str(value) for key, value in (values or {}).items()},
     }
