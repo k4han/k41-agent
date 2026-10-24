@@ -384,6 +384,8 @@
     display: inline;
   }
 
+  .app-layout .sidebar.settings-sidebar .settings-nav-header,
+  .app-layout .sidebar.settings-sidebar .settings-nav-scroll,
   .app-layout .sidebar.settings-sidebar .settings-nav-groups,
   .app-layout .sidebar.settings-sidebar .settings-nav-group {
     align-items: stretch;

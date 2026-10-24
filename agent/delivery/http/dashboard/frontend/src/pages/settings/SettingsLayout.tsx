@@ -126,7 +126,7 @@ export function SettingsLayout(props: {
   } = useMobileDrawer({ sidebarId: "settings-layout-sidebar" });
 
   let searchInputRef: HTMLInputElement | undefined;
-  let settingsNavElement: HTMLElement | undefined;
+  let settingsNavElement: HTMLDivElement | undefined;
 
   const isActive = (href: string) => location.pathname === href || location.pathname.startsWith(href + "/");
 
@@ -289,88 +289,99 @@ export function SettingsLayout(props: {
             </Show>
           </Show>
         </div>
-        <nav ref={settingsNavElement} class="nav settings-nav" onClick={handleNavClick}>
-          <A
-            href={homeHref}
-            class="nav-link settings-back-home"
-            title="Back to home"
-            aria-label="Back to home"
+        <nav class="nav settings-nav" onClick={handleNavClick}>
+          <div
+            class="settings-nav-header"
+            onWheel={(e) => {
+              if (settingsNavElement) {
+                settingsNavElement.scrollTop += e.deltaY;
+              }
+            }}
           >
-            <ArrowLeft size={15} />
-            <Show when={!collapsed() || isMobileViewport()}>
-              <span class="nav-label">Back to home</span>
-            </Show>
-          </A>
-
-          <Show when={!collapsed() || isMobileViewport()}>
-            <div class="settings-nav-search">
-              <Search size={13} class="settings-nav-search-icon" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                class="settings-nav-search-input"
-                placeholder="Search settings… ( / )"
-                value={navQuery()}
-                aria-label="Search settings"
-                onInput={(event) => setNavQuery(event.currentTarget.value)}
-              />
-              <Show when={navQuery().length > 0}>
-                <button
-                  type="button"
-                  class="settings-nav-search-clear"
-                  title="Clear search"
-                  aria-label="Clear search"
-                  onClick={() => setNavQuery("")}
-                >
-                  <X size={12} />
-                </button>
+            <A
+              href={homeHref}
+              class="nav-link settings-back-home"
+              title="Back to home"
+              aria-label="Back to home"
+            >
+              <ArrowLeft size={15} />
+              <Show when={!collapsed() || isMobileViewport()}>
+                <span class="nav-label">Back to home</span>
               </Show>
-            </div>
-            <Show when={navQuery().trim().length > 0}>
-              <div class="settings-nav-search-meta">
-                <span class="settings-nav-search-count">{totalFilteredCount()} results</span>
-                <Show when={totalFilteredCount() === 0}>
-                  <span class="settings-nav-search-hint">Try “provider” or “workspace”</span>
+            </A>
+
+            <Show when={!collapsed() || isMobileViewport()}>
+              <div class="settings-nav-search">
+                <Search size={13} class="settings-nav-search-icon" />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  class="settings-nav-search-input"
+                  placeholder="Search settings… ( / )"
+                  value={navQuery()}
+                  aria-label="Search settings"
+                  onInput={(event) => setNavQuery(event.currentTarget.value)}
+                />
+                <Show when={navQuery().length > 0}>
+                  <button
+                    type="button"
+                    class="settings-nav-search-clear"
+                    title="Clear search"
+                    aria-label="Clear search"
+                    onClick={() => setNavQuery("")}
+                  >
+                    <X size={12} />
+                  </button>
                 </Show>
               </div>
-            </Show>
-          </Show>
-
-          <div class="settings-nav-groups">
-            <For each={filteredGroups()}>
-              {(group) => (
-                <div class="settings-nav-group">
-                  <Show when={!collapsed() || isMobileViewport()}>
-                    <div class="settings-nav-group-title">{group.label}</div>
+              <Show when={navQuery().trim().length > 0}>
+                <div class="settings-nav-search-meta">
+                  <span class="settings-nav-search-count">{totalFilteredCount()} results</span>
+                  <Show when={totalFilteredCount() === 0}>
+                    <span class="settings-nav-search-hint">Try “provider” or “workspace”</span>
                   </Show>
-                  <For each={group.items}>
-                    {(item) => (
-                      <A
-                        href={item.href}
-                        class={`nav-link ${isActive(item.href) ? "active" : ""}`}
-                        title={item.description ? `${item.label} — ${item.description}` : item.label}
-                      >
-                        {item.icon()}
-                        <Show when={!collapsed() || isMobileViewport()}>
-                          <span class="nav-label">
-                            <span class="settings-nav-label-text">{item.label}</span>
-                          </span>
-                        </Show>
-                      </A>
-                    )}
-                  </For>
                 </div>
-              )}
-            </For>
+              </Show>
+            </Show>
           </div>
 
-          <Show when={filteredGroups().length === 0}>
-            <div class="settings-nav-empty">
-              <Search size={16} />
-              <div>No matches for “{navQuery()}”</div>
-              <div class="settings-nav-empty-hint">Try a different keyword</div>
+          <div ref={settingsNavElement} class="settings-nav-scroll">
+            <div class="settings-nav-groups">
+              <For each={filteredGroups()}>
+                {(group) => (
+                  <div class="settings-nav-group">
+                    <Show when={!collapsed() || isMobileViewport()}>
+                      <div class="settings-nav-group-title">{group.label}</div>
+                    </Show>
+                    <For each={group.items}>
+                      {(item) => (
+                        <A
+                          href={item.href}
+                          class={`nav-link ${isActive(item.href) ? "active" : ""}`}
+                          title={item.description ? `${item.label} — ${item.description}` : item.label}
+                        >
+                          {item.icon()}
+                          <Show when={!collapsed() || isMobileViewport()}>
+                            <span class="nav-label">
+                              <span class="settings-nav-label-text">{item.label}</span>
+                            </span>
+                          </Show>
+                        </A>
+                      )}
+                    </For>
+                  </div>
+                )}
+              </For>
             </div>
-          </Show>
+
+            <Show when={filteredGroups().length === 0}>
+              <div class="settings-nav-empty">
+                <Search size={16} />
+                <div>No matches for “{navQuery()}”</div>
+                <div class="settings-nav-empty-hint">Try a different keyword</div>
+              </div>
+            </Show>
+          </div>
         </nav>
         <Show when={!collapsed() || isMobileViewport()}>
           <div class="settings-sidebar-footer-hint">
