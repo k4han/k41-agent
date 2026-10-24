@@ -31,7 +31,7 @@ async def render_agent_prompt(
 ) -> str:
     """Resolve card instructions against the supplied execution workspace."""
     from agent.modules.prompt_variables import get_runtime_prompt_variable_values
-    from agent.modules.prompt_variables.environment import get_runtime_system_variables
+    from agent.modules.prompt_variables import get_runtime_system_variables
     from agent.modules.workspaces import WorkspaceRef
     from agent.modules.workflows import (
         get_system_default_variables, replace_known_prompt_placeholders, resolve_prompt_variables,

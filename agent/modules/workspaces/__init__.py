@@ -68,6 +68,7 @@ from agent.modules.workspaces.registry import (
     WorkspaceBackendDescriptor,
     WorkspaceBackendRegistry,
     get_workspace_backend_registry,
+    is_backend_enabled,
     list_workspace_backend_catalog,
     call_workspace_backend_loader,
 )
@@ -141,6 +142,7 @@ __all__ = [
     "NO_WORKSPACE_KEY", "NO_WORKSPACE_LABEL", "TEMP_WORKSPACE_KEY", "TEMP_WORKSPACE_LABEL",
     "WORKSPACE_STORAGE_EXCLUDE_COMMAND",
     "BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS",
+    "is_backend_enabled",
     "CommandResult",
     "DAYTONA_BACKEND",
     "DaytonaWorkspaceLifecycleManager",

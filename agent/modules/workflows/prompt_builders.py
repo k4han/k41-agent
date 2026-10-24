@@ -59,7 +59,7 @@ def replace_known_prompt_placeholders(
 
 
 def get_system_default_variables(working_dir: str = "", workspace: str = "") -> dict[str, str]:
-    from agent.modules.prompt_variables.environment import get_execution_environment
+    from agent.modules.prompt_variables import get_execution_environment
 
     return {
         **get_execution_environment(),

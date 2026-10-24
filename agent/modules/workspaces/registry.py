@@ -184,6 +184,8 @@ def ensure_builtin_workspace_backend_descriptors(container=None) -> None:
     _ = require_active_container(container).workspace_backend_registry
 
 
+is_backend_enabled = None  # defined below
+
 def _is_backend_enabled(
     descriptor: WorkspaceBackendDescriptor,
     *,
@@ -259,3 +261,5 @@ __all__ = [
     "is_registered_workspace_backend",
     "list_workspace_backend_catalog",
 ]
+
+is_backend_enabled = _is_backend_enabled

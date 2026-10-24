@@ -1,6 +1,8 @@
 from agent.modules.prompt_variables.environment import (
     get_environment_defaults,
+    get_execution_environment,
     get_host_os,
+    get_runtime_system_variables,
     get_shell_kind,
     get_shell_name,
 )
@@ -21,10 +23,12 @@ __all__ = [
     "PromptVariableRepository",
     "PromptVariableService",
     "get_environment_defaults",
+    "get_execution_environment",
     "get_host_os",
     "get_prompt_variable_service",
     "get_prompt_variable_values",
     "get_runtime_prompt_variable_values",
+    "get_runtime_system_variables",
     "get_shell_kind",
     "get_shell_name",
     "serialize_prompt_variable",

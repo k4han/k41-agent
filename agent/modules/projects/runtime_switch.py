@@ -82,16 +82,16 @@ class WorkspaceRuntimeSwitcher:
         self._notify(workspace_id, state)
 
     def _notify(self, workspace_id: int, state: dict):
-        from agent.modules.agent_runtime.active_sessions import get_active_session_registry
+        from agent.modules.agent_runtime import get_active_session_registry
         get_active_session_registry(self.service.container).publish("workspace_runtime_changed", {
             "project_id": state["project_id"], "project_workspace_id": workspace_id,
             "operation_id": state["operation_id"], "phase": state["phase"],
         })
 
     async def _threads(self, workspace_id: int):
-        from agent.modules.agent_runtime.models import BackgroundTaskRecord
-        from agent.modules.conversations.models import ConversationThread
-        from agent.modules.workspaces.models import ThreadWorkspace
+        from agent.modules.agent_runtime import BackgroundTaskRecord
+        from agent.modules.conversations import ConversationThread
+        from agent.modules.workspaces import ThreadWorkspace
         session = await _session()
         async with session:
             threads = set((await session.execute(select(ThreadWorkspace.thread_id).where(
@@ -136,7 +136,7 @@ class WorkspaceRuntimeSwitcher:
                           for job in (*coding.processes.jobs.values(), *coding.processes.retiring_jobs.values())):
             raise ProjectWorkspaceError("Stop running workspace processes before switching backends.", "workspace_busy")
         if ref.backend != "local":
-            from agent.modules.tools.coding.service import get_coding_service
+            from agent.modules.tools import get_coding_service
             try:
                 busy = await get_coding_service(self.service.container).remote.workspace_processes(ref)
             except Exception as exc:
@@ -155,7 +155,7 @@ class WorkspaceRuntimeSwitcher:
 
     async def reserve_idle(self, workspace, runtime, expected_generation: int):
         """Reserve the single writer across backend changes and linked-directory sync."""
-        from agent.modules.agent_runtime.active_sessions import get_active_session_registry, ThreadMutationConflictError
+        from agent.modules.agent_runtime import get_active_session_registry, ThreadMutationConflictError
         workspace_id = workspace.id
         self._reserve(workspace_id, runtime, expected_generation)
         try:
@@ -178,9 +178,9 @@ class WorkspaceRuntimeSwitcher:
             raise
 
     async def request(self, project_id: int, backend: str, expected_generation: int, workspace_id: int | None = None):
-        from agent.modules.workspaces.registry import get_workspace_backend_registry, _is_backend_enabled
+        from agent.modules.workspaces import get_workspace_backend_registry, is_backend_enabled
         descriptor = get_workspace_backend_registry(self.service.container).require(backend)
-        if backend not in {"local", "daytona", "modal"} or not _is_backend_enabled(descriptor, config_service=self.service.container.config_service):
+        if backend not in {"local", "daytona", "modal"} or not is_backend_enabled(descriptor, config_service=self.service.container.config_service):
             raise ValueError("The requested execution backend is not enabled.")
         project, workspace, runtime = await self.service.rows(project_id, workspace_id)
         workspace_id = workspace.id

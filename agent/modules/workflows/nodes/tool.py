@@ -15,7 +15,7 @@ from agent.modules.tools import (
     retain_tool_messages,
 )
 from agent.modules.workflows.run_config import WorkflowContext
-from agent.modules.tools.coding.remote import coding_authorization_scope
+from agent.modules.tools import coding_authorization_scope
 
 
 def make_tool_node(tools: list[BaseTool]) -> ToolNode:

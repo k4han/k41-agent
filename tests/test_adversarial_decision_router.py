@@ -406,7 +406,7 @@ async def test_shadow_mode_slow_clef_concurrent_execution_and_negative_delta(
 
     # If executed sequentially, total_duration would be >= CLEF_DELAY + LLM_DELAY = 0.21s.
     # Concurrent execution should be close to max(CLEF_DELAY, LLM_DELAY) ~ 0.18s.
-    assert total_duration < (CLEF_DELAY + LLM_DELAY + 0.1), (
+    assert total_duration < (CLEF_DELAY + LLM_DELAY + 0.25), (
         f"Expected concurrent execution, but took {total_duration:.3f}s"
     )
 

@@ -547,16 +547,16 @@ class ProjectWorkspaceService:
                 "provision_confirm_required")
 
     def _assert_recovery_backend(self, backend: str):
-        from agent.modules.workspaces.registry import get_workspace_backend_registry, _is_backend_enabled
+        from agent.modules.workspaces import get_workspace_backend_registry, is_backend_enabled
         descriptor = get_workspace_backend_registry(self.container).require(backend)
-        if not _is_backend_enabled(descriptor, config_service=self.container.config_service):
+        if not is_backend_enabled(descriptor, config_service=self.container.config_service):
             raise ProjectWorkspaceError(
                 f"The {backend} execution backend is disabled. Enable it again, "
                 "or recover the files into a local workspace instead.", "backend_disabled")
 
     def _notify_runtime_changed(self, project_id: int, workspace_id: int):
         try:
-            from agent.modules.agent_runtime.active_sessions import get_active_session_registry
+            from agent.modules.agent_runtime import get_active_session_registry
             get_active_session_registry(self.container).publish("workspace_runtime_changed", {
                 "project_id": project_id, "project_workspace_id": workspace_id,
             })
@@ -713,8 +713,8 @@ class ProjectWorkspaceService:
                                              project_workspace_id=workspace.id, runtime_generation=generation)
                 await session.execute(update(Project).where(Project.id == project.id).values(workspace_json=binding.model_dump_json()))
             if transition is not None:
-                from agent.modules.workspaces.models import ThreadWorkspace
-                from agent.modules.agent_runtime.models import BackgroundTaskRecord
+                from agent.modules.workspaces import ThreadWorkspace
+                from agent.modules.agent_runtime import BackgroundTaskRecord
                 for model in (ThreadWorkspace, BackgroundTaskRecord):
                     await session.execute(update(model).where(model.project_workspace_id == workspace.id).values(
                         working_dir=ref.locator, execution_backend=ref.backend, execution_locator=ref.locator,

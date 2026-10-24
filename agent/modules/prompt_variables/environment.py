@@ -94,8 +94,7 @@ def get_execution_environment(shell: str | None = None) -> dict[str, str]:
 
 async def get_runtime_system_variables(workspace: WorkspaceRef, *, thread_id: str = "") -> dict[str, str]:
     """Read system variables from the same runtime that executes workspace tools."""
-    from agent.modules.tools.coding.contracts import InvocationContext
-    from agent.modules.tools.coding.service import get_coding_service
+    from agent.modules.tools import InvocationContext, get_coding_service
 
     service = get_coding_service()
     if workspace.backend == "local":

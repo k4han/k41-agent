@@ -319,7 +319,7 @@ async def test_tool_node_resolves_runtime_allowed_tools(monkeypatch):
 
     assert result == {"messages": []}
     assert captured["tool_names"] == ["echo", "delegate_task"]
-    assert captured["state"] == state
+    assert captured["state"] == {**state, "active_skills": {}}
     assert captured["config"] == config
 
 

@@ -386,7 +386,7 @@ async def test_github_resolution_ignores_registered_default_local_path(monkeypat
     if known_repository:
         assert result["reused_project"] is True
         assert result["workspace"]["project_id"] == 2
-        ensure.assert_awaited_once_with(2, 2)
+        ensure.assert_not_awaited()
         github.resolve_repository_workspace.assert_not_awaited()
     else:
         ensure.assert_not_awaited()

@@ -105,7 +105,7 @@ class ThreadWorkspaceRepository:
                 record.working_dir = workspace_ref.locator
                 record.updated_at = now
                 if record.project_id and not binding.project_id:
-                    from agent.modules.projects.workspaces import get_project_workspace_service, source_key
+                    from agent.modules.projects import get_project_workspace_service, source_key
 
                     previous = _execution_from_record(record)
                     if previous is not None and source_key(previous) == source_key(workspace_ref):

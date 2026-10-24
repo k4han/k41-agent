@@ -111,7 +111,7 @@ class SandboxWorker:
 
     async def _dispatch(self, request):
         if request.get("operation") == "environment":
-            from agent.modules.prompt_variables.environment import get_execution_environment
+            from agent.modules.prompt_variables import get_execution_environment
 
             return get_execution_environment(resolve_shell())
         if request.get("operation") == "prepare_batch":
