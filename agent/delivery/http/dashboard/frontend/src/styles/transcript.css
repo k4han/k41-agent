@@ -183,10 +183,24 @@
   align-items: center;
 }
 
+.activity-group-icon.has-failed,
+.activity-group-alert-icon {
+  color: var(--danger, #dc2626);
+}
+
+.activity-group-icon.is-success,
+.activity-group-check-icon {
+  color: var(--success);
+}
+
 .activity-group-label {
   flex-shrink: 0;
   font-weight: 500;
   transition: color 120ms ease;
+}
+
+.activity-group-label.has-failed {
+  color: var(--danger, #dc2626);
 }
 
 .activity-group-detail {

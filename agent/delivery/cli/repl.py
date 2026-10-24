@@ -7,6 +7,7 @@ import logging
 import os
 import selectors
 import sys
+from typing import Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
@@ -21,6 +22,7 @@ from agent.delivery.cli.commands import (
 )
 from agent.delivery.cli.runtime import CLIRuntime
 from agent.delivery.cli.session import CLISession
+from agent.delivery.cli.tool_summary import format_tool_group_summary
 from agent.modules.agent_runtime import run_agent_stream
 
 logger = logging.getLogger(__name__)
@@ -87,6 +89,7 @@ def _print_welcome_banner(session: CLISession) -> None:
 
 async def _stream_agent_response(session: CLISession, user_input: str) -> None:
     last_text = ""
+    tools: list[dict[str, Any]] = []
     try:
         async for event in run_agent_stream(
             user_input=user_input,
@@ -98,10 +101,25 @@ async def _stream_agent_response(session: CLISession, user_input: str) -> None:
             if event_type == "tool_call":
                 name = event.get("name", "?")
                 args = event.get("args")
+                tool_id = event.get("id")
+                tools.append({"id": tool_id, "name": name, "args": args, "result": None})
                 if args:
                     console.print(f"  [dim]·[/dim] [cyan]tool[/cyan] [dim]{name}({args})[/dim]")
                 else:
                     console.print(f"  [dim]·[/dim] [cyan]tool[/cyan] [dim]{name}[/dim]")
+            elif event_type == "tool_result":
+                tool_call_id = event.get("tool_call_id")
+                tool_name = event.get("name")
+                content = event.get("content")
+                status = event.get("status")
+                for t in reversed(tools):
+                    if (tool_call_id and t.get("id") == tool_call_id) or (
+                        not tool_call_id and t.get("result") is None and t.get("name") == tool_name
+                    ):
+                        t["result"] = content
+                        if status:
+                            t["status"] = status
+                        break
             elif event_type == "final":
                 content = event.get("content", "")
                 if content:
@@ -120,6 +138,10 @@ async def _stream_agent_response(session: CLISession, user_input: str) -> None:
         else:
             console.print(f"  [bold red]✖[/bold red] [red]{exc}[/red]\n")
         return
+
+    if tools:
+        summary = format_tool_group_summary(tools, running=False)
+        console.print(f"  {summary.rich_markup}")
 
     if last_text:
         from rich.markdown import Markdown

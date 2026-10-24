@@ -1,4 +1,4 @@
-import { Check, ChevronRight, Loader2 } from "lucide-solid";
+import { AlertCircle, Check, ChevronRight, Loader2 } from "lucide-solid";
 import { createEffect, createMemo, createSignal, createUniqueId, For, onCleanup, Show } from "solid-js";
 
 import { TranscriptItemView, type TranscriptItemViewProps } from "@/components/Transcript";
@@ -6,6 +6,7 @@ import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { toolCallSummary } from "@/lib/toolCallSummary";
 import { hasToolCallResult } from "@/lib/toolCallStatus";
+import { formatToolGroupSummary } from "@/lib/toolGroupSummary";
 
 export interface TranscriptActivityGroupProps
   extends Omit<
@@ -96,10 +97,11 @@ export function TranscriptActivityGroup(props: TranscriptActivityGroupProps) {
     setUserOpen(!open());
   };
 
-  const toolCount = () =>
-    props.rows.reduce((count, row) => (row.type === "tool" ? count + 1 : count), 0);
+  const toolRows = createMemo(() =>
+    props.rows.filter((row): row is ChatTranscriptItem & { type: "tool" } => row.type === "tool"),
+  );
   const runningTool = createMemo(() => props.live
-    ? props.rows.find((row) => row.type === "tool" && !hasToolCallResult(row))
+    ? toolRows().find((row) => !hasToolCallResult(row))
     : undefined);
   const running = () => !!runningTool();
   const liveDetail = () => {
@@ -109,10 +111,10 @@ export function TranscriptActivityGroup(props: TranscriptActivityGroupProps) {
     }
     return toolCallSummary(tool.name, tool.args);
   };
-  const label = () => {
-    const tools = toolCount();
-    return `${tools} tool call${tools === 1 ? "" : "s"} · ${running() ? "Running" : "Finished"}`;
-  };
+  const summary = createMemo(() =>
+    formatToolGroupSummary(toolRows(), { live: props.live, running: running() }),
+  );
+  const label = () => summary().fullLabel;
 
   return (
     <div
@@ -129,12 +131,33 @@ export function TranscriptActivityGroup(props: TranscriptActivityGroupProps) {
         onClick={toggle}
       >
         <ChevronRight size={16} class="activity-group-chevron" />
-        <span class="activity-group-icon">
-          <Show when={running()} fallback={<Check size={14} />}>
+        <span
+          class="activity-group-icon"
+          classList={{
+            "has-failed": summary().hasFailed && !props.live,
+            "is-success": !summary().hasFailed && !props.live,
+          }}
+        >
+          <Show
+            when={props.live}
+            fallback={
+              <Show
+                when={summary().hasFailed}
+                fallback={<Check size={14} class="activity-group-check-icon" />}
+              >
+                <AlertCircle size={14} class="activity-group-alert-icon" />
+              </Show>
+            }
+          >
             <Loader2 size={14} class="spin-icon" />
           </Show>
         </span>
-        <span class="activity-group-label">{label()}</span>
+        <span
+          class="activity-group-label"
+          classList={{ "has-failed": summary().hasFailed && !props.live }}
+        >
+          {label()}
+        </span>
         <Show when={running() && liveDetail()}>
           {(detail) => <span class="activity-group-detail">{detail()}</span>}
         </Show>
