@@ -250,17 +250,77 @@ body.workspace-resizing * {
 /* Tabs Navigation Bar */
 .workspace-tabs-bar {
   display: flex;
-  min-height: 33px;
+  min-height: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  align-items: flex-end;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: 0 8px 0 10px;
+  position: relative;
+  z-index: 3;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.workspace-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  margin-left: 8px;
+  align-self: center;
+}
+
+/* Dedicated File Tabs Bar (below main tabs) */
+.workspace-file-tabs-bar {
+  display: flex;
+  min-height: 32px;
+  height: 32px;
   flex: 0 0 auto;
   align-items: flex-end;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--surface-2) 60%, var(--surface));
   padding: 0 8px 0 10px;
   position: relative;
   z-index: 2;
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
+}
+
+.workspace-file-tabs {
+  display: flex;
+  min-height: 32px;
+  height: 32px;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: flex-end;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 2px 0 0;
+  scroll-padding-left: 4px;
+  scroll-padding-right: 4px;
+  scrollbar-width: none;
+}
+
+.workspace-file-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.workspace-file-tab {
+  min-height: 29px;
+  height: 29px;
+  font-size: var(--font-size-workspace);
+  padding: 0 8px 0 7px;
+  border-radius: 5px 5px 0 0;
+}
+
+.workspace-file-tab .workspace-tab-label {
+  font-size: 0.8125rem;
 }
 
 .workspace-tabs {

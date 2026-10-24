@@ -27,9 +27,8 @@ import { apiFetch, postJson } from "@/lib/api";
 import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
 import { renderUnifiedDiffHtml } from "@/lib/diffView";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
-import { getBackendIcon } from "@/lib/iconRegistry";
 import { createDarkMode } from "@/lib/theme";
-import { formatWorkspaceRoot, localWorkspaceRef, workspaceDisplayLabel } from "@/lib/workspace";
+import { localWorkspaceRef } from "@/lib/workspace";
 import type { WorkspaceRef, WorkspaceUsagePayload, WorkspaceBackendKey } from "@/types";
 import { isSandboxBackend } from "@/types";
 
@@ -188,10 +187,6 @@ function FileCodeView(props: { content: string; path: string; dark: boolean }) {
   );
 }
 
-function BackendIcon(props: { backend: WorkspaceBackendKey }) {
-  return <>{getBackendIcon(props.backend)()}</>;
-}
-
 async function writeToClipboard(text: string): Promise<void> {
   if (navigator.clipboard && window.isSecureContext) {
     await navigator.clipboard.writeText(text);
@@ -223,7 +218,6 @@ export function WorkspaceExplorer(props: {
 }) {
   const dark = createDarkMode();
   const { showToast } = useToast();
-  const [draftWorkingDir, setDraftWorkingDir] = createSignal(props.workingDir);
   const [entriesByPath, setEntriesByPath] = createStore<Record<string, WorkspaceTreeEntry[]>>({});
   const [expandedByPath, setExpandedByPath] = createStore<Record<string, boolean>>({ "": true });
   const [treeLoadingByPath, setTreeLoadingByPath] = createStore<Record<string, boolean>>({});
@@ -243,6 +237,8 @@ export function WorkspaceExplorer(props: {
   const [diffError, setDiffError] = createSignal("");
   const [openTabs, setOpenTabs] = createSignal<WorkspaceTab[]>(["files"]);
   const [activeTab, setActiveTab] = createSignal<WorkspaceTab>("files");
+  const primaryTabs = createMemo(() => openTabs().filter((tab) => !tab.startsWith("file:")));
+  const fileTabs = createMemo(() => openTabs().filter((tab) => tab.startsWith("file:")));
   const [plusMenuOpen, setPlusMenuOpen] = createSignal(false);
   let plusBtnRef: HTMLButtonElement | undefined;
   let plusMenuRef: HTMLDivElement | undefined;
@@ -321,10 +317,6 @@ export function WorkspaceExplorer(props: {
   const activeFilePath = () => fileTabPath(activeTab());
   const activeFilePayload = () => filePayloads[activeFilePath()];
   const activeFileRevision = () => `${activeFilePayload()?.modified_at || 0}:${activeFilePayload()?.size || 0}`;
-  const workingDirDisplayValue = () =>
-    isLocalWorkspace()
-      ? props.disabled ? formatWorkspaceRoot(draftWorkingDir()) : draftWorkingDir()
-      : workspaceDisplayLabel(effectiveWorkspace()) || effectiveWorkspace()?.locator || "";
 
   const loadTree = async (path = "", targetGeneration = generation) => {
     if (disposed || !canQuery()) {
@@ -626,14 +618,6 @@ export function WorkspaceExplorer(props: {
     } finally {
       if (targetGeneration === generation) setManualRefreshing(false);
     }
-  };
-
-  const applyWorkingDir = () => {
-    if (!isLocalWorkspace()) {
-      showToast("Working directory is fixed for non-local workspaces.", "warning");
-      return;
-    }
-    props.onWorkingDirChange(draftWorkingDir().trim());
   };
 
   const reconnectSandboxWorkspace = async () => {
@@ -959,10 +943,6 @@ export function WorkspaceExplorer(props: {
 
   createEffect(on(() => props.running, () => schedulePoll(), { defer: true }));
 
-  createEffect(() => {
-    setDraftWorkingDir(props.workingDir || "");
-  });
-
   const normalizeWorkspacePath = (p: string | null | undefined): string => {
     if (!p) return "";
     return p.trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
@@ -1122,55 +1102,9 @@ export function WorkspaceExplorer(props: {
 
   return (
     <aside class="workspace-explorer">
-      <div class="workspace-dir-control">
-        <span
-          class={`workspace-backend-pill backend-${effectiveBackend()}`}
-          title={`Workspace backend: ${effectiveBackend()}`}
-          aria-label={`Workspace backend ${effectiveBackend()}`}
-        >
-          <BackendIcon backend={effectiveBackend()} />
-          <span>{effectiveBackend()}</span>
-        </span>
-        <input
-          class="input workspace-dir-input"
-          value={workingDirDisplayValue()}
-          disabled={props.disabled || !isLocalWorkspace()}
-          placeholder="Working directory"
-          title={draftWorkingDir()}
-          onInput={(event) => setDraftWorkingDir(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              applyWorkingDir();
-            }
-          }}
-        />
-        <button
-          class={`workspace-icon-btn ${manualRefreshing() ? "is-refreshing" : ""}`}
-          type="button"
-          onClick={refresh}
-          disabled={!canQuery() || manualRefreshing()}
-          title={manualRefreshing() ? "Refreshing workspace..." : "Refresh workspace"}
-          aria-label="Refresh workspace"
-        >
-          <RefreshCw size={18} />
-        </button>
-        <Show when={props.onCollapse}>
-          <button
-            class="workspace-icon-btn workspace-collapse-btn workspace-explorer-close-btn"
-            type="button"
-            onClick={props.onCollapse}
-            title="Close workspace explorer"
-            aria-label="Close workspace explorer"
-          >
-            <X size={18} />
-          </button>
-        </Show>
-      </div>
-
-      <div class="workspace-tabs-bar">
+      <div class="workspace-tabs-bar workspace-primary-tabs-bar">
         <div
-          class="workspace-tabs"
+          class="workspace-tabs workspace-primary-tabs"
           role="tablist"
           aria-label="Workspace views"
           onWheel={(event: WheelEvent) => {
@@ -1183,12 +1117,10 @@ export function WorkspaceExplorer(props: {
             }
           }}
         >
-          <For each={openTabs()}>
+          <For each={primaryTabs()}>
             {(tab) => {
               const isFiles = tab === "files";
               const isChanges = tab === "changes";
-              const isFile = tab.startsWith("file:");
-              const filePath = isFile ? fileTabPath(tab) : "";
 
               return (
                 <div
@@ -1202,7 +1134,7 @@ export function WorkspaceExplorer(props: {
                       closeTab(tab, event);
                     }
                   }}
-                  title={isFile ? filePath : isFiles ? "Files Explorer" : "Git Changes"}
+                  title={isFiles ? "Files Explorer" : "Git Changes"}
                 >
                   <div class="workspace-tab-icon-slot">
                     <span class="workspace-tab-icon" aria-hidden="true">
@@ -1212,15 +1144,12 @@ export function WorkspaceExplorer(props: {
                       <Show when={isChanges}>
                         <GitCompare size={14} />
                       </Show>
-                      <Show when={isFile}>
-                        <File size={14} />
-                      </Show>
                     </span>
                     <button
                       class="workspace-tab-close"
                       type="button"
-                      title={`Close ${isFiles ? "Files" : isChanges ? "Changes" : fileName(filePath)}`}
-                      aria-label={`Close ${isFiles ? "Files" : isChanges ? "Changes" : fileName(filePath)}`}
+                      title={`Close ${isFiles ? "Files" : "Changes"}`}
+                      aria-label={`Close ${isFiles ? "Files" : "Changes"}`}
                       onClick={(event) => closeTab(tab, event)}
                     >
                       <X size={13} />
@@ -1228,7 +1157,7 @@ export function WorkspaceExplorer(props: {
                   </div>
 
                   <span class="workspace-tab-label">
-                    {isFiles ? "Files" : isChanges ? "Changes" : fileName(filePath)}
+                    {isFiles ? "Files" : "Changes"}
                   </span>
 
                   <Show when={isChanges && changes().length > 0}>
@@ -1323,7 +1252,90 @@ export function WorkspaceExplorer(props: {
             </Show>
           </div>
         </div>
+
+        <div class="workspace-header-actions">
+          <button
+            class={`workspace-icon-btn ${manualRefreshing() ? "is-refreshing" : ""}`}
+            type="button"
+            onClick={refresh}
+            disabled={!canQuery() || manualRefreshing()}
+            title={manualRefreshing() ? "Refreshing workspace..." : "Refresh workspace"}
+            aria-label="Refresh workspace"
+          >
+            <RefreshCw size={16} />
+          </button>
+          <Show when={props.onCollapse}>
+            <button
+              class="workspace-icon-btn workspace-collapse-btn workspace-explorer-close-btn"
+              type="button"
+              onClick={props.onCollapse}
+              title="Close workspace explorer"
+              aria-label="Close workspace explorer"
+            >
+              <X size={16} />
+            </button>
+          </Show>
+        </div>
       </div>
+
+      <Show when={fileTabs().length > 0}>
+        <div class="workspace-file-tabs-bar">
+          <div
+            class="workspace-tabs workspace-file-tabs"
+            role="tablist"
+            aria-label="Open files"
+            onWheel={(event: WheelEvent) => {
+              if (event.deltaY !== 0) {
+                event.preventDefault();
+                const container = event.currentTarget as HTMLElement;
+                if (container) {
+                  container.scrollLeft += event.deltaY;
+                }
+              }
+            }}
+          >
+            <For each={fileTabs()}>
+              {(tab) => {
+                const filePath = fileTabPath(tab);
+                return (
+                  <div
+                    class={`workspace-tab workspace-file-tab ${isActiveTab(tab) ? "active" : ""}`}
+                    role="tab"
+                    aria-selected={isActiveTab(tab)}
+                    onClick={() => setActiveTab(tab)}
+                    onAuxClick={(event) => {
+                      if (event.button === 1) {
+                        event.preventDefault();
+                        closeTab(tab, event);
+                      }
+                    }}
+                    title={filePath}
+                  >
+                    <div class="workspace-tab-icon-slot">
+                      <span class="workspace-tab-icon" aria-hidden="true">
+                        <File size={13} />
+                      </span>
+                      <button
+                        class="workspace-tab-close"
+                        type="button"
+                        title={`Close ${fileName(filePath)}`}
+                        aria-label={`Close ${fileName(filePath)}`}
+                        onClick={(event) => closeTab(tab, event)}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+
+                    <span class="workspace-tab-label">
+                      {fileName(filePath)}
+                    </span>
+                  </div>
+                );
+              }}
+            </For>
+          </div>
+        </div>
+      </Show>
 
       <div class="workspace-explorer-body">
         <Show when={openTabs().length === 0}>
