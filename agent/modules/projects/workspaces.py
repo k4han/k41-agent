@@ -14,7 +14,7 @@ from pathlib import Path
 import tempfile
 from uuid import uuid4
 
-from sqlalchemy import JSON, and_, cast, func, or_, select, update
+from sqlalchemy import JSON, String, and_, cast, func, or_, select, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -83,7 +83,7 @@ def _insert(session, model):
 def _scope(project: Project) -> WorkspaceScope:
     payload = json.loads(project.workspace_json)
     scope = WorkspaceScope.model_validate(payload["scope"])
-    return scope.model_copy(update={"key": project.key})
+    return scope.model_copy(update={"key": project.key, "label": project.label})
 
 
 def _binding(project: Project, workspace: ProjectWorkspace, runtime: WorkspaceRuntime) -> WorkspaceBinding:
@@ -153,6 +153,8 @@ class ProjectWorkspaceService:
         self.closing = False
         from agent.modules.projects.runtime_switch import WorkspaceRuntimeSwitcher
         self.switcher = WorkspaceRuntimeSwitcher(self)
+        from agent.modules.projects.local_sync import WorkspaceLocalSync
+        self.local_sync = WorkspaceLocalSync(self)
 
     def lock(self, workspace_id: int) -> asyncio.Lock:
         return self.locks.setdefault(workspace_id, asyncio.Lock())
@@ -185,6 +187,7 @@ class ProjectWorkspaceService:
 
     async def describe_many(self, project_ids: list[int]) -> dict[int, dict]:
         from agent.modules.projects.runtime_switch import transition_summary
+        from agent.modules.projects.local_sync import local_link_summary
         if not project_ids:
             return {}
         session = await _session()
@@ -201,6 +204,8 @@ class ProjectWorkspaceService:
         for project in projects:
             rows = grouped[project.id]
             workspaces = [{"id": workspace.id, "kind": workspace.kind,
+                           "name": "main" if workspace.kind == "shared" else workspace.identity_key,
+                           "local_link": local_link_summary(workspace, runtime),
                            "source": json.loads(workspace.source_json),
                            "runtime": {"status": runtime.status, "generation": runtime.generation,
                                        "transition": transition_summary(runtime),
@@ -215,7 +220,8 @@ class ProjectWorkspaceService:
             if shared:
                 result["workspace"] = _binding(project, *shared).model_dump()
                 summary = next(item for item in workspaces if item["id"] == shared[0].id)
-                result.update(runtime=summary["runtime"], persistence=summary["persistence"])
+                result.update(runtime=summary["runtime"], persistence=summary["persistence"],
+                              workspace_name=summary["name"], local_link=summary["local_link"])
             descriptions[project.id] = result
         return descriptions
 
@@ -240,6 +246,22 @@ class ProjectWorkspaceService:
 
     async def binding(self, project_id: int, workspace_id: int | None = None) -> WorkspaceBinding:
         return _binding(*await self.rows(project_id, workspace_id))
+
+    async def find_repository_binding(self, repository_id: int) -> WorkspaceBinding | None:
+        """Resolve a repository's main workspace before allocating another runtime."""
+        session = await _session()
+        async with session:
+            if session.get_bind().dialect.name == "postgresql":
+                repository = cast(WorkspaceRuntime.execution_json, JSON)["metadata"]["repository_id"].as_string()
+            else:
+                repository = cast(func.json_extract(WorkspaceRuntime.execution_json, "$.metadata.repository_id"), String)
+            row = (await session.execute(select(Project, ProjectWorkspace, WorkspaceRuntime).join(
+                ProjectWorkspace, ProjectWorkspace.project_id == Project.id,
+            ).join(WorkspaceRuntime, WorkspaceRuntime.project_workspace_id == ProjectWorkspace.id).where(
+                ProjectWorkspace.kind == "shared", Project.migration_status == "ready",
+                or_(Project.key == f"github:{repository_id}", repository == str(repository_id)),
+            ).limit(1))).first()
+        return _binding(*row) if row else None
 
     async def resolve_thread(self, thread_id: str) -> WorkspaceBinding | None:
         from agent.modules.workspaces import ThreadWorkspace
@@ -378,7 +400,10 @@ class ProjectWorkspaceService:
             ref = WorkspaceRef.model_validate_json(runtime.execution_json)
             manifest = await self.transfer.capture(ref, self.storage, str(workspace.id))
             saved = await asyncio.to_thread(self.storage.put_manifest, str(workspace.id), manifest)
-            if skip_unchanged and saved == revision and workspace.persistence_status == "clean":
+            source = WorkspaceRef.model_validate_json(workspace.source_json)
+            linked_local = workspace.kind == "shared" and source.backend == ref.backend == "local" and source_key(source) == source_key(ref)
+            local_revision = saved if linked_local else workspace.local_sync_revision
+            if skip_unchanged and saved == revision and workspace.persistence_status == "clean" and local_revision == workspace.local_sync_revision:
                 if not self.closing and project.migration_status == "ready" and workspace.kind != "legacy" and runtime.status == "ready":
                     self.active.add(workspace.id)
                 return {"status": "clean", "revision": saved, "saved": True}
@@ -390,7 +415,8 @@ class ProjectWorkspaceService:
                 result = await session.execute(update(ProjectWorkspace).where(
                     ProjectWorkspace.id == workspace.id, ProjectWorkspace.head_revision == revision, runtime_check,
                 ).values(head_revision=saved, previous_revision=revision if saved != revision else workspace.previous_revision,
-                         persistence_status="clean", last_error="", last_saved_at=utcnow(), updated_at=utcnow()))
+                         persistence_status="clean", last_error="", last_saved_at=utcnow(), updated_at=utcnow(),
+                         local_sync_revision=local_revision))
                 if result.rowcount != 1:
                     raise ProjectWorkspaceError("Workspace changed while saving.", "stale_runtime")
                 await session.commit()
@@ -398,7 +424,7 @@ class ProjectWorkspaceService:
             if not self.closing and project.migration_status == "ready" and workspace.kind != "legacy" and runtime.status == "ready":
                 self.active.add(workspace.id)
             keep = {value for value in (saved, revision, workspace.previous_revision if saved == revision else None,
-                                        workspace.pinned_revision) if value}
+                                        workspace.pinned_revision, local_revision) if value}
             try:
                 # A cancelled thread keeps running; retain the lock until collection ends.
                 collection = asyncio.create_task(asyncio.to_thread(self.storage.collect, str(workspace.id), keep))

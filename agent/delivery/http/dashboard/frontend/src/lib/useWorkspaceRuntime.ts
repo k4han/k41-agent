@@ -22,10 +22,11 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
     if (!thread) return null;
     const result = await apiFetch<ThreadRuntimePayload>(`/dashboard-api/workspace/runtime/${encodeURIComponent(thread)}`);
     if (version !== revision || thread !== threadId()) return null;
+    const bindingChanged = JSON.stringify(result.workspace) !== JSON.stringify(payload().workspace);
     batch(() => {
       if (runtimeTransitionBusy(payload().runtime) && !runtimeTransitionBusy(result.runtime)) setError("");
       setPayload(result);
-      if (result.workspace) applyWorkspace(result.workspace);
+      if (result.workspace && bindingChanged) applyWorkspace(result.workspace);
     });
     return result;
   };
@@ -42,8 +43,9 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
     refreshQuietly();
   });
   createEffect(() => {
-    if (!runtimeTransitionBusy(payload().runtime)) return;
-    const timer = window.setInterval(refreshQuietly, 2000);
+    const switching = runtimeTransitionBusy(payload().runtime);
+    if (!payload().workspace && !switching) return;
+    const timer = window.setInterval(refreshQuietly, switching ? 2000 : 5000);
     onCleanup(() => window.clearInterval(timer));
   });
   onMount(() => {

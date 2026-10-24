@@ -94,7 +94,9 @@ async def get_thread_runtime(thread_id: str):
             return {"workspace": None, "runtime": None}
         description = await service.describe(binding.project_id)
         workspace = next(item for item in description["workspaces"] if item["id"] == binding.project_workspace_id)
-        return {"workspace": binding.model_dump(), "runtime": workspace["runtime"], "kind": workspace["kind"]}
+        return {"workspace": binding.model_dump(), "runtime": workspace["runtime"], "kind": workspace["kind"],
+                "workspace_name": workspace["name"], "persistence": workspace["persistence"],
+                "local_link": workspace["local_link"]}
     except Exception as exc:
         raise project_resource_error(exc) from exc
 
@@ -123,6 +125,22 @@ async def ensure_project_runtime(body: ProjectRuntimeBody, project_id: int = Pat
 class ProjectRuntimeRecoveryBody(ProjectRuntimeBody):
     action: Literal["restore", "local"]
     expected_generation: int = Field(ge=1)
+
+
+class ProjectLocalSyncBody(ProjectRuntimeBody):
+    expected_generation: int = Field(ge=1)
+    preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
+@router.post("/dashboard-api/projects/{project_id}/local-sync")
+async def synchronize_project_local(body: ProjectLocalSyncBody, project_id: int = Path(ge=1)):
+    from agent.modules.projects import get_project_workspace_service
+    try:
+        return await get_project_workspace_service().local_sync.synchronize(
+            project_id, body.expected_generation, body.project_workspace_id, preview_token=body.preview_token,
+        )
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
 
 
 @router.post("/dashboard-api/projects/{project_id}/runtime/recovery")

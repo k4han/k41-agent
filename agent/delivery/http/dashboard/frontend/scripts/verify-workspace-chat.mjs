@@ -28,9 +28,12 @@ let failRepositories = false;
 let runtimeScenario = false;
 let switchFailure = false;
 const runtimeRequests = [];
+let runtimeStatusRequests = 0;
 let runtimePayload = { kind: 'shared', workspace: { project_id: 41, project_workspace_id: 51, runtime_generation: 1,
   scope: { key: 'shared-project', kind: 'local', label: 'Shared project', metadata: {} }, execution: { ...workspace, label: 'Shared project' } },
-  runtime: { status: 'ready', generation: 1, transition: null } };
+  runtime: { status: 'ready', generation: 1, transition: null }, workspace_name: 'main',
+  persistence: { status: 'clean', last_saved_at: '2026-01-01T00:00:00Z', last_error: '' },
+  local_link: { path: root, revision: 'a'.repeat(64), status: 'active' } };
 let chatResponse;
 const modelName = 'demo-model-with-a-long-unabridged-name';
 const fixtures = {
@@ -85,7 +88,10 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'workspace-test-csrf');
     const reply = value => res.end(JSON.stringify(value));
-    if (url.pathname.startsWith('/dashboard-api/workspace/runtime/')) return reply(runtimeScenario ? runtimePayload : { workspace: null, runtime: null });
+    if (url.pathname.startsWith('/dashboard-api/workspace/runtime/')) {
+      runtimeStatusRequests += 1;
+      return reply(runtimeScenario ? runtimePayload : { workspace: null, runtime: null });
+    }
     if (url.pathname === '/dashboard-api/projects/41/runtime/switch') {
       let raw = '';
       for await (const chunk of req) raw += chunk;
@@ -717,13 +723,17 @@ try {
   await until(() => js('document.querySelector(".composer-workspace-label")?.textContent.includes("Shared project")'), 'shared runtime binding');
   await click('.composer-workspace-trigger');
   await until(() => js('!!document.querySelector(".composer-runtime-picker")'), 'runtime switch picker');
-  assert.match(await js('document.querySelector(".composer-runtime-picker").textContent'), /all conversations/);
+  assert.match(await js('document.querySelector(".composer-runtime-picker").textContent'), /all conversations/i);
   const chooseBackend = async name => {
     await click('.composer-runtime-picker button[aria-label="Execution backend"]');
     await js(`Array.from(document.querySelectorAll('[role="option"]')).find(el => el.textContent.trim() === ${JSON.stringify(name)}).click()`);
   };
   await chooseBackend('Daytona');
   assert.equal(await js('!!document.querySelector(".composer-runtime-picker")'), true, 'backend menu remains inside the project popover');
+  const beforeStoragePoll = runtimeStatusRequests;
+  await until(() => runtimeStatusRequests > beforeStoragePoll, 'idle storage status refresh');
+  assert.equal(await js(`document.querySelector('.composer-runtime-picker button[aria-label="Execution backend"]').textContent.includes('Daytona')`), true,
+    'storage polling keeps the selected destination backend');
   await click('.composer-runtime-picker button.btn-primary');
   await until(() => runtimeRequests.length === 1, 'switch API accepted');
   assert.deepEqual(runtimeRequests[0], { backend: 'daytona', project_workspace_id: 51, expected_generation: 1 });

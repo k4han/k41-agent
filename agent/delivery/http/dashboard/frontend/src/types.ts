@@ -328,6 +328,23 @@ export type ProjectWorkspaceSummary = {
   source: WorkspaceRef;
   runtime: WorkspaceRuntimeSummary;
   persistence: ProjectPersistence;
+  name?: string;
+  local_link?: ProjectLocalLink | null;
+};
+
+export type ProjectLocalLink = {
+  path: string;
+  revision: string | null;
+  status: "active" | "baseline_missing" | "applied" | "pending";
+};
+
+export type ProjectLocalSyncPreview = {
+  path: string;
+  revision: string;
+  preview_token: string;
+  changes: { path: string; action: "add" | "update" | "delete" }[];
+  conflicts: string[];
+  applied: boolean;
 };
 
 export type WorkspaceRuntimeTransition = {
@@ -359,6 +376,9 @@ export type ThreadRuntimePayload = {
   workspace: WorkspaceBinding | null;
   runtime: WorkspaceRuntimeSummary | null;
   kind?: "shared" | "github_task" | "legacy";
+  workspace_name?: string;
+  persistence?: ProjectPersistence;
+  local_link?: ProjectLocalLink | null;
 };
 
 export type ProjectSummary = {
@@ -372,6 +392,8 @@ export type ProjectSummary = {
   workspaces?: ProjectWorkspaceSummary[];
   runtime?: WorkspaceRuntimeSummary;
   persistence?: ProjectPersistence;
+  workspace_name?: string;
+  local_link?: ProjectLocalLink | null;
   created_at: string;
   updated_at: string;
 };

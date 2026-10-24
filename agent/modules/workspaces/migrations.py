@@ -96,7 +96,10 @@ def migrate_workspace_tables(database_url: str) -> None:
         with engine.begin() as conn:
             inspector = inspect(conn)
             _ensure_columns(conn, inspector, "projects", {"migration_status": "VARCHAR(30) NOT NULL DEFAULT 'pending'"})
-            _ensure_columns(conn, inspector, "project_workspaces", {"runtime_aliases_json": "TEXT NOT NULL DEFAULT '[]'"})
+            _ensure_columns(conn, inspector, "project_workspaces", {
+                "runtime_aliases_json": "TEXT NOT NULL DEFAULT '[]'",
+                "local_sync_revision": "VARCHAR(64)",
+            })
             _ensure_columns(conn, inspector, "workspace_runtimes", {"transition_json": "TEXT NOT NULL DEFAULT 'null'",
                                                                     "pending_decision_json": "TEXT NOT NULL DEFAULT '{}'"})
             for table_name in _TABLES_WITH_WORKSPACE_COLUMNS:

@@ -816,6 +816,23 @@ test('runtime switching retains accepted progress across a connection loss and a
   await tick();
   assert.equal(value.busy(), false);
   assert.equal(f.applied.at(-1).execution.locator, 'new-sandbox');
+  assert.equal(f.timers.size, 1);
+});
+
+test('storage polling refreshes save state without resetting the working location', async t => {
+  const f = runtimeFixture();
+  const { value, dispose } = mount(t, () => f.useWorkspaceRuntime(() => 'thread', f.apply));
+  await tick();
+  assert.equal(f.applied.length, 1);
+  f.setResult({ ...f.getResult(), persistence: { status: 'error', last_error: 'Disk full' },
+    workspace_name: 'main', local_link: { path: '/original', status: 'pending' } });
+  [...f.timers.values()][0]();
+  await tick();
+  assert.equal(value.payload().persistence.status, 'error');
+  assert.equal(value.payload().workspace_name, 'main');
+  assert.equal(value.payload().local_link.path, '/original');
+  assert.equal(f.applied.length, 1);
+  dispose();
   assert.equal(f.timers.size, 0);
 });
 

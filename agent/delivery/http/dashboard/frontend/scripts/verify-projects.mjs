@@ -24,6 +24,8 @@ const makeProject = (id, label) => ({ id, key: `local:/projects/${id}`, label, s
     created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' });
 let projects = [makeProject(1, 'Empty project'), makeProject(2, 'Other project')];
 const mutations = [];
+const localSyncRequests = [];
+let localSyncConflict = true;
 let unavailable = false;
 let delayRuntimeFailure = false;
 let failPendingRuntime;
@@ -78,6 +80,15 @@ const server = http.createServer(async (req, res) => {
       const project = projects.find(item => item.id === Number(checkpoint[1]));
       project.persistence = { ...project.persistence, status: 'clean', last_error: '', blocked_for_writes: false };
       send({ status: 'clean', saved: true, revision: project.persistence.revision }); return;
+    }
+    const localSync = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/local-sync$/);
+    if (localSync) {
+      localSyncRequests.push(body);
+      const project = projects.find(item => item.id === Number(localSync[1]));
+      if (body.preview_token) project.local_link = { ...project.local_link, status: 'applied', revision: project.persistence.revision };
+      send({ path: project.local_link.path, revision: project.persistence.revision, preview_token: 'b'.repeat(64),
+        changes: [{ path: 'src/app.py', action: 'update' }], conflicts: localSyncConflict ? ['src/app.py'] : [], applied: Boolean(body.preview_token) });
+      return;
     }
     const selection = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/migration\/select$/);
     if (selection) {
@@ -391,6 +402,27 @@ try {
   await until(async () => instructionRequests.length > beforeSelectionRead && await js(`document.querySelector('[aria-label="Project instructions"] h1')?.textContent === 'Selected workspace guide'`), 'selected workspace instructions');
   assert.equal(migrationProject.workspace.execution.locator, '/copies/102');
   assert.equal(migrationProject.workspaces.length, 2);
+  migrationProject.workspace_name = 'main';
+  migrationProject.local_link = { path: '/projects/1', revision: 'c'.repeat(64), status: 'pending' };
+  await call('Page.reload');
+  await until(() => js(`document.querySelector('.workspace-storage-summary')?.textContent.includes('/copies/102') &&
+    document.querySelector('.workspace-storage-summary')?.textContent.includes('/projects/1')`), 'working location and linked directory are separate');
+  await clickText('Preview local changes');
+  await until(() => js(`document.body.textContent.includes('1 conflicts')`), 'local synchronization conflict preview');
+  assert.equal(await js(`[...document.querySelectorAll('button')].find(button => button.textContent === 'Apply previewed changes').disabled`), true);
+  assert.equal(localSyncRequests.some(body => body.preview_token), false);
+  localSyncConflict = false;
+  await clickText('Preview local changes');
+  await until(() => js(`[...document.querySelectorAll('button')].some(button => button.textContent === 'Apply previewed changes' && !button.disabled)`), 'local sync ready to apply');
+  const beforeSyncPoll = detailRequests.length;
+  await until(() => detailRequests.length > beforeSyncPoll, 'status polling preserves the local sync preview');
+  assert.equal(await js(`[...document.querySelectorAll('button')].some(button => button.textContent === 'Apply previewed changes' && !button.disabled)`), true);
+  await clickText('Apply previewed changes');
+  await until(() => js(`document.body.textContent.includes('Changes applied.')`), 'apply reviewed local changes');
+  assert.equal(localSyncRequests.at(-1).preview_token, 'b'.repeat(64));
+  assert.equal(localSyncRequests.at(-1).expected_generation, 1);
+  assert.equal(migrationProject.workspace.execution.locator, '/copies/102');
+  console.log('PASS: main workspace location, linked local directory, conflict preview, and explicit local synchronization.');
   await call('Page.navigate', { url: `${base}/projects/1` });
   await until(() => js(`location.pathname === '/projects/1' && !!document.querySelector('.project-storage-status')`), 'project before delayed failure');
   delayRuntimeFailure = true;

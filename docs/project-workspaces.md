@@ -9,6 +9,17 @@ share its `shared` workspace. GitHub issue/PR automation uses separate
 `github_task` workspaces. `WorkspaceRuntime` contains the replaceable execution
 reference and generation, with one current runtime per workspace.
 
+The normal workspace is presented as `main`; its existing `shared` identity is
+retained for database and API compatibility. A run uses this workspace rather
+than creating a backend-specific copy. Reopening an original path or retired
+runtime reference resolves to the same project, including during startup import.
+Separate workspaces represent intentionally isolated work such as GitHub tasks.
+Backend selection never creates an additional workspace or revision history.
+Workspace resolution checks known paths, retired references and repository IDs
+before creating directories or allocating sandboxes. Reopening a known project
+uses its current runtime even if a different initial backend was requested;
+moving its execution is an explicit backend-switch operation.
+
 ## Storage contract
 
 `workspace.project_storage_root` configures host storage; the default is
@@ -29,7 +40,7 @@ against the same filesystem metadata; restore always verifies the bytes again.
 Unchanged background checkpoints keep the existing save timestamp and avoid
 republishing the database head or collecting storage.
 
-The current revision, its predecessor and pinned migration revisions are kept.
+The current revision, its predecessor, the linked local baseline and pinned migration revisions are kept.
 Collection runs under the workspace lock and removes only unreferenced data.
 
 Checkpoints include binary files, ignored/untracked work files, instructions,
@@ -129,6 +140,9 @@ target backend, saved revision, timestamps and errors. A same-backend request
 returns the current binding without capturing or reloading files.
 `GET /dashboard-api/workspace/runtime/{thread_id}` resolves a conversation's
 current binding and transition without starting an execution environment.
+It also returns `workspace_name`, `persistence` and `local_link`. The conversation
+picker shows the current physical location, workspace name and save state.
+Save state refreshes while idle without replacing an unchanged workspace binding.
 
 Switching requires an idle shared workspace: active agent runs, background
 tasks, managed processes and paused workflow requests block the operation with
@@ -145,6 +159,9 @@ execution references. Switching back to local always uses a new directory under
 the application-owned runtime root; an original project directory is never
 overwritten. Cloud sources are stopped after activation when no other workspace
 references the same sandbox. Modal retirement terminates the old sandbox.
+Old application-owned `switch-*` local runtimes are removed after activation;
+the original linked directory is retained. Retired references still resolve to
+the current project workspace rather than registering a new project.
 
 The latest transition and pending cleanup references are durable. Failure before
 activation retains the source binding. A restart marks an unfinished transition
@@ -160,6 +177,47 @@ runtime stays warm between turns. External editors must pause writes during a
 switch because application locks do not isolate external processes. This release
 uses local durable storage and one application writer; S3 remains a future
 implementation of the existing storage contract.
+
+## Linked local directories
+
+A project originally registered from a local directory retains that directory as
+its local link. While it is the active runtime, successful checkpoints update
+`local_sync_revision`. After moving execution elsewhere, this baseline remains
+pinned independently of the current and previous workspace revisions.
+
+Backend switching continues the same `main` workspace. Switching back to local
+uses an application-managed directory; applying changes to the original linked
+directory is a distinct, explicit operation on the project page. The page shows
+both locations and whether a newer saved revision awaits local application.
+The link is not a second writable runtime or an automatic two-way filesystem sync.
+
+`POST /dashboard-api/projects/{id}/local-sync` accepts `expected_generation` and
+optional `project_workspace_id`. Without `preview_token`, it checkpoints the
+idle runtime and returns the target path, saved revision, planned changes,
+conflicts and a preview token. Sending that token applies the reviewed changes.
+Clients cannot supply a target path or bypass conflicts. A stale token or runtime
+generation returns `409` and requires a new preview.
+
+The comparison is three-way: baseline, saved workspace and linked local files.
+Independent local edits and ignored dependency/cache folders are preserved. If
+both copies changed the same entry differently, all writes are blocked until
+the conflict is resolved. Runtime runs, processes and pending approvals use the
+same exclusive reservation as backend switching. External editors should pause
+writes while applying; files are rechecked before replacement, but the operation
+does not provide a transaction across external processes.
+
+Files are replaced atomically one at a time. On an I/O error or application
+interruption, the saved workspace and baseline remain available; a new preview
+recognizes already-applied entries and supports retrying the remainder. No user
+command is replayed. Type changes prepare the complete replacement before moving
+the original into a temporary backup. A durable recovery record restores that
+backup if publication is interrupted, or removes it after successful publication.
+Recovery runs before the next local preview. On Windows, comparisons retain the
+file read-only flag and ignore unsupported POSIX directory and execute permissions.
+Git worktree links are refused because their external Git metadata requires a
+Git-aware merge. Legacy projects already running remotely
+without a retained local baseline report `baseline_missing` and preserve the
+original directory rather than guessing which local changes can be overwritten.
 
 ## Verification
 

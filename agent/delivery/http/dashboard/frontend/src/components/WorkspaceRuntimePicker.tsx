@@ -1,6 +1,8 @@
-import { createEffect, createSignal, Show } from "solid-js";
+import { A } from "@solidjs/router";
+import { createEffect, createMemo, createSignal, Show } from "solid-js";
 
 import { SelectControl } from "@/components/SelectControl";
+import { WorkspaceStorageStatus } from "@/components/WorkspaceStorageStatus";
 import { getBackendDisplayName, getEnabledBackends } from "@/lib/catalogStore";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import type { ThreadRuntimePayload, WorkspaceBackendKey } from "@/types";
@@ -13,15 +15,21 @@ export function WorkspaceRuntimePicker(props: {
   portalMount?: HTMLElement;
   onSwitch: (backend: WorkspaceBackendKey) => Promise<void>;
 }) {
-  const [selected, setSelected] = createSignal<WorkspaceBackendKey>(props.payload.workspace?.execution.backend || "local");
-  useCatalogAndLoad(async () => { setSelected(props.payload.workspace?.execution.backend || "local"); });
-  createEffect(() => setSelected(props.payload.workspace?.execution.backend || "local"));
+  const currentBackend = createMemo(() => props.payload.workspace?.execution.backend || "local");
+  const [selected, setSelected] = createSignal<WorkspaceBackendKey>(currentBackend());
+  useCatalogAndLoad(async () => { setSelected(currentBackend()); });
+  createEffect(() => setSelected(currentBackend()));
   const transition = () => props.payload.runtime?.transition;
   const unavailable = () => props.payload.runtime?.status === "unavailable";
   const phaseLabel = () => ({ saving: "Saving files", provisioning: "Creating environment", restoring: "Loading files",
     verifying: "Verifying files", activating: "Activating environment", completed: "Backend switched", failed: "Switch failed" }[transition()?.phase || "completed"]);
   return <div class="composer-runtime-picker">
-    <p>Switching the backend updates all conversations sharing this project workspace. Running processes and installed dependencies are not transferred.</p>
+    <Show when={props.payload.workspace}>{(binding) => <WorkspaceStorageStatus name={props.payload.workspace_name}
+      execution={binding().execution} persistence={props.payload.persistence} localLink={props.payload.local_link} />}</Show>
+    <p>All conversations in this workspace use the same files and current environment. Switching continues this workspace on another backend. Running processes and installed dependencies are not transferred.</p>
+    <Show when={props.payload.local_link && props.payload.workspace?.project_id}>
+      <A class="btn" href={`/projects/${props.payload.workspace!.project_id}`}>Manage local synchronization</A>
+    </Show>
     <label>Execution backend</label>
     <SelectControl value={selected()} ariaLabel="Execution backend" portalMount={props.portalMount}
       onChange={(value) => setSelected(value as WorkspaceBackendKey)}

@@ -38,6 +38,7 @@ class ProjectWorkspace(BaseModel):
     last_saved_at = Column(DateTime(timezone=True), nullable=True)
     last_error = Column(Text, nullable=False, default="")
     pinned_revision = Column(String(64), nullable=True)
+    local_sync_revision = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 

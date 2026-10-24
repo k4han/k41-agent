@@ -1010,6 +1010,337 @@ async def finish_switch(fixture, backend):
 
 
 @pytest.mark.asyncio
+async def test_backend_roundtrip_keeps_one_project_and_local_baseline(switch_service, monkeypatch):
+    from agent.modules.projects.repository import register_project
+    from agent.modules.workspaces.refs import bind_workspace_ref
+    fixture = switch_service
+    service = fixture.service
+    original = WorkspaceRef(locator=str(fixture.root))
+    baseline = (await service.rows(fixture.project["id"]))[1].local_sync_revision
+    await catalog.update_project(fixture.project["id"], {"label": "Stable project"})
+    old_refs = [original]
+    for backend in ("daytona", "modal", "local"):
+        _, binding = await finish_switch(fixture, backend)
+        assert binding.scope.label == "Stable project"
+        old_refs.append(binding.execution)
+        target = Path(binding.execution.locator) if backend == "local" else fixture.roots[binding.execution.locator]
+        (target / (backend + ".txt")).write_text(backend)
+        await service.checkpoint(fixture.project["id"])
+    for ref in old_refs:
+        async with fixture.maker() as session:
+            project = await register_project(session, bind_workspace_ref(ref), only_missing=True)
+            assert project.id == fixture.project["id"]
+            await session.commit()
+    async with fixture.maker() as session:
+        assert len((await session.execute(select(Project))).scalars().all()) == 1
+        assert len((await session.execute(select(ProjectWorkspace))).scalars().all()) == 1
+        assert len((await session.execute(select(WorkspaceRuntime))).scalars().all()) == 1
+    workspace = (await service.rows(fixture.project["id"]))[1]
+    assert workspace.local_sync_revision == baseline
+    service.storage.get_manifest(str(workspace.id), baseline)
+    description = await service.describe(fixture.project["id"])
+    assert description["workspace_name"] == "main"
+    assert description["local_link"] == {"path": str(fixture.root), "revision": baseline, "status": "pending"}
+    leftover = fixture.root / (".k41-sync-" + "a" * 32)
+    leftover.write_text("interrupted replacement")
+    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    assert not preview["conflicts"]
+    assert not leftover.exists()
+    await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation, preview_token=preview["preview_token"])
+    assert all((fixture.root / (backend + ".txt")).is_file() for backend in ("daytona", "modal", "local"))
+    assert (await service.describe(fixture.project["id"]))["local_link"]["status"] == "applied"
+
+
+@pytest.mark.asyncio
+async def test_local_sync_preserves_external_edits_and_rejects_stale_preview(switch_service):
+    fixture = switch_service
+    service = fixture.service
+    _, binding = await finish_switch(fixture, "daytona")
+    remote = fixture.roots[binding.execution.locator]
+    (remote / "new.bin").write_bytes(bytes(range(256)))
+    (remote / "folder").mkdir()
+    (remote / "folder" / "file.txt").write_text("new file")
+    (fixture.root / "file.txt").write_text("independent local edit")
+    (fixture.root / "local-only.txt").write_text("keep")
+    (fixture.root / "node_modules").mkdir()
+    (fixture.root / "node_modules" / "cached").write_text("keep cache")
+    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    assert not preview["conflicts"] and not preview["applied"]
+    (fixture.root / "local-only.txt").write_text("newer local edit")
+    with pytest.raises(ProjectWorkspaceError) as failure:
+        await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation, preview_token=preview["preview_token"])
+    assert failure.value.code == "stale_content"
+    assert not (fixture.root / "new.bin").exists()
+    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    result = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation, preview_token=preview["preview_token"])
+    assert result["applied"]
+    assert (fixture.root / "file.txt").read_text() == "independent local edit"
+    assert (fixture.root / "local-only.txt").read_text() == "newer local edit"
+    assert (fixture.root / "node_modules" / "cached").read_text() == "keep cache"
+    assert (fixture.root / "new.bin").read_bytes() == bytes(range(256))
+    assert (fixture.root / "folder" / "file.txt").read_text() == "new file"
+
+
+@pytest.mark.asyncio
+async def test_local_sync_conflicts_block_all_writes_and_busy_runs(switch_service):
+    fixture = switch_service
+    service = fixture.service
+    _, binding = await finish_switch(fixture, "modal")
+    remote = fixture.roots[binding.execution.locator]
+    (remote / "file.txt").write_text("remote edit")
+    (remote / "additional.txt").write_text("must not be applied on conflict")
+    (fixture.root / "file.txt").write_text("local edit")
+    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    assert preview["conflicts"] == ["file.txt"]
+    with pytest.raises(ProjectWorkspaceError) as failure:
+        await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation, preview_token=preview["preview_token"])
+    assert failure.value.code == "local_sync_conflict"
+    assert (fixture.root / "file.txt").read_text() == "local edit"
+    assert not (fixture.root / "additional.txt").exists()
+    with service.switcher.run_lease(binding.project_workspace_id):
+        with pytest.raises(ProjectWorkspaceError) as failure:
+            await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    assert failure.value.code == "workspace_busy"
+    assert not service.switcher.switching and not service.switcher.tasks
+
+
+@pytest.mark.asyncio
+async def test_local_sync_blocks_missing_parent_conflicts_before_any_write(switch_service):
+    import shutil
+    fixture = switch_service
+    service = fixture.service
+    (fixture.root / "folder").mkdir()
+    (fixture.root / "folder" / "original.txt").write_text("original")
+    _, binding = await finish_switch(fixture, "daytona")
+    remote = fixture.roots[binding.execution.locator]
+    (remote / "folder" / "new.txt").write_text("cloud addition")
+    (remote / "file.txt").write_text("cloud edit")
+    shutil.rmtree(fixture.root / "folder")
+    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    assert preview["conflicts"] == ["folder"]
+    with pytest.raises(ProjectWorkspaceError) as failure:
+        await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation, preview_token=preview["preview_token"])
+    assert failure.value.code == "local_sync_conflict"
+    assert (fixture.root / "file.txt").read_text() == "original"
+    assert not (fixture.root / "folder").exists()
+
+
+@pytest.mark.asyncio
+async def test_local_sync_saves_baseline_after_applying_cloud_permissions_on_windows(switch_service, monkeypatch):
+    import agent.modules.projects.local_sync as local_sync
+    fixture = switch_service
+    service = fixture.service
+    monkeypatch.setattr(local_sync, "_WINDOWS", True)
+    _, binding = await finish_switch(fixture, "daytona")
+    remote = fixture.roots[binding.execution.locator]
+    (remote / "folder").mkdir()
+    (remote / "folder" / "new.txt").write_text("cloud addition")
+    (remote / "file.txt").write_text("cloud edit")
+    original_capture = service.transfer.capture
+    async def capture(ref, *args):
+        manifest = await original_capture(ref, *args)
+        if ref.backend != "local":
+            for entry in manifest["entries"].values():
+                entry["mode"] = 0o755 if entry["type"] == "directory" else 0o644
+        return manifest
+    monkeypatch.setattr(service.transfer, "capture", capture)
+    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    assert not preview["conflicts"]
+    result = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation, preview_token=preview["preview_token"])
+    assert result["applied"]
+    assert (fixture.root / "file.txt").read_text() == "cloud edit"
+    assert (fixture.root / "folder" / "new.txt").read_text() == "cloud addition"
+    workspace = (await service.rows(fixture.project["id"]))[1]
+    assert workspace.local_sync_revision == result["revision"]
+    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    assert not preview["changes"] and not preview["conflicts"]
+
+
+@pytest.mark.asyncio
+async def test_local_sync_preview_recovers_interrupted_type_replacement(switch_service, monkeypatch):
+    import agent.modules.projects.local_sync as local_sync
+    fixture = switch_service
+    service = fixture.service
+    _, binding = await finish_switch(fixture, "daytona")
+    remote = fixture.roots[binding.execution.locator]
+    (remote / "file.txt").unlink()
+    (remote / "file.txt").mkdir()
+    (remote / "file.txt" / "child.txt").write_text("cloud child")
+    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    journal = service.runtime_root / str(binding.project_workspace_id) / "local-sync.json"
+    original_rename = Path.rename
+    def fail_publish(path, destination):
+        if path.name == "replacement":
+            raise OSError("disk full")
+        return original_rename(path, destination)
+    def interrupted_cleanup(*args):
+        raise RuntimeError("application interrupted")
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "rename", fail_publish)
+        patch.setattr(local_sync, "_settle_replacement", interrupted_cleanup)
+        with pytest.raises(RuntimeError, match="application interrupted"):
+            await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation, preview_token=preview["preview_token"])
+    assert journal.exists() and not (fixture.root / "file.txt").exists()
+    service.local_sync = local_sync.WorkspaceLocalSync(service)
+    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    assert not preview["conflicts"]
+    assert (fixture.root / "file.txt").read_text() == "original"
+    assert not journal.exists()
+    await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation, preview_token=preview["preview_token"])
+    assert (fixture.root / "file.txt" / "child.txt").read_text() == "cloud child"
+    assert not journal.exists()
+
+
+@pytest.mark.asyncio
+async def test_local_sync_retry_after_partial_write_and_source_changes(switch_service, monkeypatch):
+    import agent.modules.projects.local_sync as local_sync
+    fixture = switch_service
+    service = fixture.service
+    _, binding = await finish_switch(fixture, "daytona")
+    remote = fixture.roots[binding.execution.locator]
+    (remote / "a.txt").write_text("first")
+    (remote / "b.txt").write_text("second")
+    (remote / "file.txt").unlink()
+    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    original_apply = local_sync._apply
+    def fail(root, stage, desired, current, signatures, changes, **kwargs):
+        original_apply(root, stage, desired, current, signatures, [change for change in changes if change["path"] == "a.txt"], **kwargs)
+        raise OSError("disk full")
+    monkeypatch.setattr(local_sync, "_apply", fail)
+    with pytest.raises(OSError, match="disk full"):
+        await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation, preview_token=preview["preview_token"])
+    assert (fixture.root / "a.txt").read_text() == "first"
+    assert not service.switcher.switching
+    monkeypatch.setattr(local_sync, "_apply", original_apply)
+    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    assert "a.txt" not in {change["path"] for change in preview["changes"]}
+    (remote / "b.txt").write_text("newer")
+    with pytest.raises(ProjectWorkspaceError) as failure:
+        await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation, preview_token=preview["preview_token"])
+    assert failure.value.code == "stale_content"
+    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation, preview_token=preview["preview_token"])
+    assert (fixture.root / "b.txt").read_text() == "newer"
+    assert not (fixture.root / "file.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_local_sync_keeps_writer_reservation_after_client_disconnect(switch_service, monkeypatch):
+    import agent.modules.projects.local_sync as local_sync
+    fixture = switch_service
+    service = fixture.service
+    _, binding = await finish_switch(fixture, "daytona")
+    (fixture.roots[binding.execution.locator] / "file.txt").write_text("new content")
+    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
+    started, release = asyncio.Event(), Event()
+    loop = asyncio.get_running_loop()
+    original_apply = local_sync._apply
+    def paused(*args, **kwargs):
+        loop.call_soon_threadsafe(started.set)
+        assert release.wait(10)
+        original_apply(*args, **kwargs)
+    monkeypatch.setattr(local_sync, "_apply", paused)
+    request = asyncio.create_task(service.local_sync.synchronize(
+        fixture.project["id"], binding.runtime_generation, preview_token=preview["preview_token"]))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=10)
+        accepted = service.switcher.tasks[binding.project_workspace_id]
+        request.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+        with pytest.raises(ProjectWorkspaceError) as failure:
+            with service.switcher.run_lease(binding.project_workspace_id):
+                pytest.fail("A new run must wait until local writes have settled")
+        assert failure.value.code == "workspace_switching"
+        release.set()
+        await asyncio.wait_for(accepted, timeout=10)
+        assert (fixture.root / "file.txt").read_text() == "new content"
+        assert not service.switcher.switching and not service.switcher.tasks
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_switch_retires_old_managed_local_copy_but_preserves_original_link(switch_service):
+    from agent.delivery.http.dashboard.routes.workspace import WorkspaceResolveBody, resolve_dashboard_workspace
+    fixture = switch_service
+    await finish_switch(fixture, "daytona")
+    _, binding = await finish_switch(fixture, "local")
+    old_runtime = Path(binding.execution.locator)
+    (old_runtime / "uncommitted.txt").write_text("keep this change")
+    _, target = await finish_switch(fixture, "modal")
+    assert not old_runtime.exists()
+    assert (fixture.root / "file.txt").read_text() == "original"
+    assert (fixture.roots[target.execution.locator] / "uncommitted.txt").read_text() == "keep this change"
+    retired = await fixture.service.find_binding(binding.execution)
+    assert retired.execution == target.execution
+    assert retired.project_id == fixture.project["id"]
+    resolved = await resolve_dashboard_workspace(None, WorkspaceResolveBody(kind="local", locator=str(old_runtime)))
+    assert resolved["workspace"]["project_id"] == fixture.project["id"]
+    assert resolved["workspace"]["execution"]["backend"] == "modal"
+    assert not old_runtime.exists()
+
+
+@pytest.mark.asyncio
+async def test_resolving_known_repository_reuses_main_workspace_before_cloud_allocation(switch_service):
+    from agent.delivery.http.dashboard.routes.workspace import WorkspaceResolveBody, resolve_dashboard_workspace
+    fixture = switch_service
+    service = fixture.service
+    project, workspace, runtime = await service.rows(fixture.project["id"])
+    ref = WorkspaceRef.model_validate_json(runtime.execution_json)
+    ref.metadata.update(source="github", repository_id=123, repository_full_name="owner/repo")
+    await service._publish_runtime(project, workspace, ref, runtime.generation, "ready")
+    _, binding = await finish_switch(fixture, "daytona")
+    assert await service.find_repository_binding(999) is None
+    count = len(fixture.created)
+    resolved = await resolve_dashboard_workspace(None, WorkspaceResolveBody(kind="github", backend="modal", repository_id=123))
+    assert resolved["reused_project"] is True
+    assert resolved["workspace"]["project_id"] == fixture.project["id"]
+    assert resolved["workspace"]["project_workspace_id"] == binding.project_workspace_id
+    assert resolved["workspace"]["execution"]["backend"] == "daytona"
+    assert len(fixture.created) == count
+
+
+@pytest.mark.asyncio
+async def test_resolving_project_registered_by_repository_key_accepts_scope_metadata(switch_service):
+    from fastapi import HTTPException
+    from agent.delivery.http.dashboard.routes.workspace import WorkspaceResolveBody, resolve_dashboard_workspace
+    fixture = switch_service
+    service = fixture.service
+    project, workspace, runtime = await service.rows(fixture.project["id"])
+    # Only the project scope declares the repository; the execution ref has no repository id.
+    ref = WorkspaceRef.model_validate_json(runtime.execution_json)
+    ref.metadata.update(source="github")
+    await service._publish_runtime(project, workspace, ref, runtime.generation, "ready")
+    async with fixture.maker() as session:
+        record = await session.get(Project, fixture.project["id"])
+        payload = json.loads(record.workspace_json)
+        payload["scope"]["metadata"] = {"repository_id": 123}
+        record.key = "github:123"
+        record.workspace_json = json.dumps(payload)
+        await session.commit()
+    count = len(fixture.created)
+    resolved = await resolve_dashboard_workspace(None, WorkspaceResolveBody(kind="github", backend="modal", repository_id=123))
+    assert resolved["reused_project"] is True
+    assert resolved["workspace"]["project_id"] == fixture.project["id"]
+    assert len(fixture.created) == count
+    with pytest.raises(HTTPException) as failure:
+        await resolve_dashboard_workspace(None, WorkspaceResolveBody(
+            kind="local", locator=str(fixture.root), repository_id=999))
+    assert failure.value.status_code == 409
+    assert failure.value.detail["code"] == "workspace_conflict"
+    async with fixture.maker() as session:
+        record = await session.get(Project, fixture.project["id"])
+        payload = json.loads(record.workspace_json)
+        payload["scope"]["metadata"] = {}
+        record.workspace_json = json.dumps(payload)
+        await session.commit()
+    resolved = await resolve_dashboard_workspace(None, WorkspaceResolveBody(
+        kind="local", locator=str(fixture.root), repository_id=999))
+    assert resolved["workspace"]["project_id"] == fixture.project["id"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("source,target", [(a, b) for a in ("local", "daytona", "modal") for b in ("local", "daytona", "modal") if a != b])
 async def test_runtime_switch_preserves_shared_identity_and_all_files(switch_service, monkeypatch, source, target):
     fixture = switch_service
@@ -1171,11 +1502,16 @@ async def test_runtime_switch_checks_paused_child_conversations(switch_service, 
 
 
 @pytest.mark.asyncio
-async def test_runtime_switch_noop_does_not_reload_files(switch_service, monkeypatch):
+@pytest.mark.parametrize("backend", ["local", "daytona", "modal"])
+async def test_runtime_switch_noop_does_not_reload_files(switch_service, monkeypatch, backend):
     fixture, service = switch_service, switch_service.service
+    if backend != "local":
+        await finish_switch(fixture, backend)
     monkeypatch.setattr(service.transfer, "capture", AsyncMock(side_effect=AssertionError("Unexpected capture")))
+    monkeypatch.setattr(service.switcher, "_assert_no_interrupts", AsyncMock(side_effect=AssertionError("Unexpected workflow lookup")))
+    monkeypatch.setattr(service.switcher, "_assert_no_processes", AsyncMock(side_effect=AssertionError("Unexpected process lookup")))
     before = await service.binding(fixture.project["id"])
-    result, after = await finish_switch(fixture, "local")
+    result, after = await finish_switch(fixture, backend)
     assert result["operation_id"] is None and before == after
 
 

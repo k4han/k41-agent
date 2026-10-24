@@ -3,6 +3,9 @@ import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid
 import { AppShell } from "@/components/AppShell";
 import { ProjectInstructions } from "@/components/ProjectInstructions";
 import { ProjectSkills } from "@/components/ProjectSkills";
+import { ProjectLocalSync } from "@/components/ProjectLocalSync";
+import { WorkspaceStorageStatus } from "@/components/WorkspaceStorageStatus";
+import { runtimeTransitionBusy } from "@/lib/useWorkspaceRuntime";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
@@ -82,12 +85,19 @@ export function ProjectDetailPage() {
       <Show when={error()}><div class="project-error" role="alert">{error()} <button class="btn" onClick={() => void load()}>Retry project</button></div></Show>
       <Show when={project()}>{(current) => <>
         <p class="project-status">{current().workspace.execution.backend} · {current().status}</p>
+        <WorkspaceStorageStatus name={current().workspace_name} execution={current().workspace.execution}
+          localLink={current().local_link} />
         <Show when={current().persistence}>{(saved) => <div class="project-storage-status" role="status">
           <strong>{current().runtime?.status === "restoring" ? "Restoring files" : saved().status === "clean" ? "Saved" : saved().status === "error" ? "Save failed" : "Unsaved changes"}</strong>
           <Show when={saved().last_saved_at}><span>Last saved: {new Date(saved().last_saved_at!).toLocaleString()}</span></Show>
           <Show when={saved().last_error}><p role="alert">{saved().last_error}</p></Show>
           <button class="btn" disabled={saving()} onClick={() => void projectAction("checkpoint")}>{saving() ? "Saving..." : saved().status === "error" ? "Retry save" : "Save now"}</button>
         </div>}</Show>
+        <Show when={current().local_link && current().runtime}>{(runtime) => <ProjectLocalSync
+          projectId={current().id} workspaceId={current().workspace.project_workspace_id}
+          generation={runtime().generation} localLink={current().local_link!}
+          disabled={saving() || runtimeTransitionBusy(runtime()) || runtime().status !== "ready"}
+          onApplied={() => void load(true)} />}</Show>
         <Show when={current().migration_status && current().migration_status !== "ready"}>
           <section class="project-storage-status" aria-label="Workspace migration">
             <h2>Choose the main workspace</h2>

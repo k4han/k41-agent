@@ -413,6 +413,27 @@ async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBo
             if body.thread_id:
                 await remember_thread_workspace_ref(body.thread_id, binding)
             return {"kind": binding.execution.backend, "label": binding.scope.label, "workspace": binding.model_dump()}
+        from agent.modules.projects import get_project_workspace_service, ProjectWorkspaceError
+        projects = get_project_workspace_service()
+        if projects.container._persistence_ready:
+            binding = None
+            if kind != "github" and (body.workspace or body.locator):
+                requested = body.workspace or {"backend": body.backend or kind, "locator": body.locator}
+                binding = await projects.find_binding(requested)
+            if binding is None and repository_id is not None:
+                binding = await projects.find_repository_binding(repository_id)
+            if binding is not None:
+                # A project may be registered by key only, so the repository id can live on either ref.
+                declared = binding.execution.metadata.get("repository_id")
+                if declared is None:
+                    declared = binding.scope.metadata.get("repository_id")
+                if repository_id is not None and declared is not None and str(declared) != str(repository_id):
+                    raise ProjectWorkspaceError("Repository reference conflicts with the project.", "workspace_conflict")
+                binding = await projects.ensure(binding.project_id, binding.project_workspace_id)
+                if body.thread_id:
+                    await remember_thread_workspace_ref(body.thread_id, binding)
+                return {"kind": binding.execution.backend, "label": binding.scope.label,
+                        "workspace": binding.model_dump(), "reused_project": True}
         if kind == "github":
             if repository_id is None:
                 raise ValueError("Repository ID is required.")

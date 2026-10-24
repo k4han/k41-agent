@@ -4,6 +4,7 @@ import { Portal } from "solid-js/web";
 
 import { WorkspaceSelector, type WorkspaceSelectorProps } from "@/components/WorkspaceSelector";
 import { WorkspaceRuntimePicker } from "@/components/WorkspaceRuntimePicker";
+import { workspaceSaveLabel } from "@/components/WorkspaceStorageStatus";
 import type { ThreadRuntimePayload, WorkspaceBackendKey } from "@/types";
 import { getBackendDisplayName } from "@/lib/catalogStore";
 import { isTempWorkspace, workspaceDisplayLabel, workspaceDisplayLabelFromValues } from "@/lib/workspace";
@@ -29,6 +30,7 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
   };
   const projectLabel = createMemo(() => {
     if (props.selection?.source === "temp" || isTempWorkspace(props.workspace)) return "Temporary";
+    if (props.locked && props.runtimePayload?.workspace) return props.runtimePayload.workspace.scope.label;
     if (props.selection) {
       return props.selection.label || props.selection.repositoryFullName
         || workspaceDisplayLabelFromValues("", props.selection.localPath) || "Temporary";
@@ -123,6 +125,9 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
         <FolderOpen size={16} />
         <span class="composer-workspace-label">{projectLabel()}</span>
         <span class="composer-workspace-backend">· {backendLabel()}</span>
+        <Show when={props.runtimePayload?.persistence}><span class="composer-workspace-save-state" role="status">
+          · {workspaceSaveLabel(props.runtimePayload?.persistence)}
+        </span></Show>
         <Show when={props.locked && !canSwitchRuntime()}><Lock size={12} class="composer-workspace-lock" /></Show>
         <ChevronDown size={12} class="composer-workspace-caret" />
       </button>

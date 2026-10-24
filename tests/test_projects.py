@@ -75,7 +75,13 @@ async def test_catalog_lifetime_rename_removal_and_explicit_restore(catalog_db, 
     assert (await navigation.list_conversation_projects())["projects"][0]["threads"] == []
     renamed = await service.update_project(project["id"], {"label": "Renamed", "is_pinned": True})
     assert renamed["key"] == project["key"]
-    assert renamed["workspace"] == project["workspace"]
+    assert renamed["workspace"]["scope"]["label"] == "Renamed"
+    assert renamed["workspace"]["scope"]["key"] == project["workspace"]["scope"]["key"]
+    assert renamed["workspace"]["execution"]["metadata"]["project_scope"]["label"] == "Renamed"
+    for field in ("project_id", "project_workspace_id", "runtime_generation"):
+        assert renamed["workspace"][field] == project["workspace"][field]
+    for field in ("backend", "locator"):
+        assert renamed["workspace"]["execution"][field] == project["workspace"]["execution"][field]
     await service.update_project(project["id"], {"status": "removed"})
     await seed_thread(catalog_db, "retained", ref)
     await workspace_repository.ThreadWorkspaceRepository().upsert(thread_id="retained", workspace=ref)
@@ -332,18 +338,78 @@ def test_runtime_switch_api_accepts_background_operation_and_reports_conflicts(m
             assert response.status_code == 409 and response.json()["detail"]["code"] == code
 
 
+def test_local_sync_api_previews_by_default_and_rejects_arbitrary_target_paths(monkeypatch, isolated_container):
+    from agent.modules.projects import ProjectWorkspaceError, get_project_workspace_service
+    projects = get_project_workspace_service(isolated_container)
+    synchronize = AsyncMock(return_value={"applied": False, "preview_token": "a" * 64, "conflicts": []})
+    monkeypatch.setattr(projects.local_sync, "synchronize", synchronize)
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app) as client:
+        url = "/dashboard-api/projects/7/local-sync"
+        body = {"expected_generation": 3, "project_workspace_id": 11}
+        assert client.post(url, json=body).json()["applied"] is False
+        synchronize.assert_awaited_once_with(7, 3, 11, preview_token=None)
+        assert client.post(url, json={**body, "preview_token": "a" * 64}).status_code == 200
+        synchronize.assert_awaited_with(7, 3, 11, preview_token="a" * 64)
+        for invalid in ({**body, "path": "/outside"}, {**body, "force": True}, {**body, "preview_token": "bad"}, {"expected_generation": 0}):
+            assert client.post(url, json=invalid).status_code == 422
+        synchronize.side_effect = ProjectWorkspaceError("Local files changed", "local_sync_conflict")
+        assert client.post(url, json=body).status_code == 409
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("known_repository", [False, True])
+async def test_github_resolution_ignores_registered_default_local_path(monkeypatch, isolated_container, tmp_path, known_repository):
+    from agent.delivery.http.dashboard.routes import workspace as workspace_routes
+    from agent.modules.projects import get_project_workspace_service
+    projects = get_project_workspace_service(isolated_container)
+    isolated_container._persistence_ready = True
+    default = workspace(tmp_path / "default")
+    unrelated = bind_workspace_ref(default, project_id=1, project_workspace_id=1, runtime_generation=1)
+    selected = workspace(tmp_path / "repository", source="github", repository_id=123, repository_full_name="owner/repo")
+    binding = bind_workspace_ref(selected, project_id=2, project_workspace_id=2, runtime_generation=1)
+    find_binding = AsyncMock(return_value=unrelated)
+    find_repository = AsyncMock(return_value=binding if known_repository else None)
+    ensure = AsyncMock(return_value=binding)
+    github = SimpleNamespace(resolve_repository_workspace=AsyncMock(return_value={"workspace": selected.model_dump()}))
+    monkeypatch.setattr(projects, "find_binding", find_binding)
+    monkeypatch.setattr(projects, "find_repository_binding", find_repository)
+    monkeypatch.setattr(projects, "ensure", ensure)
+    monkeypatch.setattr(workspace_routes, "get_github_automation_service", lambda request: github)
+    result = await workspace_routes.resolve_dashboard_workspace(None, workspace_routes.WorkspaceResolveBody(
+        kind="github", backend="local", repository_id=123, workspace=default, locator=default.locator,
+    ))
+    find_binding.assert_not_awaited()
+    find_repository.assert_awaited_once_with(123)
+    assert result["workspace"]["execution"]["locator"] == selected.locator
+    if known_repository:
+        assert result["reused_project"] is True
+        assert result["workspace"]["project_id"] == 2
+        ensure.assert_awaited_once_with(2, 2)
+        github.resolve_repository_workspace.assert_not_awaited()
+    else:
+        ensure.assert_not_awaited()
+        github.resolve_repository_workspace.assert_awaited_once_with(123)
+
+
 def test_runtime_switch_migration_adds_transition_without_changing_existing_runtime(tmp_path):
     from sqlalchemy import create_engine, text
     from agent.modules.workspaces.migrations import migrate_workspace_tables
     url = "sqlite:///" + (tmp_path / "legacy-runtime.db").as_posix()
     engine = create_engine(url)
     with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE project_workspaces (id INTEGER PRIMARY KEY, source_json TEXT NOT NULL)"))
+        connection.execute(text("INSERT INTO project_workspaces VALUES (1, :ref)"), {"ref": '{"backend":"local","locator":"/original"}'})
         connection.execute(text("CREATE TABLE workspace_runtimes (id INTEGER PRIMARY KEY, execution_json TEXT NOT NULL)"))
         connection.execute(text("INSERT INTO workspace_runtimes VALUES (1, :ref)"), {"ref": '{"backend":"local","locator":"/original"}'})
     migrate_workspace_tables(url)
     migrate_workspace_tables(url)
     with engine.connect() as connection:
         row = connection.execute(text("SELECT execution_json, transition_json FROM workspace_runtimes WHERE id=1")).one()
+        workspace = connection.execute(text("SELECT source_json, local_sync_revision FROM project_workspaces WHERE id=1")).one()
+    assert workspace.local_sync_revision is None
+    assert json.loads(workspace.source_json)["locator"] == "/original"
     assert json.loads(row.execution_json)["locator"] == "/original"
     assert json.loads(row.transition_json) is None
     engine.dispose()

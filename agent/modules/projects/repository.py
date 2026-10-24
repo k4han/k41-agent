@@ -65,29 +65,35 @@ async def register_project(
         if restore:
             record.status = "active"
         return record
-    if not only_missing:
-        def field(column, *path):
-            if session.get_bind().dialect.name == "postgresql":
-                value = cast(column, JSON)
-                for name in path:
-                    value = value[name]
-                return value.as_string()
-            return func.json_extract(column, "$." + ".".join(path))
-        current = (await session.execute(select(Project).join(
-            ProjectWorkspace, ProjectWorkspace.project_id == Project.id,
-        ).join(WorkspaceRuntime, WorkspaceRuntime.project_workspace_id == ProjectWorkspace.id).where(
-            field(WorkspaceRuntime.execution_json, "backend") == binding.execution.backend,
-            field(WorkspaceRuntime.execution_json, "locator") == binding.execution.locator,
-            func.coalesce(field(WorkspaceRuntime.execution_json, "metadata", "root"), "") == metadata.get("root", ""),
+    from agent.modules.projects.workspaces import source_key
+
+    def field(column, *path):
+        if session.get_bind().dialect.name == "postgresql":
+            value = cast(column, JSON)
+            for name in path:
+                value = value[name]
+            return value.as_string()
+        return func.json_extract(column, "$." + ".".join(path))
+
+    def matches(column):
+        return and_(field(column, "backend") == binding.execution.backend,
+                    field(column, "locator") == binding.execution.locator,
+                    func.coalesce(field(column, "metadata", "root"), "") == metadata.get("root", ""))
+
+    current = (await session.execute(select(Project).join(
+        ProjectWorkspace, ProjectWorkspace.project_id == Project.id,
+    ).join(WorkspaceRuntime, WorkspaceRuntime.project_workspace_id == ProjectWorkspace.id).where(or_(
+        matches(WorkspaceRuntime.execution_json), matches(ProjectWorkspace.source_json),
+        ProjectWorkspace.runtime_aliases_json.contains('"' + source_key(binding.execution) + '"'),
+    )).limit(1))).scalar_one_or_none()
+    if not only_missing and current is None and metadata.get("source") == "github" and metadata.get("repository_full_name"):
+        current = (await session.execute(select(Project).where(
+            field(Project.workspace_json, "execution", "metadata", "repository_full_name") == metadata["repository_full_name"],
         ).limit(1))).scalar_one_or_none()
-        if current is None and metadata.get("source") == "github" and metadata.get("repository_full_name"):
-            current = (await session.execute(select(Project).where(
-                field(Project.workspace_json, "execution", "metadata", "repository_full_name") == metadata["repository_full_name"],
-            ).limit(1))).scalar_one_or_none()
-        if current is not None:
-            if restore:
-                current.status = "active"
-            return current
+    if current is not None:
+        if restore:
+            current.status = "active"
+        return current
     now = utcnow()
     values = {
         "key": binding.scope.key, "label": (label or binding.scope.label or binding.scope.key)[:255],

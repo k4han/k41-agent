@@ -46,7 +46,7 @@ class WorkspaceRuntimeSwitcher:
     def assert_available(self, workspace_id: int, runtime=None):
         state = transition_state(runtime) if runtime is not None else None
         if workspace_id in self.switching or (state and state["phase"] in ACTIVE_PHASES):
-            raise ProjectWorkspaceError("The workspace is switching execution backends. Please retry after it finishes.", "workspace_switching")
+            raise ProjectWorkspaceError("The workspace is changing its execution environment or synchronizing files. Please retry after it finishes.", "workspace_switching")
 
     @contextmanager
     def run_lease(self, workspace_id: int):
@@ -144,36 +144,26 @@ class WorkspaceRuntimeSwitcher:
             if busy:
                 raise ProjectWorkspaceError("Stop running sandbox processes before switching backends.", "workspace_busy")
 
-    async def request(self, project_id: int, backend: str, expected_generation: int, workspace_id: int | None = None):
-        from agent.modules.agent_runtime.active_sessions import get_active_session_registry, ThreadMutationConflictError
-        from agent.modules.workspaces.registry import get_workspace_backend_registry, _is_backend_enabled
-        descriptor = get_workspace_backend_registry(self.service.container).require(backend)
-        if backend not in {"local", "daytona", "modal"} or not _is_backend_enabled(descriptor, config_service=self.service.container.config_service):
-            raise ValueError("The requested execution backend is not enabled.")
-        project, workspace, runtime = await self.service.rows(project_id, workspace_id)
-        workspace_id = workspace.id
-        if self.service.closing or project.migration_status != "ready" or workspace.kind != "shared":
-            raise ProjectWorkspaceError("Only an available shared project workspace can switch backends.", "workspace_busy")
+    def _reserve(self, workspace_id: int, runtime, expected_generation: int):
         with self.gate:
             self.assert_available(workspace_id, runtime)
             if runtime.generation != expected_generation:
                 raise ProjectWorkspaceError("Execution runtime changed; reload the workspace.", "stale_runtime")
             if self.runs.get(workspace_id) or self.service.lock(workspace_id).locked() or workspace_id in self.tasks:
-                raise ProjectWorkspaceError("Finish or stop workspace operations before switching backends.", "workspace_busy")
+                raise ProjectWorkspaceError("Finish or stop workspace operations before changing its environment or files.", "workspace_busy")
             self.switching.add(workspace_id)
-        handed_off = False
-        state = None
+
+    async def reserve_idle(self, workspace, runtime, expected_generation: int):
+        """Reserve the single writer across backend changes and linked-directory sync."""
+        from agent.modules.agent_runtime.active_sessions import get_active_session_registry, ThreadMutationConflictError
+        workspace_id = workspace.id
+        self._reserve(workspace_id, runtime, expected_generation)
         try:
-            source = WorkspaceRef.model_validate_json(runtime.execution_json)
-            if source.backend == backend:
-                return {"operation_id": None, "workspace": (await self.service.binding(project_id, workspace_id)).model_dump(), "transition": transition_summary(runtime)}
-            if runtime.status != "ready":
-                raise ProjectWorkspaceError("Recover the current runtime before switching backends.", "runtime_unavailable")
             threads = await self._threads(workspace_id)
             registry = get_active_session_registry(self.service.container)
             if any(session["thread_id"] in threads or any(session["thread_id"].startswith(thread + ":sub:") for thread in threads)
                    for session in registry.list_active()):
-                raise ProjectWorkspaceError("Finish or stop conversations using this workspace before switching backends.", "workspace_busy")
+                raise ProjectWorkspaceError("Finish or stop conversations using this workspace first.", "workspace_busy")
             reservation = ExitStack()
             self.reservations[workspace_id] = reservation
             try:
@@ -182,7 +172,33 @@ class WorkspaceRuntimeSwitcher:
             except ThreadMutationConflictError as exc:
                 raise ProjectWorkspaceError(str(exc), "workspace_busy") from exc
             await self._assert_no_interrupts(threads)
-            await self._assert_no_processes(workspace_id, source)
+            await self._assert_no_processes(workspace_id, WorkspaceRef.model_validate_json(runtime.execution_json))
+        except BaseException:
+            self._release(workspace_id)
+            raise
+
+    async def request(self, project_id: int, backend: str, expected_generation: int, workspace_id: int | None = None):
+        from agent.modules.workspaces.registry import get_workspace_backend_registry, _is_backend_enabled
+        descriptor = get_workspace_backend_registry(self.service.container).require(backend)
+        if backend not in {"local", "daytona", "modal"} or not _is_backend_enabled(descriptor, config_service=self.service.container.config_service):
+            raise ValueError("The requested execution backend is not enabled.")
+        project, workspace, runtime = await self.service.rows(project_id, workspace_id)
+        workspace_id = workspace.id
+        if self.service.closing or project.migration_status != "ready" or workspace.kind != "shared":
+            raise ProjectWorkspaceError("Only an available shared project workspace can switch backends.", "workspace_busy")
+        source = WorkspaceRef.model_validate_json(runtime.execution_json)
+        if source.backend == backend:
+            self._reserve(workspace_id, runtime, expected_generation)
+            try:
+                return {"operation_id": None, "workspace": (await self.service.binding(project_id, workspace_id)).model_dump(), "transition": transition_summary(runtime)}
+            finally:
+                self._release(workspace_id)
+        await self.reserve_idle(workspace, runtime, expected_generation)
+        handed_off = False
+        state = None
+        try:
+            if runtime.status != "ready":
+                raise ProjectWorkspaceError("Recover the current runtime before switching backends.", "runtime_unavailable")
             previous = transition_state(runtime) or {}
             state = {"operation_id": uuid4().hex, "project_id": project_id, "phase": "saving", "target_backend": backend,
                      "source": source.model_dump(), "source_generation": expected_generation, "target": None,
@@ -258,6 +274,18 @@ class WorkspaceRuntimeSwitcher:
                 state["phase"] = "completed"
                 if state["source"]["backend"] != "local":
                     state["cleanup"].append({"ref": state["source"], "action": "retire", "operation_id": state["operation_id"]})
+                else:
+                    from agent.modules.projects.workspaces import source_key
+                    source = WorkspaceRef.model_validate(state["source"])
+                    source_path = Path(source.locator)
+                    source_name = source_path.name
+                    owned_root = (self.service.runtime_root / str(workspace_id)).resolve()
+                    if (source_path.parent.resolve() == owned_root and not source_path.is_symlink()
+                            and source_name.startswith("switch-") and len(source_name) == len("switch-") + 32
+                            and all(char in "0123456789abcdef" for char in source_name[len("switch-"):])
+                            and source_key(source) != source_key(WorkspaceRef.model_validate_json(workspace.source_json))):
+                        state["cleanup"].append({"ref": state["source"], "action": "retire",
+                                                 "operation_id": source_name[len("switch-"):]})
                 await self.service._publish_runtime(project, workspace, target, runtime.generation + 1, "ready", transition=state)
                 activated = True
                 self.service.active.add(workspace_id)
