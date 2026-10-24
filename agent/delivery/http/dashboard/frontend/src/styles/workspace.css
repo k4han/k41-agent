@@ -544,6 +544,7 @@ body.workspace-resizing * {
 }
 
 .workspace-explorer-body {
+  position: relative;
   display: flex;
   min-height: 0;
   flex: 1 1 auto;
@@ -582,6 +583,8 @@ body.workspace-resizing * {
 .workspace-explorer.is-split:not(.is-compact) .workspace-primary-tabs {
   flex: 0 0 var(--workspace-split-sidebar-width);
   max-width: var(--workspace-split-sidebar-width);
+  min-width: 160px;
+  overflow: hidden;
 }
 
 .workspace-explorer.is-split:not(.is-compact) .workspace-file-tabs-bar {
@@ -601,7 +604,7 @@ body.workspace-resizing * {
 
 .workspace-explorer.is-split:not(.is-compact) .workspace-explorer-body {
   display: grid;
-  grid-template-columns: var(--workspace-split-sidebar-width) minmax(0, 1fr);
+  grid-template-columns: minmax(160px, var(--workspace-split-sidebar-width, 220px)) minmax(180px, 1fr);
   grid-template-rows: minmax(0, 1fr);
   height: 100%;
   min-height: 0;
@@ -615,6 +618,7 @@ body.workspace-resizing * {
   border-right: 1px solid var(--border);
   height: 100%;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--surface);
@@ -626,14 +630,162 @@ body.workspace-resizing * {
   grid-row: 1;
   height: 100%;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--surface);
 }
 
-/* Compact 1-Column Mode (Mobile & Small Viewports) */
-.workspace-explorer.is-compact .workspace-primary-tabs,
-@media (max-width: 640px) {
+/* Compact 1-Column Mode (Narrow Viewports & Drawers) */
+.workspace-explorer.is-compact .workspace-primary-tabs {
+  flex: 1 1 auto;
+  max-width: none;
+}
+
+.workspace-explorer.is-compact .workspace-file-tabs-bar {
+  padding-left: 10px;
+}
+
+.workspace-explorer.is-compact .workspace-file-tabs-bar::before {
+  display: none;
+}
+
+.workspace-explorer.is-compact .workspace-explorer-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-explorer.is-compact .workspace-file-panel {
+  grid-column: auto;
+  order: 1;
+  flex: 1 1 0px;
+  min-height: 80px;
+  height: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--surface);
+}
+
+.workspace-explorer.is-compact .workspace-tree-section,
+.workspace-explorer.is-compact .workspace-explorer-body > section:not(.workspace-file-panel):not(.workspace-file-empty-panel) {
+  grid-column: auto;
+  order: 2;
+  border-right: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--surface);
+}
+
+.workspace-explorer.is-compact.has-file-open .workspace-tree-section,
+.workspace-explorer.is-compact.has-file-open .workspace-explorer-body > section:not(.workspace-file-panel):not(.workspace-file-empty-panel) {
+  flex: 0 0 auto;
+  height: var(--workspace-compact-tree-height, 220px);
+  max-height: calc(100% - 100px);
+  min-height: 80px;
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+}
+
+.workspace-explorer.is-compact.has-file-open .workspace-tree-section.is-collapsed {
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  overflow: hidden !important;
+}
+
+.workspace-explorer.is-compact.has-file-open .workspace-tree-section.is-collapsed .workspace-tree {
+  display: none;
+}
+
+.workspace-explorer.is-compact .workspace-file-empty-panel {
+  display: none;
+}
+
+/* Inner Splitter Handle (between Tree and File preview) */
+.workspace-inner-resizer {
+  position: absolute;
+  z-index: 25;
+  touch-action: none;
+  background: transparent;
+}
+
+/* Vertical splitter in 2-column mode (col-resize) */
+.workspace-explorer.is-split:not(.is-compact) .workspace-inner-resizer {
+  top: 0;
+  bottom: 0;
+  left: calc(var(--workspace-split-sidebar-width, 220px) - 4px);
+  width: 8px;
+  cursor: col-resize;
+}
+
+.workspace-explorer.is-split:not(.is-compact) .workspace-inner-resizer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background-color 150ms ease;
+}
+
+.workspace-explorer.is-split:not(.is-compact) .workspace-inner-resizer:hover::before,
+body.workspace-col-resizing .workspace-inner-resizer::before {
+  background: var(--primary, var(--accent, #3b82f6));
+}
+
+/* Horizontal splitter in 1-column mode (row-resize) */
+.workspace-explorer.is-compact.has-file-open .workspace-inner-resizer {
+  left: 0;
+  right: 0;
+  bottom: calc(var(--workspace-compact-tree-height, 220px) - 4px);
+  height: 8px;
+  cursor: row-resize;
+}
+
+.workspace-explorer.is-compact.has-file-open .workspace-inner-resizer::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 3px;
+  height: 2px;
+  background: transparent;
+  transition: background-color 150ms ease;
+}
+
+.workspace-explorer.is-compact.has-file-open .workspace-inner-resizer:hover::before,
+body.workspace-row-resizing .workspace-inner-resizer::before {
+  background: var(--primary, var(--accent, #3b82f6));
+}
+
+/* Global resizing states for inner resizing */
+body.workspace-col-resizing,
+body.workspace-col-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+body.workspace-row-resizing,
+body.workspace-row-resizing * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+body.workspace-col-resizing iframe,
+body.workspace-row-resizing iframe {
+  pointer-events: none !important;
+}
+
+body.workspace-col-resizing .workspace-explorer *,
+body.workspace-row-resizing .workspace-explorer * {
+  transition: none !important;
+}
+
+@media (max-width: 480px) {
   .workspace-explorer .workspace-primary-tabs {
     flex: 1 1 auto;
     max-width: none;
@@ -648,12 +800,24 @@ body.workspace-resizing * {
     display: flex;
     flex-direction: column;
   }
+  .workspace-explorer .workspace-file-panel {
+    grid-column: auto;
+    order: 1;
+    flex: 1 1 0px;
+    min-height: 80px;
+    height: auto;
+  }
   .workspace-explorer .workspace-tree-section,
   .workspace-explorer .workspace-explorer-body > section:not(.workspace-file-panel):not(.workspace-file-empty-panel) {
     grid-column: auto;
+    order: 2;
     border-right: none;
   }
-  .workspace-explorer .workspace-file-panel,
+  .workspace-explorer.has-file-open .workspace-tree-section,
+  .workspace-explorer.has-file-open .workspace-explorer-body > section:not(.workspace-file-panel):not(.workspace-file-empty-panel) {
+    border-top: 1px solid var(--border);
+    border-bottom: none;
+  }
   .workspace-explorer .workspace-file-empty-panel {
     grid-column: auto;
   }

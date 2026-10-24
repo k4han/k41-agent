@@ -1,6 +1,7 @@
 import {
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Clipboard,
   File,
   FileCode,
@@ -248,9 +249,15 @@ export function WorkspaceExplorer(props: {
   const fileTabs = createMemo(() => openTabs().filter((tab) => tab.startsWith("file:")));
   let explorerRef: HTMLElement | undefined;
   const [containerWidth, setContainerWidth] = createSignal(
-    typeof window !== "undefined" ? window.innerWidth : 1000
+    typeof window !== "undefined" ? window.innerWidth : 560
   );
-  const isCompact = () => containerWidth() < 540;
+  const [treeCollapsed, setTreeCollapsed] = createSignal(false);
+  const WORKSPACE_SIDEBAR_WIDTH_KEY = "k41-workspace-sidebar-width";
+  const WORKSPACE_TREE_HEIGHT_KEY = "k41-workspace-tree-height";
+  const [sidebarWidth, setSidebarWidth] = createSignal(220);
+  const [treeHeight, setTreeHeight] = createSignal(220);
+  const [innerResizing, setInnerResizing] = createSignal(false);
+  const isCompact = () => !props.fullscreen && containerWidth() < 480;
   const isSplit = createMemo(() => {
     if (isCompact()) return false;
     if (props.fullscreen) return true;
@@ -258,21 +265,119 @@ export function WorkspaceExplorer(props: {
     return fileTabs().length > 0 || activeTab().startsWith("file:");
   });
 
+  const startInnerResize = (event: PointerEvent) => {
+    if (!explorerRef) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const handleEl = event.currentTarget as HTMLElement | null;
+    try {
+      handleEl?.setPointerCapture?.(event.pointerId);
+    } catch {}
+
+    const compactMode = isCompact();
+    setInnerResizing(true);
+    document.body.classList.add(compactMode ? "workspace-row-resizing" : "workspace-col-resizing");
+
+    const move = (moveEvent: PointerEvent) => {
+      if (!explorerRef) return;
+      const bodyEl = explorerRef.querySelector(".workspace-explorer-body") as HTMLElement | null;
+      if (!bodyEl) return;
+      const bodyRect = bodyEl.getBoundingClientRect();
+
+      if (compactMode) {
+        const newHeight = bodyRect.bottom - moveEvent.clientY;
+        const minH = 80;
+        const maxH = Math.max(minH, Math.round(bodyRect.height - 100));
+        const clamped = Math.round(Math.min(maxH, Math.max(minH, newHeight)));
+        setTreeHeight(clamped);
+      } else {
+        const newWidth = moveEvent.clientX - bodyRect.left;
+        const minW = 160;
+        const maxW = Math.max(minW, Math.round(bodyRect.width - 180));
+        const clamped = Math.round(Math.min(maxW, Math.max(minW, newWidth)));
+        setSidebarWidth(clamped);
+      }
+    };
+
+    const stop = () => {
+      try {
+        handleEl?.releasePointerCapture?.(event.pointerId);
+      } catch {}
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      setInnerResizing(false);
+      document.body.classList.remove("workspace-row-resizing", "workspace-col-resizing");
+
+      if (compactMode) {
+        window.localStorage.setItem(WORKSPACE_TREE_HEIGHT_KEY, String(treeHeight()));
+      } else {
+        window.localStorage.setItem(WORKSPACE_SIDEBAR_WIDTH_KEY, String(sidebarWidth()));
+      }
+    };
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+  };
+
   onMount(() => {
+    const savedSidebarWidth = Number(window.localStorage.getItem(WORKSPACE_SIDEBAR_WIDTH_KEY));
+    if (Number.isFinite(savedSidebarWidth) && savedSidebarWidth >= 160 && savedSidebarWidth <= 800) {
+      setSidebarWidth(savedSidebarWidth);
+    }
+    const savedTreeHeight = Number(window.localStorage.getItem(WORKSPACE_TREE_HEIGHT_KEY));
+    if (Number.isFinite(savedTreeHeight) && savedTreeHeight >= 80 && savedTreeHeight <= 1000) {
+      setTreeHeight(savedTreeHeight);
+    }
+
     if (typeof ResizeObserver !== "undefined" && explorerRef) {
-      const updateWidth = () => {
-        const w = explorerRef?.getBoundingClientRect().width;
-        if (w) setContainerWidth(w);
+      const updateBounds = () => {
+        if (!explorerRef) return;
+        const rect = explorerRef.getBoundingClientRect();
+        const w = rect.width;
+        const h = rect.height;
+        if (w > 0) {
+          setContainerWidth(w);
+          const maxW = Math.max(160, Math.round(w - 180));
+          if (sidebarWidth() > maxW) {
+            setSidebarWidth(maxW);
+          }
+        }
+        if (h > 0) {
+          const maxH = Math.max(80, Math.round(h - 100));
+          if (treeHeight() > maxH) {
+            setTreeHeight(maxH);
+          }
+        }
       };
-      updateWidth();
+      updateBounds();
       const ro = new ResizeObserver((entries) => {
         for (const entry of entries) {
-          setContainerWidth(entry.contentRect.width);
+          const w = entry.contentRect.width;
+          const h = entry.contentRect.height;
+          if (w > 0) {
+            setContainerWidth(w);
+            const maxW = Math.max(160, Math.round(w - 180));
+            if (sidebarWidth() > maxW) {
+              setSidebarWidth(maxW);
+            }
+          }
+          if (h > 0) {
+            const maxH = Math.max(80, Math.round(h - 100));
+            if (treeHeight() > maxH) {
+              setTreeHeight(maxH);
+            }
+          }
         }
       });
       ro.observe(explorerRef);
       onCleanup(() => ro.disconnect());
     }
+
+    onCleanup(() => {
+      document.body.classList.remove("workspace-row-resizing", "workspace-col-resizing");
+    });
   });
   const [plusMenuOpen, setPlusMenuOpen] = createSignal(false);
   let plusBtnRef: HTMLButtonElement | undefined;
@@ -1145,7 +1250,8 @@ export function WorkspaceExplorer(props: {
   return (
     <aside
       ref={explorerRef}
-      class={`workspace-explorer ${isCompact() ? "is-compact" : ""} ${isSplit() ? "is-split" : ""} ${props.fullscreen ? "is-fullscreen" : ""}`}
+      class={`workspace-explorer ${isCompact() ? "is-compact" : ""} ${isSplit() ? "is-split" : ""} ${props.fullscreen ? "is-fullscreen" : ""} ${activeTab().startsWith("file:") ? "has-file-open" : ""}`}
+      style={`--workspace-split-sidebar-width: ${sidebarWidth()}px; --workspace-compact-tree-height: ${treeHeight()}px;`}
     >
       <div class="workspace-tabs-bar workspace-primary-tabs-bar">
         <div
@@ -1169,12 +1275,14 @@ export function WorkspaceExplorer(props: {
 
               return (
                 <div
-                  class={`workspace-tab ${isActiveTab(tab) || (isSplit() && lastPrimaryTab() === tab) ? "active" : ""}`}
+                  class={`workspace-tab ${lastPrimaryTab() === tab ? "active" : ""}`}
                   role="tab"
-                  aria-selected={isActiveTab(tab) || (isSplit() && lastPrimaryTab() === tab)}
+                  aria-selected={lastPrimaryTab() === tab}
                   onClick={() => {
                     setLastPrimaryTab(tab);
-                    setActiveTab(tab);
+                    if (!activeTab().startsWith("file:")) {
+                      setActiveTab(tab);
+                    }
                   }}
                   onAuxClick={(event) => {
                     if (event.button === 1) {
@@ -1435,7 +1543,7 @@ export function WorkspaceExplorer(props: {
           <section
             class="workspace-section workspace-tab-panel"
             role="tabpanel"
-            hidden={isSplit() ? lastPrimaryTab() !== "changes" : !isActiveTab("changes")}
+            hidden={lastPrimaryTab() !== "changes"}
           >
             <Show
               when={!changesLoading() || changesLoaded()}
@@ -1532,12 +1640,46 @@ export function WorkspaceExplorer(props: {
 
         <Show when={openTabs().includes("files")}>
           <section
-            class="workspace-section workspace-tree-section workspace-tab-panel"
+            class={`workspace-section workspace-tree-section workspace-tab-panel ${isCompact() && activeTab().startsWith("file:") && treeCollapsed() ? "is-collapsed" : ""}`}
             role="tabpanel"
-            hidden={isSplit() ? lastPrimaryTab() !== "files" : !isActiveTab("files")}
+            hidden={lastPrimaryTab() !== "files"}
           >
             <div class="workspace-tree-toolbar">
-              <span class="workspace-tree-toolbar-title">Files</span>
+              <div
+                class="workspace-tree-toolbar-left"
+                style={{
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "4px",
+                  cursor: isCompact() && activeTab().startsWith("file:") ? "pointer" : "default",
+                  "user-select": "none",
+                }}
+                onClick={() => {
+                  if (isCompact() && activeTab().startsWith("file:")) {
+                    setTreeCollapsed(!treeCollapsed());
+                  }
+                }}
+              >
+                <Show when={isCompact() && activeTab().startsWith("file:")}>
+                  <button
+                    class="workspace-icon-btn workspace-tree-toolbar-btn"
+                    type="button"
+                    title={treeCollapsed() ? "Expand file tree" : "Collapse file tree"}
+                    aria-label={treeCollapsed() ? "Expand file tree" : "Collapse file tree"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setTreeCollapsed(!treeCollapsed());
+                    }}
+                  >
+                    <Show when={treeCollapsed()} fallback={<ChevronDown size={14} />}>
+                      <ChevronUp size={14} />
+                    </Show>
+                  </button>
+                </Show>
+                <span class="workspace-tree-toolbar-title">
+                  Files{isCompact() && activeTab().startsWith("file:") && treeCollapsed() ? " (collapsed)" : ""}
+                </span>
+              </div>
               <div class="workspace-tree-toolbar-actions">
                 <button
                   class="workspace-icon-btn workspace-tree-toolbar-btn"
@@ -1646,6 +1788,15 @@ export function WorkspaceExplorer(props: {
               </div>
             </div>
           </section>
+        </Show>
+
+        <Show when={(isSplit() && !isCompact()) || (isCompact() && activeTab().startsWith("file:") && !treeCollapsed())}>
+          <div
+            class="workspace-inner-resizer"
+            onPointerDown={startInnerResize}
+            title={isCompact() ? "Drag to resize tree height" : "Drag to resize tree width"}
+            aria-label={isCompact() ? "Drag to resize tree height" : "Drag to resize tree width"}
+          />
         </Show>
       </div>
 
