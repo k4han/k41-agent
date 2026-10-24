@@ -94,7 +94,7 @@ async def active_context(state: dict, *, workspace, thread_id: str, agent_name: 
     sections = []
     for key, entry in list(active.items()):
         if packages.authorize_active(entry, workspace=workspace, agent_name=agent_name, allowed_names=names):
-            entry = await packages.restore(entry, workspace=workspace, thread_id=thread_id)
+            entry = await packages.restore(entry, workspace=workspace, thread_id=thread_id, defer_execution=True)
             active[key] = entry
             sections.append(entry["content"])
         else:

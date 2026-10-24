@@ -25,6 +25,7 @@ const makeProject = (id, label) => ({ id, key: `local:/projects/${id}`, label, s
 let projects = [makeProject(1, 'Empty project'), makeProject(2, 'Other project')];
 const mutations = [];
 const localSyncRequests = [];
+const runtimeRequests = [];
 let localSyncConflict = true;
 let unavailable = false;
 let delayRuntimeFailure = false;
@@ -64,16 +65,9 @@ const server = http.createServer(async (req, res) => {
     const body = raw ? JSON.parse(raw) : {};
     const send = data => res.end(JSON.stringify(data));
     const instructions = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/instructions$/);
-    const runtime = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/runtime\/ensure$/);
-    if (runtime) {
-      if (delayRuntimeFailure) {
-        delayRuntimeFailure = false;
-        failPendingRuntime = () => { res.writeHead(410); send({ detail: 'Delayed workspace failure.' }); };
-        return;
-      }
-      if (unavailable) { res.writeHead(410); send({ detail: 'Workspace is unavailable.' }); return; }
-      const project = projects.find(item => item.id === Number(runtime[1]));
-      send({ workspace: project.workspace }); return;
+    if (/\/runtime\/(ensure|recovery)$/.test(url.pathname)) {
+      runtimeRequests.push({ path: url.pathname, body });
+      res.writeHead(500); send({ detail: 'Chat navigation must not initialize execution.' }); return;
     }
     const checkpoint = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/checkpoint$/);
     if (checkpoint) {
@@ -146,6 +140,12 @@ const server = http.createServer(async (req, res) => {
       const project = projects.find(project => project.id === Number(match[1]));
       if (req.method === 'GET') detailRequests.push(Number(match[1]));
       if (!project) { res.writeHead(404); send({ detail: 'Project not found.' }); return; }
+      if (req.method === 'GET' && delayRuntimeFailure) {
+        delayRuntimeFailure = false;
+        failPendingRuntime = () => { res.writeHead(503); send({ detail: 'Delayed workspace failure.' }); };
+        return;
+      }
+      if (req.method === 'GET' && unavailable) { res.writeHead(503); send({ detail: 'Workspace is unavailable.' }); return; }
       if (req.method === 'GET') { send(project); return; }
       Object.assign(project, req.method === 'DELETE' ? { status: 'removed' } : body);
       mutations.push({ method: req.method, id: project.id, body }); send(project); return;
@@ -171,6 +171,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'k41-projects-browser-'));
 const browser = spawn(executable, ['--headless=new', '--disable-gpu', '--no-first-run', '--disable-background-networking',
+  '--disable-features=BackForwardCache',
   '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(callback, label) {
@@ -437,6 +438,47 @@ try {
   assert.equal(await js(`document.body.textContent.includes('Delayed workspace failure.')`), false);
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: project details, instruction editing and conflicts, unsaved guards, read-only skills, resources, downloads, errors, and direct links.');
+
+  const prepareLostProject = (modalEnabled = true) => {
+    const project = makeProject(1, 'Lost Modal project');
+    project.workspace = { ...project.workspace, project_id: 1, project_workspace_id: 51, runtime_generation: 7,
+      execution: { backend: 'modal', locator: 'sb-expired', label: project.label, metadata: { root: '/workspace' } } };
+    project.runtime = { status: 'unavailable', generation: 7, decision: { reason: 'sandbox_lost', backend: 'modal' } };
+    projects = [project];
+    fixtures['/dashboard-api/catalog'].backends = [{ name: 'local', title: 'Local', enabled: true }, { name: 'modal', title: 'Modal', enabled: modalEnabled }];
+  };
+  const assertDormantChat = async () => {
+    await until(() => js(`location.pathname === '/chat' && !!document.querySelector('.composer-workspace-trigger')`), 'new chat without initializing Modal');
+    assert.equal(await js(`document.querySelector('[role="dialog"]')?.textContent.includes('Recover project workspace') || false`), false);
+    assert.equal(runtimeRequests.length, 0, 'opening a conversation must not initialize or recover execution');
+    assert.equal(projects[0].runtime.generation, 7);
+    assert.equal(await js(`document.querySelector('.composer-workspace-backend').textContent.includes('Modal')`), true, 'cloud execution preference is preserved');
+    if (fixtures['/dashboard-api/catalog'].backends.find(backend => backend.name === 'modal').enabled) {
+      await js(`document.querySelector('.composer-workspace-trigger').click()`);
+      await until(() => js(`[...document.querySelectorAll('.composer-workspace-popover input')].some(input => input.value === 'sb-expired')`), 'previous cloud execution is retained');
+      await js(`document.querySelector('[aria-label="Close project picker"]').click()`);
+    }
+  };
+  prepareLostProject();
+  await call('Page.navigate', { url: `${base}/projects` });
+  await until(() => js(`!!document.querySelector('.project-card[aria-label="Lost Modal project"]')`), 'lost Modal project catalog');
+  await clickText('New chat');
+  await assertDormantChat();
+
+  prepareLostProject(false);
+  await call('Page.navigate', { url: `${base}/projects/1` });
+  await until(() => js(`document.querySelector('.page-title')?.textContent === 'Lost Modal project'`), 'lost project detail');
+  await clickText('New chat');
+  await assertDormantChat();
+
+  prepareLostProject();
+  await js(`localStorage.setItem('k41-dashboard-sidebar', 'expanded')`);
+  await call('Page.navigate', { url: `${base}/projects` });
+  await until(() => js(`!!document.querySelector('[aria-label="New chat in Lost Modal project"]')`), 'lost project sidebar');
+  await js(`document.querySelector('[aria-label="New chat in Lost Modal project"]').click()`);
+  await assertDormantChat();
+  assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
+  console.log('PASS: catalog, project detail, and sidebar open lost cloud workspaces without initializing execution or switching to local.');
 } finally {
   if (call && ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
   ws?.close(); browser.kill(); server.closeAllConnections();

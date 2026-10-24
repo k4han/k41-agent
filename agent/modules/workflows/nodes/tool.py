@@ -143,6 +143,8 @@ async def tool_node(
         tools = ToolResolver().for_workspace(tools, workspace)
     tools = _include_pending_control_tools(state, tools)
     calls = getattr(state.get("messages", [])[-1], "tool_calls", []) if state.get("messages") else []
+    original_active = state.get("active_skills", {})
+    state = {**state, "active_skills": dict(original_active)}
     next_config = {**config, "configurable": dict(config.get("configurable", {}))}
     with coding_authorization_scope():
         if calls:
@@ -169,7 +171,7 @@ async def tool_node(
         return []
 
     active = skill_events(messages_in(result), state.get("active_skills", {}))
-    if active != state.get("active_skills", {}):
+    if active != original_active:
         if isinstance(result, dict):
             result["active_skills"] = active
         elif isinstance(result, list):

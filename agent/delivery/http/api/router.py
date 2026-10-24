@@ -40,7 +40,6 @@ from agent.modules.users import Platform, get_pairing_service
 from agent.modules.workspaces import (
     WorkspaceBinding,
     create_temp_workspace,
-    ensure_workspace_ready,
     get_thread_workspace_ref,
     is_temp_workspace,
     remember_thread_workspace_ref,
@@ -149,9 +148,8 @@ async def _apply_workspace_to_run_params(
     owned = await projects.find_binding(requested_workspace, thread_id=request.thread_id,
                                          project_id=request.project_id, workspace_id=request.project_workspace_id)
     if owned:
-        binding = await projects.ensure(owned.project_id, owned.project_workspace_id)
-        await remember_thread_workspace_ref(thread_id, binding)
-        params["workspace"] = binding.execution
+        await remember_thread_workspace_ref(thread_id, owned)
+        params["workspace"] = owned.execution
         return
     if (
         request.user_id == DASHBOARD_USER_ID
@@ -174,8 +172,6 @@ async def _apply_workspace_to_run_params(
     effective_workspace = requested_workspace or stored_workspace
     if effective_workspace is not None:
         resolved = resolve_workspace_ref(effective_workspace)
-        if resolved.backend in {"daytona", "modal"}:
-            resolved = await ensure_workspace_ready(resolved, thread_id=thread_id)
         params["workspace"] = resolved
     elif request.user_id == DASHBOARD_USER_ID and not request.thread_id:
         # Dashboard chats may start without an explicit project. Provision a

@@ -409,7 +409,7 @@ async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBo
             )
             if repository_id is not None and str(ref.metadata.get("repository_id", "")) != str(repository_id):
                 raise ProjectWorkspaceError("Repository reference conflicts with the project.", "workspace_conflict")
-            binding = await projects.ensure(body.project_id, body.project_workspace_id)
+            binding = await projects.binding(body.project_id, body.project_workspace_id)
             if body.thread_id:
                 await remember_thread_workspace_ref(body.thread_id, binding)
             return {"kind": binding.execution.backend, "label": binding.scope.label, "workspace": binding.model_dump()}
@@ -429,7 +429,6 @@ async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBo
                     declared = binding.scope.metadata.get("repository_id")
                 if repository_id is not None and declared is not None and str(declared) != str(repository_id):
                     raise ProjectWorkspaceError("Repository reference conflicts with the project.", "workspace_conflict")
-                binding = await projects.ensure(binding.project_id, binding.project_workspace_id)
                 if body.thread_id:
                     await remember_thread_workspace_ref(body.thread_id, binding)
                 return {"kind": binding.execution.backend, "label": binding.scope.label,

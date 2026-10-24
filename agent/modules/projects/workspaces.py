@@ -357,7 +357,7 @@ class ProjectWorkspaceService:
             return context
         project, _, _ = await self.rows(binding.project_id, binding.project_workspace_id)
         if not allow_unready or project.migration_status == "ready":
-            binding = await self.ensure(binding.project_id, binding.project_workspace_id)
+            binding = await self.ensure(binding.project_id, binding.project_workspace_id, recover=True)
         ref = binding.execution
         return replace(context, project_id=binding.project_id, project_workspace_id=binding.project_workspace_id,
                        runtime_generation=binding.runtime_generation, backend=ref.backend, locator=ref.locator,
@@ -463,7 +463,8 @@ class ProjectWorkspaceService:
             self.switcher.assert_available(workspace.id)
             return await self._checkpoint(project_id, workspace.id, generation, skip_unchanged=skip_unchanged)
 
-    async def ensure(self, project_id: int, workspace_id: int | None = None) -> WorkspaceBinding:
+    async def ensure(self, project_id: int, workspace_id: int | None = None, *, recover: bool = False) -> WorkspaceBinding:
+        """Attach execution on demand, optionally restoring a lost cloud runtime."""
         session = await _session()
         async with session:
             project = await session.get(Project, project_id)
@@ -488,7 +489,9 @@ class ProjectWorkspaceService:
             ref = WorkspaceRef.model_validate_json(runtime.execution_json)
             decision = pending_decision_state(runtime)
             if decision is not None:
-                # A confirmation is already pending; do not relaunch a paid runtime silently.
+                if recover:
+                    self._assert_recovery_backend(ref.backend)
+                    return await self._reprovision_replacement(project_id, project, workspace, runtime, ref.backend)
                 raise ProjectWorkspaceError(provision_decision_message(decision), "provision_confirm_required")
             if runtime.status != "restoring":
                 try:
@@ -535,13 +538,21 @@ class ProjectWorkspaceService:
                         raise
             if not workspace.head_revision:
                 raise ProjectWorkspaceError("Both the runtime and saved project files are unavailable.", "missing_data")
-            # The sandbox is gone, but the files remain recoverable from the last
-            # saved revision. Recreating a paid cloud runtime is the user's call,
-            # so record a decision and let the dashboard confirm it.
             await self._record_provision_decision(project, workspace, runtime)
+            if recover:
+                self._assert_recovery_backend(ref.backend)
+                return await self._reprovision_replacement(project_id, project, workspace, runtime, ref.backend)
             raise ProjectWorkspaceError(provision_decision_message({
                 "backend": ref.backend, "revision": workspace.head_revision}),
                 "provision_confirm_required")
+
+    def _assert_recovery_backend(self, backend: str):
+        from agent.modules.workspaces.registry import get_workspace_backend_registry, _is_backend_enabled
+        descriptor = get_workspace_backend_registry(self.container).require(backend)
+        if not _is_backend_enabled(descriptor, config_service=self.container.config_service):
+            raise ProjectWorkspaceError(
+                f"The {backend} execution backend is disabled. Enable it again, "
+                "or recover the files into a local workspace instead.", "backend_disabled")
 
     def _notify_runtime_changed(self, project_id: int, workspace_id: int):
         try:
@@ -586,17 +597,18 @@ class ProjectWorkspaceService:
                 raise ProjectWorkspaceError("Execution runtime changed; reload the workspace.", "stale_runtime")
             ref = WorkspaceRef.model_validate_json(runtime.execution_json)
             if action == "restore":
-                from agent.modules.workspaces.registry import get_workspace_backend_registry, _is_backend_enabled
-                descriptor = get_workspace_backend_registry(self.container).require(ref.backend)
-                if not _is_backend_enabled(descriptor, config_service=self.container.config_service):
-                    raise ProjectWorkspaceError(
-                        f"The {ref.backend} execution backend is disabled. Enable it again, "
-                        "or recover the files into a local workspace instead.", "backend_disabled")
+                self._assert_recovery_backend(ref.backend)
             target_backend = ref.backend if action == "restore" else "local"
             return await self._reprovision_replacement(project_id, project, workspace, runtime, target_backend)
 
     async def _reprovision_replacement(self, project_id: int, project, workspace, runtime, target_backend: str):
         """Create a fresh execution runtime and restore the workspace's saved files."""
+        if not workspace.head_revision:
+            raise ProjectWorkspaceError("No saved project files are available for recovery.", "missing_data")
+        try:
+            await asyncio.to_thread(self.storage.get_manifest, str(workspace.id), workspace.head_revision)
+        except (FileNotFoundError, ValueError) as exc:
+            raise ProjectWorkspaceError("Saved project files are unavailable or damaged.", "missing_data") from exc
         from agent.modules.workspaces import create_workspace_backend, merge_ready_workspace_metadata as _merge_ready_workspace_metadata
         previous = WorkspaceRef.model_validate_json(runtime.execution_json)
         if target_backend == "local":

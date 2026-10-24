@@ -80,17 +80,34 @@ clears the block. A provider termination can lose changes after the last
 successful checkpoint. These are file snapshots, not process-memory snapshots
 or transactional backups of running databases.
 
-Recovery first tries the current runtime and never overwrites live files with
-an older checkpoint. A dead cloud sandbox does not relaunch automatically:
-file provision and the corresponding cost are the user's decision, so the
-runtime is marked `unavailable` with a pending decision and the dashboard
-offers "Restore on the same backend" or "Move to local workspace" (see
-`runtime.recovery` confirmation). The chosen runtime is provisioned and
-hydrated before its new generation becomes ready. A disabled backend is
-refused for restore; local recovery stays available. Missing runtime and
-missing saved data produce an explicit error instead of a fresh clone. Local
-project directories are not moved or overwritten. Retired GitHub task
-worktrees can be materialized into application-owned runtime directories.
+Opening or resuming a conversation resolves the durable project identity without
+attaching or creating a sandbox. New conversations from the catalog, project
+detail page and sidebar preserve the selected backend even when its previous
+sandbox has expired. Chat admission reserves the workspace without initializing
+execution. Background task submission resolves its binding and reserves the
+workspace when the task runs. Questions that do not use workspace tools can
+complete without a cloud environment.
+
+Cloud file browsing, project instructions and skill discovery read the last
+saved revision without starting execution. Saved paths retain their cloud root;
+temporary read views are never published as local execution workspaces. Active
+skill instructions remain available from conversation state; their execution
+cache and runtime tools are restored only when a coding tool needs them.
+
+The first workspace tool, attachment write or explicit runtime operation attaches
+the selected execution backend. A surviving sandbox is reused without restoring
+an older checkpoint over live files. A lost cloud sandbox is recreated on the
+same enabled backend and hydrated from the saved revision before tools execute.
+Restoration uses the workspace lock so concurrent conversations share one new
+runtime and generation. Failed commands are never replayed by recovery.
+
+A disabled backend or missing saved data produces an explicit tool error rather
+than switching to local or cloning a fresh project. Legacy pending recovery
+decisions no longer block ordinary messages and are resolved automatically when
+execution is needed. Explicit same-backend restore and local recovery remain
+available through `runtime.recovery`. Local project directories are not moved or
+overwritten. Retired GitHub task worktrees can be materialized into
+application-owned runtime directories.
 
 Deleting a conversation removes its association and stops its own processes.
 Managed cloud lifecycle actions save before stopping, archiving or deleting.
@@ -111,7 +128,7 @@ Project responses add `migration_status`, `workspaces`, `runtime` and
 `persistence`, including the last saved revision, timestamp and error.
 
 - `POST /dashboard-api/projects/{id}/runtime/ensure`: resolve or recover files;
-  accepts optional `project_workspace_id`. Records a pending recovery decision
+  accepts optional `project_workspace_id`. This explicit inspection endpoint records a pending recovery decision
   (code `provision_confirm_required`) instead of restarting a lost cloud
   runtime automatically.
 - `POST /dashboard-api/projects/{id}/runtime/recovery`: apply the pending
@@ -120,8 +137,8 @@ Project responses add `migration_status`, `workspaces`, `runtime` and
 - `POST /dashboard-api/projects/{id}/checkpoint`: save or retry saving.
 - `POST /dashboard-api/projects/{id}/migration/select`: select `source_id`.
 
-Instruction and skill reads can use saved files while execution is unavailable.
-Writes ensure execution and report persistence separately. Archive/remove keep
+Instruction and skill reads use saved cloud files independently of execution.
+Workspace tools ensure execution on demand and report persistence separately. Archive/remove keep
 data; these endpoints do not implement permanent file deletion.
 
 ## Switching execution backends

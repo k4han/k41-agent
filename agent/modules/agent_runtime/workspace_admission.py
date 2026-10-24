@@ -23,7 +23,6 @@ async def workspace_run(arguments):
         yield
         return
     with projects.switcher.run_lease(binding.project_workspace_id):
-        binding = await projects.ensure(binding.project_id, binding.project_workspace_id)
         arguments["workspace"] = binding.model_dump()
         yield
 

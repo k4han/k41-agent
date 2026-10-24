@@ -69,7 +69,7 @@ async def submit_background_task(body: SubmitTaskBody) -> dict[str, Any]:
         ):
             projects = get_project_workspace_service()
             owned = await projects.find_binding(body.workspace, project_id=body.project_id, workspace_id=body.project_workspace_id)
-            workspace = (await projects.ensure(owned.project_id, owned.project_workspace_id)).execution
+            workspace = owned.execution
         task_id = await manager.submit(
             request=body.request.strip(),
             agent_name=body.agent_name,

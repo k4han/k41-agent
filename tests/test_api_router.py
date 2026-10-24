@@ -591,7 +591,7 @@ def test_chat_events_resolves_and_remembers_workspace(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("explicit", [False, True])
-def test_chat_events_ensures_stored_sandbox_workspace_before_stream(monkeypatch, explicit):
+def test_chat_events_keeps_stored_sandbox_dormant_before_stream(monkeypatch, explicit):
     from agent.modules.workspaces import WorkspaceRef
 
     stored_workspace = WorkspaceRef(
@@ -605,19 +605,7 @@ def test_chat_events_ensures_stored_sandbox_workspace_before_stream(monkeypatch,
             "repository_full_name": "acme/widgets",
         },
     )
-    ready_workspace = WorkspaceRef(
-        backend="modal",
-        locator="sb-new",
-        label="acme/widgets",
-        metadata={
-            "root": "/workspace",
-            "source": "github",
-            "repository_id": 44,
-            "repository_full_name": "acme/widgets",
-        },
-    )
     remembered: list[tuple[str, dict]] = []
-    ensure_calls: list[tuple[str, str]] = []
     built_params = {
         "user_input": "Continue",
         "thread_id": "api_dashboard_old_thread",
@@ -638,23 +626,16 @@ def test_chat_events_ensures_stored_sandbox_workspace_before_stream(monkeypatch,
         assert thread_id == "api_dashboard_old_thread"
         return stored_workspace
 
-    async def fake_ensure_workspace_ready(workspace, *, thread_id: str | None = None):
-        assert workspace == stored_workspace
-        assert thread_id == "api_dashboard_old_thread"
-        ensure_calls.append((thread_id, workspace.locator))
-        return ready_workspace
-
     async def fake_remember_thread_workspace_ref(thread_id: str, workspace):
         remembered.append((thread_id, workspace.model_dump()))
         return workspace
 
     async def fake_run_agent_stream(**params):
-        assert params == {**built_params, "workspace": ready_workspace}
+        assert params == {**built_params, "workspace": stored_workspace}
         yield {"type": "final", "content": "continued"}
 
     monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
     monkeypatch.setattr(router_module, "get_thread_workspace_ref", fake_get_thread_workspace_ref)
-    monkeypatch.setattr(router_module, "ensure_workspace_ready", fake_ensure_workspace_ready)
     monkeypatch.setattr(router_module, "remember_thread_workspace_ref", fake_remember_thread_workspace_ref)
     monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
 
@@ -671,9 +652,8 @@ def test_chat_events_ensures_stored_sandbox_workspace_before_stream(monkeypatch,
 
     assert response.status_code == 200
     assert response.text == '{"type": "final", "content": "continued"}\n'
-    assert ensure_calls == [("api_dashboard_old_thread", "sb-expired")]
     assert remembered == [
-        ("api_dashboard_old_thread", ready_workspace.model_dump())
+        ("api_dashboard_old_thread", stored_workspace.model_dump())
     ]
 
 

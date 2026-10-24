@@ -157,6 +157,60 @@ def _install_modal_module(monkeypatch, *, sandbox: Any, from_id_fn=None) -> None
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("sync_list", [False, True])
+async def test_modal_cloud_list_is_scoped_to_configured_app(monkeypatch, sync_list):
+    client = object()
+    calls = []
+
+    async def lookup(app_name, **kwargs):
+        calls.append(("lookup", app_name, kwargs))
+        return SimpleNamespace(app_id="ap-configured")
+
+    sandbox = SimpleNamespace(object_id="sb-1", returncode=0)
+
+    async def list_async(**kwargs):
+        calls.append(("list", kwargs))
+        yield sandbox
+
+    def list_sync(**kwargs):
+        calls.append(("list", kwargs))
+        return [sandbox]
+
+    fake_module = SimpleNamespace(
+        App=SimpleNamespace(lookup=SimpleNamespace(aio=lookup)),
+        Sandbox=SimpleNamespace(list=list_sync if sync_list else SimpleNamespace(aio=list_async)),
+    )
+    monkeypatch.setattr(modal_backend, "get_modal_module", lambda: fake_module)
+    monkeypatch.setattr(modal_backend, "get_modal_client", _async_return(client))
+    monkeypatch.setattr(modal_backend, "_config", lambda: (True, "", "", "configured-app", "/workspace", "", 3600, 900))
+
+    result = await modal_backend.list_modal_cloud_sandboxes()
+    assert [item["sandbox_id"] for item in result] == ["sb-1"]
+    assert calls == [
+        ("lookup", "configured-app", {"client": client}),
+        ("list", {"app_id": "ap-configured", "client": client}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_modal_cloud_list_does_not_scan_environment_when_app_lookup_fails(monkeypatch):
+    async def fail_lookup(*args, **kwargs):
+        raise RuntimeError("App not found")
+
+    def fail_list(**kwargs):
+        pytest.fail("Sandbox listing must not run without an app ID")
+
+    fake_module = SimpleNamespace(
+        App=SimpleNamespace(lookup=SimpleNamespace(aio=fail_lookup)),
+        Sandbox=SimpleNamespace(list=SimpleNamespace(aio=fail_list)),
+    )
+    monkeypatch.setattr(modal_backend, "get_modal_module", lambda: fake_module)
+    monkeypatch.setattr(modal_backend, "get_modal_client", _async_return(object()))
+    monkeypatch.setattr(modal_backend, "_config", lambda: (True, "", "", "missing-app", "/workspace", "", 3600, 900))
+    assert await modal_backend.list_modal_cloud_sandboxes() == []
+
+
+@pytest.mark.asyncio
 async def test_probe_modal_sandbox_started(monkeypatch):
     sandbox = SimpleNamespace(returncode=None, poll=_AioFn(lambda: None))
     _install_modal_module(monkeypatch, sandbox=sandbox)

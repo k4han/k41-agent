@@ -88,7 +88,7 @@ class SkillPackages:
 
     def execution_transport(self, workspace, thread_id=None):
         ref = resolve_workspace_ref(workspace)
-        return WorkspacePackageIO(str(self.cache_root) if ref.backend == "local" else ref, thread_id=thread_id)
+        return WorkspacePackageIO(str(self.cache_root) if ref.backend == "local" else ref, thread_id=thread_id, execution=True)
 
     def execution_destination(self, workspace, version):
         return cache_path(version) if resolve_workspace_ref(workspace).backend == "local" else f".k41-agent/s/{cache_path(version)}"
@@ -469,11 +469,29 @@ class SkillPackages:
         return ActivatedSkill(selected.id, name, version, agent_name, workspace_key(ref), skill_root, root, content, asdict(selected.source),
                               mode, destination, variable, runtime["shell"])
 
-    async def restore(self, active: dict, *, workspace, thread_id: str):
+    async def restore(self, active: dict, *, workspace, thread_id: str, defer_execution: bool = False):
         version = active["version"]
         if not re.fullmatch(r"[a-f0-9]{64}", version) or not re.fullmatch(r"[a-f0-9]{32}", active["id"]):
             raise ValueError("Invalid checkpoint skill identity.")
         ref = resolve_workspace_ref(workspace)
+        if defer_execution and ref.backend != "local":
+            from agent.modules.projects import get_project_workspace_service
+            if await get_project_workspace_service().find_binding(ref, thread_id=thread_id):
+                root = str(ref.metadata.get("root") or "")
+                destination = self.execution_destination(ref, version)
+                skill_root = f"{root}/{destination}"
+                if active.get("skill_root") == skill_root and active.get("workspace_root") == root:
+                    return active
+                archive = await asyncio.to_thread(self.snapshots.read, version)
+                with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+                    resources = [item.filename for item in bundle.infolist() if not item.is_dir() and item.filename != "SKILL.md"]
+                    document = bundle.read("SKILL.md").decode("utf-8-sig")
+                parsed = parse_skill_md(document, Path(active["source"].get("directory") or active["name"]))
+                variable = environment_variable(active["name"])
+                runtime = {"shell": "/bin/sh", "tools": {}, "errors": ["Execution tools are prepared when a workspace tool is used."]}
+                return {**active, "skill_root": skill_root, "workspace_root": root, "package_path": destination,
+                        "execution_mode": "snapshot", "environment_variable": variable, "shell": runtime["shell"],
+                        "content": self._instructions(parsed, skill_root, root, resources, runtime, "snapshot", variable)}
         if active.get("execution_mode") == "source":
             source = active["source"]
             transport = WorkspacePackageIO(source["root"], boundary=source["directory"])

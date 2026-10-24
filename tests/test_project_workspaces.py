@@ -168,6 +168,405 @@ async def test_lost_sandbox_records_decision_and_recovers_locally(project_servic
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("error_name", ["NotFoundError", "ConflictError"])
+async def test_finished_modal_runtime_returns_recovery_decision(project_service, monkeypatch, error_name):
+    from fastapi import HTTPException
+    import agent.modules.projects as projects
+    import agent.modules.workspaces as workspaces
+    from agent.delivery.http.dashboard.routes.projects import ProjectRuntimeBody, ensure_project_runtime
+    from agent.modules.workspaces import modal_backend
+
+    modal_errors = pytest.importorskip("modal.exception")
+    service, project, root, maker = project_service
+    binding = await service.ensure(project["id"])
+    _, workspace, _ = await service.rows(project["id"])
+    saved_revision = workspace.head_revision
+    expired = WorkspaceRef(backend="modal", locator="sb-expired", metadata={"root": "/workspace"})
+    async with maker() as session:
+        runtime = (await session.execute(select(WorkspaceRuntime))).scalar_one()
+        runtime.execution_json = expired.model_dump_json()
+        await session.commit()
+
+    execute = AsyncMock(side_effect=getattr(modal_errors, error_name)("sandbox has already finished"))
+    backend = modal_backend.ModalWorkspaceBackend(
+        expired, sandbox=SimpleNamespace(exec=SimpleNamespace(aio=execute)),
+    )
+    monkeypatch.setattr(modal_backend.ModalWorkspaceBackend, "create", AsyncMock(return_value=backend))
+    monkeypatch.setattr(modal_backend, "_config", lambda: (True, "", "", "configured-app", "/workspace", "", 3600, 900))
+    monkeypatch.setattr(workspaces, "attach_workspace_backend", lambda backend, locator, **kwargs:
+                        modal_backend.attach_modal_workspace(locator, **kwargs))
+    create = AsyncMock()
+    monkeypatch.setattr(workspaces, "create_workspace_backend", create)
+    monkeypatch.setattr(projects, "get_project_workspace_service", lambda: service)
+
+    for _ in range(2):
+        with pytest.raises(HTTPException) as caught:
+            await ensure_project_runtime(ProjectRuntimeBody(), project_id=project["id"])
+        assert caught.value.status_code == 409
+        assert caught.value.detail["code"] == "provision_confirm_required"
+    create.assert_not_awaited()
+    execute.assert_awaited_once()
+    _, workspace, runtime = await service.rows(project["id"])
+    assert runtime.status == "unavailable"
+    assert runtime.generation == binding.runtime_generation
+    assert workspace.head_revision == saved_revision
+    assert json.loads(runtime.pending_decision_json)["reason"] == "sandbox_lost"
+    assert (await service.read_saved(project["id"], "file.txt"))[0] == b"original"
+    service.active.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pending", [False, True])
+async def test_lazy_cloud_chat_and_saved_reads_do_not_initialize_execution(project_service, monkeypatch, pending):
+    from agent.delivery.http.api.router import _apply_workspace_to_run_params
+    from agent.delivery.http.api.schemas import ChatRequest
+    from agent.delivery.http.dashboard.routes.workspace import WorkspaceResolveBody, resolve_dashboard_workspace
+    from agent.modules.agent_runtime.workspace_admission import workspace_run
+    from agent.modules.skills.package_io import WorkspacePackageIO
+    import agent.modules.workspaces as workspaces
+
+    service, project, root, maker = project_service
+    (root / "AGENTS.md").write_text("Use the saved instructions.")
+    await service.ensure(project["id"])
+    service.active.clear()
+    service.container._async_session_maker = maker
+    expired = WorkspaceRef(backend="modal", locator="sb-expired", metadata={"root": "/workspace"})
+    async with maker() as session:
+        runtime = (await session.execute(select(WorkspaceRuntime))).scalar_one()
+        runtime.execution_json = expired.model_dump_json()
+        if pending:
+            runtime.status = "unavailable"
+            runtime.pending_decision_json = json.dumps({"reason": "sandbox_lost", "backend": "modal"})
+        await session.commit()
+    attach = AsyncMock(side_effect=AssertionError("Reading saved files must not attach execution."))
+    create = AsyncMock(side_effect=AssertionError("Opening a conversation must not allocate execution."))
+    monkeypatch.setattr(workspaces, "attach_workspace_backend", attach)
+    monkeypatch.setattr(workspaces, "create_workspace_backend", create)
+    binding = await service.binding(project["id"])
+    for existing in [False, True]:
+        thread_id = "api_lazy_existing" if existing else "api_lazy_new"
+        if existing:
+            await workspaces.remember_thread_workspace_ref(thread_id, binding)
+        request = ChatRequest(message="Hello", user_id="dashboard", thread_id=thread_id if existing else None,
+                              workspace=None if existing else binding, project_id=project["id"])
+        params = {"thread_id": thread_id}
+        await _apply_workspace_to_run_params(request, params)
+        async with workspace_run(params):
+            assert params["workspace"]["project_workspace_id"] == binding.project_workspace_id
+            assert params["workspace"]["execution"]["locator"] == "sb-expired"
+            assert service.switcher.runs[binding.project_workspace_id] == 1
+        assert not service.switcher.runs
+    resolved = await resolve_dashboard_workspace(None, WorkspaceResolveBody(project_id=project["id"]))
+    assert resolved["workspace"]["execution"]["locator"] == "sb-expired"
+    transport = WorkspacePackageIO(binding)
+    content, _ = await transport.read("AGENTS.md")
+    assert content == b"Use the saved instructions."
+    with pytest.raises(ValueError, match="escapes"):
+        await transport.read("../AGENTS.md")
+    scoped = WorkspacePackageIO(binding, boundary=".agents/skills/demo")
+    with pytest.raises(ValueError, match="selected skill package"):
+        await scoped.read("file.txt")
+    browser = await workspaces.get_workspace_browser(binding)
+    tree = await browser.tree("/workspace")
+    assert tree["root"] == tree["path"] == "/workspace"
+    assert any(entry["path"] == "/workspace/AGENTS.md" for entry in tree["entries"])
+    assert (await browser.file("/workspace/file.txt"))["content"] == "original"
+    assert (await browser.changes())["is_git_repo"] is False
+    diff = await browser.diff("/workspace/file.txt")
+    assert diff["path"] == "/workspace/file.txt" and diff["is_git_repo"] is False
+    with pytest.raises(ValueError, match="escapes"):
+        await browser.file("/workspace/../outside")
+    assert (await service.binding(project["id"])).runtime_generation == binding.runtime_generation
+    assert root.is_dir()
+    attach.assert_not_awaited()
+    create.assert_not_awaited()
+    service.active.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pending", [False, True])
+async def test_lazy_concurrent_execution_restores_one_shared_cloud_runtime(project_service, monkeypatch, tmp_path, pending):
+    import agent.modules.workspaces as workspaces
+
+    service, project, root, maker = project_service
+    before = await service.ensure(project["id"])
+    service.active.clear()
+    expired = WorkspaceRef(backend="modal", locator="sb-expired", metadata={"root": "/workspace"})
+    replacement = expired.model_copy(update={"locator": "sb-restored"})
+    async with maker() as session:
+        runtime = (await session.execute(select(WorkspaceRuntime))).scalar_one()
+        runtime.execution_json = expired.model_dump_json()
+        if pending:
+            runtime.status = "unavailable"
+            runtime.pending_decision_json = json.dumps({"reason": "sandbox_lost", "backend": "modal"})
+        await session.commit()
+    original_bool = service.container.config_service.get_bool
+    monkeypatch.setattr(service.container.config_service, "get_bool", lambda key, default=False:
+                        True if key == "workspace.modal.enabled" else original_bool(key, default))
+    async def attach(backend, locator, **kwargs):
+        if locator == expired.locator:
+            raise WorkspaceUnavailableError("sandbox has already finished")
+        assert locator == replacement.locator
+        return replacement
+    restored = tmp_path / "restored"
+    async def restore(ref, store, key, revision):
+        assert (await service.rows(project["id"]))[2].status == "restoring"
+        await asyncio.to_thread(service.transfer.materialize, store, key, revision, restored)
+    create = AsyncMock(return_value=replacement)
+    transfer = AsyncMock(side_effect=restore)
+    monkeypatch.setattr(workspaces, "attach_workspace_backend", attach)
+    monkeypatch.setattr(workspaces, "create_workspace_backend", create)
+    monkeypatch.setattr(service.transfer, "restore", transfer)
+    results = await asyncio.gather(*(service.ensure(project["id"], recover=True) for _ in range(4)))
+    assert all(result.execution.locator == "sb-restored" for result in results)
+    assert all(result.project_workspace_id == before.project_workspace_id for result in results)
+    assert all(result.runtime_generation == before.runtime_generation + 1 for result in results)
+    assert all(result.scope.key == before.scope.key for result in results)
+    create.assert_awaited_once_with("modal", label=expired.label)
+    transfer.assert_awaited_once()
+    assert (restored / "file.txt").read_text() == (root / "file.txt").read_text() == "original"
+    _, workspace, runtime = await service.rows(project["id"])
+    assert runtime.status == "ready" and runtime.pending_decision_json == "{}"
+    assert workspace.persistence_status == "clean"
+    service.active.clear()
+
+
+@pytest.mark.asyncio
+async def test_lazy_execution_refuses_disabled_backend_and_missing_saved_data(project_service, monkeypatch):
+    import agent.modules.workspaces as workspaces
+
+    service, project, root, maker = project_service
+    await service.ensure(project["id"])
+    service.active.clear()
+    expired = WorkspaceRef(backend="modal", locator="sb-expired", metadata={"root": "/workspace"})
+    async with maker() as session:
+        runtime = (await session.execute(select(WorkspaceRuntime))).scalar_one()
+        runtime.execution_json = expired.model_dump_json()
+        await session.commit()
+    attach = AsyncMock(side_effect=WorkspaceUnavailableError("sandbox has already finished"))
+    create = AsyncMock()
+    monkeypatch.setattr(workspaces, "attach_workspace_backend", attach)
+    monkeypatch.setattr(workspaces, "create_workspace_backend", create)
+    monkeypatch.setattr(service.container.config_service, "get_bool", lambda key, default=False: False)
+    with pytest.raises(ProjectWorkspaceError) as disabled:
+        await service.ensure(project["id"], recover=True)
+    assert disabled.value.code == "backend_disabled"
+    monkeypatch.setattr(service.container.config_service, "get_bool", lambda key, default=False: True)
+    async with maker() as session:
+        workspace = (await session.execute(select(ProjectWorkspace))).scalar_one()
+        workspace.head_revision = "a" * 64
+        await session.commit()
+    with pytest.raises(ProjectWorkspaceError) as missing:
+        await service.ensure(project["id"], recover=True)
+    assert missing.value.code == "missing_data"
+    create.assert_not_awaited()
+    assert (await service.binding(project["id"])).execution.backend == "modal"
+    service.active.clear()
+
+
+@pytest.mark.asyncio
+async def test_lazy_failed_restore_keeps_saved_files_and_never_replays_commands(project_service, monkeypatch, tmp_path):
+    import agent.modules.workspaces as workspaces
+
+    service, project, root, maker = project_service
+    before = await service.ensure(project["id"])
+    service.active.clear()
+    _, workspace, _ = await service.rows(project["id"])
+    revision = workspace.head_revision
+    manifest = service.storage.get_manifest(str(workspace.id), revision)
+    expired = WorkspaceRef(backend="modal", locator="sb-expired", metadata={"root": "/workspace"})
+    async with maker() as session:
+        runtime = (await session.execute(select(WorkspaceRuntime))).scalar_one()
+        runtime.execution_json = expired.model_dump_json()
+        await session.commit()
+    original_bool = service.container.config_service.get_bool
+    monkeypatch.setattr(service.container.config_service, "get_bool", lambda key, default=False:
+                        True if key == "workspace.modal.enabled" else original_bool(key, default))
+    monkeypatch.setattr(workspaces, "attach_workspace_backend", AsyncMock(side_effect=WorkspaceUnavailableError("expired")))
+    create = AsyncMock(side_effect=[expired.model_copy(update={"locator": name}) for name in ["sb-partial", "sb-ready"]])
+    monkeypatch.setattr(workspaces, "create_workspace_backend", create)
+    cleanup = AsyncMock()
+    monkeypatch.setattr(workspaces, "call_workspace_backend_loader", cleanup)
+    execute = AsyncMock(return_value=workspaces.CommandResult("done", 0))
+    monkeypatch.setattr(workspaces, "create_workspace_runtime_backend", AsyncMock(
+        side_effect=lambda ref, **kwargs: SimpleNamespace(ref=ref, execute=execute)))
+    attempts = []
+    async def restore(ref, store, key, saved_revision):
+        attempts.append(ref.locator)
+        if len(attempts) == 1:
+            raise OSError("injected restore failure")
+        await asyncio.to_thread(service.transfer.materialize, store, key, saved_revision, tmp_path / "restored-after-retry")
+    monkeypatch.setattr(service.transfer, "restore", restore)
+    monkeypatch.setattr(service.transfer, "capture", AsyncMock(return_value=manifest))
+    executor = await workspaces.get_workspace_command_executor(await service.binding(project["id"]))
+    try:
+        with pytest.raises(ProjectWorkspaceError, match="restore failed"):
+            await executor.execute("requested command")
+        execute.assert_not_awaited()
+        cleanup.assert_awaited_once()
+        assert create.await_count == 1
+        assert (await service.rows(project["id"]))[1].head_revision == revision
+        assert (await service.read_saved(project["id"], "file.txt"))[0] == b"original"
+        result = await executor.execute("requested command")
+        assert result.exit_code == 0 and result.persistence["saved"]
+        execute.assert_awaited_once_with("requested command")
+        assert attempts == ["sb-partial", "sb-ready"]
+        after = await service.binding(project["id"])
+        assert after.runtime_generation == before.runtime_generation + 2
+        assert after.project_workspace_id == before.project_workspace_id
+        assert (root / "file.txt").read_text() == "original"
+    finally:
+        service.active.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("previous_root", ["/workspace", "/old-workspace"])
+async def test_lazy_active_skill_instructions_do_not_restore_cloud_execution(project_service, monkeypatch, tmp_path, previous_root):
+    from langchain_core.messages import HumanMessage
+    from agent.modules.skills.context import active_context
+    from agent.modules.skills.package_worker import pack_directory
+    from agent.modules.skills.sources import workspace_key
+    import agent.modules.workspaces as workspaces
+
+    service, project, root, maker = project_service
+    await service.ensure(project["id"])
+    service.active.clear()
+    expired = WorkspaceRef(backend="modal", locator="sb-expired", metadata={"root": "/workspace"})
+    async with maker() as session:
+        runtime = (await session.execute(select(WorkspaceRuntime))).scalar_one()
+        runtime.execution_json = expired.model_dump_json()
+        runtime.status = "unavailable"
+        await session.commit()
+    binding = await service.binding(project["id"])
+    packages = service.container.skill_packages
+    source = tmp_path / "pinned-skill"
+    source.mkdir()
+    (source / "SKILL.md").write_text("---\nname: demo\ndescription: Saved skill.\n---\nPinned instructions.")
+    version = packages.snapshots.retain(pack_directory(source), "lazy-conversation")
+    destination = packages.execution_destination(binding.execution, version)
+    active = {"id": "a" * 32, "version": version, "name": "demo", "agent_name": "default",
+              "workspace_key": workspace_key(binding.execution), "content": "Pinned instructions.",
+              "skill_root": f"{previous_root}/{destination}", "workspace_root": previous_root,
+              "source": {"scope": "project", "directory": ".agents/skills/demo"},
+              "execution_mode": "snapshot", "package_path": destination, "shell": "/bin/sh"}
+    attach = AsyncMock(side_effect=AssertionError("Conversation context must not attach execution."))
+    create = AsyncMock(side_effect=AssertionError("Conversation context must not create execution."))
+    monkeypatch.setattr(workspaces, "attach_workspace_backend", attach)
+    monkeypatch.setattr(workspaces, "create_workspace_backend", create)
+    content, retained, _ = await active_context(
+        {"messages": [HumanMessage(content="Explain the project", id="question")], "active_skills": {"demo": active}},
+        workspace=binding.execution, thread_id="lazy-conversation", agent_name="default", names=[],
+        tools=[SimpleNamespace(name="skill")],
+    )
+    assert "Pinned instructions." in content
+    assert retained["demo"]["skill_root"] == f"/workspace/{destination}"
+    attach.assert_not_awaited()
+    create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_lazy_cloud_skill_cache_reads_use_execution_not_project_snapshot(project_service, monkeypatch, tmp_path):
+    from agent.modules.skills.package_io import WorkspacePackageIO
+    from agent.modules.skills.package_worker import run_operation
+    import agent.modules.workspaces as workspaces
+
+    service, project, root, maker = project_service
+    await service.ensure(project["id"])
+    service.active.clear()
+    cloud = WorkspaceRef(backend="modal", locator="sb-live", metadata={"root": "/workspace"})
+    async with maker() as session:
+        runtime = (await session.execute(select(WorkspaceRuntime))).scalar_one()
+        runtime.execution_json = cloud.model_dump_json()
+        await session.commit()
+    cloud_root = tmp_path / "cloud-files"
+    manifest = cloud_root / ".k41-agent/s/sk-demo/.skill-manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text('{"version":"cached"}')
+    attach = AsyncMock(return_value=cloud)
+    monkeypatch.setattr(workspaces, "attach_workspace_backend", attach)
+    async def operation(transport, op, path="", **kwargs):
+        assert transport.ref.backend == "modal"
+        return await asyncio.to_thread(run_operation, cloud_root, {"op": op, "path": path, **kwargs})
+    monkeypatch.setattr(WorkspacePackageIO, "_operation", operation)
+    binding = await service.binding(project["id"])
+    execution = WorkspacePackageIO(binding, execution=True)
+    content, _ = await execution.read(".k41-agent/s/sk-demo/.skill-manifest.json")
+    assert content == b'{"version":"cached"}'
+    attach.assert_awaited_once()
+    with pytest.raises(FileNotFoundError):
+        await service.read_saved(project["id"], ".k41-agent/s/sk-demo/.skill-manifest.json")
+    service.active.clear()
+
+
+@pytest.mark.asyncio
+async def test_lazy_first_coding_tool_restores_pinned_skill_cache_before_preparation(project_service, monkeypatch, tmp_path):
+    from agent.modules.skills.package_io import WorkspacePackageIO
+    from agent.modules.skills.package_worker import DEFAULT_LIMITS, pack_directory, run_operation
+    from agent.modules.skills.sources import workspace_key
+    from agent.modules.tools.coding.adapter import SCHEMAS, prepare_tool_batch
+    from agent.modules.tools.coding.models import ToolDefinition
+    from agent.modules.tools.coding.service import get_coding_service
+    import agent.modules.workspaces as workspaces
+
+    service, project, root, maker = project_service
+    await service.ensure(project["id"])
+    service.active.clear()
+    cloud = WorkspaceRef(backend="modal", locator="sb-live", metadata={"root": "/workspace"})
+    async with maker() as session:
+        runtime = (await session.execute(select(WorkspaceRuntime))).scalar_one()
+        runtime.execution_json = cloud.model_dump_json()
+        await session.commit()
+    binding = await service.binding(project["id"])
+    packages = service.container.skill_packages
+    source = tmp_path / "pinned-package"
+    source.mkdir()
+    (source / "SKILL.md").write_text("---\nname: demo\ndescription: Saved skill.\n---\nRead the bundled asset.")
+    (source / "asset.bin").write_bytes(b"\x00\xff")
+    version = packages.snapshots.retain(pack_directory(source), "lazy-tool")
+    destination = packages.execution_destination(binding.execution, version)
+    entry = {"id": "a" * 32, "version": version, "name": "demo", "agent_name": "default",
+             "workspace_key": workspace_key(binding.execution), "content": "Pinned instructions.",
+             "skill_root": f"/workspace/{destination}", "workspace_root": "/workspace",
+             "source": {"scope": "project", "directory": ".agents/skills/demo"},
+             "execution_mode": "snapshot", "package_path": destination, "shell": "/bin/sh"}
+    cloud_root = tmp_path / "cloud-execution"
+    cloud_root.mkdir()
+    (cloud_root / "file.txt").write_text("original")
+    attach = AsyncMock(return_value=cloud)
+    monkeypatch.setattr(workspaces, "attach_workspace_backend", attach)
+    async def operation(transport, op, path="", **kwargs):
+        return await asyncio.to_thread(run_operation, cloud_root,
+                                      {"op": op, "path": path, "limits": DEFAULT_LIMITS, **kwargs})
+    monkeypatch.setattr(WorkspacePackageIO, "_operation", operation)
+    capture = service.transfer.capture
+    async def capture_cloud(ref, store, key):
+        return await capture(WorkspaceRef(locator=str(cloud_root)), store, key)
+    monkeypatch.setattr(service.transfer, "capture", capture_cloud)
+    coding = get_coding_service(service.container)
+    prepared = AsyncMock(return_value=None)
+    monkeypatch.setattr(coding, "prepare_batch", prepared)
+    runtime = SimpleNamespace(context={"workspace": binding.execution, "agent_name": "default"},
+                              state={"active_skills": {"demo": entry}},
+                              config={"configurable": {"thread_id": "api_lazy_tool"}})
+    definition = ToolDefinition("bash", "Execute", SCHEMAS["bash"], AsyncMock())
+    assert not (cloud_root / destination).exists()
+    attach.assert_not_awaited()
+    try:
+        assert await prepare_tool_batch([SimpleNamespace(name="bash", coding_definition=definition)],
+                                        [{"id": "first-tool", "name": "bash", "args": {"command": "echo ready"}}], runtime) is None
+        assert (cloud_root / destination / "asset.bin").read_bytes() == b"\x00\xff"
+        prepared.assert_awaited_once()
+        context = prepared.call_args.args[0][0].context
+        assert context.skill_roots == (f"/workspace/{destination}",)
+        assert context.locator == "sb-live"
+        definition.execute.assert_not_awaited()
+    finally:
+        service.active.clear()
+        await coding.processes.close()
+        await coding.storage.close()
+
+
+@pytest.mark.asyncio
 async def test_provision_confirmation_refuses_disabled_backend(project_service, monkeypatch):
     service, project, root, maker = project_service
     await service.ensure(project["id"])
@@ -226,7 +625,7 @@ async def test_batch_preparation_recovers_runtime_before_authorization(project_s
     monkeypatch.setattr(runtimes, "attach_workspace_backend", attach)
     monkeypatch.setattr(runtimes, "create_workspace_backend", create)
     monkeypatch.setattr(service.transfer, "restore", restore)
-    # Recreating a paid runtime is a user decision; pop up the pending recovery note.
+    # The first tool restores the selected backend before authorization.
     original_bool = service.container.config_service.get_bool
     monkeypatch.setattr(service.container.config_service, "get_bool", lambda key, default=False:
                         True if key == "workspace.modal.enabled" else original_bool(key, default))
@@ -250,15 +649,6 @@ async def test_batch_preparation_recovers_runtime_before_authorization(project_s
     args = {"path": "file.txt", **({"content": "updated"} if name == "write" else {})}
     context = InvocationContext("test", "/workspace", thread_id, tool_call_id="call", backend="modal", locator="expired")
     invocations = [CodingInvocation(definition, args, context)]
-    # The dead sandbox stops the batch; recreating a paid runtime is the user's call.
-    stopped = await coding.prepare_batch(invocations)
-    assert stopped is not None and stopped.status == "error"
-    assert "no longer available" in stopped.content
-    create.assert_not_awaited()
-    _, _, runtime = await service.rows(project["id"])
-    assert runtime.status == "unavailable"
-    await service.confirm_provision(project["id"], "restore", runtime.generation)
-    create.assert_awaited_once()
     try:
         assert await coding.prepare_batch(invocations) is None
         create.assert_awaited_once()
@@ -858,7 +1248,7 @@ async def test_managed_commands_report_save_failure_without_reexecution(project_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("phase", ["resolve", "ensure", "submit"])
+@pytest.mark.parametrize("phase", ["resolve", "submit"])
 @pytest.mark.parametrize("code,status", [(None, 404), ("workspace_conflict", 409), ("migration_required", 409),
                                         ("writes_blocked", 409), ("missing_data", 410)])
 async def test_task_submission_maps_project_errors(project_service, monkeypatch, phase, code, status):
@@ -871,13 +1261,14 @@ async def test_task_submission_maps_project_errors(project_service, monkeypatch,
     find = AsyncMock(return_value=binding)
     ensure = AsyncMock(return_value=binding)
     if phase != "submit":
-        (find if phase == "resolve" else ensure).side_effect = error
+        find.side_effect = error
     monkeypatch.setattr(projects, "get_project_workspace_service", lambda: SimpleNamespace(find_binding=find, ensure=ensure))
     submit = AsyncMock(side_effect=error if phase == "submit" else None)
     monkeypatch.setattr(tasks, "get_background_task_manager", lambda: SimpleNamespace(submit=submit))
     with pytest.raises(HTTPException) as failure:
         await tasks.submit_background_task(tasks.SubmitTaskBody(request="Work", workspace=binding.execution if phase == "submit" else binding))
     assert failure.value.status_code == status
+    ensure.assert_not_awaited()
     if phase == "submit":
         submit.assert_awaited_once()
         find.assert_not_awaited()

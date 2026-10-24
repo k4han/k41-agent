@@ -332,7 +332,7 @@ class BackgroundTaskManager:
             projects = get_project_workspace_service()
             owned = await projects.find_binding(workspace)
             if owned:
-                workspace = (await projects.ensure(owned.project_id, owned.project_workspace_id)).execution
+                workspace = owned.execution
 
         task = BackgroundTask(
             request=request,
@@ -570,7 +570,7 @@ class BackgroundTaskManager:
         projects = get_project_workspace_service()
         binding = await projects.find_binding(task.workspace, thread_id=task.thread_id)
         if binding:
-            task.workspace = (await projects.ensure(binding.project_id, binding.project_workspace_id)).execution
+            task.workspace = binding.execution
 
         async for event in run_fn(
             user_input=task.request,

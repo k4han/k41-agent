@@ -757,6 +757,18 @@ try {
   await click('.composer-runtime-picker button.btn-primary');
   await until(() => js('document.querySelector(".composer-runtime-picker [role=alert]")?.textContent.includes("Another conversation")'), 'busy workspace error shown');
   assert.equal(await js('document.querySelector(".composer-workspace-backend").textContent.includes("Daytona")'), true, 'failed switch retains current backend');
+  await escape();
+  runtimePayload = { ...runtimePayload, runtime: { status: 'unavailable', generation: 2, transition: null,
+    decision: { reason: 'sandbox_lost', backend: 'daytona' } } };
+  await js(`window.dispatchEvent(new CustomEvent('k41:workspace-runtime-changed', { detail: { project_workspace_id: 51 } }))`);
+  await until(() => js(`document.querySelector('.thread-banner')?.textContent.includes('restored automatically')`), 'lost runtime describes deferred execution');
+  assert.equal(await js('document.querySelector(".chat-prompt-input").disabled'), false, 'lost sandbox must not block conversation input');
+  composerScenario = true;
+  const resolutionsBeforeQuestion = workspaceResolutions.length;
+  await send('Explain this project without running commands.');
+  assert.equal(sentMessages.at(-1).thread_id, 'workspace-chat');
+  assert.equal(sentMessages.at(-1).workspace.locator, 'switched-sandbox');
+  assert.equal(workspaceResolutions.length, resolutionsBeforeQuestion, 'a resumed question must not resolve execution');
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log(process.argv.includes('--runtime-only')
     ? 'PASS: shared workspace backend switching, progress, preserved history, reload, and busy workspace errors.'

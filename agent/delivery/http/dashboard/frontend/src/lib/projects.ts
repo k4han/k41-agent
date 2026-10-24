@@ -1,8 +1,8 @@
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { navProjectsStore } from "@/lib/navProjectsStore";
-import { apiFetch, postJson } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
-import type { WorkspaceBinding, WorkspaceRef } from "@/types";
+import type { ProjectSummary, WorkspaceBinding, WorkspaceRef } from "@/types";
 
 export function notifyProjectsChanged() {
   void navProjectsStore.refreshProjects();
@@ -16,7 +16,7 @@ export function projectChatState(workspace: WorkspaceRef | WorkspaceBinding) {
 
 export async function verifyProjectWorkspace(workspace: WorkspaceRef, projectId?: number): Promise<WorkspaceRef | WorkspaceBinding> {
   if (projectId) {
-    const result = await postJson<{ workspace: WorkspaceBinding }>(`${API_PATHS.projects}/${projectId}/runtime/ensure`, {});
+    const result = await apiFetch<ProjectSummary>(`${API_PATHS.projects}/${projectId}`);
     return result.workspace;
   }
   const params = new URLSearchParams({ backend: workspace.backend, locator: workspace.locator });

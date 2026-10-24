@@ -111,6 +111,20 @@ async def prepare_tool_batch(tools, calls, runtime) -> ToolResult | None:
     service = get_coding_service()
     invocations = []
     try:
+        state = getattr(runtime, "state", None) or {}
+        from agent.modules.tools.builtin.workspace import get_workspace
+        if state.get("active_skills") and get_workspace(runtime).backend != "local":
+            from agent.modules.skills import get_skill_packages
+            from agent.modules.tools.runtime.context import ToolContext
+            packages = get_skill_packages()
+            tool_context = ToolContext.from_runtime(runtime)
+            active = dict(state["active_skills"])
+            for key, entry in active.items():
+                if packages.authorize_active(entry, workspace=tool_context.workspace_or_dir, agent_name=tool_context.agent_name,
+                                             allowed_names=get_context_value(getattr(runtime, "context", None), "allowed_skill_names", None)):
+                    active[key] = await packages.restore(entry, workspace=tool_context.workspace_or_dir,
+                                                         thread_id=tool_context.thread_id or "")
+            state["active_skills"] = active
         for call in calls:
             definition = definitions.get(call["name"])
             if definition is not None:

@@ -412,7 +412,7 @@ async def ensure_workspace_ready(
     projects = get_project_workspace_service()
     binding = await projects.find_binding(workspace, thread_id=thread_id)
     if binding:
-        binding = await projects.ensure(binding.project_id, binding.project_workspace_id)
+        binding = await projects.ensure(binding.project_id, binding.project_workspace_id, recover=True)
         if thread_id:
             await remember_thread_workspace_ref(thread_id, binding)
         return binding.execution

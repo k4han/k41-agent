@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import posixpath
+import warnings
 from datetime import datetime, timedelta, timezone
 from importlib.machinery import ModuleSpec
 from types import SimpleNamespace
@@ -38,6 +39,7 @@ from agent.modules.workspaces.metadata_cache import clear_workspace_metadata_cac
 from agent.modules.workspaces.migrations import migrate_workspace_tables
 from agent.modules.workspaces.modal_backend import (
     ModalWorkspaceBackend,
+    _is_modal_unavailable_error,
     delete_modal_workspace,
     resolve_modal_path,
 )
@@ -1278,6 +1280,46 @@ def test_modal_backend_changes_reports_unavailable_sandbox():
             await backend.changes()
 
     asyncio.run(_run())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", ["sandbox has already finished", ""])
+async def test_modal_exec_reports_sdk_not_found_without_deprecation(message):
+    modal_errors = pytest.importorskip("modal.exception")
+    error = modal_errors.NotFoundError(message)
+
+    async def fail_exec(*args, **kwargs):
+        raise error
+
+    workspace = WorkspaceRef(backend="modal", locator="sb-expired")
+    sandbox = SimpleNamespace(exec=SimpleNamespace(aio=fail_exec))
+    backend = ModalWorkspaceBackend(workspace, sandbox=sandbox)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(WorkspaceUnavailableError) as caught:
+            await backend.ensure_git()
+    assert caught.value.backend == "modal"
+    assert caught.value.locator == "sb-expired"
+    assert caught.value.__cause__ is error
+
+
+@pytest.mark.parametrize("strict_not_found", [False, True])
+@pytest.mark.parametrize("error_name", [
+    "PermissionDeniedError", "AuthError", "ConflictError", "ServiceError",
+    "SandboxFilesystemNotFoundError",
+])
+def test_modal_other_sdk_errors_do_not_trigger_recovery_or_deprecation(error_name, strict_not_found):
+    modal_errors = pytest.importorskip("modal.exception")
+    error = getattr(modal_errors, error_name)("Resource unavailable")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert not _is_modal_unavailable_error(error, strict_not_found=strict_not_found)
+
+
+def test_modal_finished_message_is_unavailable():
+    assert _is_modal_unavailable_error(RuntimeError("sandbox has already finished"))
+    assert not _is_modal_unavailable_error(FileNotFoundError("sandbox file not found"))
+    assert not _is_modal_unavailable_error(RuntimeError("temporary network failure"))
 
 
 @pytest.mark.asyncio

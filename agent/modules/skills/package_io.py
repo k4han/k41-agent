@@ -7,7 +7,7 @@ import base64
 import hashlib
 import json
 import logging
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import shlex
 import time
 import uuid
@@ -19,11 +19,12 @@ logger = logging.getLogger(__name__)
 
 
 class WorkspacePackageIO:
-    def __init__(self, workspace, *, thread_id: str | None = None, boundary: str | None = None):
+    def __init__(self, workspace, *, thread_id: str | None = None, boundary: str | None = None, execution: bool = False):
         self.ref = resolve_workspace_ref(workspace)
         self.thread_id = thread_id
         self.boundary = boundary
         self.project_managed = False
+        self.execution = execution
 
     async def operation(self, op: str, path: str = "", **kwargs) -> dict:
         from agent.modules.projects import get_project_workspace_service, ProjectWorkspaceError
@@ -35,27 +36,15 @@ class WorkspacePackageIO:
         self.ref = binding.execution
         mutations = {"write", "mkdir", "delete", "rename", "rename_package", "install"}
         readonly = {"scan", "read", "resources", "tree", "archive", "versions"}
-        if op in readonly:
+        if op in readonly and not self.execution:
             kwargs["require_existing_workspace"] = True
+            if self.ref.backend != "local":
+                return await self._saved_operation(projects, binding, op, path, **kwargs)
             try:
                 return await self._operation(op, path, **kwargs)
             except (WorkspaceUnavailableError, NotADirectoryError):
-                if op == "read":
-                    content, metadata = await projects.read_saved(binding.project_id, path, binding.project_workspace_id,
-                        max_bytes=kwargs.get("limits", {}).get("max_file_bytes", 64 * 1024 * 1024))
-                    return {"data": base64.b64encode(content).decode(), "version": hashlib.sha256(content).hexdigest(),
-                            "size": len(content), **metadata}
-                async with projects.saved_view(binding.project_id, binding.project_workspace_id) as view:
-                    original = self.ref
-                    self.ref = view
-                    try:
-                        result = await self._operation(op, path, **kwargs)
-                        result["saved_revision"] = view.metadata["saved_revision"]
-                        result["last_saved_at"] = view.metadata["last_saved_at"]
-                        return result
-                    finally:
-                        self.ref = original
-        binding = await projects.ensure(binding.project_id, binding.project_workspace_id)
+                return await self._saved_operation(projects, binding, op, path, **kwargs)
+        binding = await projects.ensure(binding.project_id, binding.project_workspace_id, recover=True)
         self.ref = binding.execution
         if op not in mutations:
             return await self._operation(op, path, **kwargs)
@@ -74,6 +63,31 @@ class WorkspacePackageIO:
             except ProjectWorkspaceError as exc:
                 result["persistence"] = {"status": "error", "saved": False, "message": str(exc)}
             return result
+
+    async def _saved_operation(self, projects, binding, op, path, **kwargs):
+        if op == "read" and self.boundary is None:
+            raw = str(path).replace("\\", "/")
+            logical = PurePosixPath(raw)
+            if logical.is_absolute() or PureWindowsPath(raw).drive or ".." in logical.parts or ":" in raw or "\x00" in raw or str(logical) == ".":
+                raise ValueError("Path escapes the package root.")
+            try:
+                content, metadata = await projects.read_saved(binding.project_id, logical.as_posix(), binding.project_workspace_id,
+                    max_bytes=kwargs.get("limits", {}).get("max_file_bytes", 64 * 1024 * 1024))
+            except FileNotFoundError:
+                pass  # Materialized reads also support internal symlinks.
+            else:
+                return {"data": base64.b64encode(content).decode(), "version": hashlib.sha256(content).hexdigest(),
+                        "size": len(content), **metadata}
+        async with projects.saved_view(binding.project_id, binding.project_workspace_id) as view:
+            original = self.ref
+            self.ref = view
+            try:
+                result = await self._operation(op, path, **kwargs)
+                result["saved_revision"] = view.metadata["saved_revision"]
+                result["last_saved_at"] = view.metadata["last_saved_at"]
+                return result
+            finally:
+                self.ref = original
 
     async def _operation(self, op: str, path: str = "", **kwargs) -> dict:
         from agent.shared.config import get_config_service

@@ -236,11 +236,18 @@ async def list_modal_cloud_sandboxes() -> list[dict[str, Any]]:
 
     modal = get_modal_module()
     try:
-        iterator = modal.Sandbox.list.aio(client=client)
+        _enabled, _token_id, _token_secret, app_name, *_ = _config()
+        app = await modal.App.lookup.aio(app_name, client=client)
+    except Exception as exc:
+        logger.warning("Modal App.lookup failed for list_sandboxes: %s", exc)
+        return []
+
+    try:
+        iterator = modal.Sandbox.list.aio(app_id=app.app_id, client=client)
         items = [item async for item in iterator]
     except AttributeError:
         try:
-            iterator = modal.Sandbox.list(client=client)
+            iterator = modal.Sandbox.list(app_id=app.app_id, client=client)
             items = list(iterator)
         except Exception as exc:
             logger.warning("Modal Sandbox.list failed: %s", exc)
@@ -478,6 +485,7 @@ def _is_modal_unavailable_error(
         "already shut down",
         "idle timeout",
         "task has already finished",
+        "sandbox has already finished",
     )
     if any(marker in message for marker in unavailable_markers):
         return True
@@ -485,6 +493,16 @@ def _is_modal_unavailable_error(
         return True
     if "not a valid sandbox id" in message:
         return True
+    try:
+        from modal.exception import Error as ModalError, NotFoundError
+    except ImportError:
+        pass
+    else:
+        if isinstance(exc, NotFoundError):
+            return True
+        # Modal's legacy gRPC attributes emit deprecation warnings when read.
+        if isinstance(exc, ModalError):
+            return False
     status = getattr(exc, "status", None)
     if status is None:
         status = getattr(exc, "status_code", None)
