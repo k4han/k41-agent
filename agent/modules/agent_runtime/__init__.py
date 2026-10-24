@@ -9,8 +9,8 @@ from agent.modules.agent_runtime.active_sessions import (
 )
 
 
-def get_active_session_registry() -> ActiveSessionRegistry:
-    return active_sessions.get_active_session_registry()
+def get_active_session_registry(*args, **kwargs) -> ActiveSessionRegistry:
+    return active_sessions.get_active_session_registry(*args, **kwargs)
 from agent.modules.agent_runtime.runner import (
     build_run_params,
     clear_agent_session,

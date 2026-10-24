@@ -296,8 +296,8 @@ from agent.modules.tools.coding.contracts import InvocationContext
 from agent.modules.tools.coding.remote import coding_authorization_scope
 from agent.modules.tools.coding import service as _coding_service_module
 
-def get_coding_service():
-    return _coding_service_module.get_coding_service()
+def get_coding_service(*args, **kwargs):
+    return _coding_service_module.get_coding_service(*args, **kwargs)
 from agent.modules.tools.coding.permissions import pending_permission_requests, permission_request_event
 from agent.modules.tools.coding.storage import bounded_text as bound_tool_text
 from agent.modules.tools.coding.storage import conversation_key
