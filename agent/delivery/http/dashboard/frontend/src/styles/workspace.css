@@ -786,6 +786,9 @@ body.workspace-row-resizing .workspace-explorer * {
 }
 
 @media (max-width: 480px) {
+  .workspace-fullscreen-btn {
+    display: none !important;
+  }
   .workspace-explorer .workspace-primary-tabs {
     flex: 1 1 auto;
     max-width: none;

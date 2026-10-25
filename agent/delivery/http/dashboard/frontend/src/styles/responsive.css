@@ -256,6 +256,11 @@
     display: none;
   }
 
+  /* Workspace drawer is already full-screen in mobile/drawer mode */
+  .workspace-fullscreen-btn {
+    display: none !important;
+  }
+
   .workspace-explorer {
     height: 100%;
     min-height: 0;

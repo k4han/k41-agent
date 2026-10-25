@@ -234,6 +234,12 @@ export function ChatPage() {
 
   const explorer = useWorkspaceExplorer(() => chatShellRef);
 
+  createEffect(() => {
+    if (isDrawerActive() && explorer.fullscreen()) {
+      explorer.setFullscreen(false);
+    }
+  });
+
   const validCards = createMemo(() => (data()?.cards || []).filter((card) => card.valid && !card.internal));
   const agentOptions = createMemo(() =>
     validCards().map((card) => ({
@@ -2079,7 +2085,7 @@ export function ChatPage() {
                 visible={explorer.open()}
                 fullscreen={explorer.fullscreen()}
                 splitView={true}
-                onToggleFullscreen={explorer.toggleFullscreen}
+                onToggleFullscreen={isDrawerActive() ? undefined : explorer.toggleFullscreen}
                 running={conversationBusy()}
                 threadId={currentThreadId()}
                 workingDir={workingDir()}
