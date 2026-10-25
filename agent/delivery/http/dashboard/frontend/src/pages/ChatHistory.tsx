@@ -218,11 +218,18 @@ export function ChatHistoryListPage() {
         if (!current) {
           return current;
         }
+        const existing = current.threads.find((item) => item.thread_id === updated.thread_id);
+        const merged: ThreadSummary = {
+          ...existing,
+          ...updated,
+          updated_at: updated.updated_at || new Date().toISOString(),
+        };
         return {
           ...current,
-          threads: current.threads.map((thread) =>
-            thread.thread_id === updated.thread_id ? { ...thread, ...updated } : thread,
-          ),
+          threads: [
+            merged,
+            ...current.threads.filter((item) => item.thread_id !== updated.thread_id),
+          ],
         };
       });
       cancelRenameThread();
@@ -243,11 +250,18 @@ export function ChatHistoryListPage() {
       if (!current || !current.threads.some((item) => item.thread_id === threadId)) {
         return current;
       }
+      const existing = current.threads.find((item) => item.thread_id === threadId)!;
+      const updated: ThreadSummary = {
+        ...existing,
+        title,
+        updated_at: new Date().toISOString(),
+      };
       return {
         ...current,
-        threads: current.threads.map((item) =>
-          item.thread_id === threadId ? { ...item, title } : item,
-        ),
+        threads: [
+          updated,
+          ...current.threads.filter((item) => item.thread_id !== threadId),
+        ],
       };
     });
   };

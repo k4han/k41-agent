@@ -59,6 +59,8 @@ export type ThreadWorkspaceGroup = {
   is_pinned?: boolean;
   status?: ProjectSummary["status"];
   workspace?: WorkspaceBinding | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type ThreadMessage = {
@@ -138,11 +140,65 @@ export function threadWorkspaceLabel(thread: ThreadSummary): string {
   return thread.workspace_label || thread.workspace.scope.label || NO_WORKSPACE_LABEL;
 }
 
+export function threadLatestTimestamp(thread: ThreadSummary): number {
+  const ts = thread.updated_at
+    ? Date.parse(thread.updated_at)
+    : thread.created_at
+      ? Date.parse(thread.created_at)
+      : 0;
+  return Number.isNaN(ts) ? 0 : ts;
+}
+
+export function sortThreadsByLatest(threads: ThreadSummary[]): ThreadSummary[] {
+  return [...threads].sort((left, right) => {
+    const leftTime = threadLatestTimestamp(left);
+    const rightTime = threadLatestTimestamp(right);
+    if (leftTime !== rightTime) {
+      return rightTime - leftTime;
+    }
+    return 0;
+  });
+}
+
+export function groupLatestTimestamp(group: ThreadWorkspaceGroup): number {
+  let latest = 0;
+  for (const thread of group.threads) {
+    const ts = threadLatestTimestamp(thread);
+    if (ts > latest) {
+      latest = ts;
+    }
+  }
+  if (latest === 0 && group.updated_at) {
+    const ts = Date.parse(group.updated_at);
+    if (!Number.isNaN(ts)) latest = ts;
+  }
+  if (latest === 0 && group.created_at) {
+    const ts = Date.parse(group.created_at);
+    if (!Number.isNaN(ts)) latest = ts;
+  }
+  return latest;
+}
+
+export function sortWorkspaceGroups<T extends ThreadWorkspaceGroup>(groups: T[]): T[] {
+  return [...groups].sort((left, right) => {
+    if (Boolean(left.is_pinned) !== Boolean(right.is_pinned)) {
+      return left.is_pinned ? -1 : 1;
+    }
+    const leftTime = groupLatestTimestamp(left);
+    const rightTime = groupLatestTimestamp(right);
+    if (leftTime !== rightTime) {
+      return rightTime - leftTime;
+    }
+    return 0;
+  });
+}
+
 export function groupThreadsByWorkspace(threads: ThreadSummary[]): ThreadWorkspaceGroup[] {
   const groups: ThreadWorkspaceGroup[] = [];
   const groupIndexes = new Map<string, number>();
 
-  threads.forEach((thread) => {
+  const sortedThreads = sortThreadsByLatest(threads);
+  sortedThreads.forEach((thread) => {
     const key = threadWorkspaceKey(thread);
     const existingIndex = groupIndexes.get(key);
     if (existingIndex !== undefined) {
@@ -158,7 +214,7 @@ export function groupThreadsByWorkspace(threads: ThreadSummary[]): ThreadWorkspa
     });
   });
 
-  return groups;
+  return sortWorkspaceGroups(groups);
 }
 
 export function toThreadTranscript(

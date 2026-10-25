@@ -449,11 +449,14 @@ class ProjectWorkspaceService:
                 await asyncio.shield(self._set_error(workspace.id, ProjectWorkspaceError("Checkpoint was interrupted.")))
             raise
         except Exception as exc:
-            if getattr(exc, "code", "") == "runtime_unavailable":
+            code = "runtime_unavailable" if isinstance(exc, WorkspaceUnavailableError) else getattr(exc, "code", "persistence_error")
+            if code == "runtime_unavailable":
                 self.active.discard(workspace.id)
-            if getattr(exc, "code", "") != "stale_runtime":
+                if ref.backend != "local":
+                    await self._record_provision_decision(project, workspace, runtime)
+            if code != "stale_runtime":
                 await self._set_error(workspace.id, exc)
-            raise ProjectWorkspaceError(str(exc), getattr(exc, "code", "persistence_error")) from exc
+            raise ProjectWorkspaceError(str(exc), code) from exc
 
     async def checkpoint(self, project_id: int, workspace_id: int | None = None, *, generation: int | None = None,
                          skip_unchanged: bool = False):
@@ -1009,8 +1012,11 @@ class ProjectWorkspaceService:
                     if self.lock(workspace_id).locked() or workspace_id in self.switcher.switching:
                         continue
                     await self.checkpoint(workspace.project_id, workspace_id, skip_unchanged=True)
-                except Exception:
-                    logger.warning("Periodic checkpoint failed workspace=%s", workspace_id, exc_info=True)
+                except Exception as exc:
+                    if isinstance(exc, ProjectWorkspaceError) and exc.code == "runtime_unavailable":
+                        logger.info("Periodic checkpoint stopped for unavailable runtime workspace=%s: %s", workspace_id, exc)
+                    else:
+                        logger.warning("Periodic checkpoint failed workspace=%s", workspace_id, exc_info=True)
 
     async def capture_pending(self):
         session = await _session()

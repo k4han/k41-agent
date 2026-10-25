@@ -64,7 +64,12 @@ are monitored independently of output reads. Periodic checkpoints run every
 Ready workspaces remain monitored so external edits are saved even without an
 attached conversation. This still scans filesystem metadata every 30 seconds;
 unchanged files are not reread or rehashed. Unavailable and retired runtimes leave
-the monitoring set. Remote GitHub commit/push runs as one managed mutation.
+the monitoring set. After a host restart, a stored `ready` status does not guarantee
+that its cloud sandbox is still alive. When checkpointing detects an expired
+sandbox, it records the runtime as unavailable, preserves the saved revision and
+stops monitoring it. This does not provision a replacement in the background;
+the next execution request restores the files into a new sandbox on demand.
+Remote GitHub commit/push runs as one managed mutation.
 Missing local checkpoint roots report their registered path. After restoring
 the directory, a successful checkpoint retry resumes monitoring.
 

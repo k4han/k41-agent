@@ -173,18 +173,18 @@ export function AppShell(props: {
     
     invalidateSessions();
 
+    const now = new Date().toISOString();
     const exists = historyThreads().some((t) => t.thread_id === threadId);
     if (exists) {
+      const existing = historyThreads().find((t) => t.thread_id === threadId)!;
+      const updatedThread: ThreadSummary = {
+        ...existing,
+        agent_name: agent_name || existing.agent_name,
+        updated_at: now,
+        ...workspaceSummary,
+      };
       applyHistoryState({
-        threads: historyThreads().map((thread) => (
-          thread.thread_id === threadId
-            ? {
-                ...thread,
-                agent_name: agent_name || thread.agent_name,
-                ...workspaceSummary,
-              }
-            : thread
-        )),
+        threads: [updatedThread, ...historyThreads().filter((t) => t.thread_id !== threadId)],
       });
     } else {
       if (workspace === undefined) {
@@ -202,8 +202,8 @@ export function AppShell(props: {
         agent_name: agent_name || "default",
         ...workspaceSummary,
         kind: "interactive",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        created_at: now,
+        updated_at: now,
       };
       applyHistoryState({
         threads: [placeholderThread, ...historyThreads()],
@@ -224,9 +224,16 @@ export function AppShell(props: {
     const { threadId, agent_name } = (event as CustomEvent<{ threadId: string; agent_name: string }>).detail;
     if (!threadId || !agent_name) return;
     const threads = historyThreads();
-    if (!threads.some((thread) => thread.thread_id === threadId)) return;
+    const existing = threads.find((thread) => thread.thread_id === threadId);
+    if (!existing) return;
+    const now = new Date().toISOString();
+    const updatedThread: ThreadSummary = {
+      ...existing,
+      agent_name,
+      updated_at: now,
+    };
     applyHistoryState({
-      threads: threads.map((thread) => thread.thread_id === threadId ? { ...thread, agent_name } : thread),
+      threads: [updatedThread, ...threads.filter((thread) => thread.thread_id !== threadId)],
     });
   };
 
@@ -238,14 +245,19 @@ export function AppShell(props: {
     }
 
     const threads = historyThreads();
-    if (!threads.some((item) => item.thread_id === threadId)) {
+    const existing = threads.find((item) => item.thread_id === threadId);
+    if (!existing) {
       return;
     }
 
+    const now = new Date().toISOString();
+    const updatedThread: ThreadSummary = {
+      ...existing,
+      title,
+      updated_at: now,
+    };
     applyHistoryState({
-      threads: threads.map((item) =>
-        item.thread_id === threadId ? { ...item, title } : item,
-      ),
+      threads: [updatedThread, ...threads.filter((item) => item.thread_id !== threadId)],
     });
   };
 

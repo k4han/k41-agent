@@ -1064,6 +1064,131 @@ async def test_restart_resumes_checkpoints_and_shutdown_saves_live_files(project
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["modal", "daytona"])
+async def test_restart_detects_expired_cloud_checkpoint_and_restores_on_demand(
+    project_service, monkeypatch, tmp_path, caplog, backend,
+):
+    import agent.modules.workspaces as workspaces
+
+    service, project, root, maker = project_service
+    before = await service.ensure(project["id"])
+    _, saved, _ = await service.rows(project["id"])
+    expired = WorkspaceRef(backend=backend, locator="expired", metadata={"root": "/workspace"})
+    replacement = expired.model_copy(update={"locator": "replacement"})
+    async with maker() as session:
+        runtime = (await session.execute(select(WorkspaceRuntime))).scalar_one()
+        runtime.execution_json = expired.model_dump_json()
+        await session.commit()
+    service.active.clear()
+    restarted = ProjectWorkspaceService(service.container, storage=service.storage)
+    unavailable = WorkspaceUnavailableError("Sandbox has already finished", backend=backend, locator=expired.locator)
+    remote = AsyncMock(side_effect=unavailable)
+    monkeypatch.setattr(restarted.transfer, "_backend", remote)
+    create = AsyncMock(return_value=replacement)
+    attach = AsyncMock(return_value=replacement)
+    monkeypatch.setattr(workspaces, "create_workspace_backend", create)
+    monkeypatch.setattr(workspaces, "attach_workspace_backend", attach)
+    original_bool = service.container.config_service.get_bool
+    monkeypatch.setattr(service.container.config_service, "get_bool", lambda key, default=False:
+                        True if key == f"workspace.{backend}.enabled" else original_bool(key, default))
+    completed = asyncio.Event()
+    checkpoint = restarted.checkpoint
+    failures = []
+
+    async def record_checkpoint(*args, **kwargs):
+        try:
+            return await checkpoint(*args, **kwargs)
+        except ProjectWorkspaceError as exc:
+            failures.append(exc)
+            raise
+        finally:
+            completed.set()
+
+    monkeypatch.setattr(restarted, "checkpoint", record_checkpoint)
+    restored = tmp_path / "restored"
+
+    async def restore(ref, store, key, revision):
+        assert (await restarted.rows(project["id"]))[2].status == "restoring"
+        await asyncio.to_thread(restarted.transfer.materialize, store, key, revision, restored)
+
+    transfer = AsyncMock(side_effect=restore)
+    monkeypatch.setattr(restarted.transfer, "restore", transfer)
+    caplog.set_level("INFO", logger="agent.modules.projects.workspaces")
+    restarted.checkpoint_requested.set()
+    restarted.start()
+    try:
+        await asyncio.wait_for(completed.wait(), timeout=10)
+        assert len(failures) == 1 and failures[0].code == "runtime_unavailable"
+        assert before.project_workspace_id not in restarted.active
+        _, workspace, runtime = await restarted.rows(project["id"])
+        assert runtime.status == "unavailable"
+        assert runtime.generation == before.runtime_generation
+        assert json.loads(runtime.pending_decision_json)["reason"] == "sandbox_lost"
+        assert workspace.head_revision == saved.head_revision
+        assert workspace.previous_revision == saved.previous_revision
+        assert workspace.last_saved_at == saved.last_saved_at
+        assert workspace.persistence_status == "error"
+        assert (await restarted.read_saved(project["id"], "file.txt"))[0] == b"original"
+        create.assert_not_awaited()
+        attach.assert_not_awaited()
+        remote.assert_awaited_once_with(expired)
+        assert not any(record.exc_info for record in caplog.records if record.name == "agent.modules.projects.workspaces")
+        await restarted.close()
+
+        # A later host restart must not resume checkpointing the expired runtime.
+        completed.clear()
+        initialized = asyncio.Event()
+        wait_for_checkpoint = restarted.checkpoint_requested.wait
+
+        async def wait_after_initialization():
+            initialized.set()
+            await wait_for_checkpoint()
+
+        monkeypatch.setattr(restarted.checkpoint_requested, "wait", wait_after_initialization)
+        restarted.start()
+        await asyncio.wait_for(initialized.wait(), timeout=10)
+        assert before.project_workspace_id not in restarted.active
+        assert not completed.is_set()
+        remote.assert_awaited_once()
+        create.assert_not_awaited()
+
+        bindings = await asyncio.gather(*(restarted.ensure(project["id"], recover=True) for _ in range(4)))
+        assert all(binding.project_workspace_id == before.project_workspace_id for binding in bindings)
+        assert all(binding.runtime_generation == before.runtime_generation + 1 for binding in bindings)
+        assert all(binding.execution.backend == backend and binding.execution.locator == replacement.locator for binding in bindings)
+        create.assert_awaited_once_with(backend, label=expired.label)
+        transfer.assert_awaited_once()
+        assert (restored / "file.txt").read_bytes() == b"original"
+        _, workspace, runtime = await restarted.rows(project["id"])
+        assert runtime.status == "ready" and runtime.pending_decision_json == "{}"
+        assert workspace.persistence_status == "clean" and workspace.last_error == ""
+    finally:
+        restarted.active.clear()
+        await restarted.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [TimeoutError("RPC timed out"), OSError("Connection lost"), FileNotFoundError("Project entry disappeared")])
+async def test_transient_cloud_checkpoint_failure_keeps_runtime_for_retry(project_service, monkeypatch, error):
+    service, project, root, maker = project_service
+    binding = await service.ensure(project["id"])
+    _, saved, _ = await service.rows(project["id"])
+    async with maker() as session:
+        runtime = (await session.execute(select(WorkspaceRuntime))).scalar_one()
+        runtime.execution_json = WorkspaceRef(backend="modal", locator="live", metadata={"root": "/workspace"}).model_dump_json()
+        await session.commit()
+    monkeypatch.setattr(service.transfer, "_backend", AsyncMock(side_effect=error))
+    with pytest.raises(ProjectWorkspaceError) as failure:
+        await service.checkpoint(project["id"], skip_unchanged=True)
+    assert failure.value.code == "persistence_error"
+    assert binding.project_workspace_id in service.active
+    _, workspace, runtime = await service.rows(project["id"])
+    assert runtime.status == "ready" and runtime.pending_decision_json == "{}"
+    assert workspace.head_revision == saved.head_revision and workspace.last_saved_at == saved.last_saved_at
+    service.active.clear()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("fail_save", [False, True])
 async def test_deleting_last_conversation_keeps_project_files_and_runtime(project_service, monkeypatch, fail_save):
     import agent.modules.workspaces.repository as mappings
