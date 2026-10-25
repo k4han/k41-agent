@@ -82,6 +82,7 @@ class SandboxWorker:
         self.invocation_locks = {}
         self.cancelled_calls = set()
         self.active_calls = {}
+        self.filesystem_monitors = {}
 
     async def dispatch(self, request):
         token = thread_id_aliases_var.set(request.get("thread_aliases", {}))
@@ -110,6 +111,13 @@ class SandboxWorker:
             self.active_calls.pop(request_id, None)
 
     async def _dispatch(self, request):
+        if request.get("operation") == "workspace_changes":
+            from agent.modules.workspaces.filesystem_monitor import FilesystemMonitor
+            root = str(Path(request.get("workspace", self.default_root)).resolve())
+            if root not in self.filesystem_monitors:
+                self.filesystem_monitors[root] = FilesystemMonitor(root)
+            return await asyncio.to_thread(self.filesystem_monitors[root].poll, request.get("since"),
+                                           force=bool(request.get("force")))
         if request.get("operation") == "environment":
             from agent.modules.prompt_variables import get_execution_environment
 
@@ -142,6 +150,8 @@ class SandboxWorker:
             self.processes.stop_thread_now(thread_id)
             return {"stopped": len(jobs)}
         if operation == "close":
+            for monitor in self.filesystem_monitors.values():
+                monitor.close()
             await self.processes.close()
             return {"closed": True}
         if operation not in {"prepare", "execute", "retain"}:
@@ -259,6 +269,8 @@ async def serve(runtime_dir: Path, output_root: Path, default_root: str):
                 except TimeoutError:
                     pass
     finally:
+        for monitor in worker.filesystem_monitors.values():
+            monitor.close()
         await worker.processes.close()
         socket_path.unlink(missing_ok=True)
 

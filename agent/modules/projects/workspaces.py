@@ -155,6 +155,8 @@ class ProjectWorkspaceService:
         self.switcher = WorkspaceRuntimeSwitcher(self)
         from agent.modules.projects.local_sync import WorkspaceLocalSync
         self.local_sync = WorkspaceLocalSync(self)
+        from agent.modules.workspaces.host_mirror import HostMirrorService
+        self.host_mirrors = HostMirrorService(self)
 
     def lock(self, workspace_id: int) -> asyncio.Lock:
         return self.locks.setdefault(workspace_id, asyncio.Lock())
@@ -186,6 +188,7 @@ class ProjectWorkspaceService:
         return descriptions[project_id]
 
     async def describe_many(self, project_ids: list[int]) -> dict[int, dict]:
+        from agent.modules.workspaces.host_mirror import mirror_summary
         from agent.modules.projects.runtime_switch import transition_summary
         from agent.modules.projects.local_sync import local_link_summary
         if not project_ids:
@@ -204,6 +207,7 @@ class ProjectWorkspaceService:
         for project in projects:
             rows = grouped[project.id]
             workspaces = [{"id": workspace.id, "kind": workspace.kind,
+                           "host_mirror": mirror_summary(workspace),
                            "name": "main" if workspace.kind == "shared" else workspace.identity_key,
                            "local_link": local_link_summary(workspace, runtime),
                            "source": json.loads(workspace.source_json),
@@ -221,7 +225,7 @@ class ProjectWorkspaceService:
                 result["workspace"] = _binding(project, *shared).model_dump()
                 summary = next(item for item in workspaces if item["id"] == shared[0].id)
                 result.update(runtime=summary["runtime"], persistence=summary["persistence"],
-                              workspace_name=summary["name"], local_link=summary["local_link"])
+                              workspace_name=summary["name"], local_link=summary["local_link"], host_mirror=summary["host_mirror"])
             descriptions[project.id] = result
         return descriptions
 
@@ -388,7 +392,7 @@ class ProjectWorkspaceService:
             await session.commit()
 
     async def _checkpoint(self, project_id: int, workspace_id: int, generation: int | None = None,
-                          *, skip_unchanged: bool = False) -> dict:
+                          *, skip_unchanged: bool = False, passive: bool = False, sync_host: bool = True) -> dict:
         project, workspace, runtime = await self.rows(project_id, workspace_id)
         if generation is not None and generation != runtime.generation:
             raise ProjectWorkspaceError("Checkpoint belongs to an obsolete runtime.", "stale_runtime")
@@ -398,6 +402,10 @@ class ProjectWorkspaceService:
         committed = False
         try:
             ref = WorkspaceRef.model_validate_json(runtime.execution_json)
+            if ref.backend == "local":
+                await self.host_mirrors.prepare_local_capture(workspace, runtime)
+            if passive and ref.backend != "local":
+                ref.metadata["_require_running"] = True
             manifest = await self.transfer.capture(ref, self.storage, str(workspace.id))
             saved = await asyncio.to_thread(self.storage.put_manifest, str(workspace.id), manifest)
             source = WorkspaceRef.model_validate_json(workspace.source_json)
@@ -406,7 +414,8 @@ class ProjectWorkspaceService:
             if skip_unchanged and saved == revision and workspace.persistence_status == "clean" and local_revision == workspace.local_sync_revision:
                 if not self.closing and project.migration_status == "ready" and workspace.kind != "legacy" and runtime.status == "ready":
                     self.active.add(workspace.id)
-                return {"status": "clean", "revision": saved, "saved": True}
+                from agent.modules.workspaces.host_mirror import mirror_summary
+                return {"status": "clean", "revision": saved, "saved": True, "host_mirror": mirror_summary(workspace)}
             session = await _session()
             async with session:
                 runtime_check = select(WorkspaceRuntime.id).where(
@@ -425,6 +434,9 @@ class ProjectWorkspaceService:
                 self.active.add(workspace.id)
             keep = {value for value in (saved, revision, workspace.previous_revision if saved == revision else None,
                                         workspace.pinned_revision, local_revision) if value}
+            from agent.modules.workspaces.host_mirror import mirror_state
+            keep.update(value for key, value in mirror_state(workspace).items()
+                        if key in {"revision", "host_backup_revision"} and value)
             try:
                 # A cancelled thread keeps running; retain the lock until collection ends.
                 collection = asyncio.create_task(asyncio.to_thread(self.storage.collect, str(workspace.id), keep))
@@ -443,13 +455,22 @@ class ProjectWorkspaceService:
                 collection.result()
             except Exception:
                 logger.warning("Could not collect project storage workspace=%s", workspace.id, exc_info=True)
-            return {"status": "clean", "revision": saved, "saved": True}
+            try:
+                mirror = await self.host_mirrors.after_checkpoint(workspace, runtime, saved) if sync_host else None
+            except Exception as exc:
+                if getattr(exc, "code", None) == "stale_runtime":
+                    raise
+                logger.warning("Checkpoint saved but host synchronization failed workspace=%s", workspace.id, exc_info=True)
+                mirror = {"status": "error", "last_error": str(exc)}
+            return {"status": "clean", "revision": saved, "saved": True, "host_mirror": mirror}
         except asyncio.CancelledError:
             if not committed:
                 await asyncio.shield(self._set_error(workspace.id, ProjectWorkspaceError("Checkpoint was interrupted.")))
             raise
         except Exception as exc:
             code = "runtime_unavailable" if isinstance(exc, WorkspaceUnavailableError) else getattr(exc, "code", "persistence_error")
+            if passive and code == "runtime_unavailable":
+                raise ProjectWorkspaceError(str(exc), code) from exc
             if code == "runtime_unavailable":
                 self.active.discard(workspace.id)
                 if ref.backend != "local":
@@ -459,12 +480,12 @@ class ProjectWorkspaceService:
             raise ProjectWorkspaceError(str(exc), code) from exc
 
     async def checkpoint(self, project_id: int, workspace_id: int | None = None, *, generation: int | None = None,
-                         skip_unchanged: bool = False):
+                         skip_unchanged: bool = False, passive: bool = False):
         _, workspace, runtime = await self.rows(project_id, workspace_id)
         self.switcher.assert_available(workspace.id, runtime)
         async with self.lock(workspace.id):
             self.switcher.assert_available(workspace.id)
-            return await self._checkpoint(project_id, workspace.id, generation, skip_unchanged=skip_unchanged)
+            return await self._checkpoint(project_id, workspace.id, generation, skip_unchanged=skip_unchanged, passive=passive)
 
     async def ensure(self, project_id: int, workspace_id: int | None = None, *, recover: bool = False) -> WorkspaceBinding:
         """Attach execution on demand, optionally restoring a lost cloud runtime."""
@@ -501,7 +522,7 @@ class ProjectWorkspaceService:
                     if ref.backend == "local":
                         if not Path(ref.locator).is_dir():
                             if workspace.kind == "github_task" and workspace.head_revision:
-                                destination = self.runtime_root / str(workspace.id) / f"{runtime.generation + 1}-{uuid4().hex}"
+                                destination = self.host_mirrors.project_path(workspace, runtime)
                                 try:
                                     await asyncio.to_thread(self.transfer.materialize, self.storage, str(workspace.id),
                                                             workspace.head_revision, destination)
@@ -615,7 +636,10 @@ class ProjectWorkspaceService:
         from agent.modules.workspaces import create_workspace_backend, merge_ready_workspace_metadata as _merge_ready_workspace_metadata
         previous = WorkspaceRef.model_validate_json(runtime.execution_json)
         if target_backend == "local":
-            destination = self.runtime_root / str(workspace.id) / f"{runtime.generation + 1}-{uuid4().hex}"
+            mirror = await self.host_mirrors.after_checkpoint(workspace, runtime, workspace.head_revision)
+            if mirror["status"] != "synced":
+                raise ProjectWorkspaceError("Resolve host synchronization before continuing locally.", "host_sync_conflict")
+            destination = self.host_mirrors.project_path(workspace, runtime)
             replacement = WorkspaceRef(backend="local", locator=str(destination), label=previous.label)
         else:
             replacement = await create_workspace_backend(target_backend, label=previous.label)
@@ -626,19 +650,12 @@ class ProjectWorkspaceService:
         await self._publish_runtime(project, workspace, replacement, generation, "restoring")
         try:
             if target_backend == "local":
-                # Managed local directories are materialized, never "restored" over.
-                await asyncio.to_thread(self.transfer.materialize, self.storage, str(workspace.id),
-                                        workspace.head_revision, replacement.locator)
                 await self.transfer.verify(replacement, self.storage, str(workspace.id), workspace.head_revision)
             else:
                 await self.transfer.restore(replacement, self.storage, str(workspace.id), workspace.head_revision)
         except Exception as exc:
             await self._set_error(workspace.id, exc)
-            if target_backend == "local":
-                # The half-materialized directory belongs to this operation only.
-                import shutil
-                shutil.rmtree(replacement.locator, ignore_errors=True)
-            else:
+            if target_backend != "local":
                 try:
                     from agent.modules.workspaces import get_workspace_backend_registry, call_workspace_backend_loader
                     descriptor = get_workspace_backend_registry().require(replacement.backend)
@@ -725,7 +742,8 @@ class ProjectWorkspaceService:
             await session.commit()
 
     @asynccontextmanager
-    async def mutation(self, project_id: int, workspace_id: int, *, generation: int | None = None):
+    async def mutation(self, project_id: int, workspace_id: int, *, generation: int | None = None,
+                       host_only: bool = False):
         self.switcher.assert_available(workspace_id)
         async with self.lock(workspace_id):
             project, workspace, runtime = await self.rows(project_id, workspace_id)
@@ -734,18 +752,19 @@ class ProjectWorkspaceService:
                 raise ProjectWorkspaceError("The application is shutting down.", "workspace_closing")
             if project.migration_status != "ready":
                 raise ProjectWorkspaceError("Choose the main workspace before writing.", "migration_required")
-            if workspace.persistence_status == "error":
+            if not host_only and workspace.persistence_status == "error":
                 raise ProjectWorkspaceError("Workspace has unsaved changes; retry checkpoint before writing.", "writes_blocked")
             if generation is not None and runtime.generation != generation:
                 raise ProjectWorkspaceError("Execution runtime changed.", "stale_runtime")
-            if runtime.status != "ready":
+            if not host_only and runtime.status != "ready":
                 raise ProjectWorkspaceError("Restore the execution workspace before writing.", "runtime_unavailable")
-            session = await _session()
-            async with session:
-                await session.execute(update(ProjectWorkspace).where(ProjectWorkspace.id == workspace_id).values(
-                    persistence_status="dirty", updated_at=utcnow()))
-                await session.commit()
-            self.active.add(workspace_id)
+            if not host_only:
+                session = await _session()
+                async with session:
+                    await session.execute(update(ProjectWorkspace).where(ProjectWorkspace.id == workspace_id).values(
+                        persistence_status="dirty", updated_at=utcnow()))
+                    await session.commit()
+                self.active.add(workspace_id)
             yield
 
     async def persist_result(self, context, result):
@@ -970,6 +989,7 @@ class ProjectWorkspaceService:
 
     def start(self):
         self.closing = False
+        self.host_mirrors.start()
         if self.periodic_task is None:
             self.periodic_task = asyncio.create_task(self._periodic())
 
@@ -1011,7 +1031,18 @@ class ProjectWorkspaceService:
                         continue
                     if self.lock(workspace_id).locked() or workspace_id in self.switcher.switching:
                         continue
-                    await self.checkpoint(workspace.project_id, workspace_id, skip_unchanged=True)
+                    if WorkspaceRef.model_validate_json(runtime.execution_json).backend != "local":
+                        continue
+                    saved = await self.checkpoint(workspace.project_id, workspace_id, skip_unchanged=True)
+                    if (saved.get("host_mirror") or {}).get("status") == "synced":
+                        execution = WorkspaceRef.model_validate_json(runtime.execution_json)
+                        if (workspace.kind == "shared" and execution.backend == "local"
+                                and Path(execution.locator).resolve() != self.host_mirrors.project_path(workspace, runtime).resolve()):
+                            try:
+                                await self.switcher.request(workspace.project_id, "local", runtime.generation, workspace.id)
+                            except ProjectWorkspaceError as exc:
+                                if exc.code not in {"workspace_busy", "workspace_switching"}:
+                                    raise
                 except Exception as exc:
                     if isinstance(exc, ProjectWorkspaceError) and exc.code == "runtime_unavailable":
                         logger.info("Periodic checkpoint stopped for unavailable runtime workspace=%s: %s", workspace_id, exc)
@@ -1035,9 +1066,15 @@ class ProjectWorkspaceService:
             rows = (await session.execute(select(ProjectWorkspace, WorkspaceRuntime).join(
                 WorkspaceRuntime, WorkspaceRuntime.project_workspace_id == ProjectWorkspace.id,
             ))).all()
-        return {Path(ref.locator).resolve() for workspace, runtime in rows
+        from agent.modules.workspaces.host_mirror import mirror_state
+        paths = {Path(ref.locator).resolve() for workspace, runtime in rows
                 if (ref := WorkspaceRef.model_validate_json(runtime.execution_json)).backend == "local"
                 and (workspace.kind != "github_task" or not workspace.head_revision or workspace.persistence_status != "clean")}
+        paths.update(Path(state["path"]).resolve() for workspace, runtime in rows
+                     if (state := mirror_state(workspace)).get("path")
+                     and (workspace.kind != "github_task" or runtime.status != "destroyed"
+                          or not workspace.head_revision or workspace.persistence_status != "clean"))
+        return paths
 
     async def release_task_runtime(self, binding):
         _, workspace, _ = await self.rows(binding.project_id, binding.project_workspace_id)
@@ -1052,6 +1089,7 @@ class ProjectWorkspaceService:
 
     async def close(self):
         self.closing = True
+        await self.host_mirrors.close()
         await self.switcher.close()
         if self.periodic_task:
             self.periodic_task.cancel()
@@ -1063,7 +1101,10 @@ class ProjectWorkspaceService:
                 async with session:
                     workspace = await session.get(ProjectWorkspace, workspace_id)
                 if workspace:
-                    await self.checkpoint(workspace.project_id, workspace_id)
+                    _, _, runtime = await self.rows(workspace.project_id, workspace_id)
+                    from agent.modules.workspaces.host_mirror import workspace_is_running
+                    if await workspace_is_running(WorkspaceRef.model_validate_json(runtime.execution_json)):
+                        await self.checkpoint(workspace.project_id, workspace_id, passive=True)
             except Exception:
                 logger.error("Unsaved workspace retained at shutdown workspace=%s", workspace_id, exc_info=True)
 

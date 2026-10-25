@@ -79,6 +79,9 @@ type WorkspaceDiffPayload = {
 };
 
 type WorkspaceFilePayload = {
+  data_source?: "live" | "saved";
+  stale?: boolean;
+  last_saved_at?: string | null;
   root: string;
   path: string;
   mime_type: string;
@@ -614,6 +617,9 @@ export function WorkspaceExplorer(props: {
         || current.binary !== payload.binary
         || current.mime_type !== payload.mime_type
         || current.message !== payload.message
+        || current.stale !== payload.stale
+        || current.data_source !== payload.data_source
+        || current.last_saved_at !== payload.last_saved_at
       ) {
         setFilePayloads(path, reconcile(payload));
       }
@@ -1759,6 +1765,10 @@ export function WorkspaceExplorer(props: {
                 fallback={<div class="empty compact">{fileErrorByPath[activeFilePath()]}</div>}
               >
                 <Show when={activeFilePayload()}>
+                  <Show when={activeFilePayload()?.stale}><p class="hint" role="status">
+                    Showing a saved copy. The sandbox is stopped or unavailable.
+                    <Show when={activeFilePayload()?.last_saved_at}> Last saved: {new Date(activeFilePayload()!.last_saved_at!).toLocaleString()}.</Show>
+                  </p></Show>
                   <WorkspaceFilePreview
                     path={activeFilePath()}
                     content={activeFilePayload()?.content || ""}

@@ -71,6 +71,16 @@ function connect() {
   };
 
   connection.addEventListener(SESSION_EVENTS.SESSION_STARTED, (event) => upsert(event, CUSTOM_DOM_EVENTS.SESSION_STARTED));
+  connection.addEventListener(SESSION_EVENTS.WORKSPACE_FILES_CHANGED, (event) => {
+    if (source !== connection) return;
+    try {
+      const detail = JSON.parse(event.data);
+      notify(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED, detail);
+      notify(CUSTOM_DOM_EVENTS.WORKSPACE_CHANGED, { threadId: detail.thread_id });
+    } catch (error) {
+      console.error("Failed to parse workspace file event", error);
+    }
+  });
   connection.addEventListener(SESSION_EVENTS.WORKSPACE_RUNTIME_CHANGED, (event) => {
     if (source !== connection) return;
     try {

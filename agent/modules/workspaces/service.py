@@ -124,6 +124,8 @@ async def _delete_temp_workspace_directory(locator: str) -> bool:
     """
     root = temp_workspace_root()
     try:
+        if Path(locator).expanduser().is_symlink():
+            return False
         target = Path(locator).expanduser().resolve()
     except (OSError, RuntimeError):
         return False
@@ -167,9 +169,18 @@ async def cleanup_orphaned_temp_workspaces() -> dict[str, int]:
         records = {}
 
     temp_records: dict[str, dict[str, Any]] = {}
+    try:
+        for cloud_backend in ("daytona", "modal"):
+            records.update(await repo.list_by_backend(cloud_backend))
+    except Exception:
+        # Unknown cloud mappings may own local mirrors, so orphan sweeping must wait.
+        logger.warning("Skipping temporary cleanup while cloud host mappings are unavailable.", exc_info=True)
+        return stats
     for thread_id, record in records.items():
         workspace = record.get("workspace")
-        if workspace and is_temp_workspace(workspace):
+        if isinstance(workspace, dict) and workspace.get("project_workspace_id"):
+            continue
+        if workspace and (is_temp_workspace(workspace) or record.get("host_mirror")):
             temp_records[thread_id] = record
 
     root_ids = [str(thread_id).split(":sub:", 1)[0] for thread_id in temp_records]
@@ -190,16 +201,22 @@ async def cleanup_orphaned_temp_workspaces() -> dict[str, int]:
 
     referenced_names: set[str] = set()
     for thread_id, record in temp_records.items():
+        if str(thread_id).split(":sub:", 1)[0] in alive_ids:
+            execution = resolve_workspace_ref(record.get("workspace"))
+            if execution.backend == LOCAL_BACKEND:
+                referenced_names.add(Path(execution.locator).name)
+            if (record.get("host_mirror") or {}).get("path"):
+                referenced_names.add(Path(record["host_mirror"]["path"]).name)
+    for thread_id, record in temp_records.items():
         try:
             workspace = resolve_workspace_ref(record.get("workspace"))
         except Exception:  # noqa: BLE001
             continue
-        locator = workspace.locator
+        locator = workspace.locator if workspace.backend == LOCAL_BACKEND else (record.get("host_mirror") or {}).get("path")
         root_id = str(thread_id).split(":sub:", 1)[0]
         if root_id in alive_ids:
-            referenced_names.add(Path(locator).name)
             continue
-        if await _delete_temp_workspace_directory(locator):
+        if locator and Path(locator).name not in referenced_names and await _delete_temp_workspace_directory(locator):
             stats["directories_removed"] += 1
         try:
             await repo.delete(thread_id)
@@ -806,6 +823,19 @@ async def _recover_modal_thread_workspace(
     thread_id: str,
 ) -> WorkspaceRef:
     normalized_thread_id = str(thread_id or "").strip()
+    from agent.bootstrap.container import get_active_container
+    active = get_active_container()
+    if active is not None and active._persistence_ready:
+        from agent.modules.projects import get_project_workspace_service
+        try:
+            _, mirror = await get_project_workspace_service(active).host_mirrors.thread_status(normalized_thread_id)
+        except KeyError:
+            mirror = None
+        if mirror and (mirror.get("revision") or mirror.get("remote_revision")):
+            raise WorkspaceUnavailableError(
+                "The sandbox is unavailable. Recover its environment or switch to local to continue from saved workspace files.",
+                backend=ref.backend, locator=ref.locator,
+            )
     if ref.backend != MODAL_BACKEND or not normalized_thread_id:
         raise WorkspaceUnavailableError(
             (
@@ -1244,6 +1274,19 @@ async def delete_thread_workspace(thread_id: str) -> WorkspaceRef | None:
     if workspace.backend != LOCAL_BACKEND or is_temp_workspace(workspace):
         shared_workspace = await get_thread_workspace_repository().has_other_conversations(workspace, thread_id)
 
+    mirror_to_remove = None
+    if (active is not None and active._persistence_ready and workspace.backend != LOCAL_BACKEND
+            and not shared_workspace and owner_is_gone):
+        try:
+            mirrors = get_project_workspace_service().host_mirrors
+            rows, state = await mirrors.thread_status(thread_id)
+            await mirrors._poll_threads(rows, force=True)
+            _, state = await mirrors.thread_status(thread_id)
+            if state and state.get("status") == "synced":
+                mirror_to_remove = state["path"]
+        except Exception:
+            logger.warning("Temporary host mirror retained while deleting thread %s", thread_id, exc_info=True)
+
     try:
         if owner_is_gone:
             packages = get_skill_packages()
@@ -1285,6 +1328,8 @@ async def delete_thread_workspace(thread_id: str) -> WorkspaceRef | None:
             )
 
     await get_thread_workspace_repository().delete(thread_id)
+    if mirror_to_remove:
+        await _delete_temp_workspace_directory(mirror_to_remove)
     return workspace
 
 

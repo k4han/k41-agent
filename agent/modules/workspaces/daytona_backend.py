@@ -10,7 +10,7 @@ from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from agent.modules.workspaces.backends import CommandResult
+from agent.modules.workspaces.backends import CommandResult, WorkspaceUnavailableError
 from agent.modules.workspaces.constants import (
     GIT_TIMEOUT_SECONDS,
     IGNORED_DIR_NAMES,
@@ -903,6 +903,16 @@ class DaytonaWorkspaceBackend(SandboxBackendBase):
         self.root = self._resolve_root(self.root_hint)
 
     def ensure_active(self) -> None:
+        if self.ref.metadata.get("_require_running"):
+            if _refresh_sandbox_state(self.sandbox) != "started":
+                raise WorkspaceUnavailableError("Daytona sandbox is not running.")
+            self.ref.metadata["status"] = "started"
+            self.status = "started"
+            self.fs = getattr(self.sandbox, "fs", None)
+            self.process = getattr(self.sandbox, "process", None)
+            if self.fs is None or self.process is None:
+                raise RuntimeError("Daytona sandbox does not expose fs/process APIs.")
+            return
         self.sandbox = ensure_daytona_workspace_active(
             self.ref,
             sandbox=self.sandbox,

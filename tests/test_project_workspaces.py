@@ -23,6 +23,7 @@ from agent.modules.workspaces.models import ThreadWorkspace
 from agent.modules.agent_runtime.models import BackgroundTaskRecord
 from agent.modules.conversations.models import ConversationThread
 from agent.modules.workspaces.backends import WorkspaceUnavailableError
+from agent.modules.workspaces.host_mirror import workspace_runtime_status as probe_workspace_runtime_status
 
 
 @pytest_asyncio.fixture
@@ -864,7 +865,7 @@ async def test_thread_workspace_switch_to_retired_reference_keeps_project_identi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["dirty", "error"])
-async def test_github_prune_preserves_unsaved_worktree_until_checkpoint(project_service, status):
+async def test_github_prune_preserves_host_worktree_until_saved_and_released(project_service, status):
     from agent.modules.github.service import GitHubAutomationService
     from agent.modules.github.workspace import GitHubWorkspaceManager
     from agent.modules.projects.workspaces import register_workspace
@@ -896,11 +897,12 @@ async def test_github_prune_preserves_unsaved_worktree_until_checkpoint(project_
     pointer.unlink()
     await service.checkpoint(project["id"], binding.project_workspace_id)
     pointer.write_text("gitdir: /missing/repo/.git/worktrees/task\n")
+    assert await github.prune_orphaned_worktrees() == 0
+    await service.release_task_runtime(binding)
     assert await github.prune_orphaned_worktrees() == 1
     assert not task_root.exists()
     saved, _ = await service.read_saved(project["id"], "file.txt", binding.project_workspace_id)
     assert saved == b"unsaved changes"
-    await service.release_task_runtime(binding)
 
 
 @pytest.mark.asyncio
@@ -1092,19 +1094,12 @@ async def test_restart_detects_expired_cloud_checkpoint_and_restores_on_demand(
     monkeypatch.setattr(service.container.config_service, "get_bool", lambda key, default=False:
                         True if key == f"workspace.{backend}.enabled" else original_bool(key, default))
     completed = asyncio.Event()
-    checkpoint = restarted.checkpoint
-    failures = []
-
-    async def record_checkpoint(*args, **kwargs):
-        try:
-            return await checkpoint(*args, **kwargs)
-        except ProjectWorkspaceError as exc:
-            failures.append(exc)
-            raise
-        finally:
-            completed.set()
-
-    monkeypatch.setattr(restarted, "checkpoint", record_checkpoint)
+    decision = restarted._record_provision_decision
+    async def record_decision(*args):
+        await decision(*args)
+        completed.set()
+    monkeypatch.setattr(restarted, "_record_provision_decision", record_decision)
+    monkeypatch.setattr("agent.modules.workspaces.host_mirror.workspace_runtime_status", AsyncMock(return_value="destroyed"))
     restored = tmp_path / "restored"
 
     async def restore(ref, store, key, revision):
@@ -1118,7 +1113,6 @@ async def test_restart_detects_expired_cloud_checkpoint_and_restores_on_demand(
     restarted.start()
     try:
         await asyncio.wait_for(completed.wait(), timeout=10)
-        assert len(failures) == 1 and failures[0].code == "runtime_unavailable"
         assert before.project_workspace_id not in restarted.active
         _, workspace, runtime = await restarted.rows(project["id"])
         assert runtime.status == "unavailable"
@@ -1127,11 +1121,11 @@ async def test_restart_detects_expired_cloud_checkpoint_and_restores_on_demand(
         assert workspace.head_revision == saved.head_revision
         assert workspace.previous_revision == saved.previous_revision
         assert workspace.last_saved_at == saved.last_saved_at
-        assert workspace.persistence_status == "error"
+        assert workspace.persistence_status == "clean"
         assert (await restarted.read_saved(project["id"], "file.txt"))[0] == b"original"
         create.assert_not_awaited()
         attach.assert_not_awaited()
-        remote.assert_awaited_once_with(expired)
+        remote.assert_not_awaited()
         assert not any(record.exc_info for record in caplog.records if record.name == "agent.modules.projects.workspaces")
         await restarted.close()
 
@@ -1149,7 +1143,7 @@ async def test_restart_detects_expired_cloud_checkpoint_and_restores_on_demand(
         await asyncio.wait_for(initialized.wait(), timeout=10)
         assert before.project_workspace_id not in restarted.active
         assert not completed.is_set()
-        remote.assert_awaited_once()
+        remote.assert_not_awaited()
         create.assert_not_awaited()
 
         bindings = await asyncio.gather(*(restarted.ensure(project["id"], recover=True) for _ in range(4)))
@@ -1457,6 +1451,12 @@ async def switch_service(project_service, monkeypatch):
     await service.ensure(project["id"])
     service.runtime_root = root.parent / "managed-runtimes"
     roots = {}
+    async def running(ref):
+        return ref.backend == "local" or ref.locator in roots
+    monkeypatch.setattr("agent.modules.workspaces.host_mirror.workspace_is_running", running)
+    async def status(ref):
+        return "started" if await running(ref) else "destroyed"
+    monkeypatch.setattr("agent.modules.workspaces.host_mirror.workspace_runtime_status", status)
     created, retired = [], []
     original_bool = service.container.config_service.get_bool
     monkeypatch.setattr(service.container.config_service, "get_bool", lambda key, default=False:
@@ -1530,6 +1530,360 @@ async def finish_switch(fixture, backend):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("representation", ["reference", "dictionary", "path", "binding", "binding_dictionary"])
+async def test_unmanaged_local_file_io_accepts_supported_workspace_inputs(project_service, representation):
+    from agent.modules.workspaces import get_workspace_file_io
+    _, _, root, _ = project_service
+    temporary = root.parent / "temporary"
+    temporary.mkdir()
+    (temporary / "file.txt").write_text("original")
+    ref = WorkspaceRef(locator=str(temporary), metadata={"temp": True})
+    binding = bind_workspace_ref(ref)
+    workspace = {"reference": ref, "dictionary": ref.model_dump(), "path": str(temporary),
+                 "binding": binding, "binding_dictionary": binding.model_dump()}[representation]
+    backend = await get_workspace_file_io(workspace, thread_id="temporary-thread")
+    assert await backend.read_text("file.txt") == "original"
+    await backend.write_text("file.txt", "updated")
+    assert (temporary / "file.txt").read_text() == "updated"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("representation", ["reference", "dictionary", "binding", "binding_dictionary"])
+async def test_unmanaged_cloud_file_io_normalizes_workspace_inputs(project_service, monkeypatch, representation):
+    import agent.modules.workspaces as workspaces
+    ref = WorkspaceRef(backend="daytona", locator="temporary-sandbox", metadata={"root": "/workspace", "temp": True})
+    binding = bind_workspace_ref(ref)
+    workspace = {"reference": ref, "dictionary": ref.model_dump(), "binding": binding,
+                 "binding_dictionary": binding.model_dump()}[representation]
+    factory = AsyncMock(return_value=SimpleNamespace(read_text=AsyncMock(return_value="live content")))
+    monkeypatch.setattr(workspaces, "create_workspace_runtime_backend", factory)
+    monkeypatch.setattr("agent.modules.workspaces.host_mirror.workspace_is_running", AsyncMock(return_value=True))
+    backend = await workspaces.get_workspace_file_io(workspace, thread_id="temporary-thread")
+    assert await backend.read_text("file.txt") == "live content"
+    execution = factory.await_args.args[0]
+    assert execution.backend == ref.backend and execution.locator == ref.locator
+    assert execution.metadata["root"] == "/workspace" and execution.metadata["_require_running"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("provider_status", "runtime_status"), [
+    ("destroyed", "unavailable"), ("stopped", "stopped"), ("destroyed", "ready"),
+])
+async def test_saved_host_conflicts_can_be_resolved_before_local_recovery(
+    switch_service, monkeypatch, provider_status, runtime_status,
+):
+    fixture, service = switch_service, switch_service.service
+    await finish_switch(fixture, "daytona")
+    (fixture.root / "file.txt").write_text("host edit")
+    project, workspace, runtime = await service.rows(fixture.project["id"])
+    if runtime_status == "unavailable":
+        await service._record_provision_decision(project, workspace, runtime)
+    elif runtime_status == "stopped":
+        async with fixture.maker() as session:
+            record = await session.get(WorkspaceRuntime, runtime.id)
+            record.status = runtime_status
+            await session.commit()
+    state = await service.host_mirrors.after_checkpoint(workspace, runtime, workspace.head_revision)
+    assert state["status"] == "conflict"
+    original_capture = service.transfer.capture
+    async def capture(ref, *args):
+        assert ref.backend == "local", "Offline resolution must only capture the host backup"
+        return await original_capture(ref, *args)
+    with monkeypatch.context() as patch:
+        patch.setattr("agent.modules.workspaces.host_mirror.workspace_runtime_status", AsyncMock(return_value=provider_status))
+        patch.setattr(service.transfer, "capture", capture)
+        checkpoint = AsyncMock(side_effect=AssertionError("Offline resolution must not checkpoint the sandbox"))
+        patch.setattr(service, "_checkpoint", checkpoint)
+        with pytest.raises(ProjectWorkspaceError) as stale:
+            await service.host_mirrors.resolve_project(project.id, workspace.id, runtime.generation + 1,
+                                                      "keep_sandbox", state["resolution_token"])
+        assert stale.value.code == "stale_runtime"
+        service.switcher.switching.add(workspace.id)
+        try:
+            with pytest.raises(ProjectWorkspaceError) as busy:
+                await service.host_mirrors.resolve_project(project.id, workspace.id, runtime.generation,
+                                                          "keep_sandbox", state["resolution_token"])
+            assert busy.value.code == "workspace_switching"
+        finally:
+            service.switcher.switching.discard(workspace.id)
+        with pytest.raises(ProjectWorkspaceError) as stale:
+            await service.host_mirrors.resolve_project(project.id, workspace.id, runtime.generation,
+                                                      "keep_sandbox", "0" * 64)
+        assert stale.value.code == "stale_content"
+        assert (fixture.root / "file.txt").read_text() == "host edit"
+        if runtime_status != "ready":
+            with pytest.raises(ProjectWorkspaceError) as unavailable:
+                await service.host_mirrors.resolve_project(project.id, workspace.id, runtime.generation,
+                                                          "keep_host", state["resolution_token"])
+            assert unavailable.value.code == "runtime_unavailable"
+        resolved = await service.host_mirrors.resolve_project(project.id, workspace.id, runtime.generation,
+                                                            "keep_sandbox", state["resolution_token"])
+        checkpoint.assert_not_awaited()
+    assert resolved["status"] == "synced" and (fixture.root / "file.txt").read_text() == "original"
+    project, workspace, runtime = await service.rows(project.id, workspace.id)
+    assert workspace.persistence_status == "clean" and runtime.status == runtime_status
+    backup = service.storage.get_manifest(str(workspace.id), json.loads(workspace.host_mirror_json)["host_backup_revision"])
+    assert service.storage.get_blob(str(workspace.id), backup["entries"]["file.txt"]["checksum"]) == b"host edit"
+    await service._record_provision_decision(project, workspace, runtime)
+    recovered = await service.confirm_provision(project.id, "local", runtime.generation, workspace.id)
+    assert recovered.execution.backend == "local" and recovered.execution.locator == str(fixture.root)
+
+
+@pytest.mark.asyncio
+async def test_temporary_capture_survives_host_failure_and_provider_deletion(switch_service, monkeypatch, tmp_path):
+    fixture, service = switch_service, switch_service.service
+    ref = await fixture.create("daytona")
+    ref.metadata["temp"] = True
+    remote = fixture.roots[ref.locator]
+    (remote / "file.txt").write_text("original")
+    async with fixture.maker() as session:
+        session.add(ThreadWorkspace(thread_id="failed-mirror", execution_backend=ref.backend, execution_locator=ref.locator,
+                                    execution_metadata_json=json.dumps(ref.metadata)))
+        await session.commit()
+    monkeypatch.setattr("agent.modules.workspaces.service.temp_workspace_root", lambda: tmp_path / "temporary")
+    monkeypatch.setattr(service.host_mirrors, "_changes", AsyncMock(return_value={"token": "changed", "changed": True}))
+    rows, _ = await service.host_mirrors.thread_status("failed-mirror")
+    await service.host_mirrors._poll_threads(rows)
+    rows, initial = await service.host_mirrors.thread_status("failed-mirror")
+    (remote / "file.txt").write_text("latest sandbox content")
+    async def fail_apply(store, key, state, revision, generation):
+        _, persisted = await service.host_mirrors.thread_status("failed-mirror")
+        assert persisted["remote_revision"] == revision
+        raise PermissionError("Host file locked")
+    with monkeypatch.context() as patch:
+        patch.setattr(service.host_mirrors, "_apply", fail_apply)
+        with pytest.raises(ProjectWorkspaceError, match="Host file locked"):
+            await service.host_mirrors._poll_threads(rows, force=True)
+    rows, failed = await service.host_mirrors.thread_status("failed-mirror")
+    assert failed["status"] == "error" and failed["revision"] == initial["revision"]
+    assert failed["remote_revision"] != initial["remote_revision"]
+    assert (Path(failed["path"]) / "file.txt").read_text() == "original"
+    async with service.host_mirrors.saved_thread_view("failed-mirror") as view:
+        assert (Path(view.locator) / "file.txt").read_text() == "latest sandbox content"
+    def deleted_sandbox(ref):
+        raise RuntimeError("Sandbox not found (404)")
+    monkeypatch.setattr("agent.modules.workspaces.daytona_backend.get_daytona_sandbox", deleted_sandbox)
+    monkeypatch.setattr("agent.modules.workspaces.host_mirror.workspace_runtime_status", probe_workspace_runtime_status)
+    await service.host_mirrors.switch_thread("failed-mirror", "local", failed["generation"])
+    rows, recovered = await service.host_mirrors.thread_status("failed-mirror")
+    assert service.host_mirrors.thread_ref(rows[0]).backend == "local"
+    assert (Path(recovered["path"]) / "file.txt").read_text() == "latest sandbox content"
+
+
+@pytest.mark.asyncio
+async def test_automatic_host_mirror_keeps_one_directory_and_separate_save_status(switch_service):
+    fixture, service = switch_service, switch_service.service
+    _, binding = await finish_switch(fixture, "daytona")
+    remote = fixture.roots[binding.execution.locator]
+    (remote / "created.txt").write_text("sandbox output")
+    await service.checkpoint(fixture.project["id"])
+    assert (fixture.root / "created.txt").read_text() == "sandbox output"
+    (fixture.root / "file.txt").write_text("external host edit")
+    (remote / "created.txt").write_text("new sandbox output")
+    result = await service.checkpoint(fixture.project["id"])
+    assert result["saved"] and result["host_mirror"]["status"] == "conflict"
+    assert (fixture.root / "created.txt").read_text() == "sandbox output"
+    await finish_switch(fixture, "local")
+    assert (await service.binding(fixture.project["id"])).execution.backend == "daytona"
+    state = (await service.describe(fixture.project["id"]))["host_mirror"]
+    await service.host_mirrors.resolve_project(fixture.project["id"], binding.project_workspace_id,
+        binding.runtime_generation, "keep_sandbox", state["resolution_token"])
+    _, local = await finish_switch(fixture, "local")
+    assert local.execution.locator == str(fixture.root)
+    assert (fixture.root / "created.txt").read_text() == "new sandbox output"
+    assert (fixture.root / "file.txt").read_text() == "original"
+    _, cloud = await finish_switch(fixture, "modal")
+    _, local_again = await finish_switch(fixture, "local")
+    assert local_again.execution.locator == str(fixture.root)
+
+
+@pytest.mark.asyncio
+async def test_legacy_local_runtime_rebinds_to_original_without_removing_the_old_copy(switch_service):
+    import shutil
+    fixture, service = switch_service, switch_service.service
+    project, workspace, runtime = await service.rows(fixture.project["id"])
+    legacy = service.runtime_root / str(workspace.id) / "legacy-generation"
+    shutil.copytree(fixture.root, legacy)
+    (legacy / "file.txt").write_text("legacy runtime edit")
+    await service._publish_runtime(project, workspace, WorkspaceRef(locator=str(legacy)), runtime.generation + 1, "ready")
+    _, binding = await finish_switch(fixture, "local")
+    assert binding.execution.locator == str(fixture.root)
+    assert (fixture.root / "file.txt").read_text() == "legacy runtime edit"
+    assert (legacy / "file.txt").read_text() == "legacy runtime edit"
+    assert not fixture.created
+
+
+@pytest.mark.asyncio
+async def test_legacy_local_conflict_resolution_preserves_the_approved_host_edit(switch_service):
+    import shutil
+    fixture, service = switch_service, switch_service.service
+    project, workspace, runtime = await service.rows(fixture.project["id"])
+    legacy = service.runtime_root / str(workspace.id) / "legacy-generation"
+    shutil.copytree(fixture.root, legacy)
+    (legacy / "file.txt").write_text("runtime edit")
+    (fixture.root / "file.txt").write_text("host edit")
+    generation = runtime.generation + 1
+    await service._publish_runtime(project, workspace, WorkspaceRef(locator=str(legacy)), generation, "ready")
+    saved = await service.checkpoint(project.id)
+    assert saved["host_mirror"]["status"] == "conflict"
+    state = await service.host_mirrors.resolve_project(project.id, workspace.id, generation,
+                                                      "keep_host", saved["host_mirror"]["resolution_token"])
+    assert state["status"] == "synced"
+    _, binding = await finish_switch(fixture, "local")
+    assert binding.execution.locator == str(fixture.root)
+    assert (fixture.root / "file.txt").read_text() == (legacy / "file.txt").read_text() == "host edit"
+
+
+@pytest.mark.asyncio
+async def test_workspace_reads_live_files_and_falls_back_without_waking_the_provider(switch_service, monkeypatch):
+    import agent.modules.workspaces as workspaces
+    from agent.modules.projects.backend import DeferredWorkspaceBackend
+    from agent.modules.agent_runtime import get_active_session_registry
+    fixture, service = switch_service, switch_service.service
+    _, binding = await finish_switch(fixture, "daytona")
+    factory = workspaces.create_workspace_runtime_backend
+    cloud_reads = []
+    async def backend(ref, **kwargs):
+        if ref.backend == "local":
+            return await factory(ref, **kwargs)
+        cloud_reads.append(ref)
+        assert ref.metadata["_require_running"]
+        return SimpleNamespace(file=AsyncMock(return_value={"content": "live sandbox edit"}))
+    monkeypatch.setattr(workspaces, "create_workspace_runtime_backend", backend)
+    monkeypatch.setattr("agent.modules.workspaces.host_mirror.workspace_is_running", AsyncMock(return_value=False))
+    browser = DeferredWorkspaceBackend(binding, service)
+    saved = await browser.file("file.txt")
+    assert saved["content"] == "original" and saved["stale"] and not cloud_reads
+    monkeypatch.setattr("agent.modules.workspaces.host_mirror.workspace_is_running", AsyncMock(return_value=True))
+    live = await browser.file("file.txt")
+    assert live["content"] == "live sandbox edit" and live["data_source"] == "live" and not live["stale"]
+    assert len(cloud_reads) == 1
+    registry = get_active_session_registry(service.container)
+    queue = registry.subscribe()
+    try:
+        await service.checkpoint(fixture.project["id"])
+        event = await asyncio.wait_for(queue.get(), timeout=1)
+        assert event["type"] == "workspace_files_changed"
+        assert event["data"]["project_workspace_id"] == binding.project_workspace_id
+    finally:
+        registry.unsubscribe(queue)
+
+
+@pytest.mark.asyncio
+async def test_host_resolution_rejects_stale_content_and_pushes_only_conflicts(switch_service, monkeypatch):
+    fixture, service = switch_service, switch_service.service
+    _, binding = await finish_switch(fixture, "daytona")
+    remote = fixture.roots[binding.execution.locator]
+    (remote / "remote-only.txt").write_text("cloud")
+    (fixture.root / "file.txt").write_text("host edit")
+    await service.checkpoint(fixture.project["id"])
+    state = (await service.describe(fixture.project["id"]))["host_mirror"]
+    (fixture.root / "file.txt").write_text("newer host edit")
+    with pytest.raises(ProjectWorkspaceError) as error:
+        await service.host_mirrors.resolve_project(fixture.project["id"], binding.project_workspace_id,
+            binding.runtime_generation, "keep_sandbox", state["resolution_token"])
+    assert error.value.code == "stale_content"
+    await service.checkpoint(fixture.project["id"])
+    state = (await service.describe(fixture.project["id"]))["host_mirror"]
+    async def reconcile(ref, store, key, expected, desired):
+        from agent.modules.projects import snapshot_worker
+        import tempfile
+        # Run the portable overlay against the simulated provider filesystem.
+        with tempfile.TemporaryDirectory(prefix="k41-project-") as stage:
+            stage = Path(stage)
+            service.transfer.materialize(store, key, store.put_manifest(key, desired), stage / "desired")
+            (stage / "expected.json").write_text(json.dumps(expected))
+            (stage / "manifest.json").write_text(json.dumps(desired))
+            (stage / "objects").mkdir()
+            from agent.modules.projects.storage import file_chunks
+            for entry in desired["entries"].values():
+                if entry["type"] == "file":
+                    for chunk in file_chunks(entry):
+                        (stage / "objects" / chunk["checksum"]).write_bytes(store.get_blob(key, chunk["checksum"]))
+            snapshot_worker.overlay(str(remote), str(stage))
+    monkeypatch.setattr(service.transfer, "reconcile", reconcile)
+    result = await service.host_mirrors.resolve_project(fixture.project["id"], binding.project_workspace_id,
+        binding.runtime_generation, "keep_host", state["resolution_token"])
+    assert result["status"] == "synced"
+    assert (remote / "file.txt").read_text() == "newer host edit"
+    assert (fixture.root / "remote-only.txt").read_text() == "cloud"
+
+
+@pytest.mark.asyncio
+async def test_temporary_mirrors_share_aliases_and_keep_the_host_folder_across_switches(switch_service, monkeypatch, tmp_path):
+    from agent.modules.workspaces.host_mirror import mirror_state
+    from agent.modules.projects.workspaces import source_key
+    fixture, service = switch_service, switch_service.service
+    ref = await fixture.create("daytona")
+    ref.metadata["temp"] = True
+    remote = fixture.roots[ref.locator]
+    (remote / "file.txt").write_text("sandbox")
+    async with fixture.maker() as session:
+        for thread_id in ("mirror-main", "mirror-main:sub:child", "mirror-alias"):
+            session.add(ThreadWorkspace(thread_id=thread_id, execution_backend=ref.backend, execution_locator=ref.locator,
+                                        execution_metadata_json=json.dumps(ref.metadata)))
+        await session.commit()
+    monkeypatch.setattr("agent.modules.workspaces.service.temp_workspace_root", lambda: tmp_path / "temporary")
+    changes = AsyncMock(return_value={"token": "first", "changed": True})
+    monkeypatch.setattr(service.host_mirrors, "_changes", changes)
+    rows, _ = await service.host_mirrors.thread_status("mirror-main:sub:child")
+    await service.host_mirrors._poll_threads(rows)
+    rows, state = await service.host_mirrors.thread_status("mirror-main")
+    host = Path(state["path"])
+    assert len(rows) == 3 and (host / "file.txt").read_text() == "sandbox"
+    from agent.modules.agent_runtime.workspace_admission import workspace_run
+    from agent.modules.workspaces.host_mirror import thread_storage_key
+    async with workspace_run({"thread_id": "mirror-main", "workspace": ref.model_dump()}):
+        with pytest.raises(ProjectWorkspaceError) as blocked:
+            await service.host_mirrors.switch_thread("mirror-main", "local", state["generation"])
+        assert blocked.value.code == "workspace_busy"
+    lease_id = -int(thread_storage_key(rows))
+    service.switcher.switching.add(lease_id)
+    try:
+        with pytest.raises(ProjectWorkspaceError) as blocked:
+            async with workspace_run({"thread_id": "mirror-main:sub:child", "workspace": ref.model_dump()}):
+                pytest.fail("A new child run entered a switching temporary workspace")
+        assert blocked.value.code == "workspace_switching"
+    finally:
+        service.switcher.switching.discard(lease_id)
+    assert len({mirror_state(row)["path"] for row in rows}) == 1
+    assert len(list((tmp_path / "temporary").iterdir())) == 1
+    expired_locator = ref.locator
+    async def status(workspace):
+        return "destroyed" if workspace.locator == expired_locator else "started"
+    monkeypatch.setattr("agent.modules.workspaces.host_mirror.workspace_runtime_status", status)
+    await service.host_mirrors.switch_thread("mirror-main", "modal", state["generation"])
+    rows, state = await service.host_mirrors.thread_status("mirror-main")
+    ref = service.host_mirrors.thread_ref(rows[0])
+    remote = fixture.roots[ref.locator]
+    assert state["path"] == str(host) and (remote / "file.txt").read_text() == "sandbox"
+    (host / "file.txt").write_text("external host")
+    (remote / "added.txt").write_text("remote addition")
+    await service.host_mirrors._poll_threads(rows)
+    rows, state = await service.host_mirrors.thread_status("mirror-main")
+    assert state["status"] == "conflict" and not (host / "added.txt").exists()
+    async with service.host_mirrors.saved_thread_view("mirror-main") as view:
+        assert (Path(view.locator) / "file.txt").read_text() == "sandbox"
+        assert (Path(view.locator) / "added.txt").read_text() == "remote addition"
+    await service.host_mirrors.synchronize_thread("mirror-main", generation=state["generation"],
+                                                 action="keep_sandbox", token=state["resolution_token"])
+    first_generation = state["generation"]
+    await service.host_mirrors.switch_thread("mirror-main", "local", first_generation)
+    rows, state = await service.host_mirrors.thread_status("mirror-main")
+    assert all(service.host_mirrors.thread_ref(row).locator == str(host) for row in rows)
+    assert state["path"] == str(host) and state["generation"] != first_generation
+    await service.host_mirrors.switch_thread("mirror-main", "modal", state["generation"])
+    rows, state = await service.host_mirrors.thread_status("mirror-main")
+    await service.host_mirrors.switch_thread("mirror-main", "local", state["generation"])
+    rows, state = await service.host_mirrors.thread_status("mirror-main")
+    assert all(service.host_mirrors.thread_ref(row).locator == str(host) for row in rows)
+    with pytest.raises(ProjectWorkspaceError) as error:
+        await service.host_mirrors.switch_thread("mirror-main", "daytona", first_generation)
+    assert error.value.code == "stale_runtime"
+    assert (host / "added.txt").read_text() == "remote addition"
+
+
+@pytest.mark.asyncio
 async def test_backend_roundtrip_keeps_one_project_and_local_baseline(switch_service, monkeypatch):
     from agent.modules.projects.repository import register_project
     from agent.modules.workspaces.refs import bind_workspace_ref
@@ -1556,19 +1910,18 @@ async def test_backend_roundtrip_keeps_one_project_and_local_baseline(switch_ser
         assert len((await session.execute(select(ProjectWorkspace))).scalars().all()) == 1
         assert len((await session.execute(select(WorkspaceRuntime))).scalars().all()) == 1
     workspace = (await service.rows(fixture.project["id"]))[1]
-    assert workspace.local_sync_revision == baseline
-    service.storage.get_manifest(str(workspace.id), baseline)
+    assert workspace.local_sync_revision == workspace.head_revision
+    assert workspace.local_sync_revision != baseline
     description = await service.describe(fixture.project["id"])
     assert description["workspace_name"] == "main"
-    assert description["local_link"] == {"path": str(fixture.root), "revision": baseline, "status": "pending"}
+    assert description["local_link"] == {"path": str(fixture.root), "revision": workspace.head_revision, "status": "active"}
+    assert binding.execution.locator == str(fixture.root)
     leftover = fixture.root / (".k41-sync-" + "a" * 32)
     leftover.write_text("interrupted replacement")
-    preview = await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation)
-    assert not preview["conflicts"]
+    await service.checkpoint(fixture.project["id"])
     assert not leftover.exists()
-    await service.local_sync.synchronize(fixture.project["id"], binding.runtime_generation, preview_token=preview["preview_token"])
     assert all((fixture.root / (backend + ".txt")).is_file() for backend in ("daytona", "modal", "local"))
-    assert (await service.describe(fixture.project["id"]))["local_link"]["status"] == "applied"
+    assert (await service.describe(fixture.project["id"]))["local_link"]["status"] == "active"
 
 
 @pytest.mark.asyncio
@@ -1781,7 +2134,7 @@ async def test_local_sync_keeps_writer_reservation_after_client_disconnect(switc
 
 
 @pytest.mark.asyncio
-async def test_switch_retires_old_managed_local_copy_but_preserves_original_link(switch_service):
+async def test_switch_preserves_the_fixed_host_directory(switch_service):
     from agent.delivery.http.dashboard.routes.workspace import WorkspaceResolveBody, resolve_dashboard_workspace
     fixture = switch_service
     await finish_switch(fixture, "daytona")
@@ -1789,7 +2142,7 @@ async def test_switch_retires_old_managed_local_copy_but_preserves_original_link
     old_runtime = Path(binding.execution.locator)
     (old_runtime / "uncommitted.txt").write_text("keep this change")
     _, target = await finish_switch(fixture, "modal")
-    assert not old_runtime.exists()
+    assert old_runtime == fixture.root and old_runtime.exists()
     assert (fixture.root / "file.txt").read_text() == "original"
     assert (fixture.roots[target.execution.locator] / "uncommitted.txt").read_text() == "keep this change"
     retired = await fixture.service.find_binding(binding.execution)
@@ -1798,7 +2151,7 @@ async def test_switch_retires_old_managed_local_copy_but_preserves_original_link
     resolved = await resolve_dashboard_workspace(None, WorkspaceResolveBody(kind="local", locator=str(old_runtime)))
     assert resolved["workspace"]["project_id"] == fixture.project["id"]
     assert resolved["workspace"]["execution"]["backend"] == "modal"
-    assert not old_runtime.exists()
+    assert old_runtime.exists()
 
 
 @pytest.mark.asyncio
@@ -1907,7 +2260,7 @@ async def test_runtime_switch_preserves_shared_identity_and_all_files(switch_ser
     assert (destination / "binary.dat").read_bytes() == (root / "binary.dat").read_bytes()
     assert (destination / ".git" / "HEAD").read_bytes() == (root / ".git" / "HEAD").read_bytes()
     assert (destination / ".k41-agent" / "uploads" / "input.dat").read_bytes() == b"attachment"
-    assert not (destination / "node_modules").exists()
+    assert (destination / "node_modules").exists() is (target == "local")
     assert (root / "file.txt").read_text() == "original"
     assert await service.resolve_thread("first") == await service.resolve_thread("second") == after
     for thread in ("first", "second"):
@@ -2102,7 +2455,7 @@ async def test_runtime_switch_retries_cleanup_without_retiring_a_shared_sandbox(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("phase", ["saving", "provisioning", "restoring", "verifying", "activating"])
-async def test_runtime_switch_restart_discards_partial_destination_without_replaying(switch_service, monkeypatch, phase):
+async def test_runtime_switch_restart_preserves_legacy_local_destination_without_replaying(switch_service, monkeypatch, phase):
     from agent.modules.projects.runtime_switch import WorkspaceRuntimeSwitcher
     fixture, service = switch_service, switch_service.service
     before = await service.binding(fixture.project["id"])
@@ -2116,7 +2469,7 @@ async def test_runtime_switch_restart_discards_partial_destination_without_repla
     await service.switcher._write(before.project_workspace_id, state)
     service.switcher = WorkspaceRuntimeSwitcher(service)
     await service.switcher.recover()
-    assert not destination.exists()
+    assert (destination / "partial").read_bytes() == b"partial"
     assert await service.binding(before.project_id) == before
     assert (await service.describe(before.project_id))["runtime"]["transition"]["phase"] == "failed"
     assert not fixture.created

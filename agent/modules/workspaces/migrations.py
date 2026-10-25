@@ -99,7 +99,9 @@ def migrate_workspace_tables(database_url: str) -> None:
             _ensure_columns(conn, inspector, "project_workspaces", {
                 "runtime_aliases_json": "TEXT NOT NULL DEFAULT '[]'",
                 "local_sync_revision": "VARCHAR(64)",
+                "host_mirror_json": "TEXT NOT NULL DEFAULT '{}'",
             })
+            _ensure_columns(conn, inspector, "thread_workspaces", {"host_mirror_json": "TEXT NOT NULL DEFAULT '{}'"})
             _ensure_columns(conn, inspector, "workspace_runtimes", {"transition_json": "TEXT NOT NULL DEFAULT 'null'",
                                                                     "pending_decision_json": "TEXT NOT NULL DEFAULT '{}'"})
             for table_name in _TABLES_WITH_WORKSPACE_COLUMNS:

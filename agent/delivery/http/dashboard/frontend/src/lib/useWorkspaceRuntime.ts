@@ -54,10 +54,12 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
       if (!payload().workspace || !detail?.project_workspace_id || detail.project_workspace_id === payload().workspace?.project_workspace_id) refreshQuietly();
     };
     window.addEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED, changed);
+    window.addEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED, changed);
     window.addEventListener("focus", refreshQuietly);
     onCleanup(() => {
       revision += 1;
       window.removeEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED, changed);
+      window.removeEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED, changed);
       window.removeEventListener("focus", refreshQuietly);
     });
   });
@@ -66,7 +68,20 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
     if (busy()) return;
     const binding = payload().workspace;
     const thread = threadId();
-    if (!binding?.project_id || !binding.project_workspace_id || !binding.runtime_generation) return;
+    if (!binding) return;
+    if (!binding.project_id) {
+      const generation = payload().host_mirror?.generation;
+      if (!generation || !thread) return;
+      setRequesting(true); setError("");
+      try {
+        await postJson("/dashboard-api/workspace/runtime/switch", { thread_id: thread, backend, expected_generation: generation });
+        if (thread === threadId()) await refresh();
+      } catch (reason) {
+        if (thread === threadId()) setError(reason instanceof Error ? reason.message : "Failed to switch execution backend.");
+      } finally { if (thread === threadId()) setRequesting(false); }
+      return;
+    }
+    if (!binding.project_workspace_id || !binding.runtime_generation) return;
     setRequesting(true);
     setError("");
     try {

@@ -91,12 +91,70 @@ async def get_thread_runtime(thread_id: str):
     try:
         binding = await service.resolve_thread(thread_id)
         if binding is None:
-            return {"workspace": None, "runtime": None}
+            try:
+                from agent.modules.workspaces import binding_from_record
+                rows, state = await service.host_mirrors.thread_status(thread_id)
+                ref = service.host_mirrors.thread_ref(rows[0])
+                return {"workspace": binding_from_record(rows[0], ref).model_dump(), "runtime": None, "host_mirror": state,
+                        "workspace_name": "temporary"}
+            except KeyError:
+                return {"workspace": None, "runtime": None}
         description = await service.describe(binding.project_id)
         workspace = next(item for item in description["workspaces"] if item["id"] == binding.project_workspace_id)
         return {"workspace": binding.model_dump(), "runtime": workspace["runtime"], "kind": workspace["kind"],
                 "workspace_name": workspace["name"], "persistence": workspace["persistence"],
-                "local_link": workspace["local_link"]}
+                "local_link": workspace["local_link"], "host_mirror": workspace["host_mirror"]}
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
+
+
+class WorkspaceHostSyncBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_id: int | None = Field(default=None, ge=1)
+    project_workspace_id: int | None = Field(default=None, ge=1)
+    thread_id: str | None = Field(default=None, min_length=1, max_length=512)
+    expected_generation: int | str
+    action: Literal["retry", "keep_host", "keep_sandbox"] = "retry"
+    resolution_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
+class ThreadRuntimeSwitchBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    thread_id: str = Field(min_length=1, max_length=512)
+    backend: Literal["local", "daytona", "modal"]
+    expected_generation: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+@router.post("/dashboard-api/workspace/runtime/switch")
+async def switch_thread_runtime(body: ThreadRuntimeSwitchBody):
+    from agent.modules.projects import get_project_workspace_service
+    try:
+        service = get_project_workspace_service()
+        if await service.resolve_thread(body.thread_id):
+            raise ValueError("Use the project runtime endpoint for a project workspace.")
+        await service.host_mirrors.switch_thread(body.thread_id, body.backend, body.expected_generation)
+        return await get_thread_runtime(body.thread_id)
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
+
+
+@router.post("/dashboard-api/workspace/host-sync")
+async def synchronize_workspace_host(body: WorkspaceHostSyncBody):
+    from agent.modules.projects import get_project_workspace_service
+    service = get_project_workspace_service()
+    try:
+        binding = await service.find_binding(thread_id=body.thread_id, project_id=body.project_id,
+                                             workspace_id=body.project_workspace_id)
+        if binding:
+            if body.action == "retry":
+                return await service.host_mirrors.synchronize_project(binding.project_id, binding.project_workspace_id,
+                                                                      generation=body.expected_generation, passive=True)
+            return await service.host_mirrors.resolve_project(binding.project_id, binding.project_workspace_id,
+                                                             body.expected_generation, body.action, body.resolution_token)
+        if body.thread_id:
+            return await service.host_mirrors.synchronize_thread(body.thread_id, generation=body.expected_generation,
+                                                                 action=body.action, token=body.resolution_token)
+        raise ValueError("A project or thread workspace is required.")
     except Exception as exc:
         raise project_resource_error(exc) from exc
 

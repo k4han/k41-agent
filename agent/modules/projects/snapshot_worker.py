@@ -11,6 +11,7 @@ import shutil
 import stat
 import sys
 import tempfile
+from uuid import uuid4
 
 CHUNK_BYTES = 4 * 1024 * 1024
 EXCLUDED = frozenset({"node_modules", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".pnpm-store"})
@@ -244,6 +245,94 @@ def verify(root: str, manifest: dict) -> None:
                 raise ValueError("Restored project file mismatch: " + name)
 
 
+def overlay(root: str, staging: str) -> None:
+    """Apply an explicitly approved host resolution against an unchanged cloud view."""
+    stage, base = Path(staging), Path(root)
+    expected = json.loads((stage / "expected.json").read_text())
+    desired = json.loads((stage / "manifest.json").read_text())
+    with tempfile.TemporaryDirectory(prefix="k41-overlay-check-") as check:
+        actual = capture(root, check)
+    if actual != expected:
+        raise ValueError("Sandbox files changed before conflict resolution. Refresh synchronization first.")
+    inventory = _inventory(base)
+    signatures = {name: _signature(path) for name, path in inventory.items()}
+    before, after = expected["entries"], desired["entries"]
+    changed = {name for name in before.keys() | after.keys() if before.get(name) != after.get(name)}
+
+    def target(name):
+        relative = PurePosixPath(name)
+        if relative.is_absolute() or ".." in relative.parts or "\\" in name or ":" in name:
+            raise ValueError("Unsafe conflict resolution path.")
+        path = base.joinpath(*relative.parts)
+        if base.is_symlink() or any(parent.is_symlink() for parent in path.parents if parent == base or base in parent.parents):
+            raise ValueError("Conflict resolution cannot follow symlinks.")
+        return path
+
+    def check(name, *, removed=False):
+        path = target(name)
+        if name not in before or removed:
+            if path.exists() or path.is_symlink():
+                raise ValueError("A sandbox destination appeared during conflict resolution: " + name)
+        elif before[name]["type"] == "directory":
+            if not path.is_dir() or path.is_symlink() or _signature(path)[4:6] != signatures[name][4:6]:
+                raise ValueError("A sandbox directory changed during conflict resolution: " + name)
+        elif _signature(path) != signatures[name]:
+            raise ValueError("A sandbox file changed during conflict resolution: " + name)
+
+    for name in changed:
+        # A new child under a replaced symlink or file becomes safe after its parent is removed.
+        if not any(str(parent) in changed and before.get(str(parent), {}).get("type") != "directory"
+                   for parent in PurePosixPath(name).parents if str(parent) != "."):
+            check(name)
+    removed = set()
+    for name in sorted(changed, key=lambda value: (-len(PurePosixPath(value).parts), value)):
+        if name in before and (name not in after or before[name]["type"] != after[name]["type"]):
+            check(name)
+            path = target(name)
+            if before[name]["type"] == "directory":
+                path.rmdir()
+            else:
+                path.unlink()
+            removed.add(name)
+    for name in sorted(changed, key=lambda value: (len(PurePosixPath(value).parts), value)):
+        entry = after.get(name)
+        if entry is None:
+            continue
+        path = target(name)
+        check(name, removed=name in removed)
+        if entry["type"] == "directory":
+            path.mkdir(exist_ok=True)
+            continue
+        temporary = path.with_name(".k41-sync-" + uuid4().hex)
+        try:
+            if entry["type"] == "symlink":
+                _safe_link(name, entry["target"])
+                temporary.symlink_to(entry["target"])
+            else:
+                digest, size = hashlib.sha256(), 0
+                with temporary.open("xb") as handle:
+                    for chunk in entry.get("chunks", [{"checksum": entry["checksum"], "size": entry["size"]}]):
+                        content = (stage / "objects" / chunk["checksum"]).read_bytes()
+                        if hashlib.sha256(content).hexdigest() != chunk["checksum"] or len(content) != chunk["size"]:
+                            raise ValueError("Conflict resolution object is corrupt.")
+                        handle.write(content)
+                        digest.update(content)
+                        size += len(content)
+                if digest.hexdigest() != entry["checksum"] or size != entry["size"]:
+                    raise ValueError("Conflict resolution file is corrupt.")
+                temporary.chmod(entry["mode"] & 0o777)
+            check(name, removed=name in removed)
+            if name not in before or name in removed:
+                os.link(temporary, path, follow_symlinks=False)
+            else:
+                os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    for name in sorted(changed, key=lambda value: -len(PurePosixPath(value).parts)):
+        if after.get(name, {}).get("type") == "directory":
+            target(name).chmod(after[name]["mode"] & 0o777)
+
+
 def main():
     operation, root, staging = sys.argv[1:]
     stage = Path(staging)
@@ -255,6 +344,8 @@ def main():
         restore(root, staging)
     elif operation == "verify":
         verify(root, json.loads((stage / "manifest.json").read_text(encoding="utf-8")))
+    elif operation == "overlay":
+        overlay(root, staging)
     elif operation == "cleanup":
         shutil.rmtree(stage, ignore_errors=True)
     else:

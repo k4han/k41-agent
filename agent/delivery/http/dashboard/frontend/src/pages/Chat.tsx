@@ -1936,6 +1936,7 @@ export function ChatPage() {
                 </div>
                 <div class="chat-header-right">
                   <ComposerWorkspacePicker
+                    threadId={currentThreadId()}
                     workingDir={workingDir()}
                     defaultWorkingDir={defaultWorkingDir()}
                     workspace={workspaceRef()}

@@ -187,7 +187,9 @@ class WorkspaceRuntimeSwitcher:
         if self.service.closing or project.migration_status != "ready" or workspace.kind != "shared":
             raise ProjectWorkspaceError("Only an available shared project workspace can switch backends.", "workspace_busy")
         source = WorkspaceRef.model_validate_json(runtime.execution_json)
-        if source.backend == backend:
+        local_rebind = (backend == source.backend == "local"
+                        and Path(source.locator).resolve() != self.service.host_mirrors.project_path(workspace, runtime).resolve())
+        if source.backend == backend and not local_rebind:
             self._reserve(workspace_id, runtime, expected_generation)
             try:
                 return {"operation_id": None, "workspace": (await self.service.binding(project_id, workspace_id)).model_dump(), "transition": transition_summary(runtime)}
@@ -240,6 +242,8 @@ class WorkspaceRuntimeSwitcher:
                 if runtime.generation != state["source_generation"]:
                     raise ProjectWorkspaceError("Execution runtime changed before switching.", "stale_runtime")
                 saved = await self.service._checkpoint(project_id, workspace_id, runtime.generation)
+                if saved.get("host_mirror", {}).get("status") != "synced":
+                    raise ProjectWorkspaceError("Resolve host synchronization before switching backends.", "host_sync_conflict")
                 state["revision"] = saved["revision"]
                 session = await _session()
                 async with session:
@@ -247,11 +251,12 @@ class WorkspaceRuntimeSwitcher:
                     await session.commit()
                 await self._phase(workspace_id, state, "provisioning")
                 if state["target_backend"] == "local":
-                    destination = self.service.runtime_root / str(workspace_id) / ("switch-" + state["operation_id"])
+                    _, workspace, runtime = await self.service.rows(project_id, workspace_id)
+                    destination = self.service.host_mirrors.project_path(workspace, runtime)
                     target = WorkspaceRef(backend="local", locator=str(destination), label=project.label)
                     state["target"] = target.model_dump()
                     await self._phase(workspace_id, state, "restoring")
-                    await asyncio.to_thread(self.service.transfer.materialize, self.service.storage, str(workspace_id), saved["revision"], destination)
+                    # The checkpoint has reconciled this stable host directory already.
                 else:
                     from agent.modules.workspaces import create_workspace_backend
                     async def remember_target(ref):
@@ -274,18 +279,6 @@ class WorkspaceRuntimeSwitcher:
                 state["phase"] = "completed"
                 if state["source"]["backend"] != "local":
                     state["cleanup"].append({"ref": state["source"], "action": "retire", "operation_id": state["operation_id"]})
-                else:
-                    from agent.modules.projects.workspaces import source_key
-                    source = WorkspaceRef.model_validate(state["source"])
-                    source_path = Path(source.locator)
-                    source_name = source_path.name
-                    owned_root = (self.service.runtime_root / str(workspace_id)).resolve()
-                    if (source_path.parent.resolve() == owned_root and not source_path.is_symlink()
-                            and source_name.startswith("switch-") and len(source_name) == len("switch-") + 32
-                            and all(char in "0123456789abcdef" for char in source_name[len("switch-"):])
-                            and source_key(source) != source_key(WorkspaceRef.model_validate_json(workspace.source_json))):
-                        state["cleanup"].append({"ref": state["source"], "action": "retire",
-                                                 "operation_id": source_name[len("switch-"):]})
                 await self.service._publish_runtime(project, workspace, target, runtime.generation + 1, "ready", transition=state)
                 activated = True
                 self.service.active.add(workspace_id)
@@ -311,7 +304,7 @@ class WorkspaceRuntimeSwitcher:
                 state.update(phase="completed", cleanup_error=message)
             else:
                 state.update(phase="failed", error=message)
-                if state.get("target"):
+                if state.get("target") and state["target"]["backend"] != "local":
                     state["cleanup"].append({"ref": state["target"], "action": "delete", "operation_id": state["operation_id"]})
             await asyncio.shield(self._write(workspace_id, state))
             await asyncio.shield(self._unpin(workspace_id, state))
@@ -344,8 +337,15 @@ class WorkspaceRuntimeSwitcher:
             try:
                 if ref.backend == "local":
                     import shutil
+                    from agent.modules.workspaces.host_mirror import mirror_state
                     raw_path = Path(ref.locator)
                     path = raw_path.resolve()
+                    session = await _session()
+                    async with session:
+                        owned = (await session.execute(select(ProjectWorkspace))).scalars().all()
+                    if any(mirror_state(row).get("path") and Path(mirror_state(row)["path"]).resolve() == path for row in owned):
+                        # A legacy cleanup record may now name the adopted canonical host directory.
+                        continue
                     expected = (self.service.runtime_root / str(workspace_id) / ("switch-" + item.get("operation_id", state["operation_id"]))).resolve()
                     if path != expected or not path.is_relative_to(self.service.runtime_root.resolve()) or raw_path.is_symlink():
                         raise ValueError("Refusing to remove an unmanaged runtime directory.")
@@ -397,7 +397,7 @@ class WorkspaceRuntimeSwitcher:
                     continue
                 if state["phase"] in ACTIVE_PHASES:
                     state.update(phase="failed", error="The application restarted before the switch completed. The source runtime is unchanged.")
-                    if state.get("target"):
+                    if state.get("target") and state["target"]["backend"] != "local":
                         state["cleanup"].append({"ref": state["target"], "action": "delete", "operation_id": state["operation_id"]})
                     await self._write(workspace_id, state)
                 await self._unpin(workspace_id, state)

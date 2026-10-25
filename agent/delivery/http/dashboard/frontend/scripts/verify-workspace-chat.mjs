@@ -28,6 +28,7 @@ let failRepositories = false;
 let runtimeScenario = false;
 let switchFailure = false;
 const runtimeRequests = [];
+const hostSyncRequests = [];
 let runtimeStatusRequests = 0;
 let runtimePayload = { kind: 'shared', workspace: { project_id: 41, project_workspace_id: 51, runtime_generation: 1,
   scope: { key: 'shared-project', kind: 'local', label: 'Shared project', metadata: {} }, execution: { ...workspace, label: 'Shared project' } },
@@ -88,6 +89,13 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'workspace-test-csrf');
     const reply = value => res.end(JSON.stringify(value));
+    if (url.pathname === '/dashboard-api/workspace/host-sync') {
+      let raw = '';
+      for await (const chunk of req) raw += chunk;
+      hostSyncRequests.push(JSON.parse(raw));
+      runtimePayload.host_mirror = { ...runtimePayload.host_mirror, status: 'synced', conflicts: [], resolution_token: null };
+      return reply(runtimePayload.host_mirror);
+    }
     if (url.pathname.startsWith('/dashboard-api/workspace/runtime/')) {
       runtimeStatusRequests += 1;
       return reply(runtimeScenario ? runtimePayload : { workspace: null, runtime: null });
@@ -752,6 +760,16 @@ try {
   assert.equal(await js('document.body.textContent.includes("History message 0")'), true, 'switch preserves conversation history');
   await click('.composer-workspace-trigger');
   await until(() => js('!!document.querySelector(".composer-runtime-picker")'), 'runtime picker after reload');
+  runtimePayload.host_mirror = { path: root, status: 'conflict', revision: 'a'.repeat(64), remote_revision: 'b'.repeat(64),
+    generation: 2, last_synced_at: '2026-01-01T00:00:00Z', last_error: '', conflicts: ['source.txt'], resolution_token: 'c'.repeat(64) };
+  await js(`window.dispatchEvent(new CustomEvent('k41:workspace-files-changed', { detail: { project_workspace_id: 51 } }))`);
+  await until(() => js('document.querySelector(".workspace-host-mirror")?.textContent.includes("source.txt")'), 'background file events refresh host conflicts');
+  await js(`Array.from(document.querySelectorAll('.workspace-host-mirror button')).find(el => el.textContent.trim() === 'Keep host changes').click()`);
+  await until(() => hostSyncRequests.length === 1, 'host conflict resolution request');
+  assert.equal(hostSyncRequests[0].action, 'keep_host');
+  assert.equal(hostSyncRequests[0].expected_generation, 2);
+  assert.equal(hostSyncRequests[0].resolution_token, 'c'.repeat(64));
+  await until(() => js('document.querySelector(".workspace-host-mirror")?.textContent.includes("Synchronized")'), 'resolved host status refreshes');
   await chooseBackend('Local');
   switchFailure = true;
   await click('.composer-runtime-picker button.btn-primary');

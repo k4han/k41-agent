@@ -407,8 +407,9 @@ def test_runtime_switch_migration_adds_transition_without_changing_existing_runt
     migrate_workspace_tables(url)
     with engine.connect() as connection:
         row = connection.execute(text("SELECT execution_json, transition_json FROM workspace_runtimes WHERE id=1")).one()
-        workspace = connection.execute(text("SELECT source_json, local_sync_revision FROM project_workspaces WHERE id=1")).one()
+        workspace = connection.execute(text("SELECT source_json, local_sync_revision, host_mirror_json FROM project_workspaces WHERE id=1")).one()
     assert workspace.local_sync_revision is None
+    assert json.loads(workspace.host_mirror_json) == {}
     assert json.loads(workspace.source_json)["locator"] == "/original"
     assert json.loads(row.execution_json)["locator"] == "/original"
     assert json.loads(row.transition_json) is None

@@ -16,6 +16,7 @@ export const STREAM_ERROR_CODES = {
 } as const;
 
 export const SESSION_EVENTS = {
+  WORKSPACE_FILES_CHANGED: "workspace_files_changed",
   SNAPSHOT: "snapshot",
   SESSION_STARTED: "session_started",
   SESSION_STOPPED: "session_stopped",
@@ -30,6 +31,7 @@ export const BACKGROUND_TASK_EVENTS = {
 } as const;
 
 export const CUSTOM_DOM_EVENTS = {
+  WORKSPACE_FILES_CHANGED: "k41:workspace-files-changed",
   SESSION_STARTED: "k41:session-started",
   SESSION_STOPPED: "k41:session-stopped",
   SESSION_UPDATED: "k41:session-updated",

@@ -20,7 +20,25 @@ async def workspace_run(arguments):
         from agent.modules.workspaces import resolve_workspace_ref
         binding = await projects.find_binding(resolve_workspace_ref(None))
     if binding is None:
-        yield
+        from agent.modules.workspaces import binding_from_record, resolve_workspace_ref
+        from agent.modules.workspaces.host_mirror import thread_storage_key
+        from agent.modules.projects.workspaces import source_key
+        rows = None
+        if arguments.get("thread_id"):
+            try:
+                rows, _ = await projects.host_mirrors.thread_status(arguments["thread_id"])
+            except KeyError:
+                pass
+        if requested is not None:
+            ref = resolve_workspace_ref(requested)
+            if rows is None or source_key(projects.host_mirrors.thread_ref(rows[0])) != source_key(ref):
+                rows = (await projects.host_mirrors._thread_rows()).get(source_key(ref))
+        if rows:
+            with projects.switcher.run_lease(-int(thread_storage_key(rows))):
+                arguments["workspace"] = binding_from_record(rows[0], projects.host_mirrors.thread_ref(rows[0])).model_dump()
+                yield
+        else:
+            yield
         return
     with projects.switcher.run_lease(binding.project_workspace_id):
         arguments["workspace"] = binding.model_dump()

@@ -10,6 +10,7 @@ import { getBackendDisplayName } from "@/lib/catalogStore";
 import { isTempWorkspace, workspaceDisplayLabel, workspaceDisplayLabelFromValues } from "@/lib/workspace";
 
 export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
+  threadId?: string;
   runtimePayload?: ThreadRuntimePayload;
   runtimeBusy?: boolean;
   runtimeError?: string;
@@ -38,7 +39,8 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
     return workspaceDisplayLabel(props.workspace)
       || workspaceDisplayLabelFromValues("", props.workingDir) || "Temporary";
   });
-  const canSwitchRuntime = () => props.locked && props.runtimePayload?.kind === "shared" && props.onSwitchBackend;
+  const canSwitchRuntime = () => props.locked && (props.runtimePayload?.kind === "shared"
+    || (!props.runtimePayload?.workspace?.project_id && props.runtimePayload?.host_mirror)) && props.onSwitchBackend;
   const description = () => `${projectLabel()} · ${backendLabel()}${props.locked && !canSwitchRuntime() ? " · Workspace locked" : ""}`;
 
   const close = () => {
@@ -161,6 +163,7 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
               onBrowserOpenChange={setNestedDialogOpen}
             />}>
               <WorkspaceRuntimePicker payload={props.runtimePayload!} busy={Boolean(props.runtimeBusy)}
+                threadId={props.threadId}
                 disabled={props.disabled} error={props.runtimeError || ""} onSwitch={props.onSwitchBackend!} portalMount={panelRef} />
             </Show>
           </div>

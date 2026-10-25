@@ -378,7 +378,8 @@ class WorkspaceLocalSync:
                 _, workspace, runtime = await service.rows(project_id, workspace_id)
                 if runtime.generation != expected_generation:
                     raise ProjectWorkspaceError("Execution runtime changed; preview the local changes again.", "stale_runtime")
-                saved = await service._checkpoint(project_id, workspace.id, expected_generation)
+                # A preview must not apply files as a side effect of capturing the sandbox.
+                saved = await service._checkpoint(project_id, workspace.id, expected_generation, sync_host=False)
                 desired = await asyncio.to_thread(service.storage.get_manifest, str(workspace.id), saved["revision"])
                 base = await asyncio.to_thread(service.storage.get_manifest, str(workspace.id), workspace.local_sync_revision)
                 root = Path(link["path"])

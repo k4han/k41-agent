@@ -137,6 +137,53 @@ class WorkspaceSnapshotTransfer:
                         (objects / digest).write_bytes(store.get_blob(key, digest))
             snapshot_worker.restore(str(destination), stage, manifest)
 
+    async def reconcile(self, ref, store, key, expected, desired):
+        """Push approved conflict paths through the normal project mutation boundary."""
+        validate_manifest(expected)
+        validate_manifest(desired)
+        if ref.backend == "local":
+            def apply():
+                with tempfile.TemporaryDirectory(prefix="k41-local-overlay-") as directory:
+                    stage = Path(directory)
+                    (stage / "objects").mkdir()
+                    (stage / "expected.json").write_text(json.dumps(expected), encoding="utf-8")
+                    (stage / "manifest.json").write_text(json.dumps(desired), encoding="utf-8")
+                    for name, entry in desired["entries"].items():
+                        if entry["type"] == "file" and entry != expected["entries"].get(name):
+                            for chunk in file_chunks(entry):
+                                (stage / "objects" / chunk["checksum"]).write_bytes(store.get_blob(key, chunk["checksum"]))
+                    snapshot_worker.overlay(ref.locator, str(stage))
+            task = asyncio.create_task(asyncio.to_thread(apply))
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                await task
+                raise
+            return
+        backend = await self._backend(ref)
+        stage = "/tmp/k41-project-" + uuid4().hex
+        try:
+            result = await backend.execute_coding_command("mkdir -p -- " + shlex.quote(stage + "/objects"), timeout=30)
+            if result.exit_code not in (0, None):
+                raise OSError("Cannot prepare conflict resolution.")
+            await backend.upload_coding_file(json.dumps(expected).encode(), stage + "/expected.json")
+            await backend.upload_coding_file(json.dumps(desired).encode(), stage + "/manifest.json")
+            uploaded = set()
+            for name, entry in desired["entries"].items():
+                if entry["type"] != "file" or expected["entries"].get(name) == entry:
+                    continue
+                for chunk in file_chunks(entry):
+                    digest = chunk["checksum"]
+                    if digest not in uploaded:
+                        await backend.upload_coding_file(await asyncio.to_thread(store.get_blob, key, digest), stage + "/objects/" + digest)
+                        uploaded.add(digest)
+            await self._remote(backend, "overlay", stage)
+        finally:
+            try:
+                await self._remote(backend, "cleanup", stage)
+            except Exception:
+                pass
+
     async def verify(self, ref: WorkspaceRef, store: ProjectStorageBackend, key: str, revision: str):
         manifest = await asyncio.to_thread(store.get_manifest, key, revision)
         validate_manifest(manifest)

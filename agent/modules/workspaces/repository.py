@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+from secrets import token_hex
 from typing import Any
 
 from agent.shared.thread_ids import resolve_thread_id
@@ -31,10 +32,12 @@ def _trim(value: str | None, max_length: int) -> str:
 
 
 def serialize_thread_workspace(record: ThreadWorkspace) -> dict[str, Any]:
+    from agent.modules.workspaces.host_mirror import mirror_summary
     workspace = _binding_from_record(record)
     return {
         "thread_id": record.thread_id,
         "workspace": workspace.model_dump() if workspace else None,
+        "host_mirror": mirror_summary(record),
         "created_at": record.created_at.isoformat() if record.created_at else None,
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
     }
@@ -102,6 +105,10 @@ class ThreadWorkspaceRepository:
                 )
                 session.add(record)
             else:
+                previous_ref = _execution_from_record(record)
+                from agent.modules.projects.workspaces import source_key
+                if previous_ref is not None and source_key(previous_ref) != source_key(workspace_ref):
+                    record.host_mirror_json = "{}"
                 record.working_dir = workspace_ref.locator
                 record.updated_at = now
                 if record.project_id and not binding.project_id:
@@ -113,6 +120,8 @@ class ThreadWorkspaceRepository:
                     else:
                         binding = await get_project_workspace_service().find_binding(workspace_ref) or binding
                         record.project_id, record.project_workspace_id = binding.project_id, binding.project_workspace_id
+            if not record.host_mirror_json or record.host_mirror_json == "{}":
+                record.host_mirror_json = json.dumps({"generation": token_hex(32)})
             record.scope_key = binding.scope.key
             record.scope_kind = binding.scope.kind
             record.scope_label = binding.scope.label

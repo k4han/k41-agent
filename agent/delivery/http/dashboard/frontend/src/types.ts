@@ -323,6 +323,7 @@ export type ProjectPersistence = {
 };
 
 export type ProjectWorkspaceSummary = {
+  host_mirror?: WorkspaceHostMirrorState | null;
   id: number;
   kind: "shared" | "github_task" | "legacy";
   source: WorkspaceRef;
@@ -336,6 +337,19 @@ export type ProjectLocalLink = {
   path: string;
   revision: string | null;
   status: "active" | "baseline_missing" | "applied" | "pending";
+};
+
+export type WorkspaceHostMirrorState = {
+  backend_status?: string | null;
+  path: string;
+  status: "pending" | "syncing" | "synced" | "conflict" | "error";
+  revision: string | null;
+  remote_revision: string | null;
+  generation: number | string;
+  last_synced_at: string | null;
+  last_error: string;
+  conflicts: string[];
+  resolution_token: string | null;
 };
 
 export type ProjectLocalSyncPreview = {
@@ -373,6 +387,7 @@ export type WorkspaceRuntimeSummary = {
 };
 
 export type ThreadRuntimePayload = {
+  host_mirror?: WorkspaceHostMirrorState | null;
   workspace: WorkspaceBinding | null;
   runtime: WorkspaceRuntimeSummary | null;
   kind?: "shared" | "github_task" | "legacy";
@@ -382,6 +397,7 @@ export type ThreadRuntimePayload = {
 };
 
 export type ProjectSummary = {
+  host_mirror?: WorkspaceHostMirrorState | null;
   id: number;
   key: string;
   label: string;

@@ -46,6 +46,7 @@ RUNTIME_MODULES = (
     "tools/runtime/shell_guard.py", "tools/runtime/output_policy.py", "workspaces/constants.py", "workspaces/search_utils.py",
     "workspaces/posix_utils.py",
     "prompt_variables/environment.py",
+    "projects/snapshot_worker.py", "workspaces/filesystem_monitor.py",
 )
 
 BOOTSTRAP = r'''
@@ -281,15 +282,19 @@ print(json.dumps({"running": running}))
             raise CodingError("unknown_outcome", "Cannot verify sandbox workspace process state: " + result.output[-1000:])
         return json.loads(result.output)["running"]
 
-    async def client(self, context):
+    async def client(self, context, *, passive=False):
         self.loop = asyncio.get_running_loop()
         key = (context.backend, context.locator, context.workspace)
+        if passive:
+            key += ("passive",)
         async with self.client_lock:
             if key not in self.clients:
                 from agent.modules.workspaces import WorkspaceRef
                 from agent.modules.workspaces import create_workspace_runtime_backend as _create_workspace_runtime_backend
                 ref = WorkspaceRef(backend=context.backend, locator=context.locator,
                                    metadata={"root": context.workspace} if context.workspace else {})
+                if passive:
+                    ref.metadata["_require_running"] = True
                 # Do not transparently recreate a sandbox and retry a mutation.
                 backend = await _create_workspace_runtime_backend(ref)
                 if not callable(getattr(backend, "execute_coding_command", None)):

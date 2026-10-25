@@ -39,6 +39,7 @@ class ProjectWorkspace(BaseModel):
     last_error = Column(Text, nullable=False, default="")
     pinned_revision = Column(String(64), nullable=True)
     local_sync_revision = Column(String(64), nullable=True)
+    host_mirror_json = Column(Text, nullable=False, default="{}")
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 

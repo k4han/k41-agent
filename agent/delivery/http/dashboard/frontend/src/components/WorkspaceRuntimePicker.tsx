@@ -3,11 +3,13 @@ import { createEffect, createMemo, createSignal, Show } from "solid-js";
 
 import { SelectControl } from "@/components/SelectControl";
 import { WorkspaceStorageStatus } from "@/components/WorkspaceStorageStatus";
+import { WorkspaceHostMirror } from "@/components/WorkspaceHostMirror";
 import { getBackendDisplayName, getEnabledBackends } from "@/lib/catalogStore";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import type { ThreadRuntimePayload, WorkspaceBackendKey } from "@/types";
 
 export function WorkspaceRuntimePicker(props: {
+  threadId?: string;
   payload: ThreadRuntimePayload;
   busy: boolean;
   disabled?: boolean;
@@ -21,13 +23,19 @@ export function WorkspaceRuntimePicker(props: {
   createEffect(() => setSelected(currentBackend()));
   const transition = () => props.payload.runtime?.transition;
   const unavailable = () => props.payload.runtime?.status === "unavailable";
+  const recoverTemporary = () => !props.payload.workspace?.project_id && currentBackend() !== "local"
+    && ["stopped", "destroyed"].includes(props.payload.host_mirror?.backend_status || "");
   const phaseLabel = () => ({ saving: "Saving files", provisioning: "Creating environment", restoring: "Loading files",
     verifying: "Verifying files", activating: "Activating environment", completed: "Backend switched", failed: "Switch failed" }[transition()?.phase || "completed"]);
   return <div class="composer-runtime-picker">
     <Show when={props.payload.workspace}>{(binding) => <WorkspaceStorageStatus name={props.payload.workspace_name}
       execution={binding().execution} persistence={props.payload.persistence} localLink={props.payload.local_link} />}</Show>
     <p>All conversations in this workspace use the same files and current environment. Switching continues this workspace on another backend. Running processes and installed dependencies are not transferred.</p>
-    <Show when={props.payload.local_link && props.payload.workspace?.project_id}>
+    <Show when={props.payload.host_mirror}>{(state) => <WorkspaceHostMirror state={state()}
+      projectId={props.payload.workspace?.project_id} workspaceId={props.payload.workspace?.project_workspace_id}
+      threadId={props.threadId}
+      generation={props.payload.workspace?.runtime_generation} disabled={props.busy || props.disabled} />}</Show>
+    <Show when={!props.payload.host_mirror && props.payload.local_link && props.payload.workspace?.project_id}>
       <A class="btn" href={`/projects/${props.payload.workspace!.project_id}`}>Manage local synchronization</A>
     </Show>
     <label>Execution backend</label>
@@ -37,11 +45,12 @@ export function WorkspaceRuntimePicker(props: {
       options={getEnabledBackends().filter((backend) => ["local", "daytona", "modal"].includes(backend.name))
         .map((backend) => ({ value: backend.name, label: getBackendDisplayName(backend.name) }))} />
     <Show when={selected() === "local" && props.payload.workspace?.execution.backend !== "local"}>
-      <p>Files will be loaded into a new application-managed local directory.</p>
+      <p>Execution will continue in the fixed host workspace after synchronization completes.</p>
     </Show>
     <button class="btn btn-primary" type="button"
-      disabled={props.disabled || props.busy || unavailable() || selected() === props.payload.workspace?.execution.backend}
-      onClick={() => void props.onSwitch(selected())}>{props.busy ? "Switching backend..." : "Switch backend"}</button>
+      disabled={props.disabled || props.busy || unavailable() || (selected() === props.payload.workspace?.execution.backend && !recoverTemporary())}
+      onClick={() => void props.onSwitch(selected())}>{props.busy ? "Switching backend..."
+        : recoverTemporary() && selected() === currentBackend() ? "Recover environment" : "Switch backend"}</button>
     <Show when={unavailable() && !transition()}>
       <p role="status">The previous environment is gone. Recover the workspace (restore or move to local) before switching backends.</p>
     </Show>
