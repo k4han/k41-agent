@@ -121,3 +121,16 @@ def test_import_overwrite_checks_destination_version(client):
 def test_corrupt_zip_is_an_input_error(client):
     result = client.post("/dashboard-api/skill-packages/imports/preview", files={"file": ("broken.zip", b"broken", "application/zip")})
     assert result.status_code == 400
+
+
+def test_import_failure_without_exception_message_has_detail(client, monkeypatch, caplog):
+    from agent.modules.skills import get_skill_packages
+
+    async def unavailable(**kwargs):
+        raise NotImplementedError
+
+    monkeypatch.setattr(get_skill_packages(), "preview", unavailable)
+    result = client.post("/dashboard-api/skill-packages/imports/preview", json={"kind": "git", "url": "https://github.com/example/repo"})
+    assert result.status_code == 503
+    assert result.json()["detail"] == "Skill package operation failed. Check the server logs for details."
+    assert "NotImplementedError" in caplog.text

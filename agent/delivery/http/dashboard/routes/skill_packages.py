@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import io
 import json
+import logging
 import zipfile
 from typing import Any, Literal
 from urllib.parse import quote
@@ -17,6 +18,7 @@ import yaml
 from agent.modules.skills import get_skill_packages, validate_skill_document as validate_document
 
 router = APIRouter(prefix="/dashboard-api/skill-packages")
+logger = logging.getLogger(__name__)
 
 
 def workspace_value(value: str | None):
@@ -30,7 +32,9 @@ def workspace_value(value: str | None):
 
 def package_error(exc: Exception):
     status = 404 if isinstance(exc, FileNotFoundError) else 409 if isinstance(exc, FileExistsError) else 403 if isinstance(exc, PermissionError) else 400 if isinstance(exc, (ValueError, UnicodeError, zipfile.BadZipFile)) else 503
-    return HTTPException(status, str(exc))
+    if status >= 500:
+        logger.exception("Skill package operation failed")
+    return HTTPException(status, str(exc) or "Skill package operation failed. Check the server logs for details.")
 
 
 class PackageBody(BaseModel):

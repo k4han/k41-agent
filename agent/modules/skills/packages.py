@@ -391,22 +391,31 @@ class SkillPackages:
     async def _git(self, arguments: list[str], environment=None) -> str:
         import os
         import subprocess
-        from types import SimpleNamespace
         from agent.modules.tools import kill_process_tree
         from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
-        process = await asyncio.create_subprocess_exec("git", *arguments, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE, env={**(environment or os.environ), "GIT_TERMINAL_PROMPT": "0"},
-            start_new_session=os.name != "nt",
-            **hidden_subprocess_kwargs(creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)))
-        try:
-            output, error = await asyncio.wait_for(process.communicate(), 120)
-        except asyncio.TimeoutError:
-            await asyncio.to_thread(kill_process_tree, SimpleNamespace(pid=process.pid, poll=lambda: process.returncode, kill=process.kill))
-            await process.wait()
-            raise ValueError("Git import timed out.") from None
-        if process.returncode:
-            raise ValueError("Git import failed. Check repository URL, ref and connection permissions.")
-        return output.decode()
+
+        def run() -> str:
+            # The application's Windows selector loop cannot spawn async subprocesses.
+            try:
+                process = subprocess.Popen(["git", *arguments], stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    env={**(environment or os.environ), "GIT_TERMINAL_PROMPT": "0"},
+                    start_new_session=os.name != "nt",
+                    **hidden_subprocess_kwargs(creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)))
+            except FileNotFoundError:
+                raise ValueError("Git is not installed or is not available on PATH. Install Git before importing a repository.") from None
+            with process:
+                try:
+                    output, _ = process.communicate(timeout=120)
+                except subprocess.TimeoutExpired:
+                    kill_process_tree(process)
+                    process.communicate()
+                    raise ValueError("Git import timed out. Check the connection and try again.") from None
+                if process.returncode:
+                    raise ValueError("Git import failed. Check repository URL, ref and connection permissions.")
+                return output.decode("utf-8", errors="replace")
+
+        return await asyncio.to_thread(run)
 
     async def import_preview(self, token: str, *, scope="global", workspace=None, overwrite=False):
         from agent.modules.skills import get_repository_skill_dir
