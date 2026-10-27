@@ -1,5 +1,18 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { Download, Folder, Plus, RefreshCw, Save, Upload } from "lucide-solid";
+import {
+  BookOpen,
+  Download,
+  FileText,
+  Folder,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  Sliders,
+  Trash2,
+  TriangleAlert,
+  Upload,
+} from "lucide-solid";
 import { Dialog } from "@/components/Dialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Markdown } from "@/components/Markdown";
@@ -17,8 +30,11 @@ import {
 } from "@/lib/api";
 import type { WorkspaceRef } from "@/types";
 import type {
-  SkillDiagnostic as Diagnostic, SkillPackageSummary as Package, SkillPackageDetail as Detail,
-  SkillEntry as Entry, SkillFileDetail as FileDetail,
+  SkillDiagnostic as Diagnostic,
+  SkillPackageSummary as Package,
+  SkillPackageDetail as Detail,
+  SkillEntry as Entry,
+  SkillFileDetail as FileDetail,
 } from "@/lib/skillPackages";
 import { SettingsLayout } from "./SettingsLayout";
 
@@ -351,77 +367,120 @@ export function SkillsPage() {
           disabled={busy()}
           onClick={() => void execute(load)}
         >
-          <RefreshCw size={14} /> Reload
+          <RefreshCw size={14} class={busy() ? "animate-spin" : ""} /> Reload
         </button>
       }
     >
       <div class="stack">
         <Show when={error()}>
-          <div class="panel" role="alert">
-            {error()}
+          <div
+            class="panel"
+            role="alert"
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "10px",
+              padding: "12px 16px",
+              "border-color":
+                "color-mix(in srgb, var(--danger) 40%, var(--border))",
+              background:
+                "color-mix(in srgb, var(--danger) 8%, var(--surface))",
+              color: "var(--danger)",
+            }}
+          >
+            <TriangleAlert size={16} style={{ "flex-shrink": 0 }} />
+            <span>{error()}</span>
           </div>
         </Show>
         <section class="panel">
           <div class="panel-body stack">
-            <div class="row-wrap">
-              <select
-                aria-label="Skill scope"
-                value={scope()}
-                disabled={busy()}
-                onChange={(event) => {
-                  setScope(event.currentTarget.value);
-                  void execute(load);
-                }}
-              >
-                <option value="global">Shared skills</option>
-                <option value="project">Workspace skills</option>
-              </select>
-              <Show when={scope() === "project"}>
-                <WorkspaceSelector
-                  workingDir={workspace()?.locator || ""}
-                  defaultWorkingDir={defaultDirectory()}
-                  workspace={workspace()}
-                  locked={false}
+            <div class="skills-toolbar">
+              <div class="skills-toolbar-filters">
+                <select
+                  class="select"
+                  aria-label="Skill scope"
+                  value={scope()}
                   disabled={busy()}
-                  onSelectionChange={(draft) => void selectWorkspace(draft)}
-                />
-              </Show>
-              <input
-                aria-label="Search skills"
-                placeholder="Search skills"
-                value={search()}
-                onInput={(event) => setSearch(event.currentTarget.value)}
-              />
-              <button
-                class="btn primary"
-                disabled={busy()}
-                onClick={() => setCreateOpen(true)}
-              >
-                <Plus size={14} /> New skill
-              </button>
-              <button
-                class="btn"
-                disabled={busy()}
-                onClick={() => {
-                  setPreview(null);
-                  setOverwrite(false);
-                  setImportOpen(true);
-                }}
-              >
-                <Upload size={14} /> Import
-              </button>
+                  onChange={(event) => {
+                    setScope(event.currentTarget.value);
+                    void execute(load);
+                  }}
+                  style={{ width: "auto", "min-width": "150px" }}
+                >
+                  <option value="global">Shared skills</option>
+                  <option value="project">Workspace skills</option>
+                </select>
+                <Show when={scope() === "project"}>
+                  <WorkspaceSelector
+                    workingDir={workspace()?.locator || ""}
+                    defaultWorkingDir={defaultDirectory()}
+                    workspace={workspace()}
+                    locked={false}
+                    disabled={busy()}
+                    onSelectionChange={(draft) => void selectWorkspace(draft)}
+                  />
+                </Show>
+              </div>
+              <div class="skills-toolbar-search">
+                <div class="settings-resource-search" style={{ width: "100%" }}>
+                  <Search size={15} />
+                  <input
+                    class="input"
+                    type="search"
+                    aria-label="Search skills"
+                    placeholder="Search skills by name, description, or path..."
+                    value={search()}
+                    onInput={(event) => setSearch(event.currentTarget.value)}
+                  />
+                </div>
+              </div>
+              <div class="skills-toolbar-actions">
+                <button
+                  class="btn btn-primary"
+                  disabled={busy()}
+                  onClick={() => setCreateOpen(true)}
+                >
+                  <Plus size={14} /> New skill
+                </button>
+                <button
+                  class="btn"
+                  disabled={busy()}
+                  onClick={() => {
+                    setPreview(null);
+                    setOverwrite(false);
+                    setImportOpen(true);
+                  }}
+                >
+                  <Upload size={14} /> Import
+                </button>
+              </div>
             </div>
-            <span class="hint">
-              Workspace skills take precedence. Activate skills from chat or
-              with /skill name.
-            </span>
           </div>
         </section>
         <section class="panel">
           <div class="panel-body stack">
+            <div
+              class="settings-section-header"
+              style={{ "margin-bottom": "4px" }}
+            >
+              <h3
+                class="settings-section-title"
+                style={{
+                  display: "inline-flex",
+                  "align-items": "center",
+                  gap: "8px",
+                  margin: 0,
+                  "font-size": "0.9375rem",
+                }}
+              >
+                <Sliders size={15} />
+                Environment & Storage Configuration
+              </h3>
+            </div>
             <div class="field">
               <label>Repository skills directory</label>
               <input
+                class="input"
                 value={repositoryDirectory()}
                 disabled={busy()}
                 onInput={(event) =>
@@ -432,6 +491,7 @@ export function SkillsPage() {
             <div class="field">
               <label>Additional shared skill directories</label>
               <textarea
+                class="textarea"
                 rows={2}
                 disabled={busy()}
                 value={additionalRoots()}
@@ -444,6 +504,7 @@ export function SkillsPage() {
             <div class="field">
               <label for="local-skill-execution">Local execution</label>
               <select
+                class="select"
                 id="local-skill-execution"
                 disabled={busy()}
                 value={localExecutionMode()}
@@ -456,17 +517,13 @@ export function SkillsPage() {
                 </option>
                 <option value="source">Source (live local files)</option>
               </select>
-              <span class="hint">
-                Source mode avoids a copy. Packages with Python or Node project
-                manifests still use a snapshot for dependency installation.
-                Refresh a source skill after changing its files.
-              </span>
             </div>
             <div class="field">
               <label for="skill-cache-root">
                 Local execution cache directory
               </label>
               <input
+                class="input"
                 id="skill-cache-root"
                 disabled={busy()}
                 value={cacheRoot()}
@@ -474,63 +531,128 @@ export function SkillsPage() {
                 placeholder="Automatic short directory in the managed user folder"
               />
             </div>
-            <button
-              class="btn"
-              disabled={busy()}
-              onClick={() =>
-                void execute(async () => {
-                  await putJson("/settings", {
-                    values: {
-                      "skills.repository_dir": repositoryDirectory(),
-                      "skills.local_execution_mode": localExecutionMode(),
-                      "skills.cache_root": cacheRoot(),
-                      "skills.additional_roots": additionalRoots()
-                        .split("\n")
-                        .map((value) => value.trim())
-                        .filter(Boolean),
-                    },
-                  });
-                  await load();
-                  showToast("Sources saved.");
-                })
-              }
-            >
-              Save sources
-            </button>
+            <div>
+              <button
+                class="btn btn-primary"
+                disabled={busy()}
+                onClick={() =>
+                  void execute(async () => {
+                    await putJson("/settings", {
+                      values: {
+                        "skills.repository_dir": repositoryDirectory(),
+                        "skills.local_execution_mode": localExecutionMode(),
+                        "skills.cache_root": cacheRoot(),
+                        "skills.additional_roots": additionalRoots()
+                          .split("\n")
+                          .map((value) => value.trim())
+                          .filter(Boolean),
+                      },
+                    });
+                    await load();
+                    showToast("Sources saved.");
+                  })
+                }
+              >
+                <Save size={14} /> Save sources
+              </button>
+            </div>
           </div>
         </section>
         <Show
           when={shown().length}
           fallback={
             <div class="panel">
-              <div class="panel-body">No skills found in this scope.</div>
+              <div
+                class="panel-body"
+                style={{ padding: "32px 16px", "text-align": "center" }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    "flex-direction": "column",
+                    "align-items": "center",
+                    gap: "12px",
+                  }}
+                >
+                  <BookOpen size={32} style={{ color: "var(--muted-2)" }} />
+                  <div style={{ "font-weight": 600, color: "var(--fg)" }}>
+                    No skills found in this scope.
+                  </div>
+                  <button
+                    class="btn btn-primary"
+                    disabled={busy()}
+                    onClick={() => setCreateOpen(true)}
+                  >
+                    <Plus size={14} /> New skill
+                  </button>
+                </div>
+              </div>
             </div>
           }
         >
           <For each={shown()}>
             {(item) => (
-              <section class="panel">
+              <section class="panel skill-card">
                 <div class="panel-body stack">
-                  <div class="row-wrap">
-                    <strong>{item.name}</strong>
-                    <span class="badge">{item.source.scope}</span>
-                    <Show when={item.shadowed}>
-                      <span class="badge">Shadowed</span>
-                    </Show>
-                    <Show when={!item.enabled}>
-                      <span class="badge">Disabled or invalid</span>
-                    </Show>
+                  <div class="skill-card-header">
+                    <div class="skill-card-title-group">
+                      <strong class="skill-card-title">
+                        <BookOpen size={16} />
+                        {item.name}
+                      </strong>
+                      <span
+                        class={`badge ${item.source.scope === "project" ? "badge-info" : ""}`}
+                      >
+                        {item.source.scope === "project"
+                          ? "Workspace"
+                          : "Shared"}
+                      </span>
+                      <Show when={item.shadowed}>
+                        <span
+                          class="badge badge-warning"
+                          title="Shadowed by workspace skill with same name"
+                        >
+                          Shadowed
+                        </span>
+                      </Show>
+                      <Show when={!item.enabled}>
+                        <span class="badge badge-danger">
+                          Disabled or invalid
+                        </span>
+                      </Show>
+                      <Show when={item.enabled}>
+                        <span class="badge badge-success">Enabled</span>
+                      </Show>
+                    </div>
                   </div>
-                  <p>{item.description}</p>
-                  <span class="hint mono">
-                    {item.source.root}/{item.source.directory}
-                  </span>
-                  <For each={item.diagnostics}>
-                    {(diagnostic) => (
-                      <span class="hint">{diagnostic.message}</span>
-                    )}
-                  </For>
-                  <div class="row-wrap">
+                  <p class="skill-card-description">{item.description}</p>
+                  <div class="skill-card-meta">
+                    <Folder size={13} />
+                    <span class="mono" style={{ color: "var(--fg-muted)" }}>
+                      {item.source.root}/{item.source.directory}
+                    </span>
+                  </div>
+                  <Show when={item.diagnostics && item.diagnostics.length > 0}>
+                    <div class="stack" style={{ gap: "4px" }}>
+                      <For each={item.diagnostics}>
+                        {(diagnostic) => (
+                          <div
+                            class="badge badge-warning"
+                            style={{
+                              "white-space": "normal",
+                              "text-align": "left",
+                              padding: "4px 8px",
+                              width: "fit-content",
+                            }}
+                          >
+                            <TriangleAlert size={12} />
+                            <span>{diagnostic.message}</span>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                  <div class="skill-card-actions">
                     <button
                       class="btn"
                       disabled={busy()}
@@ -557,7 +679,7 @@ export function SkillsPage() {
                       <Download size={14} /> Export ZIP
                     </a>
                     <button
-                      class="btn danger"
+                      class="btn btn-danger"
                       disabled={busy()}
                       onClick={() => setDeleteTarget(item)}
                     >
@@ -579,49 +701,76 @@ export function SkillsPage() {
         <Show when={detail()}>
           {(current) => (
             <div class="stack">
-              <div class="row-wrap">
-                <input
-                  aria-label="Package name"
-                  value={packageName()}
-                  onInput={(event) => setPackageName(event.currentTarget.value)}
-                />
-                <button
-                  class="btn"
-                  disabled={busy() || packageName() === current().name}
-                  onClick={() =>
-                    void execute(async () => {
-                      await apiFetch(url(`/${current().id}`), {
-                        method: "PATCH",
-                        json: {
-                          name: packageName(),
-                          expected_version: current().file_version,
-                        },
-                      });
-                      setDetail(null);
-                      await load();
-                    })
-                  }
+              <div class="field">
+                <label>Package name</label>
+                <div
+                  class="row-wrap"
+                  style={{ "align-items": "center", gap: "8px" }}
                 >
-                  Rename package
-                </button>
+                  <input
+                    class="input"
+                    style={{ "max-width": "320px" }}
+                    aria-label="Package name"
+                    value={packageName()}
+                    onInput={(event) =>
+                      setPackageName(event.currentTarget.value)
+                    }
+                  />
+                  <button
+                    class="btn"
+                    disabled={
+                      busy() ||
+                      packageName() === current().name ||
+                      !packageName().trim()
+                    }
+                    onClick={() =>
+                      void execute(async () => {
+                        await apiFetch(url(`/${current().id}`), {
+                          method: "PATCH",
+                          json: {
+                            name: packageName(),
+                            expected_version: current().file_version,
+                          },
+                        });
+                        setDetail(null);
+                        await load();
+                      })
+                    }
+                  >
+                    Rename package
+                  </button>
+                </div>
               </div>
-              <div class="row-wrap">
+              <div
+                class="settings-tabs"
+                role="tablist"
+                style={{ "margin-bottom": "8px" }}
+              >
                 <button
-                  class="btn"
+                  type="button"
+                  role="tab"
+                  class={`settings-tab ${mode() === "form" ? "active" : ""}`}
+                  aria-selected={mode() === "form"}
                   disabled={busy()}
                   onClick={() => void switchMode("form")}
                 >
                   Form
                 </button>
                 <button
-                  class="btn"
+                  type="button"
+                  role="tab"
+                  class={`settings-tab ${mode() === "raw" ? "active" : ""}`}
+                  aria-selected={mode() === "raw"}
                   disabled={busy()}
                   onClick={() => void switchMode("raw")}
                 >
                   SKILL.md source
                 </button>
                 <button
-                  class="btn"
+                  type="button"
+                  role="tab"
+                  class={`settings-tab ${mode() === "preview" ? "active" : ""}`}
+                  aria-selected={mode() === "preview"}
                   disabled={busy()}
                   onClick={() => void switchMode("preview")}
                 >
@@ -633,7 +782,8 @@ export function SkillsPage() {
                   <div class="field">
                     <label>Description</label>
                     <textarea
-                      rows={2}
+                      class="textarea"
+                      rows={3}
                       value={description()}
                       onInput={(event) =>
                         setDescription(event.currentTarget.value)
@@ -643,6 +793,7 @@ export function SkillsPage() {
                   <div class="field">
                     <label>Compatibility</label>
                     <input
+                      class="input"
                       value={compatibility()}
                       onInput={(event) =>
                         setCompatibility(event.currentTarget.value)
@@ -652,7 +803,7 @@ export function SkillsPage() {
                   <div class="field">
                     <label>Metadata (JSON)</label>
                     <textarea
-                      class="mono"
+                      class="textarea mono"
                       rows={3}
                       value={metadata()}
                       onInput={(event) =>
@@ -663,44 +814,89 @@ export function SkillsPage() {
                   <div class="field">
                     <label>Instructions</label>
                     <textarea
-                      class="mono"
-                      rows={10}
+                      class="textarea mono"
+                      rows={12}
                       value={body()}
                       onInput={(event) => setBody(event.currentTarget.value)}
                     />
                   </div>
-                  <span class="hint">
-                    Other fields are preserved. Edit source to change license,
-                    allowed-tools or custom fields.
-                  </span>
                 </div>
               </Show>
               <Show when={mode() === "raw"}>
                 <textarea
                   aria-label="SKILL.md source"
-                  class="mono"
-                  rows={16}
+                  class="textarea mono"
+                  rows={18}
                   value={raw()}
                   onInput={(event) => setRaw(event.currentTarget.value)}
                 />
               </Show>
               <Show when={mode() === "preview"}>
-                <Markdown text={body()} />
+                <div
+                  class="panel"
+                  style={{
+                    padding: "16px",
+                    "max-height": "480px",
+                    "overflow-y": "auto",
+                    background: "var(--surface)",
+                  }}
+                >
+                  <Markdown text={body()} />
+                </div>
               </Show>
-              <For each={diagnostics()}>
-                {(diagnostic) => <span class="hint">{diagnostic.message}</span>}
-              </For>
-              <button
-                class="btn primary"
-                disabled={busy() || mode() === "preview"}
-                onClick={() => void saveDocument()}
+              <Show when={diagnostics().length > 0}>
+                <div class="stack" style={{ gap: "4px" }}>
+                  <For each={diagnostics()}>
+                    {(diagnostic) => (
+                      <div
+                        class="badge badge-warning"
+                        style={{
+                          "white-space": "normal",
+                          "text-align": "left",
+                          padding: "6px 10px",
+                          width: "100%",
+                        }}
+                      >
+                        <TriangleAlert size={14} style={{ "flex-shrink": 0 }} />
+                        <span>{diagnostic.message}</span>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+              <div>
+                <button
+                  class="btn btn-primary"
+                  disabled={busy() || mode() === "preview"}
+                  onClick={() => void saveDocument()}
+                >
+                  <Save size={14} /> Save SKILL.md
+                </button>
+              </div>
+              <div
+                class="skill-file-header"
+                style={{
+                  display: "flex",
+                  "align-items": "center",
+                  "justify-content": "space-between",
+                  gap: "10px",
+                  "margin-top": "12px",
+                  "padding-top": "12px",
+                  "border-top": "1px solid var(--border)",
+                }}
               >
-                <Save size={14} /> Save SKILL.md
-              </button>
-              <hr />
-              <div class="row-wrap">
-                <strong>Package files</strong>
-                <span class="mono">/{directory()}</span>
+                <div
+                  style={{
+                    display: "flex",
+                    "align-items": "center",
+                    gap: "8px",
+                  }}
+                >
+                  <strong>Package files</strong>
+                  <span class="mono" style={{ "font-size": "0.8125rem", color: "var(--fg-muted)" }}>
+                    /{directory()}
+                  </span>
+                </div>
                 <button
                   class="btn"
                   disabled={busy() || !directory()}
@@ -713,41 +909,67 @@ export function SkillsPage() {
                   Parent directory
                 </button>
               </div>
-              <For each={entries()}>
-                {(entry) => (
-                  <div class="row-wrap">
-                    <button class="btn" onClick={() => void openFile(entry)}>
-                      <Show when={entry.kind === "directory"}>
-                        <Folder size={14} />
-                      </Show>
-                      {entry.name}
-                    </button>
-                    <span class="hint">
-                      {entry.kind === "file"
-                        ? `${entry.size} bytes`
-                        : "Directory"}
-                    </span>
-                    <Show when={entry.kind === "directory"}>
-                      <button
-                        class="btn"
-                        disabled={busy()}
-                        onClick={() => {
-                          setFile({
-                            path: entry.path,
-                            content: null,
-                            version: "",
-                            mime_type: "directory",
-                            size: 0,
-                          });
-                          setRenamePath(entry.path);
-                        }}
-                      >
-                        Manage
-                      </button>
-                    </Show>
+              <div class="skill-file-list">
+                <Show when={entries().length === 0}>
+                  <div
+                    style={{
+                      padding: "12px",
+                      "text-align": "center",
+                      color: "var(--fg-muted)",
+                      "font-size": "0.8125rem",
+                    }}
+                  >
+                    No files in this directory.
                   </div>
-                )}
-              </For>
+                </Show>
+                <For each={entries()}>
+                  {(entry) => (
+                    <div class="skill-file-row">
+                      <div class="skill-file-info">
+                        <button
+                          class="btn"
+                          style={{
+                            "justify-content": "flex-start",
+                            gap: "6px",
+                          }}
+                          onClick={() => void openFile(entry)}
+                        >
+                          <Show when={entry.kind === "directory"}>
+                            <Folder size={14} />
+                          </Show>
+                          <Show when={entry.kind !== "directory"}>
+                            <FileText size={14} />
+                          </Show>
+                          {entry.name}
+                        </button>
+                        <span style={{ "font-size": "0.8125rem", color: "var(--fg-muted)" }}>
+                          {entry.kind === "file"
+                            ? `${entry.size} bytes`
+                            : "Directory"}
+                        </span>
+                      </div>
+                      <Show when={entry.kind === "directory"}>
+                        <button
+                          class="btn"
+                          disabled={busy()}
+                          onClick={() => {
+                            setFile({
+                              path: entry.path,
+                              content: null,
+                              version: "",
+                              mime_type: "directory",
+                              size: 0,
+                            });
+                            setRenamePath(entry.path);
+                          }}
+                        >
+                          Manage
+                        </button>
+                      </Show>
+                    </div>
+                  )}
+                </For>
+              </div>
               <Show when={nextOffset() !== null}>
                 <button
                   class="btn"
@@ -759,8 +981,13 @@ export function SkillsPage() {
                   Load more files
                 </button>
               </Show>
-              <div class="row-wrap">
+              <div
+                class="row-wrap"
+                style={{ "align-items": "center", gap: "8px" }}
+              >
                 <input
+                  class="input"
+                  style={{ "max-width": "260px" }}
                   aria-label="New file or directory path"
                   placeholder="Relative file or directory path"
                   value={entryPath()}
@@ -768,7 +995,7 @@ export function SkillsPage() {
                 />
                 <button
                   class="btn"
-                  disabled={busy() || !entryPath()}
+                  disabled={busy() || !entryPath().trim()}
                   onClick={() =>
                     void execute(() => mutateFile("mkdir", entryPath()))
                   }
@@ -777,7 +1004,7 @@ export function SkillsPage() {
                 </button>
                 <button
                   class="btn"
-                  disabled={busy() || !entryPath()}
+                  disabled={busy() || !entryPath().trim()}
                   onClick={() =>
                     void execute(async () => {
                       await writeFile(entryPath(), "");
@@ -787,8 +1014,8 @@ export function SkillsPage() {
                 >
                   Create text file
                 </button>
-                <label class="btn">
-                  Upload file
+                <label class="btn" style={{ cursor: "pointer" }}>
+                  <Upload size={14} /> Upload file
                   <input
                     type="file"
                     hidden
@@ -813,51 +1040,85 @@ export function SkillsPage() {
               </div>
               <Show when={file()}>
                 {(selected) => (
-                  <div class="panel">
+                  <div
+                    class="panel"
+                    style={{ "border-color": "var(--border-strong)" }}
+                  >
                     <div class="panel-body stack">
-                      <strong class="mono">{selected().path}</strong>
+                      <div
+                        style={{
+                          display: "flex",
+                          "align-items": "center",
+                          "justify-content": "space-between",
+                          gap: "8px",
+                        }}
+                      >
+                        <strong
+                          class="mono"
+                          style={{ "font-size": "0.875rem" }}
+                        >
+                          {selected().path}
+                        </strong>
+                        <Show when={selected().mime_type !== "directory"}>
+                          <span style={{ "font-size": "0.8125rem", color: "var(--fg-muted)" }}>
+                            {selected().mime_type} • {selected().size} bytes
+                          </span>
+                        </Show>
+                      </div>
                       <Show when={selected().content !== null}>
                         <textarea
+                          class="textarea mono"
                           aria-label="Resource content"
-                          class="mono"
                           rows={10}
                           value={fileText()}
                           onInput={(event) =>
                             setFileText(event.currentTarget.value)
                           }
                         />
-                        <button
-                          class="btn"
-                          disabled={busy()}
-                          onClick={() =>
-                            void execute(async () => {
-                              await writeFile(
-                                selected().path,
-                                fileText(),
-                                selected().version,
-                              );
-                              setFile(
-                                await apiFetch<FileDetail>(
-                                  fileUrl(selected().path),
-                                ),
-                              );
-                              showToast("File saved.");
-                            })
-                          }
-                        >
-                          Save file
-                        </button>
+                        <div>
+                          <button
+                            class="btn btn-primary"
+                            disabled={busy()}
+                            onClick={() =>
+                              void execute(async () => {
+                                await writeFile(
+                                  selected().path,
+                                  fileText(),
+                                  selected().version,
+                                );
+                                setFile(
+                                  await apiFetch<FileDetail>(
+                                    fileUrl(selected().path),
+                                  ),
+                                );
+                                showToast("File saved.");
+                              })
+                            }
+                          >
+                            <Save size={14} /> Save file
+                          </button>
+                        </div>
                       </Show>
                       <Show when={selected().mime_type.startsWith("image/")}>
-                        <img
-                          alt={selected().path}
-                          src={fileUrl(selected().path, true)}
+                        <div
                           style={{
-                            "max-width": "100%",
-                            "max-height": "360px",
-                            "object-fit": "contain",
+                            "text-align": "center",
+                            padding: "12px",
+                            background: "var(--surface-2)",
+                            "border-radius": "8px",
                           }}
-                        />
+                        >
+                          <img
+                            alt={selected().path}
+                            src={fileUrl(selected().path, true)}
+                            style={{
+                              "max-width": "100%",
+                              "max-height": "360px",
+                              "object-fit": "contain",
+                              "border-radius": "4px",
+                            }}
+                          />
+                        </div>
                       </Show>
                       <Show
                         when={
@@ -865,42 +1126,62 @@ export function SkillsPage() {
                           selected().mime_type !== "directory"
                         }
                       >
-                        <span class="hint">
+                        <div
+                          style={{
+                            padding: "8px 12px",
+                            "border-radius": "6px",
+                            background: "var(--surface-2)",
+                            color: "var(--fg-muted)",
+                            "font-size": "0.8125rem",
+                          }}
+                        >
                           Binary or large resource. Download it or process it
                           using the skill scripts.
-                        </span>
+                        </div>
                       </Show>
                       <Show when={selected().mime_type !== "directory"}>
-                        <a class="btn" href={fileUrl(selected().path, true)}>
-                          Download file
-                        </a>
-                        <label class="btn">
-                          Replace file
-                          <input
-                            type="file"
-                            hidden
-                            disabled={busy()}
-                            onChange={(event) => {
-                              const upload = event.currentTarget.files?.[0];
-                              if (upload)
-                                void execute(async () => {
-                                  await writeFile(
-                                    selected().path,
-                                    upload,
-                                    selected().version,
-                                  );
-                                  const updated = await apiFetch<FileDetail>(
-                                    fileUrl(selected().path),
-                                  );
-                                  setFile(updated);
-                                  setFileText(updated.content || "");
-                                });
-                            }}
-                          />
-                        </label>
+                        <div class="row-wrap" style={{ gap: "8px" }}>
+                          <a class="btn" href={fileUrl(selected().path, true)}>
+                            <Download size={14} /> Download file
+                          </a>
+                          <label class="btn" style={{ cursor: "pointer" }}>
+                            <Upload size={14} /> Replace file
+                            <input
+                              type="file"
+                              hidden
+                              disabled={busy()}
+                              onChange={(event) => {
+                                const upload = event.currentTarget.files?.[0];
+                                if (upload)
+                                  void execute(async () => {
+                                    await writeFile(
+                                      selected().path,
+                                      upload,
+                                      selected().version,
+                                    );
+                                    const updated = await apiFetch<FileDetail>(
+                                      fileUrl(selected().path),
+                                    );
+                                    setFile(updated);
+                                    setFileText(updated.content || "");
+                                  });
+                              }}
+                            />
+                          </label>
+                        </div>
                       </Show>
-                      <div class="row-wrap">
+                      <div
+                        class="row-wrap"
+                        style={{
+                          "align-items": "center",
+                          gap: "8px",
+                          "padding-top": "8px",
+                          "border-top": "1px solid var(--border)",
+                        }}
+                      >
                         <input
+                          class="input"
+                          style={{ "max-width": "260px" }}
                           aria-label="Rename resource path"
                           value={renamePath()}
                           onInput={(event) =>
@@ -909,7 +1190,11 @@ export function SkillsPage() {
                         />
                         <button
                           class="btn"
-                          disabled={busy() || renamePath() === selected().path}
+                          disabled={
+                            busy() ||
+                            renamePath() === selected().path ||
+                            !renamePath().trim()
+                          }
                           onClick={() =>
                             void execute(async () => {
                               await mutateFile(
@@ -925,11 +1210,11 @@ export function SkillsPage() {
                           Rename
                         </button>
                         <button
-                          class="btn danger"
+                          class="btn btn-danger"
                           disabled={busy()}
                           onClick={() => setEntryDeleteTarget(selected())}
                         >
-                          Delete
+                          <Trash2 size={14} /> Delete
                         </button>
                       </div>
                     </div>
@@ -945,40 +1230,64 @@ export function SkillsPage() {
         title="Create skill package"
         size="lg"
         onClose={() => setCreateOpen(false)}
+        footer={
+          <div
+            class="row-wrap"
+            style={{
+              "justify-content": "flex-end",
+              gap: "8px",
+              width: "100%",
+            }}
+          >
+            <button
+              class="btn"
+              type="button"
+              onClick={() => setCreateOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              class="btn btn-primary"
+              type="button"
+              disabled={busy() || !newName().trim()}
+              onClick={() =>
+                void execute(async () => {
+                  await postJson(base, {
+                    name: newName(),
+                    content: newDocument(),
+                    scope: scope(),
+                    workspace: workspace(),
+                  });
+                  setCreateOpen(false);
+                  await load();
+                })
+              }
+            >
+              <Plus size={14} /> Create package
+            </button>
+          </div>
+        }
       >
         <div class="stack">
           <div class="field">
             <label>Skill name</label>
             <input
+              class="input"
               value={newName()}
               onInput={(event) => setNewName(event.currentTarget.value)}
+              placeholder="e.g. data-analyzer"
             />
           </div>
-          <textarea
-            aria-label="New skill document"
-            class="mono"
-            rows={14}
-            value={newDocument()}
-            onInput={(event) => setNewDocument(event.currentTarget.value)}
-          />
-          <button
-            class="btn primary"
-            disabled={busy() || !newName()}
-            onClick={() =>
-              void execute(async () => {
-                await postJson(base, {
-                  name: newName(),
-                  content: newDocument(),
-                  scope: scope(),
-                  workspace: workspace(),
-                });
-                setCreateOpen(false);
-                await load();
-              })
-            }
-          >
-            Create package
-          </button>
+          <div class="field">
+            <label>SKILL.md initial content</label>
+            <textarea
+              aria-label="New skill document"
+              class="textarea mono"
+              rows={14}
+              value={newDocument()}
+              onInput={(event) => setNewDocument(event.currentTarget.value)}
+            />
+          </div>
         </div>
       </Dialog>
       <Dialog
@@ -988,102 +1297,163 @@ export function SkillsPage() {
         onClose={() => setImportOpen(false)}
       >
         <div class="stack">
-          <select
-            aria-label="Import source"
-            value={importKind()}
-            onChange={(event) => {
-              setImportKind(event.currentTarget.value);
-              setPreview(null);
-            }}
-          >
-            <option value="zip">ZIP upload</option>
-            <option value="directory">Local directory</option>
-            <option value="git">Git repository</option>
-          </select>
-          <Show when={importKind() === "zip"}>
-            <input
-              aria-label="Skill ZIP"
-              type="file"
-              accept=".zip"
+          <div class="field">
+            <label>Import source</label>
+            <select
+              class="select"
+              aria-label="Import source"
+              value={importKind()}
               onChange={(event) => {
-                setZipFile(event.currentTarget.files?.[0] || null);
+                setImportKind(event.currentTarget.value);
                 setPreview(null);
               }}
-            />
+            >
+              <option value="zip">ZIP upload</option>
+              <option value="directory">Local directory</option>
+              <option value="git">Git repository</option>
+            </select>
+          </div>
+          <Show when={importKind() === "zip"}>
+            <div class="field">
+              <label>ZIP file</label>
+              <input
+                class="input"
+                aria-label="Skill ZIP"
+                type="file"
+                accept=".zip"
+                onChange={(event) => {
+                  setZipFile(event.currentTarget.files?.[0] || null);
+                  setPreview(null);
+                }}
+              />
+            </div>
           </Show>
           <Show when={importKind() !== "zip"}>
-            <input
-              aria-label="Import location"
-              placeholder={
-                importKind() === "git"
-                  ? "HTTPS repository URL"
-                  : "Directory on the backend host"
-              }
-              value={importPath()}
-              onInput={(event) => {
-                setImportPath(event.currentTarget.value);
-                setPreview(null);
-              }}
-            />
+            <div class="field">
+              <label>
+                {importKind() === "git"
+                  ? "Git repository URL"
+                  : "Directory path"}
+              </label>
+              <input
+                class="input"
+                aria-label="Import location"
+                placeholder={
+                  importKind() === "git"
+                    ? "HTTPS repository URL (e.g. https://github.com/org/repo)"
+                    : "Directory on the backend host"
+                }
+                value={importPath()}
+                onInput={(event) => {
+                  setImportPath(event.currentTarget.value);
+                  setPreview(null);
+                }}
+              />
+            </div>
           </Show>
           <Show when={importKind() === "git"}>
-            <input
-              aria-label="Git ref"
-              placeholder="Branch, tag or commit"
-              value={importRef()}
-              onInput={(event) => {
-                setImportRef(event.currentTarget.value);
-                setPreview(null);
-              }}
-            />
-            <input
-              aria-label="Git skill directory"
-              placeholder="Directory within repository"
-              value={subdirectory()}
-              onInput={(event) => {
-                setSubdirectory(event.currentTarget.value);
-                setPreview(null);
-              }}
-            />
-            <input
-              aria-label="GitHub installation ID"
-              placeholder="Connected GitHub installation ID (private repository)"
-              value={installationId()}
-              onInput={(event) => setInstallationId(event.currentTarget.value)}
-            />
+            <div class="field">
+              <label>Git branch, tag or commit</label>
+              <input
+                class="input"
+                aria-label="Git ref"
+                placeholder="Branch, tag or commit"
+                value={importRef()}
+                onInput={(event) => {
+                  setImportRef(event.currentTarget.value);
+                  setPreview(null);
+                }}
+              />
+            </div>
+            <div class="field">
+              <label>Subdirectory</label>
+              <input
+                class="input"
+                aria-label="Git skill directory"
+                placeholder="Directory within repository"
+                value={subdirectory()}
+                onInput={(event) => {
+                  setSubdirectory(event.currentTarget.value);
+                  setPreview(null);
+                }}
+              />
+            </div>
+            <div class="field">
+              <label>GitHub installation ID (optional)</label>
+              <input
+                class="input"
+                aria-label="GitHub installation ID"
+                placeholder="Connected GitHub installation ID (private repository)"
+                value={installationId()}
+                onInput={(event) => setInstallationId(event.currentTarget.value)}
+              />
+            </div>
           </Show>
-          <button
-            class="btn"
-            disabled={busy()}
-            onClick={() => void previewImport()}
-          >
-            {busy() ? "Preparing preview..." : "Preview import"}
-          </button>
+          <div>
+            <button
+              class="btn"
+              disabled={busy()}
+              onClick={() => void previewImport()}
+            >
+              {busy() ? "Preparing preview..." : "Preview import"}
+            </button>
+          </div>
           <Show when={preview()}>
             {(result) => (
-              <div class="stack">
+              <div
+                class="stack"
+                style={{
+                  "margin-top": "12px",
+                  "padding-top": "12px",
+                  "border-top": "1px solid var(--border)",
+                }}
+              >
                 <Show when={result().commit}>
-                  <span class="hint mono">Commit: {result().commit}</span>
+                  <span class="mono" style={{ "font-size": "0.8125rem", color: "var(--fg-muted)" }}>
+                    Commit: {result().commit}
+                  </span>
                 </Show>
                 <For each={result().skills}>
                   {(item) => (
                     <div class="panel">
-                      <div class="panel-body">
-                        <strong>{item.name}</strong>
-                        <p>{item.description}</p>
-                        <Show when={item.conflict}>
-                          <span class="badge">Existing package conflict</span>
-                        </Show>
+                      <div class="panel-body stack">
+                        <div
+                          class="row-wrap"
+                          style={{ "align-items": "center", gap: "8px" }}
+                        >
+                          <strong>{item.name}</strong>
+                          <Show when={item.conflict}>
+                            <span class="badge badge-warning">
+                              Existing package conflict
+                            </span>
+                          </Show>
+                        </div>
+                        <p style={{ margin: 0 }}>{item.description}</p>
                         <For each={item.diagnostics}>
                           {(diagnostic) => (
-                            <p class="hint">{diagnostic.message}</p>
+                            <p
+                              style={{
+                                margin: "4px 0 0",
+                                color: "var(--warning)",
+                                "font-size": "0.8125rem",
+                              }}
+                            >
+                              {diagnostic.message}
+                            </p>
                           )}
                         </For>
                       </div>
                     </div>
                   )}
                 </For>
-                <label>
+                <label
+                  style={{
+                    display: "inline-flex",
+                    "align-items": "center",
+                    gap: "8px",
+                    cursor: "pointer",
+                  }}
+                >
                   <input
                     type="checkbox"
                     checked={overwrite()}
@@ -1093,29 +1463,31 @@ export function SkillsPage() {
                   />{" "}
                   Replace existing destination packages
                 </label>
-                <button
-                  class="btn primary"
-                  disabled={
-                    busy() ||
-                    (result().skills.some((item) => item.conflict) &&
-                      !overwrite())
-                  }
-                  onClick={() =>
-                    void execute(async () => {
-                      await postJson(`${base}/imports`, {
-                        preview_id: result().preview_id,
-                        scope: scope(),
-                        workspace: workspace(),
-                        overwrite: overwrite(),
-                      });
-                      setImportOpen(false);
-                      await load();
-                      showToast("Skill packages imported.");
-                    })
-                  }
-                >
-                  Import {result().skills.length} packages
-                </button>
+                <div>
+                  <button
+                    class="btn btn-primary"
+                    disabled={
+                      busy() ||
+                      (result().skills.some((item) => item.conflict) &&
+                        !overwrite())
+                    }
+                    onClick={() =>
+                      void execute(async () => {
+                        await postJson(`${base}/imports`, {
+                          preview_id: result().preview_id,
+                          scope: scope(),
+                          workspace: workspace(),
+                          overwrite: overwrite(),
+                        });
+                        setImportOpen(false);
+                        await load();
+                        showToast("Skill packages imported.");
+                      })
+                    }
+                  >
+                    Import {result().skills.length} packages
+                  </button>
+                </div>
               </div>
             )}
           </Show>

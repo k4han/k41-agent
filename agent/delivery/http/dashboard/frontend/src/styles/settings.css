@@ -1649,3 +1649,141 @@
     width: var(--touch-target);
   }
 }
+
+/* ── Skills settings page ── */
+
+.skills-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.skills-toolbar-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.skills-toolbar-search {
+  flex: 1;
+  min-width: 220px;
+}
+
+.skills-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.skill-card {
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.skill-card:hover {
+  border-color: var(--border-strong);
+}
+
+.skill-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.skill-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.skill-card-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 650;
+  color: var(--fg);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.skill-card-description {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.skill-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--muted-2);
+}
+
+.skill-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.skill-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  background: var(--surface-2);
+}
+
+.skill-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background-color 100ms ease;
+}
+
+.skill-file-row:hover {
+  background: var(--surface);
+}
+
+.skill-file-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .skills-toolbar-actions {
+    width: 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+
+  .skills-toolbar-search {
+    width: 100%;
+  }
+
+  .skill-card-actions .btn {
+    flex: 1 1 calc(50% - 8px);
+  }
+}
+
