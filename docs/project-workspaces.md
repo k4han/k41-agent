@@ -59,9 +59,12 @@ the workspace are rejected.
 
 Mutations enter the workspace coordinator after authorization. File writes keep
 optimistic version checks. Long processes release the lock when they yield and
-are monitored independently of output reads. Periodic checkpoints run every
-30 seconds. Shared shell processes do not have transaction isolation.
-Ready workspaces remain monitored so external edits are saved even without an
+are monitored independently of output reads. Local periodic checkpoints run every
+30 seconds. Cloud monitoring backs off through 5, 15 and 60 seconds while work
+or managed processes remain active. Idle cloud checks query provider state without
+executing commands. Run/process completion and lifecycle operations checkpoint files.
+Shared shell processes do not have transaction isolation.
+Ready local workspaces remain monitored so external edits are saved even without an
 attached conversation. This still scans filesystem metadata every 30 seconds;
 unchanged files are not reread or rehashed. Unavailable and retired runtimes leave
 the monitoring set. After a host restart, a stored `ready` status does not guarantee
@@ -93,15 +96,24 @@ execution. Background task submission resolves its binding and reserves the
 workspace when the task runs. Questions that do not use workspace tools can
 complete without a cloud environment.
 
-Cloud file browsing, project instructions and skill discovery read the last
-saved revision without starting execution. Saved paths retain their cloud root;
+Cloud file browsing reads live files when the runtime is already running and may
+read the saved revision when execution is unavailable, without starting execution.
+Missing files, permission failures and invalid paths never fall back to old data.
+`WorkspaceReadResult` reports source, generation, saved revision and fallback reason
+for every data type. Raw text/binary reads require live data unless the caller
+explicitly requests `saved_ok`; download/preview responses report source metadata
+in `X-Workspace-*` headers. Project instructions and skill discovery also remain
+available from saved files. Saved paths retain their cloud root;
 temporary read views are never published as local execution workspaces. Active
 skill instructions remain available from conversation state; their execution
 cache and runtime tools are restored only when a coding tool needs them.
 
 The first workspace tool, attachment write or explicit runtime operation attaches
 the selected execution backend. A surviving sandbox is reused without restoring
-an older checkpoint over live files. A lost cloud sandbox is recreated on the
+an older checkpoint over live files. Stopped/archived Daytona runtimes resume
+before capturing their files; finished Modal runtimes require replacement.
+Network and authentication errors do not establish that a runtime was deleted.
+A lost cloud sandbox is recreated on the
 same enabled backend and hydrated from the saved revision before tools execute.
 Restoration uses the workspace lock so concurrent conversations share one new
 runtime and generation. Failed commands are never replayed by recovery.
@@ -110,11 +122,13 @@ A disabled backend or missing saved data produces an explicit tool error rather
 than switching to local or cloning a fresh project. Legacy pending recovery
 decisions no longer block ordinary messages and are resolved automatically when
 execution is needed. Explicit same-backend restore and local recovery remain
-available through `runtime.recovery`. Local project directories are not moved or
-overwritten. Retired GitHub task worktrees can be materialized into
+available through `runtime.recovery`. Original local project directories remain
+in place; manual local recovery applies a reviewed merge. Retired GitHub task worktrees can be materialized into
 application-owned runtime directories.
 
 Deleting a conversation removes its association and stops its own processes.
+Pending approvals in that conversation and its descendants do not block deletion;
+approvals in retained conversations still block sandbox retirement.
 Managed cloud lifecycle actions save before stopping, archiving or deleting.
 Shutdown stops managed processes and attempts final saves before closing the
 database. GitHub worktree pruning preserves sources whose data is not saved.
@@ -129,7 +143,7 @@ sources remain visible with an error. GitHub task workspaces remain separate.
 
 Chat, task and workspace requests accept `project_id` and
 `project_workspace_id`. Existing execution references remain supported.
-Project responses add `migration_status`, `workspaces`, `runtime` and
+Project responses add `migration_status`, `workspaces`, `runtime`, `sync_policy` and
 `persistence`, including the last saved revision, timestamp and error.
 
 - `POST /dashboard-api/projects/{id}/runtime/ensure`: resolve or recover files;
@@ -138,7 +152,13 @@ Project responses add `migration_status`, `workspaces`, `runtime` and
   runtime automatically.
 - `POST /dashboard-api/projects/{id}/runtime/recovery`: apply the pending
   decision with `action` (`restore` on the previous backend, or `local`) and
-  `expected_generation`; refuses disabled cloud backends for `restore`.
+  `expected_generation`; refuses disabled cloud backends for `restore`. Manual
+  local recovery also requires the `preview_token` returned by `local-sync`.
+- `POST /dashboard-api/projects/{id}/runtime/abandon`: clear an
+  `allocation_unknown` transition after the operator reconciled provider
+  inventory; accepts optional `project_workspace_id` and `expected_operation_id`.
+  `POST /dashboard-api/workspace/runtime/abandon` does the same for a temporary
+  thread workspace with its `thread_id` and `expected_generation`.
 - `POST /dashboard-api/projects/{id}/checkpoint`: save or retry saving.
 - `POST /dashboard-api/projects/{id}/migration/select`: select `source_id`.
 
@@ -155,7 +175,8 @@ catalog labels, Git state, uploads and uncommitted files remain unchanged.
 GitHub task workspaces remain independent.
 
 `POST /dashboard-api/projects/{id}/runtime/switch` accepts `backend`,
-`expected_generation` and optional `project_workspace_id`. It returns `202`
+`expected_generation` and optional `project_workspace_id`. A `manual_apply`
+cloud-to-local switch also requires `preview_token`. The endpoint returns `202`
 with an `operation_id` and runs independently of the browser connection. The
 project detail response exposes `runtime.transition`, including the phase,
 target backend, saved revision, timestamps and errors. A same-backend request
@@ -177,9 +198,13 @@ reconnection and focus, and polls during a switch.
 The source is checkpointed and its revision pinned before provisioning. A fresh
 destination is restored and verified before one database transaction publishes
 the new runtime, increments its generation and refreshes conversation/task
-execution references. Switching back to local always uses a new directory under
-the application-owned runtime root; an original project directory is never
-overwritten. Cloud sources are stopped after activation when no other workspace
+execution references. For `manual_apply`, switching back to local requires a
+preview token and uses the linked original directory, preserving independent host
+edits through the same three-way application used by `local-sync`. The merged
+local tree is captured as a new revision before activation. Cloud-only projects
+use a managed local directory, allocated only on explicit export or local demand.
+Cloud-to-cloud switches depend on verified snapshots, not host mirror success.
+Cloud sources are stopped after activation when no other workspace or thread
 references the same sandbox. Modal retirement terminates the old sandbox.
 Old application-owned `switch-*` local runtimes are removed after activation;
 the original linked directory is retained. Retired references still resolve to
@@ -190,8 +215,13 @@ activation retains the source binding. A restart marks an unfinished transition
 failed and cleans up its partially restored target; it never replays user
 commands. Failed cleanup is retried by the workspace monitor. Provider allocation
 IDs are saved before workspace initialization; an allocation whose provider
-response is lost before its ID is received may still require provider-side
-cleanup. Shutdown waits for accepted switches to settle before final saves.
+response is lost before its ID is received enters `allocation_unknown`. Operation
+labels/tags allow inventory reconciliation after restart; an unresolved allocation
+never triggers automatic duplicate provisioning. An operator who reconciled the
+provider inventory can explicitly abandon the transition to unblock the
+workspace without provisioning again. Recovery uses the same journal
+and only publishes a verified destination. Shutdown waits for accepted switches
+to settle before final saves.
 
 File snapshots do not transfer processes, terminal state, installed dependencies,
 system environment variables or guarantees of Windows/Linux compatibility. The
@@ -207,11 +237,14 @@ its local link. While it is the active runtime, successful checkpoints update
 `local_sync_revision`. After moving execution elsewhere, this baseline remains
 pinned independently of the current and previous workspace revisions.
 
-Backend switching continues the same `main` workspace. Switching back to local
-uses an application-managed directory; applying changes to the original linked
-directory is a distinct, explicit operation on the project page. The page shows
-both locations and whether a newer saved revision awaits local application.
-The link is not a second writable runtime or an automatic two-way filesystem sync.
+New project and thread workspaces explicitly use `manual_apply`. Cloud checkpoints
+save revisions without writing the original host directory. Applying changes or
+continuing locally requires preview and explicit application. Existing database
+rows are migrated to `mirror_strict`, preserving their automatic host reflection
+and host-divergence conflict behavior. Re-running migration preserves either policy.
+Backend switching continues the same `main` workspace. The link is not an automatic
+two-way filesystem sync. Source workspace files, snapshot persistence and local
+application status are independent.
 
 `POST /dashboard-api/projects/{id}/local-sync` accepts `expected_generation` and
 optional `project_workspace_id`. Without `preview_token`, it checkpoints the
@@ -219,6 +252,11 @@ idle runtime and returns the target path, saved revision, planned changes,
 conflicts and a preview token. Sending that token applies the reviewed changes.
 Clients cannot supply a target path or bypass conflicts. A stale token or runtime
 generation returns `409` and requires a new preview.
+Manual GitHub task workspaces use the same preview endpoint with their explicit
+`project_workspace_id`, including before local recovery of a lost sandbox.
+Temporary thread workspaces expose the same contract at
+`POST /dashboard-api/workspace/local-sync`, with `thread_id` and its existing
+string generation. Both project and thread local switches accept `preview_token`.
 
 The comparison is three-way: baseline, saved workspace and linked local files.
 Independent local edits and ignored dependency/cache folders are preserved. If
