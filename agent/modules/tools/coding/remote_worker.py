@@ -112,14 +112,22 @@ class SandboxWorker:
 
     async def _dispatch(self, request):
         if request.get("operation") == "workspace_changes":
-            from agent.modules.workspaces import FilesystemMonitor
+            try:
+                from agent.modules.workspaces import FilesystemMonitor
+            except (ImportError, AttributeError):
+                from importlib import import_module
+                FilesystemMonitor = import_module("agent.modules.workspaces.filesystem_monitor").FilesystemMonitor
             root = str(Path(request.get("workspace", self.default_root)).resolve())
             if root not in self.filesystem_monitors:
                 self.filesystem_monitors[root] = FilesystemMonitor(root)
             return await asyncio.to_thread(self.filesystem_monitors[root].poll, request.get("since"),
                                            force=bool(request.get("force")))
         if request.get("operation") == "environment":
-            from agent.modules.prompt_variables import get_execution_environment
+            try:
+                from agent.modules.prompt_variables import get_execution_environment
+            except (ImportError, AttributeError):
+                from importlib import import_module
+                get_execution_environment = import_module("agent.modules.prompt_variables.environment").get_execution_environment
 
             return get_execution_environment(resolve_shell())
         if request.get("operation") == "prepare_batch":

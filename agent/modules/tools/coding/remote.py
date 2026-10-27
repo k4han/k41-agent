@@ -119,6 +119,8 @@ def build_runtime_bundle() -> bytes:
             if package == "agent/modules/workspaces":
                 initializer = ("from .constants import IGNORED_DIR_NAMES, MAX_IMAGE_READ_BYTES\n"
                                "from .search_utils import compile_glob_pattern, match_glob_path, match_include_pattern\n")
+            elif package == "agent/modules/prompt_variables":
+                initializer = "from .environment import get_execution_environment\n" 
             archive.writestr(f"{package}/__init__.py", initializer)
         for name in paths:
             archive.writestr(name, (root / name).read_bytes())
