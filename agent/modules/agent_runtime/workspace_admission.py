@@ -37,8 +37,8 @@ async def workspace_run(arguments):
         binding = await projects.find_binding(resolve_workspace_ref(None))
     if binding is None:
         from agent.modules.workspaces import binding_from_record, resolve_workspace_ref
-        from agent.modules.workspaces.host_mirror import thread_storage_key
-        from agent.modules.projects.workspaces import source_key
+        from agent.modules.workspaces import thread_storage_key
+        from agent.modules.projects import source_key
         rows = None
         if arguments.get("thread_id"):
             try:

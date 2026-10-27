@@ -64,7 +64,7 @@ class CodingService(CodingEngine):
             projects = get_project_workspace_service()
             owner = context.project_workspace_id
             if owner is None and context.thread_id and projects.container._persistence_ready:
-                from agent.modules.workspaces.host_mirror import thread_storage_key
+                from agent.modules.workspaces import thread_storage_key
                 try:
                     rows, _ = await projects.host_mirrors.thread_status(context.thread_id)
                     owner = -int(thread_storage_key(rows))
@@ -152,7 +152,7 @@ class CodingService(CodingEngine):
             ref = projects.host_mirrors.thread_ref(rows[0])
             if (ref.backend, ref.locator) != (context.backend, context.locator):
                 raise CodingError("stale_runtime", "Execution runtime changed before checkpointing.")
-            from agent.modules.workspaces.host_mirror import thread_storage_key
+            from agent.modules.workspaces import thread_storage_key
             key = thread_storage_key(rows)
             async with projects.host_mirrors.thread_locks.setdefault(key, asyncio.Lock()):
                 rows = await projects.host_mirrors._refresh_threads(rows, ref)
@@ -205,7 +205,7 @@ class CodingService(CodingEngine):
         except (CodingError, OSError, ValueError, RuntimeError) as exc:
             return self.failure(exc)
         from agent.bootstrap.container import get_active_container
-        from agent.modules.projects.workspaces import storage_timestamp
+        from agent.modules.projects import storage_timestamp
         from agent.shared.infrastructure.db.base import utcnow
         container = get_active_container()
         projects = getattr(container, "_project_workspace_service", None) if container is not None else None

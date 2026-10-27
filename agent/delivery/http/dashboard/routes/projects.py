@@ -98,7 +98,7 @@ async def get_thread_runtime(thread_id: str):
                 from agent.modules.workspaces import binding_from_record
                 rows, state = await service.host_mirrors.thread_status(thread_id)
                 ref = service.host_mirrors.thread_ref(rows[0])
-                from agent.modules.workspaces.host_mirror import mirror_state
+                from agent.modules.workspaces import mirror_state
                 return {"workspace": binding_from_record(rows[0], ref).model_dump(), "runtime": None, "host_mirror": state,
                         "transition": mirror_state(rows[0]).get("transition"),
                         "sync_policy": rows[0].sync_policy,
@@ -109,7 +109,7 @@ async def get_thread_runtime(thread_id: str):
         workspace = next(item for item in description["workspaces"] if item["id"] == binding.project_workspace_id)
         pending = await service.sessions.pending(thread_id)
         if pending:
-            from agent.modules.projects.runtime_switch import transition_summary
+            from agent.modules.projects import transition_summary
             workspace = dict(workspace, runtime=dict(workspace["runtime"], transition=transition_summary(pending)))
         return {"workspace": binding.model_dump(), "runtime": workspace["runtime"], "kind": workspace["kind"],
                 "transition_workspace_id": pending.project_workspace_id if pending else None,

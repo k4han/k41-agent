@@ -15,12 +15,12 @@ from uuid import uuid4
 
 from sqlalchemy import and_, or_, select, update
 
-from agent.modules.projects.local_sync import (
+from agent.modules.projects import (
     _apply, _capture, _plan, _recover_replacement, _run_writer, _same_entry, _sweep_temporary, _verify, plan_changes,
 )
-from agent.modules.projects.models import ProjectWorkspace, WorkspaceRuntime
-from agent.modules.projects.storage import LocalProjectStorage
-from agent.modules.projects.workspaces import ProjectWorkspaceError, _session, source_key, storage_timestamp
+from agent.modules.projects import ProjectWorkspace, WorkspaceRuntime
+from agent.modules.projects import LocalProjectStorage
+from agent.modules.projects import ProjectWorkspaceError, _session, source_key, storage_timestamp
 from agent.modules.workspaces.models import ThreadWorkspace
 from agent.modules.workspaces.policies import MANUAL_APPLY, MIRROR_STRICT, sync_policy
 from agent.modules.workspaces.refs import WorkspaceRef, workspace_ref_from_columns
@@ -38,7 +38,7 @@ def transition_active(transition) -> bool:
     """Only a live phase blocks work; a failed transition stays as history."""
     if not transition:
         return False
-    from agent.modules.projects.runtime_switch import ACTIVE_PHASES
+    from agent.modules.projects import ACTIVE_PHASES
     return transition.get("phase") in ACTIVE_PHASES
 
 
@@ -368,7 +368,7 @@ class HostMirrorService:
     async def synchronize_thread_local(self, thread_id, generation, *, preview_token=None):
         """Apply a thread snapshot using the same preview contract as project workspaces."""
         from agent.modules.agent_runtime import get_active_session_registry, ThreadMutationConflictError
-        from agent.modules.projects.local_sync import apply_workspace_revision
+        from agent.modules.projects import apply_workspace_revision
         from agent.modules.workspaces.runtime import runtime_observation
         from agent.modules.workspaces.service import temp_workspace_root
         rows, _ = await self.thread_status(thread_id)
@@ -489,7 +489,7 @@ class HostMirrorService:
                 self.tokens.pop(identity, None)
                 return {"backend_status": status, "changed": False, "token": None}
         from agent.modules.tools import get_coding_service
-        from agent.modules.tools.coding.contracts import InvocationContext
+        from agent.modules.tools import InvocationContext
         context = InvocationContext(agent_name="host-mirror", workspace=str(ref.metadata.get("root", "")),
                                     thread_id="", backend=ref.backend, locator=ref.locator)
         remote = get_coding_service(self.service.container).remote
@@ -888,7 +888,7 @@ class HostMirrorService:
                     await self._save_threads(rows, ref, state)
                 if backend == "local":
                     if manual:
-                        from agent.modules.projects.local_sync import apply_workspace_revision
+                        from agent.modules.projects import apply_workspace_revision
                         from agent.modules.workspaces.service import temp_workspace_root
                         destination = state.get("path") or str(temp_workspace_root() / ("cloud-" + key))
                         applied = await apply_workspace_revision(self.service.transfer, self.temporary_storage, key, revision,
@@ -1050,7 +1050,7 @@ class HostMirrorService:
             try:
                 session = await _session()
                 async with session:
-                    from agent.modules.projects.models import Project
+                    from agent.modules.projects import Project
                     projects = (await session.execute(select(ProjectWorkspace, WorkspaceRuntime).join(
                         WorkspaceRuntime, WorkspaceRuntime.project_workspace_id == ProjectWorkspace.id,
                     ).join(Project, Project.id == ProjectWorkspace.project_id).where(

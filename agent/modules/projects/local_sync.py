@@ -20,7 +20,7 @@ from agent.modules.projects import snapshot_worker
 from agent.modules.projects.models import ProjectWorkspace
 from agent.modules.projects.workspaces import ProjectWorkspaceError, _session, source_key
 from agent.modules.workspaces import WorkspaceRef
-from agent.modules.workspaces.policies import MANUAL_APPLY, MIRROR_STRICT, sync_policy
+from agent.modules.workspaces import MANUAL_APPLY, MIRROR_STRICT, sync_policy
 
 logger = logging.getLogger(__name__)
 _WINDOWS = os.name == "nt"
@@ -114,7 +114,7 @@ def plan_changes(base, desired, current, root, policy=MANUAL_APPLY):
 async def apply_workspace_revision(transfer, store, key, revision, baseline, root, generation, *, preview_token=None,
                                    policy=MANUAL_APPLY, journal=None, target_generation=None):
     """Preview or apply a pinned revision without changing its runtime or baseline."""
-    from agent.modules.workspaces.host_mirror import validate_host_names
+    from agent.modules.workspaces import validate_host_names
     root = Path(root)
     desired = await asyncio.to_thread(store.get_manifest, key, revision)
     validate_host_names(desired)

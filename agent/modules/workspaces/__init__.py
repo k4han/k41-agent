@@ -249,3 +249,49 @@ __all__ = [
     "workspace_ref_from_columns",
     "workspace_ref_from_local_path",
 ]
+
+def __getattr__(name):
+    from importlib import import_module
+    modules = {
+        "relative_remote_path": "posix_utils",
+        "READS": "reads",
+        "STRUCTURED_READS": "reads",
+        "MANUAL_APPLY": "policies",
+        "MIRROR_STRICT": "policies",
+        "sync_policy": "policies",
+        "WorkspaceRuntimeMetrics": "metrics",
+        "RuntimeTransitionCoordinator": "transitions",
+        "runtime_is_owned": "runtime",
+        "FilesystemMonitor": "filesystem_monitor",
+        "HostMirrorService": "host_mirror",
+        "mirror_state": "host_mirror",
+        "transition_active": "host_mirror",
+        "thread_storage_key": "host_mirror",
+        "validate_host_names": "host_mirror",
+        "mirror_summary": "host_mirror",
+        "workspace_is_running": "host_mirror",
+    }
+    if name not in modules:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return getattr(import_module(f"{__name__}.{modules[name]}"), name)
+
+
+__all__ += [
+    "relative_remote_path",
+    "READS",
+    "STRUCTURED_READS",
+    "MANUAL_APPLY",
+    "MIRROR_STRICT",
+    "sync_policy",
+    "WorkspaceRuntimeMetrics",
+    "RuntimeTransitionCoordinator",
+    "runtime_is_owned",
+    "FilesystemMonitor",
+    "HostMirrorService",
+    "mirror_state",
+    "transition_active",
+    "thread_storage_key",
+    "validate_host_names",
+    "mirror_summary",
+    "workspace_is_running",
+]

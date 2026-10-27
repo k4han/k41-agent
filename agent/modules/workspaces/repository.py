@@ -64,7 +64,7 @@ def _binding_from_record(record: ThreadWorkspace) -> WorkspaceBinding | None:
 
 
 async def _policy_for_workspace(session, ref):
-    from agent.modules.projects.workspaces import source_key
+    from agent.modules.projects import source_key
     from agent.modules.workspaces.policies import MANUAL_APPLY, sync_policy
     peers = (await session.execute(select(ThreadWorkspace).where(
         ThreadWorkspace.execution_backend == ref.backend,
@@ -119,7 +119,7 @@ class ThreadWorkspaceRepository:
                 session.add(record)
             else:
                 previous_ref = _execution_from_record(record)
-                from agent.modules.projects.workspaces import source_key
+                from agent.modules.projects import source_key
                 if previous_ref is not None and source_key(previous_ref) != source_key(workspace_ref):
                     # The policy belongs to the workspace identity; a new execution ref must not rewrite a migrated row.
                     record.host_mirror_json = "{}"

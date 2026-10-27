@@ -15,7 +15,7 @@ from sqlalchemy import or_, select, update
 from agent.modules.projects.models import ProjectWorkspace, WorkspaceRuntime
 from agent.modules.projects.workspaces import ProjectWorkspaceError, _session, storage_timestamp
 from agent.modules.workspaces import WorkspaceRef
-from agent.modules.workspaces.policies import MANUAL_APPLY, sync_policy
+from agent.modules.workspaces import MANUAL_APPLY, sync_policy
 from agent.shared.infrastructure.db.base import utcnow
 
 logger = logging.getLogger(__name__)
@@ -265,7 +265,7 @@ class WorkspaceRuntimeSwitcher:
             if expected_operation_id and state.get("operation_id") != expected_operation_id:
                 raise ProjectWorkspaceError("The runtime transition changed; reload the workspace.", "stale_runtime")
             # A late provider response may still identify the sandbox created by the abandoned attempt.
-            from agent.modules.workspaces.transitions import RuntimeTransitionCoordinator
+            from agent.modules.workspaces import RuntimeTransitionCoordinator
             try:
                 target = await RuntimeTransitionCoordinator.find_allocation(
                     state["target_backend"], state["operation_id"])
@@ -373,7 +373,7 @@ class WorkspaceRuntimeSwitcher:
                         if mirror["status"] != "synced":
                             raise ProjectWorkspaceError("Resolve host synchronization before continuing locally.", "host_sync_conflict")
                 else:
-                    from agent.modules.workspaces.transitions import RuntimeTransitionCoordinator
+                    from agent.modules.workspaces import RuntimeTransitionCoordinator
                     async def remember_target(ref):
                         state["target"] = ref.model_dump()
                         await self._write(workspace_id, state)
@@ -451,14 +451,14 @@ class WorkspaceRuntimeSwitcher:
         for item in state.get("cleanup", []):
             ref = WorkspaceRef.model_validate(item["ref"])
             # Never stop a sandbox still owning another live workspace, or one rebound through a legacy alias.
-            from agent.modules.workspaces.runtime import runtime_is_owned
+            from agent.modules.workspaces import runtime_is_owned
             if await runtime_is_owned(ref):
                 remaining.append(item)
                 continue
             try:
                 if ref.backend == "local":
                     import shutil
-                    from agent.modules.workspaces.host_mirror import mirror_state
+                    from agent.modules.workspaces import mirror_state
                     raw_path = Path(ref.locator)
                     path = raw_path.resolve()
                     session = await _session()
@@ -517,7 +517,7 @@ class WorkspaceRuntimeSwitcher:
                 if state is None:
                     continue
                 if state["target_backend"] != "local" and (state["phase"] == "allocation_unknown" or (state["phase"] == "provisioning" and not state.get("target"))):
-                    from agent.modules.workspaces.transitions import RuntimeTransitionCoordinator
+                    from agent.modules.workspaces import RuntimeTransitionCoordinator
                     try:
                         target = await RuntimeTransitionCoordinator.find_allocation(state["target_backend"], state["operation_id"])
                     except Exception:

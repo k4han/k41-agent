@@ -12,9 +12,9 @@ from dataclasses import replace
 
 from agent.modules.projects.workspaces import ProjectWorkspaceError, get_project_workspace_service
 from agent.modules.workspaces import CommandResult
-from agent.modules.workspaces.posix_utils import relative_remote_path, resolve_remote_path
-from agent.modules.workspaces.reads import READS, STRUCTURED_READS, WorkspaceReadService
-from agent.modules.workspaces.reads import WorkspaceReadResult
+from agent.modules.workspaces import relative_remote_path, resolve_remote_path
+from agent.modules.workspaces import READS, STRUCTURED_READS, WorkspaceReadService
+from agent.modules.workspaces import WorkspaceReadResult
 
 MUTATIONS = frozenset({"write_text", "write_bytes", "rename", "delete", "create_file", "create_directory", "execute", "clone_repository"})
 logger = logging.getLogger(__name__)
@@ -177,7 +177,7 @@ class ThreadWorkspaceBackend(DeferredWorkspaceBackend):
 
     async def _read_generation(self):
         from agent.modules.projects.workspaces import source_key
-        from agent.modules.workspaces.host_mirror import mirror_state, transition_active
+        from agent.modules.workspaces import mirror_state, transition_active
         try:
             rows, _ = await self.service.host_mirrors.thread_status(self.thread_id)
         except KeyError:
@@ -213,14 +213,14 @@ class ThreadWorkspaceBackend(DeferredWorkspaceBackend):
         async def operation(*args, **kwargs):
             from agent.modules.workspaces import create_workspace_runtime_backend
             if name not in READS:
-                from agent.modules.workspaces.host_mirror import thread_storage_key
+                from agent.modules.workspaces import thread_storage_key
                 rows, _ = await self.service.host_mirrors.thread_status(self.thread_id)
                 key = thread_storage_key(rows)
                 with self.service.switcher.run_lease(-int(key)):
                     try:
                         async with self.service.host_mirrors.thread_locks.setdefault(key, asyncio.Lock()):
                             rows = await self.service.host_mirrors._refresh_threads(rows, self.ref)
-                            from agent.modules.workspaces.host_mirror import mirror_state, transition_active
+                            from agent.modules.workspaces import mirror_state, transition_active
                             if transition_active(mirror_state(rows[0]).get("transition")):
                                 raise ProjectWorkspaceError("The runtime transition must be reconciled or abandoned.", "workspace_switching")
                             backend = await create_workspace_runtime_backend(self.ref)

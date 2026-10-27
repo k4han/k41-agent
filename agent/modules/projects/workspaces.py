@@ -25,7 +25,7 @@ from agent.modules.projects.storage import LocalProjectStorage, file_chunks
 from agent.modules.projects.transfer import WorkspaceSnapshotTransfer
 from agent.modules.workspaces import WorkspaceUnavailableError
 from agent.modules.workspaces import WorkspaceBinding, WorkspaceRef, WorkspaceScope, bind_workspace_ref
-from agent.modules.workspaces.policies import MANUAL_APPLY, MIRROR_STRICT, sync_policy
+from agent.modules.workspaces import MANUAL_APPLY, MIRROR_STRICT, sync_policy
 from agent.shared.infrastructure.db.base import utcnow
 from agent.modules.tools import CodingError
 
@@ -154,7 +154,7 @@ class ProjectWorkspaceService:
         self.running_processes: set[tuple[int, str]] = set()
         self.periodic_task = None
         self.closing = False
-        from agent.modules.workspaces.metrics import WorkspaceRuntimeMetrics
+        from agent.modules.workspaces import WorkspaceRuntimeMetrics
         self.metrics = WorkspaceRuntimeMetrics()
         from agent.modules.projects.runtime_switch import WorkspaceRuntimeSwitcher
         self.switcher = WorkspaceRuntimeSwitcher(self)
@@ -162,7 +162,7 @@ class ProjectWorkspaceService:
         self.local_sync = WorkspaceLocalSync(self)
         from agent.modules.projects.sessions import ProjectSessionWorkspaces
         self.sessions = ProjectSessionWorkspaces(self)
-        from agent.modules.workspaces.host_mirror import HostMirrorService
+        from agent.modules.workspaces import HostMirrorService
         self.host_mirrors = HostMirrorService(self)
 
     def lock(self, workspace_id: int) -> asyncio.Lock:
@@ -196,7 +196,7 @@ class ProjectWorkspaceService:
         return descriptions[project_id]
 
     async def describe_many(self, project_ids: list[int]) -> dict[int, dict]:
-        from agent.modules.workspaces.host_mirror import mirror_summary
+        from agent.modules.workspaces import mirror_summary
         from agent.modules.projects.runtime_switch import transition_summary
         from agent.modules.projects.local_sync import local_link_summary
         if not project_ids:
@@ -400,7 +400,7 @@ class ProjectWorkspaceService:
             binding = await self.resolve_thread(context.thread_id)
         if binding is None:
             if context.thread_id and self.container._persistence_ready:
-                from agent.modules.workspaces.host_mirror import mirror_state, transition_active
+                from agent.modules.workspaces import mirror_state, transition_active
                 try:
                     rows, _ = await self.host_mirrors.thread_status(context.thread_id)
                 except KeyError:
@@ -408,7 +408,7 @@ class ProjectWorkspaceService:
                 if rows and transition_active(mirror_state(rows[0]).get("transition")):
                     raise ProjectWorkspaceError("The runtime transition must be reconciled or abandoned before executing tools.", "workspace_switching")
                 if rows:
-                    from agent.modules.workspaces.host_mirror import thread_storage_key
+                    from agent.modules.workspaces import thread_storage_key
                     self.switcher.assert_available(-int(thread_storage_key(rows)))
                     ref = self.host_mirrors.thread_ref(rows[0])
                     if context.locator and (context.backend != ref.backend or context.locator != ref.locator):
@@ -470,7 +470,7 @@ class ProjectWorkspaceService:
             if skip_unchanged and saved == revision and workspace.persistence_status == "clean" and local_revision == workspace.local_sync_revision:
                 if not self.closing and project.migration_status == "ready" and workspace.kind != "legacy" and runtime.status == "ready":
                     self.active.add(workspace.id)
-                from agent.modules.workspaces.host_mirror import mirror_summary
+                from agent.modules.workspaces import mirror_summary
                 return {"status": "clean", "revision": saved, "saved": True, "host_mirror": mirror_summary(workspace)}
             session = await _session()
             async with session:
@@ -490,7 +490,7 @@ class ProjectWorkspaceService:
                 self.active.add(workspace.id)
             keep = {value for value in (saved, revision, workspace.previous_revision if saved == revision else None,
                                         workspace.pinned_revision, local_revision) if value}
-            from agent.modules.workspaces.host_mirror import mirror_state
+            from agent.modules.workspaces import mirror_state
             keep.update(value for key, value in mirror_state(workspace).items()
                         if key in {"revision", "host_backup_revision"} and value)
             try:
@@ -1118,7 +1118,7 @@ class ProjectWorkspaceService:
             rows = (await session.execute(select(ProjectWorkspace, WorkspaceRuntime).join(
                 WorkspaceRuntime, WorkspaceRuntime.project_workspace_id == ProjectWorkspace.id,
             ))).all()
-        from agent.modules.workspaces.host_mirror import mirror_state
+        from agent.modules.workspaces import mirror_state
         paths = {Path(ref.locator).resolve() for workspace, runtime in rows
                 if (ref := WorkspaceRef.model_validate_json(runtime.execution_json)).backend == "local"
                 and (workspace.kind != "github_task" or not workspace.head_revision or workspace.persistence_status != "clean")}
@@ -1154,7 +1154,7 @@ class ProjectWorkspaceService:
                     workspace = await session.get(ProjectWorkspace, workspace_id)
                 if workspace:
                     _, _, runtime = await self.rows(workspace.project_id, workspace_id)
-                    from agent.modules.workspaces.host_mirror import workspace_is_running
+                    from agent.modules.workspaces import workspace_is_running
                     if await workspace_is_running(WorkspaceRef.model_validate_json(runtime.execution_json)):
                         await self.checkpoint(workspace.project_id, workspace_id, passive=True)
             except Exception:

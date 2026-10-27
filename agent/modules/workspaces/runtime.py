@@ -19,8 +19,8 @@ def runtime_observation(backend: str, state: str) -> RuntimeObservation:
 
 
 async def runtime_is_owned(ref) -> bool:
-    from agent.modules.projects.models import WorkspaceRuntime
-    from agent.modules.projects.workspaces import _session
+    from agent.modules.projects import WorkspaceRuntime
+    from agent.modules.projects import _session
     from agent.modules.workspaces.models import ThreadWorkspace
     from agent.modules.workspaces.refs import WorkspaceRef
     session = await _session()
