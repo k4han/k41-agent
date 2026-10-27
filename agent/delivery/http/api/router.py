@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -148,7 +149,21 @@ async def _apply_workspace_to_run_params(
     owned = await projects.find_binding(requested_workspace, thread_id=request.thread_id,
                                          project_id=request.project_id, workspace_id=request.project_workspace_id)
     if owned:
+        if not request.thread_id:
+            owned = await projects.prepare_chat(owned.project_id)
         await remember_thread_workspace_ref(thread_id, owned)
+        if request.execution_backend and request.execution_backend != owned.execution.backend:
+            if request.thread_id:
+                raise HTTPException(status_code=400, detail="Use the session backend switch endpoint for an existing conversation.")
+            operation = await projects.sessions.request(owned.project_id, thread_id, request.execution_backend,
+                                                       owned.runtime_generation, owned.project_workspace_id)
+            operation_workspace = operation["workspace"]["project_workspace_id"]
+            task = projects.switcher.tasks.get(operation_workspace)
+            if task:
+                await asyncio.shield(task)
+            owned = await projects.resolve_thread(thread_id)
+            if owned.execution.backend != request.execution_backend:
+                raise HTTPException(status_code=409, detail="The session backend could not be prepared. Retry the backend switch.")
         params["workspace"] = owned.execution
         return
     if (

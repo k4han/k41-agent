@@ -48,7 +48,7 @@ import { useSessions } from "@/lib/sessionStore";
 import { updateDashboardFavicon } from "@/lib/favicon";
 import { STORAGE_KEYS } from "@/lib/uiConstants";
 import { navProjectsStore, navProjectThreads, newProjectWorkspace } from "@/lib/navProjectsStore";
-import { verifyProjectWorkspace } from "@/lib/projects";
+import { prepareProjectChatWorkspace } from "@/lib/projects";
 import { useMobileDrawer } from "@/lib/useMobileDrawer";
 import { useSidebarResize } from "@/lib/useSidebarResize";
 import { useThreadWorkspaceGroups } from "@/lib/useThreadWorkspaceGroups";
@@ -395,10 +395,12 @@ export function AppShell(props: {
   const startProjectChat = async (group: ThreadWorkspaceGroup) => {
     if (openingProject()) return;
     let workspace = newProjectWorkspace(group);
+    let workspaceBinding = group.workspace || undefined;
     setOpeningProject(group.key);
     try {
       if (workspace && group.id) {
-        const ready = await verifyProjectWorkspace(workspace, group.id);
+        const ready = await prepareProjectChatWorkspace(workspace, group.id);
+        workspaceBinding = "execution" in ready ? ready : undefined;
         workspace = "execution" in ready ? ready.execution : ready;
       }
       if (disposed) return;
@@ -406,6 +408,7 @@ export function AppShell(props: {
         state: {
           newChatId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
           projectId: group.id,
+          workspaceBinding: workspaceBinding ? cloneValue(unwrap(workspaceBinding)) : undefined,
           workspace: workspace ? cloneValue(unwrap(workspace)) : null,
         },
       });

@@ -316,22 +316,42 @@ def test_project_api_validation_and_errors(monkeypatch):
     assert client.get("/dashboard-api/projects").status_code == 503
 
 
+def test_new_chat_workspace_api_returns_prepared_local_binding_and_errors(monkeypatch, isolated_container):
+    from agent.modules.projects import ProjectWorkspaceError, get_project_workspace_service
+    projects = get_project_workspace_service(isolated_container)
+    binding = bind_workspace_ref(workspace("/project"))
+    prepare = AsyncMock(return_value=binding)
+    monkeypatch.setattr(projects, "prepare_chat", prepare)
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app) as client:
+        response = client.post("/dashboard-api/projects/7/chat-workspace", json={})
+        assert response.status_code == 200
+        assert response.json()["workspace"] == binding.model_dump()
+        prepare.assert_awaited_once_with(7)
+        prepare.side_effect = ProjectWorkspaceError("Resolve local file conflicts.", "local_sync_conflict")
+        assert client.post("/dashboard-api/projects/7/chat-workspace").status_code == 409
+        prepare.side_effect = KeyError("missing")
+        assert client.post("/dashboard-api/projects/99/chat-workspace").status_code == 404
+        assert client.post("/dashboard-api/projects/0/chat-workspace").status_code == 422
+
+
 def test_runtime_switch_api_accepts_background_operation_and_reports_conflicts(monkeypatch, isolated_container):
     from agent.modules.projects import ProjectWorkspaceError
     from agent.modules.projects.workspaces import get_project_workspace_service
     projects = get_project_workspace_service(isolated_container)
     request = AsyncMock(return_value={"operation_id": "switch", "transition": {"phase": "saving"}})
-    monkeypatch.setattr(projects.switcher, "request", request)
+    monkeypatch.setattr(projects.sessions, "request", request)
     app = FastAPI()
     app.include_router(routes.router)
     with TestClient(app) as client:
         url = "/dashboard-api/projects/7/runtime/switch"
-        body = {"backend": "daytona", "expected_generation": 3, "project_workspace_id": 11}
+        body = {"thread_id": "session", "backend": "daytona", "expected_generation": 3, "project_workspace_id": 11}
         response = client.post(url, json=body)
         assert response.status_code == 202 and response.json()["operation_id"] == "switch"
-        request.assert_awaited_once_with(7, "daytona", 3, 11)
+        request.assert_awaited_once_with(7, "session", "daytona", 3, 11)
         assert client.post(url, json={**body, "preview_token": "a" * 64}).status_code == 202
-        request.assert_awaited_with(7, "daytona", 3, 11, preview_token="a" * 64)
+        request.assert_awaited_with(7, "session", "daytona", 3, 11, preview_token="a" * 64)
         for invalid in ({**body, "backend": "unknown"}, {**body, "expected_generation": 0}, {"backend": "local"}, {**body, "force": True}):
             assert client.post(url, json=invalid).status_code == 422
         for code in ("workspace_busy", "workspace_switching", "stale_runtime"):
@@ -364,6 +384,8 @@ def test_local_sync_api_previews_by_default_and_rejects_arbitrary_target_paths(m
     projects = get_project_workspace_service(isolated_container)
     synchronize = AsyncMock(return_value={"applied": False, "preview_token": "a" * 64, "conflicts": []})
     monkeypatch.setattr(projects.local_sync, "synchronize", synchronize)
+    monkeypatch.setattr(projects, "rows", AsyncMock(return_value=(None, SimpleNamespace(id=11, kind="shared"), None)))
+    monkeypatch.setattr(projects, "prepare_chat", AsyncMock())
     app = FastAPI()
     app.include_router(routes.router)
     with TestClient(app) as client:
@@ -373,6 +395,8 @@ def test_local_sync_api_previews_by_default_and_rejects_arbitrary_target_paths(m
         synchronize.assert_awaited_once_with(7, 3, 11, preview_token=None)
         assert client.post(url, json={**body, "preview_token": "a" * 64}).status_code == 200
         synchronize.assert_awaited_with(7, 3, 11, preview_token="a" * 64)
+        assert client.post(url, json={"expected_generation": 3}).status_code == 200
+        synchronize.assert_awaited_with(7, 3, 11, preview_token=None)
         for invalid in ({**body, "path": "/outside"}, {**body, "force": True}, {**body, "preview_token": "bad"}, {"expected_generation": 0}):
             assert client.post(url, json=invalid).status_code == 422
         synchronize.side_effect = ProjectWorkspaceError("Local files changed", "local_sync_conflict")
@@ -440,6 +464,34 @@ def test_runtime_switch_migration_adds_transition_without_changing_existing_runt
     assert json.loads(workspace.source_json)["locator"] == "/original"
     assert json.loads(row.execution_json)["locator"] == "/original"
     assert json.loads(row.transition_json) is None
+    engine.dispose()
+
+
+def test_session_workspace_migration_keeps_ids_baselines_and_local_selection(tmp_path):
+    from sqlalchemy import create_engine, text
+    from agent.modules.workspaces.migrations import migrate_workspace_tables
+    url = "sqlite:///" + (tmp_path / "session-migration.db").as_posix()
+    engine = create_engine(url)
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE projects (id INTEGER PRIMARY KEY)"))
+        connection.execute(text("CREATE TABLE project_workspaces (id INTEGER PRIMARY KEY, project_id INTEGER, "
+                                "kind TEXT, source_json TEXT, local_sync_revision TEXT)"))
+        connection.execute(text("CREATE TABLE workspace_runtimes (id INTEGER PRIMARY KEY, project_workspace_id INTEGER, execution_json TEXT)"))
+        for index, (kind, backend) in enumerate((("shared", "local"), ("shared", "daytona"), ("github_task", "modal")), 1):
+            ref = json.dumps({"backend": backend, "locator": "original-" + str(index)})
+            connection.execute(text("INSERT INTO projects VALUES (:id)"), {"id": index})
+            connection.execute(text("INSERT INTO project_workspaces VALUES (:id, :id, :kind, :ref, :revision)"),
+                               {"id": index, "kind": kind, "ref": ref, "revision": "a" * 64})
+            connection.execute(text("INSERT INTO workspace_runtimes VALUES (:id, :id, :ref)"), {"id": index, "ref": ref})
+    migrate_workspace_tables(url)
+    migrate_workspace_tables(url)
+    with engine.connect() as connection:
+        projects = connection.execute(text("SELECT local_workspace_id FROM projects ORDER BY id")).scalars().all()
+        workspaces = connection.execute(text("SELECT id, local_sync_revision, sync_policy FROM project_workspaces ORDER BY id")).all()
+        assert projects == [1, None, None]
+        assert [row.sync_policy for row in workspaces] == ["mirror_strict", "manual_apply", "mirror_strict"]
+        assert [row.id for row in workspaces] == [1, 2, 3]
+        assert all(row.local_sync_revision == "a" * 64 for row in workspaces)
     engine.dispose()
 
 

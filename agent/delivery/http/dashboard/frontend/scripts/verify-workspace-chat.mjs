@@ -368,7 +368,7 @@ try {
   await escape();
   await send('Use the selected local project');
   assert.equal(workspaceResolutions.at(-1).kind, 'local');
-  assert.equal(sentMessages.at(-1).workspace.locator, root);
+  assert.equal(sentMessages.at(-1).workspace.execution.locator, root);
   await openPicker();
   await source('GitHub');
   await until(() => js('!!document.querySelector(".workspace-item-card")'), 'GitHub repository list');
@@ -416,7 +416,7 @@ try {
   await escape();
   await send('Use the selected sandbox');
   assert.equal(workspaceResolutions.at(-1).kind, 'daytona');
-  assert.equal(sentMessages.at(-1).workspace.backend, 'daytona');
+  assert.equal(sentMessages.at(-1).workspace.execution.backend, 'daytona');
   failRepositories = true;
   await openPicker();
   await source('GitHub');
@@ -740,7 +740,7 @@ try {
   await until(() => js('document.querySelector(".composer-workspace-label")?.textContent.includes("Shared project")'), 'shared runtime binding');
   await click('.composer-workspace-trigger');
   await until(() => js('!!document.querySelector(".composer-runtime-picker")'), 'runtime switch picker');
-  assert.match(await js('document.querySelector(".composer-runtime-picker").textContent'), /all conversations/i);
+  assert.match(await js('document.querySelector(".composer-runtime-picker").textContent'), /this session's backend/i);
   const chooseBackend = async name => {
     await click('.composer-runtime-picker button[aria-label="Execution backend"]');
     await js(`Array.from(document.querySelectorAll('[role="option"]')).find(el => el.textContent.trim() === ${JSON.stringify(name)}).click()`);
@@ -753,7 +753,7 @@ try {
     'storage polling keeps the selected destination backend');
   await click('.composer-runtime-picker button.btn-primary');
   await until(() => runtimeRequests.length === 1, 'switch API accepted');
-  assert.deepEqual(runtimeRequests[0], { backend: 'daytona', project_workspace_id: 51, expected_generation: 1 });
+  assert.deepEqual(runtimeRequests[0], { thread_id: 'workspace-chat', backend: 'daytona', project_workspace_id: 51, expected_generation: 1 });
   await until(() => js('document.querySelector(".composer-runtime-picker button.btn-primary")?.disabled'), 'switch progress disables duplicate requests');
   assert.equal(await js('document.querySelector(".chat-prompt-input").disabled'), true, 'workspace switch blocks new messages');
   runtimePayload = { ...runtimePayload, workspace: { ...runtimePayload.workspace, runtime_generation: 2,
@@ -788,9 +788,9 @@ try {
   runtimePayload.local_link = { ...runtimePayload.local_link, status: 'pending' };
   const beforeManualPreview = fs.readFileSync(filePath, 'utf8');
   await js(`window.dispatchEvent(new CustomEvent('k41:workspace-files-changed', { detail: { project_workspace_id: 51 } }))`);
-  await until(() => js(`Array.from(document.querySelectorAll('.composer-runtime-picker button')).some(el => el.textContent === 'Preview local changes')`), 'manual policy exposes preview');
+  await until(() => js(`Array.from(document.querySelectorAll('.composer-runtime-picker button')).some(el => el.textContent === 'Sync to local')`), 'manual policy exposes preview');
   assert.equal(await js('!!document.querySelector(".workspace-host-mirror")'), false, 'manual workspaces hide automatic host mirror controls');
-  await js(`Array.from(document.querySelectorAll('.composer-runtime-picker button')).find(el => el.textContent === 'Preview local changes').click()`);
+  await js(`Array.from(document.querySelectorAll('.composer-runtime-picker button')).find(el => el.textContent === 'Sync to local').click()`);
   await until(() => localSyncRequests.length === 1, 'manual local preview requested');
   assert.equal(localSyncRequests[0].preview_token, undefined, 'preview does not apply files');
   assert.equal(fs.readFileSync(filePath, 'utf8'), beforeManualPreview, 'preview preserves original local data');
@@ -809,7 +809,8 @@ try {
   const resolutionsBeforeQuestion = workspaceResolutions.length;
   await send('Explain this project without running commands.');
   assert.equal(sentMessages.at(-1).thread_id, 'workspace-chat');
-  assert.equal(sentMessages.at(-1).workspace.locator, 'switched-sandbox');
+  assert.equal(sentMessages.at(-1).workspace.execution.locator, 'switched-sandbox');
+  assert.equal(sentMessages.at(-1).workspace.project_workspace_id, 51);
   assert.equal(workspaceResolutions.length, resolutionsBeforeQuestion, 'a resumed question must not resolve execution');
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log(process.argv.includes('--runtime-only')

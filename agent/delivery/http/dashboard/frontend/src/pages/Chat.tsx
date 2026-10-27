@@ -45,6 +45,8 @@ import type {
   ModelOption,
   SandboxBackendKey,
   WorkspaceRef,
+  WorkspaceBinding,
+  WorkspaceBackendKey,
 } from "@/types";
 import { isSandboxBackend } from "@/types";
 import {
@@ -198,6 +200,8 @@ export function ChatPage() {
   const [reasoningScope, setReasoningScope] = createSignal(0);
   const [workingDir, setWorkingDir] = createSignal("");
   const [workspaceRef, setWorkspaceRef] = createSignal<WorkspaceRef | null>(null);
+  const [workspaceBinding, setWorkspaceBinding] = createSignal<WorkspaceBinding | null>(null);
+  const [draftBackend, setDraftBackend] = createSignal<WorkspaceBackendKey>("local");
   const [workspaceSelection, setWorkspaceSelection] = createSignal<WorkspaceSelectionDraft | null>(null);
   const [defaultWorkingDir, setDefaultWorkingDir] = createSignal("");
   const [prompt, setPrompt] = createSignal("");
@@ -536,8 +540,10 @@ export function ChatPage() {
     }
   };
 
-  const setWorkspace = (value: WorkspaceRef | string | null) => {
+  const setWorkspace = (value: WorkspaceRef | WorkspaceBinding | string | null) => {
     setWorkspaceSelection(null);
+    setWorkspaceBinding(value && typeof value !== "string" && "execution" in value ? value : null);
+    if (value && typeof value !== "string" && "execution" in value) value = value.execution;
     if (!value) {
       setWorkingDir("");
       setWorkspaceRef(null);
@@ -556,13 +562,14 @@ export function ChatPage() {
   };
 
   const setWorkspaceDraft = (selection: WorkspaceSelectionDraft) => {
+    setWorkspaceBinding(null);
     setWorkspaceSelection(selection);
     setWorkspaceRef(null);
     setWorkingDir(workspaceSelectionLocator(selection));
   };
 
   const draftProjectId = () => !currentThreadId() ? location.state?.projectId : undefined;
-  const workspaceRuntime = useWorkspaceRuntime(currentThreadId, (binding) => setWorkspace(binding.execution), draftProjectId);
+  const workspaceRuntime = useWorkspaceRuntime(currentThreadId, setWorkspace, draftProjectId);
 
   const runtimeDecision = () => workspaceRuntime.payload().runtime?.decision || null;
   const decisionBackendLabel = () => getBackendDisplayName(runtimeDecision()?.backend || "local");
@@ -654,7 +661,10 @@ export function ChatPage() {
     if (!execution) {
       throw new Error("Resolved workspace is missing its execution reference.");
     }
-    if (isCurrent()) setWorkspace(execution);
+    if (isCurrent()) {
+      if (selection) setDraftBackend(selection.backend);
+      setWorkspace(response.workspace);
+    }
     return execution;
   };
 
@@ -680,7 +690,7 @@ export function ChatPage() {
     setThreadTitleOverride(payload.title || "");
     setCurrentThreadId(payload.thread_id);
     setActiveCheckpointId(payload.active_checkpoint_id || "");
-    setWorkspace(workspaceExecution(payload.workspace) || null);
+    setWorkspace(payload.workspace || null);
     if (!persistedStreams.has(payload.thread_id)) {
       const historyItems = [
         ...toThreadTranscript(payload.messages, payload.thread_id),
@@ -963,7 +973,8 @@ export function ChatPage() {
       setTodosExpanded(false);
       setCompacting(false);
       setPrompt(promptDrafts.get(threadId || newChatId || "__new__") || "");
-      setWorkspace(!threadId && newChatId ? location.state?.workspace || null : null);
+      setWorkspace(!threadId && newChatId ? location.state?.workspaceBinding || location.state?.workspace || null : null);
+      setDraftBackend("local");
       setCurrentThreadId(threadId);
       setCurrentStreamThreadId(persistedStreams.has(threadId) ? threadId : null);
       restoreSelection();
@@ -994,12 +1005,13 @@ export function ChatPage() {
     }
     const workspace = resolvedWorkspace || workspaceRef() || localWorkspaceRef(workingDir());
     if (workspace) {
-      payload.workspace = workspace;
+      payload.workspace = workspaceBinding() || workspace;
     }
     if (currentThreadId()) {
       payload.thread_id = currentThreadId();
     } else {
       payload.new_thread = true;
+      if (draftProjectId()) payload.execution_backend = draftBackend();
     }
     if (attachedFiles.length) {
       payload.attachments = attachedFiles;
@@ -1161,7 +1173,8 @@ export function ChatPage() {
     const currentWorkspace = workspaceRef();
     const needsWorkspaceResolution = !resume && !currentWorkspace;
     const needsEnvironmentInitialization = !resume && (
-      needsWorkspaceResolution || workspaceNeedsEnvironmentInitialization(currentWorkspace, initializedWorkspaces())
+      needsWorkspaceResolution || (!currentThreadId() && draftBackend() !== "local" && Boolean(workspaceBinding()))
+      || workspaceNeedsEnvironmentInitialization(currentWorkspace, initializedWorkspaces())
     );
     const statusMessageId = !resume
       ? appendItem(
@@ -1189,7 +1202,8 @@ export function ChatPage() {
         : await resolveWorkspaceForSend(() => !isUnmounting && currentStreamThreadId() === streamThreadIdRef.id);
       abortController.signal.throwIfAborted();
       streamThreadIdRef.workspace = resolvedWorkspace;
-      if (resolvedWorkspace) payload.workspace = resolvedWorkspace;
+      if (resolvedWorkspace) payload.workspace = workspaceBinding() || resolvedWorkspace;
+      if (!resume && !currentThreadId() && workspaceBinding()) payload.execution_backend = draftBackend();
       if (statusMessageId !== null && !needsEnvironmentInitialization) {
         replaceMessage(statusMessageId, THINKING_TEXT, streamThreadIdRef.id);
       }
@@ -1954,7 +1968,12 @@ export function ChatPage() {
                     runtimePayload={workspaceRuntime.payload()}
                     runtimeBusy={workspaceRuntime.busy()}
                     runtimeError={workspaceRuntime.error()}
-                    onSwitchBackend={workspaceRuntime.switchBackend}
+                    draft={!currentThreadId() && Boolean(draftProjectId())}
+                    draftBackend={draftBackend()}
+                    onSwitchBackend={async (backend, token) => {
+                      if (!currentThreadId()) setDraftBackend(backend);
+                      else await workspaceRuntime.switchBackend(backend, token);
+                    }}
                     onAbandonBackend={workspaceRuntime.abandon}
                     onSelectionChange={setWorkspaceDraft}
                   />
@@ -2093,6 +2112,7 @@ export function ChatPage() {
                 />
               </Show>
               <WorkspaceExplorer
+                binding={workspaceBinding()}
                 visible={explorer.open()}
                 fullscreen={explorer.fullscreen()}
                 splitView={true}

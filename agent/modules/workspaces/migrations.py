@@ -95,7 +95,10 @@ def migrate_workspace_tables(database_url: str) -> None:
     try:
         with engine.begin() as conn:
             inspector = inspect(conn)
-            _ensure_columns(conn, inspector, "projects", {"migration_status": "VARCHAR(30) NOT NULL DEFAULT 'pending'"})
+            _ensure_columns(conn, inspector, "projects", {
+                "migration_status": "VARCHAR(30) NOT NULL DEFAULT 'pending'",
+                "local_workspace_id": "INTEGER",
+            })
             _ensure_columns(conn, inspector, "project_workspaces", {
                 "runtime_aliases_json": "TEXT NOT NULL DEFAULT '[]'",
                 "local_sync_revision": "VARCHAR(64)",
@@ -114,6 +117,19 @@ def migrate_workspace_tables(database_url: str) -> None:
                 if _has_table(inspector, table_name):
                     for column in ("project_id", "project_workspace_id"):
                         conn.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table_name}_{column} ON {table_name} ({column})"))
+
+            inspector = inspect(conn)
+            if all(_has_table(inspector, table) for table in ("projects", "project_workspaces", "workspace_runtimes")) and {
+                "project_id", "kind", "sync_policy"
+            }.issubset(_column_names(inspector, "project_workspaces")) and "project_workspace_id" in _column_names(inspector, "workspace_runtimes"):
+                rows = conn.execute(text("SELECT w.id, w.project_id, r.execution_json FROM project_workspaces w "
+                                         "JOIN workspace_runtimes r ON r.project_workspace_id=w.id WHERE w.kind='shared'"))
+                for row in rows:
+                    if json.loads(row.execution_json).get("backend", "local") == "local":
+                        conn.execute(text("UPDATE projects SET local_workspace_id=:workspace WHERE id=:project AND local_workspace_id IS NULL"),
+                                     {"workspace": row.id, "project": row.project_id})
+                    else:
+                        conn.execute(text("UPDATE project_workspaces SET sync_policy='manual_apply' WHERE id=:workspace"), {"workspace": row.id})
 
             inspector = inspect(conn)
             if _has_table(inspector, "background_tasks"):

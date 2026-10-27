@@ -58,11 +58,11 @@ export function ProjectLocalSync(props: {
   };
   return <Show when={props.localLink?.status !== "active"}>
     <div class="project-storage-status">
-      <strong>Apply changes to linked local directory</strong>
+      <strong>Sync sandbox changes to local</strong>
       <p><code>{props.localLink?.path || preview()?.path || "A managed local directory will be used."}</code></p>
       <p>Preview compares project changes with the last local baseline. Conflicting local edits must be resolved before applying.</p>
       <button class="btn" disabled={props.disabled || busy() || props.localLink?.status === "baseline_missing"}
-        onClick={() => void synchronize(false)}>{busy() ? "Checking files..." : "Preview local changes"}</button>
+        onClick={() => void synchronize(false)}>{busy() ? "Checking files..." : "Sync to local"}</button>
       <Show when={preview()}>{(result) => <>
         <p role="status">{result().applied ? "Changes applied." : `${result().changes.length} changes · ${result().conflicts.length} conflicts`}</p>
         <ul><For each={result().changes.slice(0, 100)}>{(change) => <li>{change.action}: <code>{change.path}</code></li>}</For></ul>

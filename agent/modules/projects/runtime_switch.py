@@ -92,6 +92,7 @@ class WorkspaceRuntimeSwitcher:
         get_active_session_registry(self.service.container).publish("workspace_runtime_changed", {
             "project_id": state["project_id"], "project_workspace_id": workspace_id,
             "operation_id": state["operation_id"], "phase": state["phase"],
+            "thread_id": state.get("thread_id"),
         })
 
     async def _threads(self, workspace_id: int):
@@ -185,14 +186,14 @@ class WorkspaceRuntimeSwitcher:
             raise
 
     async def request(self, project_id: int, backend: str, expected_generation: int, workspace_id: int | None = None,
-                      *, preview_token: str | None = None):
+                      *, preview_token: str | None = None, session_state: dict | None = None):
         from agent.modules.workspaces import get_workspace_backend_registry, is_backend_enabled
         descriptor = get_workspace_backend_registry(self.service.container).require(backend)
         if backend not in {"local", "daytona", "modal"} or not is_backend_enabled(descriptor, config_service=self.service.container.config_service):
             raise ValueError("The requested execution backend is not enabled.")
         project, workspace, runtime = await self.service.rows(project_id, workspace_id)
         workspace_id = workspace.id
-        if self.service.closing or project.migration_status != "ready" or workspace.kind != "shared":
+        if self.service.closing or project.migration_status != "ready" or workspace.kind not in ({"shared", "session"} if session_state else {"shared"}):
             raise ProjectWorkspaceError("Only an available shared project workspace can switch backends.", "workspace_busy")
         source = WorkspaceRef.model_validate_json(runtime.execution_json)
         if backend == "local" and source.backend != "local" and sync_policy(workspace) == MANUAL_APPLY and not preview_token:
@@ -205,11 +206,12 @@ class WorkspaceRuntimeSwitcher:
                 return {"operation_id": None, "workspace": (await self.service.binding(project_id, workspace_id)).model_dump(), "transition": transition_summary(runtime)}
             finally:
                 self._release(workspace_id)
-        await self.reserve_idle(workspace, runtime, expected_generation)
+        session_recovery = bool(session_state and session_state.get("kind") == "recovery")
+        await self.reserve_idle(workspace, runtime, expected_generation, allow_unavailable=session_recovery)
         handed_off = False
         state = None
         try:
-            if runtime.status != "ready":
+            if runtime.status != "ready" and not session_recovery:
                 raise ProjectWorkspaceError("Recover the current runtime before switching backends.", "runtime_unavailable")
             previous = transition_state(runtime) or {}
             state = {"operation_id": uuid4().hex, "project_id": project_id, "phase": "saving", "target_backend": backend,
@@ -217,6 +219,9 @@ class WorkspaceRuntimeSwitcher:
                      "source": source.model_dump(), "source_generation": expected_generation, "target": None,
                      "revision": None, "error": "", "cleanup_error": "", "cleanup": previous.get("cleanup", []),
                      "started_at": storage_timestamp(utcnow()), "previous_pin": workspace.pinned_revision}
+            state.update(session_state or {})
+            if session_recovery:
+                state["revision"] = workspace.head_revision
             await self._write(workspace_id, state)
             task = asyncio.create_task(self._run(project_id, workspace_id, state))
             self.tasks[workspace_id] = task
@@ -283,6 +288,15 @@ class WorkspaceRuntimeSwitcher:
         state["phase"] = phase
         await self._write(workspace_id, state)
 
+    async def _discard_unactivated_fork(self, workspace_id: int, state: dict):
+        if state.get("thread_id") and state.get("source_workspace_id") != workspace_id:
+            async with await _session() as session:
+                await session.execute(update(WorkspaceRuntime).where(
+                    WorkspaceRuntime.project_workspace_id == workspace_id,
+                ).values(status="retired"))
+                await session.commit()
+            self.service.active.discard(workspace_id)
+
     async def replace(self, project, workspace, runtime, backend, *, preview_token=None):
         """Recovery shares switch journaling; the caller already owns the writer lock."""
         self.assert_available(workspace.id, runtime)
@@ -336,7 +350,8 @@ class WorkspaceRuntimeSwitcher:
                 await self._phase(workspace_id, state, "provisioning")
                 if state["target_backend"] == "local":
                     _, workspace, runtime = await self.service.rows(project_id, workspace_id)
-                    destination = self.service.host_mirrors.project_path(workspace, runtime)
+                    local_binding = await self.service.binding(project_id, state["local_workspace_id"]) if state.get("thread_id") else None
+                    destination = Path(local_binding.execution.locator) if local_binding else self.service.host_mirrors.project_path(workspace, runtime)
                     target = WorkspaceRef(backend="local", locator=str(destination), label=project.label)
                     state["target"] = target.model_dump()
                     await self._phase(workspace_id, state, "restoring")
@@ -345,9 +360,14 @@ class WorkspaceRuntimeSwitcher:
                         applied = await apply_workspace_revision(self.service.transfer, self.service.storage, str(workspace_id),
                             saved["revision"], workspace.local_sync_revision, destination, runtime.generation,
                             preview_token=state.get("preview_token"),
-                            journal=self.service.runtime_root / str(workspace_id) / "local-sync.json")
+                            journal=self.service.runtime_root / str(workspace_id) / "local-sync.json",
+                            target_generation=local_binding.runtime_generation if local_binding else None)
                         saved["revision"] = applied["merged_revision"]
                         state["local_revision"] = saved["revision"]
+                        if state.get("thread_id"):
+                            local_id = state["local_workspace_id"]
+                            async with self.service.lock(local_id):
+                                await self.service._checkpoint(project_id, local_id, sync_host=False)
                     elif recovery:
                         mirror = await self.service.host_mirrors.after_checkpoint(workspace, runtime, saved["revision"])
                         if mirror["status"] != "synced":
@@ -377,7 +397,8 @@ class WorkspaceRuntimeSwitcher:
                     state["cleanup"].append({"ref": state["source"], "action": "retire", "operation_id": state["operation_id"]})
                 await self.service._publish_runtime(project, workspace, target, runtime.generation + 1, "ready", transition=state)
                 activated = True
-                self.service.active.add(workspace_id)
+                if not state.get("thread_id") or state["target_backend"] != "local":
+                    self.service.active.add(workspace_id)
                 await self._unpin(workspace_id, state)
             # The verified destination can serve new runs while the unused source is retired.
             self._release(workspace_id)
@@ -392,17 +413,19 @@ class WorkspaceRuntimeSwitcher:
                 # Commit may have succeeded even when its acknowledgement was lost.
                 _, _, current = await self.service.rows(project_id, workspace_id)
                 published = transition_state(current) or {}
-                activated = (current.generation == state["source_generation"] + 1
+                activated = ((current.generation == state["source_generation"] + 1 or state.get("thread_id"))
                              and published.get("operation_id") == state["operation_id"]
                              and published.get("phase") == "completed")
             if activated:
                 self._release(workspace_id)
                 state.update(phase="completed", cleanup_error=message)
             else:
-                unknown = state["phase"] == "provisioning" and not state.get("target") and isinstance(exc, (TimeoutError, ConnectionError, asyncio.CancelledError))
+                unknown = (state["target_backend"] != "local" and state["phase"] == "provisioning" and not state.get("target")
+                           and isinstance(exc, (TimeoutError, ConnectionError, asyncio.CancelledError)))
                 state.update(phase="allocation_unknown" if unknown else "failed", error=message)
                 if state.get("target") and state["target"]["backend"] != "local":
                     state["cleanup"].append({"ref": state["target"], "action": "delete", "operation_id": state["operation_id"]})
+                await asyncio.shield(self._discard_unactivated_fork(workspace_id, state))
             await asyncio.shield(self._write(workspace_id, state))
             if state["phase"] != "allocation_unknown":
                 await asyncio.shield(self._unpin(workspace_id, state))
@@ -410,6 +433,9 @@ class WorkspaceRuntimeSwitcher:
             logger.warning("Runtime switch outcome workspace=%s activated=%s: %s", workspace_id, activated, message)
         finally:
             self._release(workspace_id)
+            for name in ("reserved_source_id", "reserved_local_id"):
+                if state.get(name):
+                    self._release(state[name])
 
     async def _unpin(self, workspace_id: int, state: dict):
         session = await _session()
@@ -490,7 +516,7 @@ class WorkspaceRuntimeSwitcher:
                 state = transition_state(current)
                 if state is None:
                     continue
-                if state["phase"] == "allocation_unknown" or (state["phase"] == "provisioning" and not state.get("target")):
+                if state["target_backend"] != "local" and (state["phase"] == "allocation_unknown" or (state["phase"] == "provisioning" and not state.get("target"))):
                     from agent.modules.workspaces.transitions import RuntimeTransitionCoordinator
                     try:
                         target = await RuntimeTransitionCoordinator.find_allocation(state["target_backend"], state["operation_id"])
@@ -508,6 +534,7 @@ class WorkspaceRuntimeSwitcher:
                     if state.get("target") and state["target"]["backend"] != "local":
                         state["cleanup"].append({"ref": state["target"], "action": "delete", "operation_id": state["operation_id"]})
                     await self._write(workspace_id, state)
+                    await self._discard_unactivated_fork(workspace_id, state)
                 await self._unpin(workspace_id, state)
                 if state.get("cleanup"):
                     await self._cleanup(workspace_id, state)

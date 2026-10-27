@@ -66,8 +66,8 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
   });
   onMount(() => {
     const changed = (event: Event) => {
-      const detail = (event as CustomEvent<{ project_workspace_id?: number }>).detail;
-      if (!payload().workspace || !detail?.project_workspace_id || detail.project_workspace_id === payload().workspace?.project_workspace_id) refreshQuietly();
+      const detail = (event as CustomEvent<{ project_workspace_id?: number; thread_id?: string }>).detail;
+      if (detail?.thread_id === threadId() || !payload().workspace || !detail?.project_workspace_id || detail.project_workspace_id === payload().workspace?.project_workspace_id) refreshQuietly();
     };
     window.addEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED, changed);
     window.addEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED, changed);
@@ -106,7 +106,7 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
     try {
       const result = await postJson<{ transition: NonNullable<ThreadRuntimePayload["runtime"]>["transition"] }>(
         `/dashboard-api/projects/${binding.project_id}/runtime/switch`, {
-          backend, project_workspace_id: binding.project_workspace_id, expected_generation: binding.runtime_generation,
+          thread_id: thread, backend, project_workspace_id: binding.project_workspace_id, expected_generation: binding.runtime_generation,
           ...(previewToken ? { preview_token: previewToken } : {}),
         },
       );
@@ -140,7 +140,7 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
           expected_operation_id: operationId });
       } else if (binding.project_workspace_id) {
         await postJson(`/dashboard-api/projects/${binding.project_id}/runtime/abandon`, {
-          project_workspace_id: binding.project_workspace_id, expected_operation_id: operationId,
+          project_workspace_id: payload().transition_workspace_id || binding.project_workspace_id, expected_operation_id: operationId,
         });
       }
       if (currentScope === scope()) await refresh();
@@ -164,6 +164,7 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
       await postJson<{ workspace: WorkspaceBinding }>(
         `/dashboard-api/projects/${binding.project_id}/runtime/recovery`, {
           action, project_workspace_id: binding.project_workspace_id, expected_generation: binding.runtime_generation,
+          ...(threadId() ? { thread_id: threadId() } : {}),
           ...(previewToken ? { preview_token: previewToken } : {}),
         },
       );

@@ -264,12 +264,13 @@ async def test_lazy_cloud_chat_and_saved_reads_do_not_initialize_execution(proje
                               workspace=None if existing else binding, project_id=project["id"])
         params = {"thread_id": thread_id}
         await _apply_workspace_to_run_params(request, params)
+        expected = binding if existing else await service.prepare_chat(project["id"])
         async with workspace_run(params):
-            assert params["workspace"]["project_workspace_id"] == binding.project_workspace_id
-            assert params["workspace"]["execution"]["locator"] == "sb-expired"
-            assert service.switcher.runs[binding.project_workspace_id] == 1
+            assert params["workspace"]["project_workspace_id"] == expected.project_workspace_id
+            assert params["workspace"]["execution"]["locator"] == expected.execution.locator
+            assert service.switcher.runs[expected.project_workspace_id] == 1
         assert not service.switcher.runs
-    resolved = await resolve_dashboard_workspace(None, WorkspaceResolveBody(project_id=project["id"]))
+    resolved = await resolve_dashboard_workspace(None, WorkspaceResolveBody(project_id=project["id"], project_workspace_id=binding.project_workspace_id))
     assert resolved["workspace"]["execution"]["locator"] == "sb-expired"
     transport = WorkspacePackageIO(binding)
     content, _ = await transport.read("AGENTS.md")
@@ -1973,6 +1974,347 @@ async def test_new_workspace_defaults_to_manual_apply(project_service, tmp_path)
     await service.ensure(project["id"])
     assert (await service.rows(project["id"]))[1].sync_policy == "manual_apply"
     assert (await service.describe(project["id"]))["sync_policy"] == "manual_apply"
+
+
+@pytest.mark.asyncio
+async def test_new_chat_keeps_existing_local_runtime(project_service):
+    service, project, _, _ = project_service
+    before = await service.binding(project["id"])
+    assert await service.prepare_chat(project["id"]) == before
+
+
+async def bind_session(fixture, thread, binding):
+    async with fixture.maker() as session:
+        session.add(ThreadWorkspace(thread_id=thread, project_id=binding.project_id,
+            project_workspace_id=binding.project_workspace_id, scope_key=binding.scope.key,
+            scope_kind=binding.scope.kind, scope_label=binding.scope.label,
+            execution_backend=binding.execution.backend, execution_locator=binding.execution.locator,
+            execution_metadata_json=json.dumps(binding.execution.metadata), working_dir=binding.execution.locator))
+        await session.commit()
+
+
+async def switch_session(fixture, thread, backend, token=None):
+    binding = await fixture.service.resolve_thread(thread)
+    result = await fixture.service.sessions.request(binding.project_id, thread, backend,
+        binding.runtime_generation, binding.project_workspace_id, preview_token=token)
+    job = fixture.service.switcher.tasks.get(result["workspace"]["project_workspace_id"])
+    if job:
+        await job
+    result_binding = await fixture.service.resolve_thread(thread)
+    assert result_binding.execution.backend == backend
+    return result_binding
+
+
+@pytest.mark.asyncio
+async def test_session_switches_only_rebind_the_owner_and_children(switch_service):
+    fixture, service = switch_service, switch_service.service
+    local = await service.prepare_chat(fixture.project["id"])
+    for thread in ("first", "first:sub:child", "second"):
+        await bind_session(fixture, thread, local)
+    cloud = await switch_session(fixture, "first", "daytona")
+    assert cloud.project_workspace_id != local.project_workspace_id
+    assert await service.resolve_thread("second") == local
+    assert await service.resolve_thread("first:sub:child") == cloud
+    assert await service.prepare_chat(local.project_id) == local
+    other_cloud = await switch_session(fixture, "second", "daytona")
+    assert other_cloud.project_workspace_id != cloud.project_workspace_id
+    assert other_cloud.execution.locator != cloud.execution.locator
+    assert (await service.describe(local.project_id))["workspace"]["execution"]["backend"] == "local"
+    changed = await switch_session(fixture, "first", "modal")
+    assert changed.project_workspace_id == cloud.project_workspace_id
+    assert await service.resolve_thread("second") == other_cloud
+
+
+@pytest.mark.asyncio
+async def test_session_sync_updates_local_files_without_rebinding_cloud(switch_service):
+    fixture, service = switch_service, switch_service.service
+    local = await service.prepare_chat(fixture.project["id"])
+    await bind_session(fixture, "cloud-session", local)
+    cloud = await switch_session(fixture, "cloud-session", "daytona")
+    remote = fixture.roots[cloud.execution.locator]
+    (remote / "binary.bin").write_bytes(b"\x00\xff\x01")
+    (remote / "file.txt").unlink()
+    (fixture.root / "local-only.txt").write_text("independent")
+    preview = await service.local_sync.synchronize(cloud.project_id, cloud.runtime_generation, cloud.project_workspace_id)
+    assert not (fixture.root / "binary.bin").exists()
+    with service.switcher.run_lease(local.project_workspace_id):
+        with pytest.raises(ProjectWorkspaceError) as busy:
+            await service.local_sync.synchronize(cloud.project_id, cloud.runtime_generation, cloud.project_workspace_id,
+                                                 preview_token=preview["preview_token"])
+        assert busy.value.code == "workspace_busy"
+    applied = await service.local_sync.synchronize(cloud.project_id, cloud.runtime_generation, cloud.project_workspace_id,
+                                                  preview_token=preview["preview_token"])
+    assert applied["applied"]
+    assert (fixture.root / "binary.bin").read_bytes() == b"\x00\xff\x01"
+    assert not (fixture.root / "file.txt").exists()
+    assert (fixture.root / "local-only.txt").read_text() == "independent"
+    assert await service.resolve_thread("cloud-session") == cloud
+    assert not fixture.retired
+    assert (await service.rows(local.project_id, local.project_workspace_id))[1].head_revision
+    preview = await service.local_sync.synchronize(cloud.project_id, cloud.runtime_generation, cloud.project_workspace_id)
+    restored = await switch_session(fixture, "cloud-session", "local", preview["preview_token"])
+    assert restored.project_workspace_id == local.project_workspace_id
+    assert not service.switcher.switching
+
+
+@pytest.mark.asyncio
+async def test_cloud_only_project_uses_saved_files_without_touching_provider(switch_service, monkeypatch):
+    fixture, service = switch_service, switch_service.service
+    _, cloud = await finish_switch(fixture, "daytona")
+    async with fixture.maker() as session:
+        workspace = await session.get(ProjectWorkspace, cloud.project_workspace_id)
+        workspace.source_json = cloud.execution.model_dump_json()
+        await session.commit()
+    cloud = await service.binding(cloud.project_id, cloud.project_workspace_id)
+    capture = service.transfer.capture
+    async def local_only(ref, *args, **kwargs):
+        assert ref.backend == "local", "Preparing local must not contact the sandbox"
+        return await capture(ref, *args, **kwargs)
+    monkeypatch.setattr(service.transfer, "capture", local_only)
+    with service.switcher.run_lease(cloud.project_workspace_id):
+        local = await service.prepare_chat(cloud.project_id)
+    assert local.execution.backend == "local"
+    assert Path(local.execution.locator, "file.txt").read_text() == "original"
+    assert await service.binding(cloud.project_id, cloud.project_workspace_id) == cloud
+    assert len(fixture.created) == 1 and not fixture.retired
+    monkeypatch.setattr(service.transfer, "capture", capture)
+
+
+@pytest.mark.asyncio
+async def test_session_first_message_prepares_selected_backend(switch_service, monkeypatch):
+    from agent.delivery.http.api.router import _apply_workspace_to_run_params
+    from agent.delivery.http.api.schemas import ChatRequest
+    from agent.delivery.http.dashboard.routes.projects import get_thread_runtime
+    import agent.modules.workspaces as runtimes
+    fixture, service = switch_service, switch_service.service
+    service.container._async_session_maker = fixture.maker
+    local = await service.prepare_chat(fixture.project["id"])
+    request = ChatRequest(message="Inspect this project", user_id="dashboard", new_thread=True,
+                          workspace=local, execution_backend="daytona")
+    params = {"thread_id": "first-message"}
+    assert not fixture.created
+    started, release = asyncio.Event(), asyncio.Event()
+    async def create(*args, **kwargs):
+        started.set()
+        await release.wait()
+        return await fixture.create(*args, **kwargs)
+    monkeypatch.setattr(runtimes, "create_workspace_backend", create)
+    preparing = asyncio.create_task(_apply_workspace_to_run_params(request, params))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=30)
+        status = await get_thread_runtime("first-message")
+        assert status["workspace"]["project_workspace_id"] == local.project_workspace_id
+        assert status["runtime"]["transition"]["phase"] == "provisioning"
+        assert status["transition_workspace_id"] != local.project_workspace_id
+    finally:
+        release.set()
+        await preparing
+    cloud = await service.resolve_thread("first-message")
+    assert params["workspace"].backend == "daytona"
+    assert cloud.project_workspace_id != local.project_workspace_id
+    assert await service.prepare_chat(local.project_id) == local
+    assert len(fixture.created) == 1
+    assert (await get_thread_runtime("first-message"))["kind"] == "session"
+
+
+@pytest.mark.asyncio
+async def test_local_recovery_rebinds_only_one_legacy_cloud_session(switch_service, monkeypatch):
+    fixture, service = switch_service, switch_service.service
+    await enable_manual_apply(fixture)
+    _, cloud = await finish_switch(fixture, "modal")
+    for thread in ("recover-one", "keep-cloud"):
+        await bind_session(fixture, thread, cloud)
+    await service._record_provision_decision(*await service.rows(cloud.project_id, cloud.project_workspace_id))
+    local = await service.prepare_chat(cloud.project_id)
+    preview = await service.local_sync.synchronize(cloud.project_id, cloud.runtime_generation, cloud.project_workspace_id)
+    capture = service.transfer.capture
+    async def local_only(ref, *args, **kwargs):
+        assert ref.backend == "local"
+        return await capture(ref, *args, **kwargs)
+    monkeypatch.setattr(service.transfer, "capture", local_only)
+    recovered = await switch_session(fixture, "recover-one", "local", preview["preview_token"])
+    assert recovered.project_workspace_id == local.project_workspace_id
+    assert await service.resolve_thread("keep-cloud") == cloud
+    _, _, unchanged = await service.rows(cloud.project_id, cloud.project_workspace_id)
+    assert unchanged.status == "unavailable" and json.loads(unchanged.pending_decision_json)
+    assert len(fixture.created) == 1
+    monkeypatch.setattr(service.transfer, "capture", capture)
+
+
+@pytest.mark.asyncio
+async def test_session_failed_switch_retains_source_and_can_retry_and_round_trip(switch_service, monkeypatch):
+    fixture, service = switch_service, switch_service.service
+    local = await service.prepare_chat(fixture.project["id"])
+    await bind_session(fixture, "retry-session", local)
+    restore = service.transfer.restore
+    monkeypatch.setattr(service.transfer, "restore", AsyncMock(side_effect=OSError("Transfer failed")))
+    result = await service.sessions.request(local.project_id, "retry-session", "daytona", local.runtime_generation, local.project_workspace_id)
+    await service.switcher.tasks[result["workspace"]["project_workspace_id"]]
+    assert await service.resolve_thread("retry-session") == local
+    journal = await service.sessions.pending("retry-session")
+    assert json.loads(journal.transition_json)["phase"] == "failed"
+    created = len(fixture.created)
+    await service.switcher.recover()
+    assert len(fixture.created) == created
+    assert not service.switcher.switching
+    monkeypatch.setattr(service.transfer, "restore", restore)
+    cloud = await switch_session(fixture, "retry-session", "daytona")
+    preview = await service.local_sync.synchronize(cloud.project_id, cloud.runtime_generation, cloud.project_workspace_id)
+    await switch_session(fixture, "retry-session", "local", preview["preview_token"])
+    again = await switch_session(fixture, "retry-session", "modal")
+    assert again.project_workspace_id == cloud.project_workspace_id
+    assert again.runtime_generation > cloud.runtime_generation
+    assert (await service.binding(local.project_id)).execution.backend == "local"
+
+
+@pytest.mark.asyncio
+async def test_multiple_cloud_sessions_keep_independent_sync_baselines(switch_service):
+    fixture, service = switch_service, switch_service.service
+    local = await service.prepare_chat(fixture.project["id"])
+    for thread in ("cloud-one", "cloud-two"):
+        await bind_session(fixture, thread, local)
+    one = await switch_session(fixture, "cloud-one", "daytona")
+    two = await switch_session(fixture, "cloud-two", "modal")
+    (fixture.roots[one.execution.locator] / "one.txt").write_text("one")
+    (fixture.roots[two.execution.locator] / "two.txt").write_text("two")
+    for binding in (one, two):
+        preview = await service.local_sync.synchronize(binding.project_id, binding.runtime_generation, binding.project_workspace_id)
+        assert not preview["conflicts"]
+        await service.local_sync.synchronize(binding.project_id, binding.runtime_generation, binding.project_workspace_id,
+                                             preview_token=preview["preview_token"])
+    assert (fixture.root / "one.txt").read_text() == "one"
+    assert (fixture.root / "two.txt").read_text() == "two"
+    assert await service.resolve_thread("cloud-one") == one
+    assert await service.resolve_thread("cloud-two") == two
+    preview = await service.local_sync.synchronize(one.project_id, one.runtime_generation, one.project_workspace_id)
+    async with fixture.maker() as session:
+        runtime = (await session.execute(select(WorkspaceRuntime).where(
+            WorkspaceRuntime.project_workspace_id == local.project_workspace_id))).scalar_one()
+        runtime.generation += 1
+        await session.commit()
+    with pytest.raises(ProjectWorkspaceError) as changed_target:
+        await service.local_sync.synchronize(one.project_id, one.runtime_generation, one.project_workspace_id,
+                                             preview_token=preview["preview_token"])
+    assert changed_target.value.code == "stale_content"
+    (fixture.roots[one.execution.locator] / "file.txt").write_text("sandbox")
+    preview = await service.local_sync.synchronize(one.project_id, one.runtime_generation, one.project_workspace_id)
+    (fixture.root / "file.txt").write_text("local")
+    with pytest.raises(ProjectWorkspaceError) as stale:
+        await service.local_sync.synchronize(one.project_id, one.runtime_generation, one.project_workspace_id,
+                                             preview_token=preview["preview_token"])
+    assert stale.value.code == "stale_content"
+    preview = await service.local_sync.synchronize(one.project_id, one.runtime_generation, one.project_workspace_id)
+    assert "file.txt" in preview["conflicts"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("revision", [None, "0" * 64])
+async def test_cloud_only_project_requires_a_valid_saved_revision(switch_service, revision):
+    fixture, service = switch_service, switch_service.service
+    _, cloud = await finish_switch(fixture, "daytona")
+    async with fixture.maker() as session:
+        workspace = await session.get(ProjectWorkspace, cloud.project_workspace_id)
+        workspace.source_json, workspace.head_revision = cloud.execution.model_dump_json(), revision
+        await session.commit()
+    with pytest.raises(ProjectWorkspaceError) as missing:
+        await service.prepare_chat(cloud.project_id)
+    assert missing.value.code == "missing_data"
+    assert (await service.rows(cloud.project_id, cloud.project_workspace_id))[2].generation == cloud.runtime_generation
+    assert len(fixture.created) == 1 and not fixture.retired
+
+
+@pytest.mark.asyncio
+async def test_cloud_only_local_initialization_retry_preserves_seed_baseline(switch_service, monkeypatch):
+    fixture, service = switch_service, switch_service.service
+    _, cloud = await finish_switch(fixture, "daytona")
+    async with fixture.maker() as session:
+        workspace = await session.get(ProjectWorkspace, cloud.project_workspace_id)
+        workspace.source_json, workspace.sync_policy = cloud.execution.model_dump_json(), "manual_apply"
+        await session.commit()
+    checkpoint = service._checkpoint
+    async def interrupted(project_id, workspace_id, *args, **kwargs):
+        await checkpoint(project_id, workspace_id, *args, **kwargs)
+        raise OSError("Interrupted before local activation")
+    monkeypatch.setattr(service, "_checkpoint", interrupted)
+    with pytest.raises(OSError, match="Interrupted"):
+        await service.prepare_chat(cloud.project_id)
+    monkeypatch.setattr(service, "_checkpoint", checkpoint)
+    (fixture.roots[cloud.execution.locator] / "file.txt").write_text("new sandbox changes")
+    await service.checkpoint(cloud.project_id, cloud.project_workspace_id)
+    directory = service.runtime_root / ("project-" + str(cloud.project_id)) / "local"
+    (directory / "independent.txt").write_text("keep local edits")
+    local = await service.prepare_chat(cloud.project_id)
+    assert Path(local.execution.locator, "file.txt").read_text() == "original"
+    _, source, _ = await service.rows(cloud.project_id, cloud.project_workspace_id)
+    assert source.local_sync_revision != source.head_revision
+    preview = await service.local_sync.synchronize(cloud.project_id, cloud.runtime_generation, cloud.project_workspace_id)
+    assert not preview["conflicts"] and {"path": "file.txt", "action": "update"} in preview["changes"]
+    await service.local_sync.synchronize(cloud.project_id, cloud.runtime_generation, cloud.project_workspace_id,
+                                         preview_token=preview["preview_token"])
+    assert Path(local.execution.locator, "file.txt").read_text() == "new sandbox changes"
+    assert Path(local.execution.locator, "independent.txt").read_text() == "keep local edits"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", ["manual_apply", "mirror_strict"])
+async def test_new_chat_uses_separate_local_home_and_keeps_cloud(switch_service, policy, monkeypatch):
+    fixture, service = switch_service, switch_service.service
+    if policy == "manual_apply":
+        await enable_manual_apply(fixture)
+    _, cloud = await finish_switch(fixture, "daytona")
+    (fixture.roots[cloud.execution.locator] / "remote.txt").write_text("cloud output")
+    local = await service.prepare_chat(cloud.project_id)
+    assert local.execution.backend == "local" and local.execution.locator == str(fixture.root)
+    assert local.project_workspace_id != cloud.project_workspace_id
+    assert local.runtime_generation == 1
+    assert not (fixture.root / "remote.txt").exists()
+    assert await service.binding(cloud.project_id, cloud.project_workspace_id) == cloud
+    assert not fixture.retired
+    assert len(fixture.created) == 1
+    assert await service.prepare_chat(cloud.project_id) == local
+    from agent.modules.workspaces import repository as mappings
+    monkeypatch.setattr(mappings, "get_async_session", catalog.get_async_session)
+    remembered = await mappings.ThreadWorkspaceRepository().upsert(thread_id="local-reference", workspace=local.execution)
+    assert remembered["workspace"]["project_workspace_id"] == local.project_workspace_id
+
+
+@pytest.mark.asyncio
+async def test_new_chat_preserves_local_edits_while_cloud_is_busy(switch_service):
+    fixture, service = switch_service, switch_service.service
+    await enable_manual_apply(fixture)
+    _, cloud = await finish_switch(fixture, "daytona")
+    with service.switcher.run_lease(cloud.project_workspace_id):
+        local = await service.prepare_chat(cloud.project_id)
+        assert local.execution.backend == "local"
+    (fixture.roots[cloud.execution.locator] / "file.txt").write_text("cloud edit")
+    (fixture.root / "file.txt").write_text("local edit")
+    assert await service.prepare_chat(cloud.project_id) == local
+    assert (fixture.root / "file.txt").read_text() == "local edit"
+    assert (await service.binding(cloud.project_id, cloud.project_workspace_id)).execution.backend == "daytona"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recorded", [True, False])
+async def test_new_chat_recovers_expired_cloud_locally_without_cloud_allocation(switch_service, monkeypatch, recorded):
+    fixture, service = switch_service, switch_service.service
+    await enable_manual_apply(fixture)
+    _, cloud = await finish_switch(fixture, "modal")
+    (fixture.roots[cloud.execution.locator] / "remote.txt").write_text("saved output")
+    await service.checkpoint(cloud.project_id)
+    if recorded:
+        await service._record_provision_decision(*await service.rows(cloud.project_id))
+    original_capture = service.transfer.capture
+
+    async def capture(ref, *args, **kwargs):
+        if ref.backend != "local":
+            raise WorkspaceUnavailableError("expired")
+        return await original_capture(ref, *args, **kwargs)
+
+    monkeypatch.setattr(service.transfer, "capture", capture)
+    local = await service.prepare_chat(cloud.project_id)
+    assert local.execution.backend == "local"
+    assert not (fixture.root / "remote.txt").exists()
+    assert len(fixture.created) == 1
 
 
 @pytest.mark.asyncio

@@ -25,6 +25,7 @@ export type NewChatNavigationState = {
   newChatId: string;
   projectId?: number;
   workspace: WorkspaceRef | null;
+  workspaceBinding?: WorkspaceBinding;
 };
 
 export type ThreadSummary = {

@@ -156,6 +156,15 @@ async def register_thread_project(session: AsyncSession, thread_id: str, binding
             WorkspaceRuntime.project_workspace_id == workspace.id,
         ))).scalar_one()
         return _binding(project, workspace, runtime)
+    if project.local_workspace_id:
+        workspace = await session.get(ProjectWorkspace, project.local_workspace_id)
+        runtime = (await session.execute(select(WorkspaceRuntime).where(
+            WorkspaceRuntime.project_workspace_id == workspace.id,
+        ))).scalar_one()
+        from agent.modules.projects.workspaces import source_key
+        from agent.modules.workspaces import WorkspaceRef
+        if source_key(binding.execution) == source_key(WorkspaceRef.model_validate_json(runtime.execution_json)):
+            return _binding(project, workspace, runtime)
     kind = "github_task" if binding.execution.metadata.get("workspace_kind") == "github_task" else "shared"
     if project.migration_status != "ready":
         kind = "legacy" if kind == "shared" else kind

@@ -27,6 +27,7 @@ const mutations = [];
 const localSyncRequests = [];
 const runtimeRequests = [];
 const switchRequests = [];
+const newChatRequests = [];
 const chatRequests = [];
 let switchFailure = false;
 let localSyncConflict = true;
@@ -75,6 +76,27 @@ const server = http.createServer(async (req, res) => {
     for await (const chunk of req) raw += chunk;
     const body = raw ? JSON.parse(raw) : {};
     const send = data => res.end(JSON.stringify(data));
+    const chatWorkspace = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/chat-workspace$/);
+    if (chatWorkspace) {
+      assert.equal(req.method, 'POST');
+      const project = projects.find(item => item.id === Number(chatWorkspace[1]));
+      newChatRequests.push(project.id);
+      if (delayRuntimeFailure) {
+        delayRuntimeFailure = false;
+        failPendingRuntime = () => { res.writeHead(503); send({ detail: 'Delayed workspace failure.' }); };
+        return;
+      }
+      if (unavailable) {
+        res.writeHead(409); send({ detail: 'Workspace is unavailable.' }); return;
+      }
+      if (project.workspace.execution.backend !== 'local') {
+        project.sandbox = { workspace: project.workspace, runtime: project.runtime };
+        project.workspace = { ...project.workspace, project_workspace_id: project.workspace.project_workspace_id + 1, runtime_generation: 1,
+          execution: { backend: 'local', locator: `/projects/${project.id}`, label: project.label, metadata: {} } };
+        project.runtime = { status: 'ready', generation: project.workspace.runtime_generation };
+      }
+      send({ workspace: project.workspace }); return;
+    }
     const instructions = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/instructions$/);
     const runtimeSwitch = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/runtime\/switch$/);
     if (runtimeSwitch) {
@@ -161,11 +183,6 @@ const server = http.createServer(async (req, res) => {
       const project = projects.find(project => project.id === Number(match[1]));
       if (req.method === 'GET') detailRequests.push(Number(match[1]));
       if (!project) { res.writeHead(404); send({ detail: 'Project not found.' }); return; }
-      if (req.method === 'GET' && delayRuntimeFailure) {
-        delayRuntimeFailure = false;
-        failPendingRuntime = () => { res.writeHead(503); send({ detail: 'Delayed workspace failure.' }); };
-        return;
-      }
       if (req.method === 'GET' && unavailable) { res.writeHead(503); send({ detail: 'Workspace is unavailable.' }); return; }
       if (req.method === 'GET') { send(project); return; }
       Object.assign(project, req.method === 'DELETE' ? { status: 'removed' } : body);
@@ -429,12 +446,12 @@ try {
   await call('Page.reload');
   await until(() => js(`document.querySelector('.workspace-storage-summary')?.textContent.includes('/copies/102') &&
     document.querySelector('.workspace-storage-summary')?.textContent.includes('/projects/1')`), 'working location and linked directory are separate');
-  await clickText('Preview local changes');
+  await clickText('Sync to local');
   await until(() => js(`document.body.textContent.includes('1 conflicts')`), 'local synchronization conflict preview');
   assert.equal(await js(`[...document.querySelectorAll('button')].find(button => button.textContent === 'Apply previewed changes').disabled`), true);
   assert.equal(localSyncRequests.some(body => body.preview_token), false);
   localSyncConflict = false;
-  await clickText('Preview local changes');
+  await clickText('Sync to local');
   await until(() => js(`[...document.querySelectorAll('button')].some(button => button.textContent === 'Apply previewed changes' && !button.disabled)`), 'local sync ready to apply');
   const beforeSyncPoll = detailRequests.length;
   await until(() => detailRequests.length > beforeSyncPoll, 'status polling preserves the local sync preview');
@@ -483,32 +500,22 @@ try {
     await js(`document.querySelector('[aria-label="Execution backend"]').click()`);
     await js(`[...document.querySelectorAll('[role="option"]')].find(el => el.textContent.trim() === 'Daytona').click()`);
     const beforeSwitch = switchRequests.length;
-    if (entry === 'catalog') {
-      switchFailure = true;
-      await clickText('Switch backend');
-      await until(() => js(`document.querySelector('.composer-runtime-picker [role="alert"]')?.textContent.includes('Another conversation')`), 'draft switch failure');
-      assert.equal(await js(`document.querySelector('.composer-workspace-backend').textContent.includes('Local')`), true);
-      switchFailure = false;
-    }
-    await clickText('Switch backend');
-    await until(() => switchRequests.length === beforeSwitch + (entry === 'catalog' ? 2 : 1), `${entry} draft switch accepted`);
-    assert.deepEqual(switchRequests.at(-1), { projectId: 1, body: { backend: 'daytona', project_workspace_id: 51, expected_generation: 1 } });
-    await until(() => js(`document.querySelector('.chat-prompt-input').disabled`), 'draft messages wait for switching');
-    assert.equal(chatRequests.length, entry === 'catalog' ? 0 : entry === 'detail' ? 1 : 2, 'switching must not create a thread');
-    const execution = { backend: 'daytona', locator: `sandbox-${entry}`, label: project.label, metadata: { root: '/workspace' } };
-    project.workspace = { ...project.workspace, execution, runtime_generation: 2 };
-    project.runtime = { status: 'ready', generation: 2,
-      transition: { operation_id: 'new-chat-switch', phase: 'completed', target_backend: 'daytona' } };
+    await clickText('Use selected backend');
+    await until(() => js(`document.querySelector('.composer-workspace-backend').textContent.includes('Daytona')`), `${entry} draft backend selected`);
+    assert.equal(switchRequests.length, beforeSwitch, 'draft selection must not change a runtime or allocate a sandbox');
+    assert.equal(project.workspace.execution.backend, 'local');
+    assert.equal(project.runtime.generation, 1);
     await js(`dispatchEvent(new CustomEvent('k41:workspace-runtime-changed', { detail: { project_workspace_id: 51 } }))`);
-    await until(() => js(`document.querySelector('.composer-workspace-backend').textContent.includes('Daytona') && !document.querySelector('.chat-prompt-input').disabled`), `${entry} draft follows switched backend`);
+    await until(() => js(`document.querySelector('.composer-workspace-backend').textContent.includes('Daytona') && !document.querySelector('.chat-prompt-input').disabled`), `${entry} draft retains selection after refresh`);
     await js(`document.querySelector('[aria-label="Close project picker"]').click()`);
     const beforeChat = chatRequests.length;
     await input('.chat-prompt-input', 'Explain this project.');
     await js(`document.querySelector('[aria-label="Send message"]').click()`);
     await until(() => chatRequests.length === beforeChat + 1, `${entry} first message`);
-    assert.deepEqual(chatRequests.at(-1).workspace, execution, 'first message uses the switched project files');
+    assert.deepEqual(chatRequests.at(-1).workspace, project.workspace, 'first message retains the full source binding');
+    assert.equal(chatRequests.at(-1).execution_backend, 'daytona');
   }
-  console.log('PASS: catalog, detail, and sidebar project drafts switch to sandbox before the first message, show failures, and block sends during switching.');
+  console.log('PASS: project drafts select a session backend without changing any runtime before the first message.');
 
   const prepareLostProject = (modalEnabled = true) => {
     const project = makeProject(1, 'Lost Modal project');
@@ -518,38 +525,36 @@ try {
     projects = [project];
     fixtures['/dashboard-api/catalog'].backends = [{ name: 'local', title: 'Local', enabled: true }, { name: 'modal', title: 'Modal', enabled: modalEnabled }];
   };
-  const assertDormantChat = async () => {
-    await until(() => js(`location.pathname === '/chat' && !!document.querySelector('.composer-workspace-trigger')`), 'new chat without initializing Modal');
+  const assertLocalChat = async () => {
+    await until(() => js(`location.pathname === '/chat' && !!document.querySelector('.composer-workspace-trigger')`), 'new chat on local');
     assert.equal(await js(`document.querySelector('[role="dialog"]')?.textContent.includes('Recover project workspace') || false`), false);
     assert.equal(runtimeRequests.length, 0, 'opening a conversation must not initialize or recover execution');
-    assert.equal(projects[0].runtime.generation, 7);
-    assert.equal(await js(`document.querySelector('.composer-workspace-backend').textContent.includes('Modal')`), true, 'cloud execution preference is preserved');
-    if (fixtures['/dashboard-api/catalog'].backends.find(backend => backend.name === 'modal').enabled) {
-      await js(`document.querySelector('.composer-workspace-trigger').click()`);
-      await until(() => js(`document.querySelector('.workspace-storage-summary')?.textContent.includes('sb-expired')`), 'previous cloud execution is retained');
-      await js(`document.querySelector('[aria-label="Close project picker"]').click()`);
-    }
+    assert.equal(projects[0].runtime.generation, 1);
+    assert.equal(projects[0].sandbox.runtime.generation, 7);
+    assert.equal(projects[0].sandbox.workspace.execution.backend, 'modal');
+    assert.equal(await js(`document.querySelector('.composer-workspace-backend').textContent.includes('Local')`), true, 'new chats default to local execution');
+    assert.equal(newChatRequests.at(-1), 1);
   };
   prepareLostProject();
   await call('Page.navigate', { url: `${base}/projects` });
   await until(() => js(`!!document.querySelector('.project-card[aria-label="Lost Modal project"]')`), 'lost Modal project catalog');
   await clickText('New chat');
-  await assertDormantChat();
+  await assertLocalChat();
 
   prepareLostProject(false);
   await call('Page.navigate', { url: `${base}/projects/1` });
   await until(() => js(`document.querySelector('.page-title')?.textContent === 'Lost Modal project'`), 'lost project detail');
   await clickText('New chat');
-  await assertDormantChat();
+  await assertLocalChat();
 
   prepareLostProject();
   await js(`localStorage.setItem('k41-dashboard-sidebar', 'expanded')`);
   await call('Page.navigate', { url: `${base}/projects` });
   await until(() => js(`!!document.querySelector('[aria-label="New chat in Lost Modal project"]')`), 'lost project sidebar');
   await js(`document.querySelector('[aria-label="New chat in Lost Modal project"]').click()`);
-  await assertDormantChat();
+  await assertLocalChat();
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
-  console.log('PASS: catalog, project detail, and sidebar open lost cloud workspaces without initializing execution or switching to local.');
+  console.log('PASS: catalog, project detail, and sidebar start new chats locally and allow explicit backend switching.');
 } finally {
   if (call && ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
   ws?.close(); browser.kill(); server.closeAllConnections();

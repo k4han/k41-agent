@@ -160,6 +160,8 @@ class ProjectWorkspaceService:
         self.switcher = WorkspaceRuntimeSwitcher(self)
         from agent.modules.projects.local_sync import WorkspaceLocalSync
         self.local_sync = WorkspaceLocalSync(self)
+        from agent.modules.projects.sessions import ProjectSessionWorkspaces
+        self.sessions = ProjectSessionWorkspaces(self)
         from agent.modules.workspaces.host_mirror import HostMirrorService
         self.host_mirrors = HostMirrorService(self)
 
@@ -177,7 +179,8 @@ class ProjectWorkspaceService:
             if project is None:
                 raise KeyError("Project not found.")
             statement = select(ProjectWorkspace).where(ProjectWorkspace.project_id == project_id)
-            statement = statement.where(ProjectWorkspace.id == workspace_id) if workspace_id else statement.where(ProjectWorkspace.identity_key == "shared")
+            selected_id = workspace_id or project.local_workspace_id
+            statement = statement.where(ProjectWorkspace.id == selected_id) if selected_id else statement.where(ProjectWorkspace.identity_key == "shared")
             workspace = (await session.execute(statement)).scalar_one_or_none()
             if workspace is None:
                 raise ProjectWorkspaceError("Project workspace has not been migrated.", "migration_required")
@@ -214,7 +217,7 @@ class ProjectWorkspaceService:
             workspaces = [{"id": workspace.id, "kind": workspace.kind,
                            "sync_policy": sync_policy(workspace),
                            "host_mirror": mirror_summary(workspace),
-                           "name": "main" if workspace.kind == "shared" else workspace.identity_key,
+                           "name": "main" if workspace.kind == "shared" else "Session sandbox" if workspace.kind == "session" else workspace.identity_key,
                            "local_link": local_link_summary(workspace, runtime),
                            "source": json.loads(workspace.source_json),
                            "runtime": {"status": runtime.status, "generation": runtime.generation,
@@ -228,9 +231,17 @@ class ProjectWorkspaceService:
                                            "last_error": workspace.last_error,
                                            "blocked_for_writes": workspace.persistence_status == "error"}}
                           for workspace, runtime in rows]
-            shared = next(((workspace, runtime) for workspace, runtime in rows if workspace.identity_key == "shared"), None)
+            shared = next(((workspace, runtime) for workspace, runtime in rows
+                           if workspace.id == project.local_workspace_id), None) or next(
+                ((workspace, runtime) for workspace, runtime in rows if workspace.identity_key == "shared"), None)
             result = {"migration_status": project.migration_status, "workspaces": workspaces}
             if shared:
+                local_ref = WorkspaceRef.model_validate_json(shared[1].execution_json)
+                if project.local_workspace_id and local_ref.backend == "local":
+                    for item, (owned, _) in zip(workspaces, rows):
+                        if owned.id != project.local_workspace_id and owned.kind in {"shared", "session"}:
+                            item["local_link"] = {"path": local_ref.locator, "revision": owned.local_sync_revision,
+                                                  "status": "applied" if owned.local_sync_revision == owned.head_revision else "pending"}
                 result["workspace"] = _binding(project, *shared).model_dump()
                 summary = next(item for item in workspaces if item["id"] == shared[0].id)
                 result.update(runtime=summary["runtime"], persistence=summary["persistence"],
@@ -261,6 +272,10 @@ class ProjectWorkspaceService:
     async def binding(self, project_id: int, workspace_id: int | None = None) -> WorkspaceBinding:
         return _binding(*await self.rows(project_id, workspace_id))
 
+    async def prepare_chat(self, project_id: int) -> WorkspaceBinding:
+        """Prepare the local home without changing any existing conversation."""
+        return await self.sessions.prepare_local(project_id)
+
     async def find_repository_binding(self, repository_id: int) -> WorkspaceBinding | None:
         """Resolve a repository's main workspace before allocating another runtime."""
         session = await _session()
@@ -273,8 +288,9 @@ class ProjectWorkspaceService:
                 ProjectWorkspace, ProjectWorkspace.project_id == Project.id,
             ).join(WorkspaceRuntime, WorkspaceRuntime.project_workspace_id == ProjectWorkspace.id).where(
                 ProjectWorkspace.kind == "shared", Project.migration_status == "ready",
+                WorkspaceRuntime.status != "retired",
                 or_(Project.key == f"github:{repository_id}", repository == str(repository_id)),
-            ).limit(1))).first()
+            ).order_by((ProjectWorkspace.id == Project.local_workspace_id).desc(), ProjectWorkspace.id).limit(1))).first()
         return _binding(*row) if row else None
 
     async def resolve_thread(self, thread_id: str) -> WorkspaceBinding | None:
@@ -310,8 +326,19 @@ class ProjectWorkspaceService:
             if project_id:
                 raise ProjectWorkspaceError("Project storage is temporarily unavailable.")
             return None
+        existing = await self.resolve_thread(thread_id) if thread_id else None
+        if existing:
+            if project_id or workspace is None or source_key(resolve_workspace_ref(workspace)) == source_key(existing.execution):
+                if ((project_id and existing.project_id != project_id)
+                        or (workspace_id and existing.project_workspace_id != workspace_id)
+                        or (isinstance(payload, dict) and payload.get("runtime_generation") not in {None, existing.runtime_generation})
+                        or (workspace is not None and source_key(resolve_workspace_ref(workspace)) != source_key(existing.execution))):
+                    raise ProjectWorkspaceError("The conversation runtime changed; reload the session.", "stale_runtime")
+                return existing
         if project_id:
             project, owned, runtime = await self.rows(project_id, workspace_id)
+            if runtime.status == "retired":
+                raise ProjectWorkspaceError("The session runtime has been retired; reload its current workspace.", "stale_runtime")
             binding = _binding(project, owned, runtime)
             if isinstance(payload, dict) and payload.get("scope", {}).get("key", binding.scope.key) != binding.scope.key:
                 raise ProjectWorkspaceError("Workspace scope conflicts with the project.", "workspace_conflict")
@@ -325,10 +352,6 @@ class ProjectWorkspaceService:
             if project.migration_status == "ready" and owned.kind == "legacy":
                 return await self.binding(project_id)
             return binding
-        if thread_id and workspace is None:
-            binding = await self.resolve_thread(thread_id)
-            if binding:
-                return binding
         if workspace is None:
             return None
         requested = resolve_workspace_ref(workspace)
@@ -348,12 +371,17 @@ class ProjectWorkspaceService:
             rows = (await session.execute(select(Project, ProjectWorkspace, WorkspaceRuntime).join(
                 ProjectWorkspace, ProjectWorkspace.project_id == Project.id,
             ).join(WorkspaceRuntime, WorkspaceRuntime.project_workspace_id == ProjectWorkspace.id).where(or_(
-                matches(ProjectWorkspace.source_json), matches(WorkspaceRuntime.execution_json),
+                and_(ProjectWorkspace.kind != "session", matches(ProjectWorkspace.source_json)), matches(WorkspaceRuntime.execution_json),
                 ProjectWorkspace.runtime_aliases_json.contains('"' + key + '"'),
-            )))).all()
+            )).order_by((WorkspaceRuntime.status == "retired"),
+                (ProjectWorkspace.id == Project.local_workspace_id).desc(), ProjectWorkspace.id))).all()
             for project, owned, runtime in rows:
                 if key in {*json.loads(owned.runtime_aliases_json), source_key(WorkspaceRef.model_validate_json(owned.source_json)),
                            source_key(WorkspaceRef.model_validate_json(runtime.execution_json))}:
+                    if runtime.status == "retired":
+                        raise ProjectWorkspaceError("The session runtime has been retired; reload its current workspace.", "stale_runtime")
+                    if existing and existing.project_id == project.id and existing.project_workspace_id != owned.id:
+                        raise ProjectWorkspaceError("The conversation workspace changed; reload the session.", "stale_runtime")
                     if project.migration_status == "ready" and owned.kind == "legacy":
                         return await self.binding(project.id)
                     return _binding(project, owned, runtime)
@@ -363,6 +391,9 @@ class ProjectWorkspaceService:
         binding = None
         if context.project_workspace_id:
             binding = await self.binding(context.project_id, context.project_workspace_id)
+            mapped = await self.resolve_thread(context.thread_id) if context.thread_id else None
+            if mapped and mapped.project_workspace_id != binding.project_workspace_id:
+                raise ProjectWorkspaceError("The conversation workspace changed; prepare the operation again.", "stale_runtime")
             if context.runtime_generation is not None and context.runtime_generation != binding.runtime_generation:
                 raise ProjectWorkspaceError("Execution runtime changed; prepare the operation again.", "stale_runtime")
         elif context.thread_id and self.container._persistence_ready:
@@ -697,6 +728,8 @@ class ProjectWorkspaceService:
                 await session.commit()
 
     async def _publish_runtime(self, project, workspace, ref, generation, status, *, transition=None):
+        if transition and transition.get("thread_id"):
+            return await self.sessions.publish(project, workspace, ref, generation, transition)
         session = await _session()
         async with session:
             previous = (await session.execute(select(WorkspaceRuntime).where(
@@ -730,7 +763,7 @@ class ProjectWorkspaceService:
                 WorkspaceRuntime.generation == previous.generation).values(**values))
             if changed.rowcount != 1:
                 raise ProjectWorkspaceError("Runtime changed during publication.", "stale_runtime")
-            if workspace.kind == "shared":
+            if workspace.kind == "shared" and project.local_workspace_id in {None, workspace.id}:
                 binding = bind_workspace_ref(ref, scope=_scope(project), project_id=project.id,
                                              project_workspace_id=workspace.id, runtime_generation=generation)
                 await session.execute(update(Project).where(Project.id == project.id).values(workspace_json=binding.model_dump_json()))
@@ -867,6 +900,11 @@ class ProjectWorkspaceService:
                 raise ProjectWorkspaceError("Choose an available migration source.", "invalid_source")
             await asyncio.to_thread(self.storage.get_manifest, str(source.id), source.head_revision)
             source.kind, source.identity_key = "shared", "shared"
+            selected_runtime = (await session.execute(select(WorkspaceRuntime).where(
+                WorkspaceRuntime.project_workspace_id == source.id,
+            ))).scalar_one()
+            if WorkspaceRef.model_validate_json(selected_runtime.execution_json).backend != "local":
+                source.sync_policy = MANUAL_APPLY
             project.migration_status = "ready"
             await session.flush()
             for model in (ThreadWorkspace, BackgroundTaskRecord):

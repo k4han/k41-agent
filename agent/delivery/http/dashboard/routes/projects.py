@@ -1,5 +1,6 @@
 """Authenticated dashboard project catalog endpoints."""
 
+import asyncio
 import logging
 from typing import Literal
 
@@ -78,6 +79,7 @@ class MigrationSelectionBody(BaseModel):
 
 
 class ProjectRuntimeSwitchBody(ProjectRuntimeBody):
+    thread_id: str = Field(min_length=1, max_length=512)
     backend: Literal["local", "daytona", "modal"]
     expected_generation: int = Field(ge=1)
     preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
@@ -105,7 +107,12 @@ async def get_thread_runtime(thread_id: str):
                 return {"workspace": None, "runtime": None}
         description = await service.describe(binding.project_id)
         workspace = next(item for item in description["workspaces"] if item["id"] == binding.project_workspace_id)
+        pending = await service.sessions.pending(thread_id)
+        if pending:
+            from agent.modules.projects.runtime_switch import transition_summary
+            workspace = dict(workspace, runtime=dict(workspace["runtime"], transition=transition_summary(pending)))
         return {"workspace": binding.model_dump(), "runtime": workspace["runtime"], "kind": workspace["kind"],
+                "transition_workspace_id": pending.project_workspace_id if pending else None,
                 "workspace_name": workspace["name"], "persistence": workspace["persistence"],
                 "local_link": workspace["local_link"], "host_mirror": workspace["host_mirror"],
                 "sync_policy": workspace["sync_policy"]}
@@ -206,8 +213,9 @@ async def synchronize_workspace_host(body: WorkspaceHostSyncBody):
 async def switch_project_runtime(body: ProjectRuntimeSwitchBody, project_id: int = Path(ge=1)):
     from agent.modules.projects import get_project_workspace_service
     try:
-        return await get_project_workspace_service().switcher.request(
-            project_id, body.backend, body.expected_generation, body.project_workspace_id,
+        service = get_project_workspace_service()
+        return await service.sessions.request(
+            project_id, body.thread_id, body.backend, body.expected_generation, body.project_workspace_id,
             **({"preview_token": body.preview_token} if body.preview_token else {}),
         )
     except Exception as exc:
@@ -225,6 +233,7 @@ async def ensure_project_runtime(body: ProjectRuntimeBody, project_id: int = Pat
 
 
 class ProjectRuntimeRecoveryBody(ProjectRuntimeBody):
+    thread_id: str | None = Field(default=None, min_length=1, max_length=512)
     action: Literal["restore", "local"]
     expected_generation: int = Field(ge=1)
     preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
@@ -259,8 +268,12 @@ async def synchronize_thread_local(body: ThreadLocalSyncBody):
 async def synchronize_project_local(body: ProjectLocalSyncBody, project_id: int = Path(ge=1)):
     from agent.modules.projects import get_project_workspace_service
     try:
-        return await get_project_workspace_service().local_sync.synchronize(
-            project_id, body.expected_generation, body.project_workspace_id, preview_token=body.preview_token,
+        service = get_project_workspace_service()
+        _, workspace, _ = await service.rows(project_id, body.project_workspace_id)
+        if workspace.kind in {"shared", "session"}:
+            await service.prepare_chat(project_id)
+        return await service.local_sync.synchronize(
+            project_id, body.expected_generation, body.project_workspace_id or workspace.id, preview_token=body.preview_token,
         )
     except Exception as exc:
         raise project_resource_error(exc) from exc
@@ -271,7 +284,18 @@ async def confirm_project_runtime_recovery(body: ProjectRuntimeRecoveryBody, pro
     """Apply the pending re-provision decision for a lost cloud sandbox."""
     from agent.modules.projects import get_project_workspace_service
     try:
-        binding = await get_project_workspace_service().confirm_provision(
+        service = get_project_workspace_service()
+        if body.action == "local" and body.thread_id:
+            operation = await service.sessions.request(project_id, body.thread_id, "local", body.expected_generation,
+                body.project_workspace_id, preview_token=body.preview_token)
+            task = service.switcher.tasks.get(operation["workspace"]["project_workspace_id"])
+            if task:
+                await asyncio.shield(task)
+            binding = await service.resolve_thread(body.thread_id)
+            if binding.execution.backend != "local":
+                raise ProjectWorkspaceError("Local recovery failed; preview the changes and retry.", "runtime_unavailable")
+            return {"workspace": binding.model_dump()}
+        binding = await service.confirm_provision(
             project_id, body.action, body.expected_generation, body.project_workspace_id,
             **({"preview_token": body.preview_token} if body.preview_token else {}))
         return {"workspace": binding.model_dump()}
@@ -317,6 +341,16 @@ async def get_project_detail(project_id: int = Path(ge=1)):
     except Exception as exc:
         logger.exception("Failed to load project")
         raise HTTPException(status_code=503, detail="Project catalog is temporarily unavailable.") from exc
+
+
+@router.post("/dashboard-api/projects/{project_id}/chat-workspace")
+async def prepare_project_chat(project_id: int = Path(ge=1)):
+    from agent.modules.projects import get_project_workspace_service
+    try:
+        binding = await get_project_workspace_service().prepare_chat(project_id)
+        return {"workspace": binding.model_dump()}
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
 
 
 @router.get("/dashboard-api/projects/{project_id}/instructions")

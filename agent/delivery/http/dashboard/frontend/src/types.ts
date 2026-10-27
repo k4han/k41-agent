@@ -326,7 +326,7 @@ export type ProjectWorkspaceSummary = {
   sync_policy?: "manual_apply" | "mirror_strict";
   host_mirror?: WorkspaceHostMirrorState | null;
   id: number;
-  kind: "shared" | "github_task" | "legacy";
+  kind: "shared" | "session" | "github_task" | "legacy";
   source: WorkspaceRef;
   runtime: WorkspaceRuntimeSummary;
   persistence: ProjectPersistence;
@@ -394,7 +394,8 @@ export type ThreadRuntimePayload = {
   host_mirror?: WorkspaceHostMirrorState | null;
   workspace: WorkspaceBinding | null;
   runtime: WorkspaceRuntimeSummary | null;
-  kind?: "shared" | "github_task" | "legacy";
+  kind?: "shared" | "session" | "github_task" | "legacy";
+  transition_workspace_id?: number | null;
   workspace_name?: string;
   persistence?: ProjectPersistence;
   local_link?: ProjectLocalLink | null;

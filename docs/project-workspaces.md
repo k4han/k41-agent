@@ -4,21 +4,19 @@ A project owns its files independently of its execution provider. `Project.id`
 is the durable identity. Existing catalog keys, labels, pinning, status and
 conversation history survive replacement of a sandbox.
 
-`ProjectWorkspace` owns a storage head and source reference. Normal conversations
-share its `shared` workspace. GitHub issue/PR automation uses separate
+`ProjectWorkspace` owns a storage head and source reference. Local conversations
+share a local home selected by `Project.local_workspace_id`. Cloud conversations
+use conversation-owned `session` workspaces. GitHub issue/PR automation uses separate
 `github_task` workspaces. `WorkspaceRuntime` contains the replaceable execution
 reference and generation, with one current runtime per workspace.
 
-The normal workspace is presented as `main`; its existing `shared` identity is
-retained for database and API compatibility. A run uses this workspace rather
-than creating a backend-specific copy. Reopening an original path or retired
-runtime reference resolves to the same project, including during startup import.
-Separate workspaces represent intentionally isolated work such as GitHub tasks.
-Backend selection never creates an additional workspace or revision history.
+The local home is presented as `main`. Existing `shared` workspaces and their
+conversation bindings retain their IDs. A session leaving a shared environment
+forks a verified snapshot into `session:<thread>`. Children and associated tasks
+follow the owning conversation; other conversations retain their bindings.
 Workspace resolution checks known paths, retired references and repository IDs
-before creating directories or allocating sandboxes. Reopening a known project
-uses its current runtime even if a different initial backend was requested;
-moving its execution is an explicit backend-switch operation.
+before creating directories or allocating sandboxes. New project conversations
+use local execution. Moving an existing conversation is an explicit session switch.
 
 ## Storage contract
 
@@ -88,12 +86,17 @@ clears the block. A provider termination can lose changes after the last
 successful checkpoint. These are file snapshots, not process-memory snapshots
 or transactional backups of running databases.
 
-Opening or resuming a conversation resolves the durable project identity without
+Resuming an existing conversation resolves the durable project identity without
 attaching or creating a sandbox. New conversations from the catalog, project
-detail page and sidebar preserve the selected backend even when its previous
-sandbox has expired. Chat admission reserves the workspace without initializing
-execution. Background task submission resolves its binding and reserves the
-workspace when the task runs. Questions that do not use workspace tools can
+detail page, sidebar and project picker use local execution without moving or
+checkpointing existing cloud sessions. Original local directories are adopted
+as-is. Cloud-only projects materialize the latest verified saved revision into
+a managed directory, without contacting the cloud provider. Missing saved data
+requires saving or synchronizing first. Draft backend selection is deferred
+until the first message, using `ChatRequest.execution_backend`. Resuming an existing
+conversation retains the current runtime. Chat admission reserves the workspace
+without initializing execution. Background task submission resolves its binding
+and reserves the workspace when the task runs. Questions that do not use workspace tools can
 complete without a cloud environment.
 
 Cloud file browsing reads live files when the runtime is already running and may
@@ -168,26 +171,29 @@ data; these endpoints do not implement permanent file deletion.
 
 ## Switching execution backends
 
-The dashboard conversation project picker can switch a shared workspace between
-enabled local, Daytona and Modal backends. Every conversation bound to that
-workspace follows its current runtime. Project and conversation identities,
+The dashboard conversation project picker switches only the selected session
+between enabled local, Daytona and Modal backends. Each cloud session has its
+own files and local baseline. Legacy sessions keep sharing their old cloud
+workspace until moved individually. Project and conversation identities,
 catalog labels, Git state, uploads and uncommitted files remain unchanged.
 GitHub task workspaces remain independent.
 
 `POST /dashboard-api/projects/{id}/runtime/switch` accepts `backend`,
-`expected_generation` and optional `project_workspace_id`. A `manual_apply`
+`thread_id`, `expected_generation` and optional `project_workspace_id`. A missing
+conversation ID is rejected. A `manual_apply`
 cloud-to-local switch also requires `preview_token`. The endpoint returns `202`
 with an `operation_id` and runs independently of the browser connection. The
-project detail response exposes `runtime.transition`, including the phase,
+thread runtime response exposes `runtime.transition`, including the phase,
 target backend, saved revision, timestamps and errors. A same-backend request
 returns the current binding without capturing or reloading files.
 `GET /dashboard-api/workspace/runtime/{thread_id}` resolves a conversation's
 current binding and transition without starting an execution environment.
-It also returns `workspace_name`, `persistence` and `local_link`. The conversation
+It also returns `workspace_name`, `persistence`, `local_link` and the journal's
+`transition_workspace_id` while a fork is pending. The conversation
 picker shows the current physical location, workspace name and save state.
 Save state refreshes while idle without replacing an unchanged workspace binding.
 
-Switching requires an idle shared workspace: active agent runs, background
+Switching requires an idle source workspace: active agent runs, background
 tasks, managed processes and paused workflow requests block the operation with
 `409`. All agent entrypoints reserve their workspace for their full run; a
 switch reservation blocks new runs, managed writes and lifecycle operations.
@@ -197,18 +203,21 @@ reconnection and focus, and polls during a switch.
 
 The source is checkpointed and its revision pinned before provisioning. A fresh
 destination is restored and verified before one database transaction publishes
-the new runtime, increments its generation and refreshes conversation/task
-execution references. For `manual_apply`, switching back to local requires a
+the new runtime, increments its generation and refreshes the owning conversation,
+children and associated task references. Journals retain source workspace and
+binding generation until activation. For `manual_apply`, switching back to local requires a
 preview token and uses the linked original directory, preserving independent host
 edits through the same three-way application used by `local-sync`. The merged
-local tree is captured as a new revision before activation. Cloud-only projects
+local tree is captured in the local home's storage before that session is rebound.
+Other local sessions keep their binding. Cloud-only projects
 use a managed local directory, allocated only on explicit export or local demand.
 Cloud-to-cloud switches depend on verified snapshots, not host mirror success.
 Cloud sources are stopped after activation when no other workspace or thread
 references the same sandbox. Modal retirement terminates the old sandbox.
 Old application-owned `switch-*` local runtimes are removed after activation;
-the original linked directory is retained. Retired references still resolve to
-the current project workspace rather than registering a new project.
+the original linked directory is retained. Legacy aliases resolve within their
+workspace. Detached session runtime references report `stale_runtime` instead of
+reattaching an old sandbox or registering a new project.
 
 The latest transition and pending cleanup references are durable. Failure before
 activation retains the source binding. A restart marks an unfinished transition
@@ -239,10 +248,10 @@ pinned independently of the current and previous workspace revisions.
 
 New project and thread workspaces explicitly use `manual_apply`. Cloud checkpoints
 save revisions without writing the original host directory. Applying changes or
-continuing locally requires preview and explicit application. Existing database
-rows are migrated to `mirror_strict`, preserving their automatic host reflection
-and host-divergence conflict behavior. Re-running migration preserves either policy.
-Backend switching continues the same `main` workspace. The link is not an automatic
+continuing locally requires preview and explicit application. Existing cloud chat
+workspaces migrate to `manual_apply` with their baselines intact. Existing local
+and GitHub task policies remain unchanged. Migration is idempotent and preserves
+the selected local home. The link is not an automatic
 two-way filesystem sync. Source workspace files, snapshot persistence and local
 application status are independent.
 
@@ -261,8 +270,11 @@ string generation. Both project and thread local switches accept `preview_token`
 The comparison is three-way: baseline, saved workspace and linked local files.
 Independent local edits and ignored dependency/cache folders are preserved. If
 both copies changed the same entry differently, all writes are blocked until
-the conflict is resolved. Runtime runs, processes and pending approvals use the
-same exclusive reservation as backend switching. External editors should pause
+the conflict is resolved. Each sandbox retains its own last-applied baseline.
+Source and local destination are reserved together in workspace ID order; runs,
+processes and pending approvals on either side block synchronization. Successful
+application updates the local storage head and source baseline without changing
+the sandbox's generation or session binding. External editors should pause
 writes while applying; files are rechecked before replacement, but the operation
 does not provide a transaction across external processes.
 

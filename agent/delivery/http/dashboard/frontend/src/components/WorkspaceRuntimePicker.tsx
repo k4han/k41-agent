@@ -16,19 +16,21 @@ export function WorkspaceRuntimePicker(props: {
   busy: boolean;
   disabled?: boolean;
   error: string;
+  draft?: boolean;
+  draftBackend?: WorkspaceBackendKey;
   portalMount?: HTMLElement;
   onSwitch: (backend: WorkspaceBackendKey, previewToken?: string) => Promise<void>;
   onAbandon?: () => Promise<void>;
 }) {
-  const currentBackend = createMemo(() => props.payload.workspace?.execution.backend || "local");
+  const currentBackend = createMemo(() => (props.draft ? props.draftBackend : undefined) || props.payload.workspace?.execution.backend || "local");
   const [selected, setSelected] = createSignal<WorkspaceBackendKey>(currentBackend());
   const [abandoning, setAbandoning] = createSignal(false);
   useCatalogAndLoad(async () => { setSelected(currentBackend()); });
   createEffect(() => setSelected(currentBackend()));
   const transition = () => props.payload.runtime?.transition || props.payload.transition;
-  const unavailable = () => props.payload.runtime?.status === "unavailable";
+  const unavailable = () => !props.draft && props.payload.runtime?.status === "unavailable";
   const manual = () => props.payload.sync_policy === "manual_apply";
-  const needsPreview = () => manual() && selected() === "local" && currentBackend() !== "local";
+  const needsPreview = () => !props.draft && manual() && selected() === "local" && currentBackend() !== "local";
   const recoverTemporary = () => !props.payload.workspace?.project_id && currentBackend() !== "local"
     && ["stopped", "destroyed"].includes(props.payload.host_mirror?.backend_status || "");
   const abandonSwitch = async () => {
@@ -40,9 +42,10 @@ export function WorkspaceRuntimePicker(props: {
     verifying: "Verifying files", activating: "Activating environment", completed: "Backend switched", failed: "Switch failed",
     allocation_unknown: "Allocation outcome unknown; reconcile the provider inventory, then abandon the switch" }[transition()?.phase || "completed"]);
   return <div class="composer-runtime-picker">
+    <Show when={!props.draft}>
     <Show when={props.payload.workspace}>{(binding) => <WorkspaceStorageStatus name={props.payload.workspace_name}
       execution={binding().execution} persistence={props.payload.persistence} localLink={props.payload.local_link} />}</Show>
-    <p>All conversations in this workspace use the same files and current environment. Switching continues this workspace on another backend. Running processes and installed dependencies are not transferred.</p>
+    <p>Switching changes this session's backend. Other sessions keep their current environments. Running processes and installed dependencies are not transferred.</p>
     <Show when={!manual() && props.payload.host_mirror}>{(state) => <WorkspaceHostMirror state={state()}
       projectId={props.payload.workspace?.project_id} workspaceId={props.payload.workspace?.project_workspace_id}
       threadId={props.threadId}
@@ -59,19 +62,21 @@ export function WorkspaceRuntimePicker(props: {
         onApplied={() => window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED))}
         onContinue={needsPreview() ? (token) => props.onSwitch("local", token) : undefined} />
     </Show>
+    </Show>
+    <Show when={props.draft}><p>The selected backend will be used when you send your first message.</p></Show>
     <label>Execution backend</label>
     <SelectControl value={selected()} ariaLabel="Execution backend" portalMount={props.portalMount}
       onChange={(value) => setSelected(value as WorkspaceBackendKey)}
       disabled={props.disabled || props.busy || unavailable()}
       options={getEnabledBackends().filter((backend) => ["local", "daytona", "modal"].includes(backend.name))
         .map((backend) => ({ value: backend.name, label: getBackendDisplayName(backend.name) }))} />
-    <Show when={selected() === "local" && props.payload.workspace?.execution.backend !== "local"}>
+    <Show when={!props.draft && selected() === "local" && props.payload.workspace?.execution.backend !== "local"}>
       <p>Execution will continue in the fixed host workspace after synchronization completes.</p>
     </Show>
     <button class="btn btn-primary" type="button"
-      disabled={props.disabled || props.busy || unavailable() || needsPreview() || (selected() === props.payload.workspace?.execution.backend && !recoverTemporary())}
+      disabled={props.disabled || props.busy || unavailable() || needsPreview() || (selected() === currentBackend() && !recoverTemporary())}
       onClick={() => void props.onSwitch(selected())}>{props.busy ? "Switching backend..."
-        : recoverTemporary() && selected() === currentBackend() ? "Recover environment" : "Switch backend"}</button>
+        : props.draft ? "Use selected backend" : recoverTemporary() && selected() === currentBackend() ? "Recover environment" : "Switch backend"}</button>
     <Show when={transition()?.phase === "allocation_unknown" && props.onAbandon}>
       <button class="btn" type="button" disabled={props.disabled || abandoning()}
         onClick={() => void abandonSwitch()}>{abandoning() ? "Abandoning..." : "Abandon switch"}</button>

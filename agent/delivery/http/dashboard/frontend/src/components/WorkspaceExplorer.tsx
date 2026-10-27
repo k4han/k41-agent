@@ -33,7 +33,7 @@ import { renderUnifiedDiffHtml } from "@/lib/diffView";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { createDarkMode } from "@/lib/theme";
 import { localWorkspaceRef } from "@/lib/workspace";
-import type { WorkspaceRef, WorkspaceUsagePayload, WorkspaceBackendKey } from "@/types";
+import type { WorkspaceBinding, WorkspaceRef, WorkspaceUsagePayload, WorkspaceBackendKey } from "@/types";
 import { isSandboxBackend } from "@/types";
 
 type WorkspaceTreeEntry = {
@@ -106,11 +106,13 @@ const WORKSPACE_POLL_INTERVAL_MS = 15_000;
 const WORKSPACE_RUNNING_POLL_INTERVAL_MS = 10_000;
 const WORKSPACE_REFRESH_DELAY_MS = 300;
 
-function workspaceQuery(threadId: string, workspace: WorkspaceRef | null, extra?: Record<string, string>) {
+function buildWorkspaceQuery(threadId: string, workspace: WorkspaceRef | null, extra?: Record<string, string>, binding?: WorkspaceBinding | null) {
   const params = new URLSearchParams();
   if (threadId) {
     params.set("thread_id", threadId);
   }
+  if (binding?.project_id) params.set("project_id", String(binding.project_id));
+  if (binding?.project_workspace_id) params.set("project_workspace_id", String(binding.project_workspace_id));
   if (workspace?.locator.trim()) {
     params.set("backend", workspace.backend);
     params.set("locator", workspace.locator.trim());
@@ -217,6 +219,7 @@ export function WorkspaceExplorer(props: {
   threadId: string;
   workingDir: string;
   workspace?: WorkspaceRef | null;
+  binding?: WorkspaceBinding | null;
   disabled?: boolean;
   visible?: boolean;
   running?: boolean;
@@ -226,6 +229,8 @@ export function WorkspaceExplorer(props: {
   onWorkingDirChange: (value: WorkspaceRef | string | null) => void;
   onCollapse?: () => void;
 }) {
+  const workspaceQuery = (thread: string, workspace: WorkspaceRef | null, extra?: Record<string, string>) =>
+    buildWorkspaceQuery(thread, workspace, extra, props.binding);
   const dark = createDarkMode();
   const { showToast } = useToast();
   const [entriesByPath, setEntriesByPath] = createStore<Record<string, WorkspaceTreeEntry[]>>({});
@@ -891,7 +896,7 @@ export function WorkspaceExplorer(props: {
     try {
       await postJson("/dashboard-api/workspace/rename", {
         thread_id: props.threadId || null,
-        workspace: queryWorkspace(),
+        workspace: props.binding || queryWorkspace(),
         path: entry.path,
         new_name: nextName,
       });
@@ -926,7 +931,7 @@ export function WorkspaceExplorer(props: {
     try {
       await postJson("/dashboard-api/workspace/delete", {
         thread_id: props.threadId || null,
-        workspace: queryWorkspace(),
+        workspace: props.binding || queryWorkspace(),
         path: entry.path,
       });
       showToast(`Deleted ${entry.name}`, "success");
@@ -975,7 +980,7 @@ export function WorkspaceExplorer(props: {
       const fullPath = parent ? `${parent}/${cleanName}` : cleanName;
       await postJson("/dashboard-api/workspace/create-entry", {
         thread_id: props.threadId || null,
-        workspace: queryWorkspace(),
+        workspace: props.binding || queryWorkspace(),
         path: fullPath,
         kind: target.kind,
       });

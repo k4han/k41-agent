@@ -11,7 +11,7 @@ import { runtimeTransitionBusy } from "@/lib/useWorkspaceRuntime";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
-import { projectChatState, verifyProjectWorkspace } from "@/lib/projects";
+import { projectChatState, prepareProjectChatWorkspace } from "@/lib/projects";
 import type { ProjectSummary } from "@/types";
 
 export function ProjectDetailPage() {
@@ -40,11 +40,11 @@ export function ProjectDetailPage() {
   createEffect(() => { params.projectId; void load(); });
   onCleanup(() => { revision += 1; });
   onMount(() => {
-    const refreshMirror = () => { if (!saving() && !loading()) void load(true); };
+    const refreshMirror = () => { if (!saving() && !loading() && !opening()) void load(true); };
     window.addEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED, refreshMirror);
     onCleanup(() => window.removeEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED, refreshMirror));
     const timer = window.setInterval(async () => {
-      if (!project() || saving() || loading()) return;
+      if (!project() || saving() || loading() || opening()) return;
       const version = revision;
       try {
         const result = await apiFetch<ProjectSummary>(`${API_PATHS.projects}/${project()!.id}`);
@@ -59,7 +59,7 @@ export function ProjectDetailPage() {
     const version = revision;
     setOpening(true);
     try {
-      const workspace = await verifyProjectWorkspace(current.workspace.execution, current.id);
+      const workspace = await prepareProjectChatWorkspace(current.workspace.execution, current.id);
       if (version === revision) navigate("/chat", { state: projectChatState(workspace) });
     } catch (error) {
       if (version === revision) {

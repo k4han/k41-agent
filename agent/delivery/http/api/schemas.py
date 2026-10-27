@@ -42,6 +42,8 @@ class ChatRequest(PoolSelectionValidation):
     workspace: Optional[WorkspaceRef | WorkspaceBinding] = Field(default=None, description="Workspace reference for file operations. Optional for dashboard chats; when omitted, a hidden temporary workspace is provisioned.")
     project_id: int | None = Field(default=None, ge=1)
     project_workspace_id: int | None = Field(default=None, ge=1)
+    execution_backend: Literal["local", "daytona", "modal"] | None = Field(
+        default=None, description="Execution backend selected for a new project session; defaults to local.")
     agent_name: Optional[str] = Field(default=None, description="Agent card name to use. Defaults to 'default'.")
     provider: Optional[str] = Field(default=None, description="LLM provider name override.")
     model: Optional[str] = Field(default=None, description="LLM model name override.")

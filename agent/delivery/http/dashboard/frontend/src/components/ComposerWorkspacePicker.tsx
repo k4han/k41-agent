@@ -14,6 +14,8 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
   runtimePayload?: ThreadRuntimePayload;
   runtimeBusy?: boolean;
   runtimeError?: string;
+  draft?: boolean;
+  draftBackend?: WorkspaceBackendKey;
   onSwitchBackend?: (backend: WorkspaceBackendKey, previewToken?: string) => Promise<void>;
   onAbandonBackend?: () => Promise<void>;
 }) {
@@ -24,7 +26,7 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
   let triggerRef: HTMLButtonElement | undefined;
   let panelRef: HTMLDivElement | undefined;
 
-  const backend = () => props.selection?.backend || props.workspace?.backend || "local";
+  const backend = () => (props.draft ? props.draftBackend : undefined) || props.selection?.backend || props.workspace?.backend || "local";
   const backendLabel = () => {
     const label = getBackendDisplayName(backend());
     const titles: Record<string, string> = { local: "Local", daytona: "Daytona", modal: "Modal" };
@@ -40,7 +42,7 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
     return workspaceDisplayLabel(props.workspace)
       || workspaceDisplayLabelFromValues("", props.workingDir) || "Temporary";
   });
-  const canSwitchRuntime = () => props.locked && (props.runtimePayload?.kind === "shared"
+  const canSwitchRuntime = () => props.locked && (["shared", "session"].includes(props.runtimePayload?.kind || "")
     || (!props.runtimePayload?.workspace?.project_id && props.runtimePayload?.host_mirror)) && props.onSwitchBackend;
   const description = () => `${projectLabel()} · ${backendLabel()}${props.locked && !canSwitchRuntime() ? " · Workspace locked" : ""}`;
 
@@ -164,6 +166,7 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
               onBrowserOpenChange={setNestedDialogOpen}
             />}>
               <WorkspaceRuntimePicker payload={props.runtimePayload!} busy={Boolean(props.runtimeBusy)}
+                draft={props.draft} draftBackend={props.draftBackend}
                 threadId={props.threadId}
                 disabled={props.disabled} error={props.runtimeError || ""} onSwitch={props.onSwitchBackend!}
                 onAbandon={props.onAbandonBackend} portalMount={panelRef} />

@@ -9,7 +9,7 @@ import { useToast } from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
-import { projectChatState, verifyProjectWorkspace } from "@/lib/projects";
+import { projectChatState, prepareProjectChatWorkspace } from "@/lib/projects";
 import type { ProjectSummary, ProjectsPayload } from "@/types";
 
 export function ProjectsPage() {
@@ -60,7 +60,7 @@ export function ProjectsPage() {
     if (opening() !== null) return;
     setOpening(project.id);
     try {
-      const workspace = await verifyProjectWorkspace(project.workspace.execution, project.id);
+      const workspace = await prepareProjectChatWorkspace(project.workspace.execution, project.id);
       if (!disposed) navigate("/chat", { state: projectChatState(workspace) });
     } catch (error) {
       if (!disposed) showToast(error instanceof Error ? error.message : "Workspace is unavailable.", "error");

@@ -13,6 +13,7 @@ class Project(BaseModel):
     status = Column(String(20), nullable=False, default="active", index=True)
     is_pinned = Column(Boolean, nullable=False, default=False)
     workspace_json = Column(Text, nullable=False)
+    local_workspace_id = Column(Integer, nullable=True)
     migration_status = Column(String(30), nullable=False, default="pending")
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)

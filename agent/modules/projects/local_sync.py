@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager
+from contextlib import AsyncExitStack, contextmanager
 import hashlib
 import json
 import logging
@@ -29,7 +29,7 @@ _TEMPORARY_PREFIX = ".k41-sync-"
 
 def local_link_summary(workspace, runtime) -> dict | None:
     source = WorkspaceRef.model_validate_json(workspace.source_json)
-    if workspace.kind != "shared" or source.backend != "local":
+    if workspace.kind not in {"shared", "session"} or source.backend != "local":
         return None
     execution = WorkspaceRef.model_validate_json(runtime.execution_json)
     active = execution.backend == "local" and source_key(source) == source_key(execution)
@@ -112,7 +112,7 @@ def plan_changes(base, desired, current, root, policy=MANUAL_APPLY):
 
 
 async def apply_workspace_revision(transfer, store, key, revision, baseline, root, generation, *, preview_token=None,
-                                   policy=MANUAL_APPLY, journal=None):
+                                   policy=MANUAL_APPLY, journal=None, target_generation=None):
     """Preview or apply a pinned revision without changing its runtime or baseline."""
     from agent.modules.workspaces.host_mirror import validate_host_names
     root = Path(root)
@@ -133,6 +133,8 @@ async def apply_workspace_revision(transfer, store, key, revision, baseline, roo
     changes, conflicts = await asyncio.to_thread(plan_changes, base, desired, current, root, policy)
     identity = {"generation": generation, "revision": revision, "base": baseline,
                 "current": current, "path": str(root.resolve()), "policy": policy}
+    if target_generation is not None:
+        identity["target_generation"] = target_generation
     token = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     result = {"path": str(root), "revision": revision, "preview_token": token,
               "changes": changes, "conflicts": conflicts, "applied": False}
@@ -409,18 +411,34 @@ class WorkspaceLocalSync:
                           *, preview_token: str | None = None) -> dict:
         service = self.service
         project, workspace, runtime = await service.rows(project_id, workspace_id)
-        supported = workspace.kind == "shared" or (workspace.kind == "github_task" and sync_policy(workspace) == MANUAL_APPLY)
+        supported = workspace.kind in {"shared", "session"} or (workspace.kind == "github_task" and sync_policy(workspace) == MANUAL_APPLY)
         if service.closing or project.migration_status != "ready" or not supported or runtime.status not in {"ready", "unavailable"}:
             raise ProjectWorkspaceError("Recover the workspace before synchronizing local files.", "workspace_busy")
         link = local_link_summary(workspace, runtime)
+        local_id = project.local_workspace_id if workspace.kind in {"shared", "session"} else None
+        if local_id and local_id != workspace.id:
+            target = await service.binding(project_id, local_id)
+            link = {"path": target.execution.locator, "status": "pending"}
         if link is None and sync_policy(workspace) == MANUAL_APPLY:
             link = {"path": str(service.host_mirrors.project_path(workspace, runtime)), "status": "pending"}
         if link is None or link["status"] == "active":
             raise ValueError("This workspace is not using a separate linked local directory.")
         if not workspace.local_sync_revision and WorkspaceRef.model_validate_json(workspace.source_json).backend == "local":
             raise ProjectWorkspaceError("No baseline is available for the linked directory. Existing local files have been preserved.", "local_sync_unsupported")
-        await service.switcher.reserve_idle(workspace, runtime, expected_generation, allow_unavailable=runtime.status == "unavailable")
-        task = asyncio.create_task(self._synchronize(project_id, workspace.id, expected_generation, link, preview_token))
+        reserved = []
+        try:
+            for key in sorted({workspace.id, local_id} - {None}):
+                _, current, current_runtime = await service.rows(project_id, key)
+                await service.switcher.reserve_idle(current, current_runtime,
+                    expected_generation if key == workspace.id else current_runtime.generation,
+                    allow_unavailable=key == workspace.id and runtime.status == "unavailable")
+                reserved.append(key)
+        except BaseException:
+            for key in reserved:
+                service.switcher._release(key)
+            raise
+        task = asyncio.create_task(self._synchronize(project_id, workspace.id, expected_generation, link, preview_token,
+                                                    local_id=local_id, reserved=reserved))
         service.switcher.tasks[workspace.id] = task
 
         def completed(done):
@@ -430,11 +448,13 @@ class WorkspaceLocalSync:
         task.add_done_callback(completed)
         return await asyncio.shield(task)
 
-    async def _synchronize(self, project_id, workspace_id, expected_generation, link, preview_token):
+    async def _synchronize(self, project_id, workspace_id, expected_generation, link, preview_token, *, local_id=None, reserved=None):
         service = self.service
         owner = asyncio.current_task()
         try:
-            async with service.lock(workspace_id):
+            async with AsyncExitStack() as stack:
+                for key in sorted(set(reserved or [workspace_id])):
+                    await stack.enter_async_context(service.lock(key))
                 _, workspace, runtime = await service.rows(project_id, workspace_id)
                 if runtime.generation != expected_generation:
                     raise ProjectWorkspaceError("Execution runtime changed; preview the local changes again.", "stale_runtime")
@@ -446,9 +466,14 @@ class WorkspaceLocalSync:
                 result = await apply_workspace_revision(service.transfer, service.storage, str(workspace.id),
                     saved["revision"], workspace.local_sync_revision, Path(link["path"]), expected_generation,
                     preview_token=preview_token, policy=MANUAL_APPLY,
-                    journal=service.runtime_root / str(workspace.id) / "local-sync.json")
+                    journal=service.runtime_root / str(workspace.id) / "local-sync.json",
+                    target_generation=(await service.binding(project_id, local_id)).runtime_generation
+                        if local_id and local_id != workspace.id else None)
                 if not result["applied"]:
                     return result
+                if local_id and local_id != workspace.id:
+                    await service._checkpoint(project_id, local_id, sync_host=False)
+                    service._notify_runtime_changed(project_id, local_id)
                 session = await _session()
                 async with session:
                     state = json.loads(workspace.host_mirror_json or "{}")
@@ -462,4 +487,5 @@ class WorkspaceLocalSync:
         finally:
             if service.switcher.tasks.get(workspace_id) is owner:
                 service.switcher.tasks.pop(workspace_id, None)
-            service.switcher._release(workspace_id)
+            for key in reserved or [workspace_id]:
+                service.switcher._release(key)

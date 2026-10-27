@@ -25,7 +25,7 @@ async def runtime_is_owned(ref) -> bool:
     from agent.modules.workspaces.refs import WorkspaceRef
     session = await _session()
     async with session:
-        runtimes = (await session.execute(select(WorkspaceRuntime).where(WorkspaceRuntime.status != "destroyed"))).scalars().all()
+        runtimes = (await session.execute(select(WorkspaceRuntime).where(WorkspaceRuntime.status.notin_(["destroyed", "retired"])))).scalars().all()
         if any((current := WorkspaceRef.model_validate_json(row.execution_json)).backend == ref.backend
                and current.locator == ref.locator for row in runtimes):
             return True
