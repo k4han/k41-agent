@@ -161,6 +161,11 @@ class SandboxClient:
 
     async def call(self, request):
         started = time.monotonic()
+        from agent.bootstrap.container import get_active_container
+        container = get_active_container()
+        projects = getattr(container, "_project_workspace_service", None) if container is not None else None
+        if projects is not None:
+            projects.metrics.rpc_count += 1
         endpoint = self.endpoint
         request_id = uuid.uuid4().hex
         request_path = f"{endpoint['runtime_dir']}/{request_id}.request"

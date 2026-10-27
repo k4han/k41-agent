@@ -20,6 +20,7 @@ import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
+import { ProjectLocalSync } from "@/components/ProjectLocalSync";
 import type { TodoProgress } from "@/components/ChatTodos";
 import { apiFetch, fetchWithCsrf, postJson, readError } from "@/lib/api";
 import { fetchAgentChatOptions } from "@/lib/agents";
@@ -560,7 +561,8 @@ export function ChatPage() {
     setWorkingDir(workspaceSelectionLocator(selection));
   };
 
-  const workspaceRuntime = useWorkspaceRuntime(currentThreadId, (binding) => setWorkspace(binding.execution));
+  const draftProjectId = () => !currentThreadId() ? location.state?.projectId : undefined;
+  const workspaceRuntime = useWorkspaceRuntime(currentThreadId, (binding) => setWorkspace(binding.execution), draftProjectId);
 
   const runtimeDecision = () => workspaceRuntime.payload().runtime?.decision || null;
   const decisionBackendLabel = () => getBackendDisplayName(runtimeDecision()?.backend || "local");
@@ -816,7 +818,7 @@ export function ChatPage() {
   const stopActive = createMemo(() => (
     streaming() || backgroundTaskActive() || backgroundLive() || Boolean(activeSession())
   ));
-  const workspaceLocked = createMemo(() => Boolean(currentThreadId() && workingDir().trim()));
+  const workspaceLocked = createMemo(() => Boolean((currentThreadId() || draftProjectId()) && workingDir().trim()));
   const composerDisabled = createMemo(() => (
     conversationBusy() || hasPendingInterrupt() || compacting() || workspaceRuntime.busy()
   ));
@@ -1953,6 +1955,7 @@ export function ChatPage() {
                     runtimeBusy={workspaceRuntime.busy()}
                     runtimeError={workspaceRuntime.error()}
                     onSwitchBackend={workspaceRuntime.switchBackend}
+                    onAbandonBackend={workspaceRuntime.abandon}
                     onSelectionChange={setWorkspaceDraft}
                   />
                   <Show when={!explorer.open()}>
@@ -1988,11 +1991,19 @@ export function ChatPage() {
                         {`Restore on ${decisionBackendLabel()}`}
                       </button>
                     </Show>
-                    <button class="btn" type="button" disabled={workspaceRuntime.busy()}
+                    <Show when={workspaceRuntime.payload().sync_policy !== "manual_apply"}><button class="btn" type="button" disabled={workspaceRuntime.busy()}
                       onClick={() => void workspaceRuntime.confirmRecovery("local")}>
                       Move to local workspace
-                    </button>
+                    </button></Show>
                   </div>
+                  <Show when={workspaceRuntime.payload().sync_policy === "manual_apply"}>
+                    <ProjectLocalSync projectId={workspaceRuntime.payload().workspace?.project_id || undefined}
+                      workspaceId={workspaceRuntime.payload().workspace?.project_workspace_id}
+                      generation={workspaceRuntime.payload().workspace?.runtime_generation || 1}
+                      localLink={workspaceRuntime.payload().local_link} disabled={workspaceRuntime.busy()}
+                      onApplied={() => void workspaceRuntime.refresh()}
+                      onContinue={(token) => workspaceRuntime.confirmRecovery("local", token)} />
+                  </Show>
                 </div>
               </Show>
               <ChatTranscript

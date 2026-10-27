@@ -17,13 +17,13 @@ from agent.modules.projects import service as catalog
 from agent.modules.projects.models import Project, ProjectWorkspace, WorkspaceRuntime
 from agent.modules.projects.storage import LocalProjectStorage
 from agent.modules.projects.transfer import WorkspaceSnapshotTransfer
-from agent.modules.projects.workspaces import ProjectWorkspaceError, ProjectWorkspaceService
+from agent.modules.projects.workspaces import ProjectWorkspaceError, ProjectWorkspaceService, source_key
 from agent.modules.workspaces.refs import WorkspaceRef, bind_workspace_ref
 from agent.modules.workspaces.models import ThreadWorkspace
 from agent.modules.agent_runtime.models import BackgroundTaskRecord
 from agent.modules.conversations.models import ConversationThread
 from agent.modules.workspaces.backends import WorkspaceUnavailableError
-from agent.modules.workspaces.host_mirror import workspace_runtime_status as probe_workspace_runtime_status
+from agent.modules.workspaces.host_mirror import mirror_state, workspace_runtime_status as probe_workspace_runtime_status
 
 
 @pytest_asyncio.fixture
@@ -43,6 +43,11 @@ async def project_service(tmp_path, isolated_container, monkeypatch):
     root.mkdir()
     (root / "file.txt").write_text("original")
     project = await catalog.add_project(WorkspaceRef(locator=str(root)))
+    # Existing scenarios exercise upgraded workspaces with their original mirror policy.
+    async with maker() as session:
+        workspace = (await session.execute(select(ProjectWorkspace))).scalar_one()
+        workspace.sync_policy = "mirror_strict"
+        await session.commit()
     yield service, project, root, maker
     await service.close()
     await engine.dispose()
@@ -98,9 +103,16 @@ async def test_concurrent_recovery_keeps_identity_and_restores_before_ready(proj
     restored = tmp_path / "restored"
     async def restore(ref, store, key, revision):
         _, _, runtime = await service.rows(project["id"])
-        assert runtime.status == "restoring"
+        assert runtime.status == "unavailable"
+        assert runtime.generation == binding.runtime_generation
+        transition = json.loads(runtime.transition_json)
+        assert transition["phase"] == "restoring" and transition["target"]["locator"] == ref.locator
         service.transfer.materialize(store, key, revision, restored)
     monkeypatch.setattr(service.transfer, "restore", restore)
+    async def verify(ref, store, key, revision):
+        from agent.modules.projects.snapshot_worker import verify as verify_files
+        verify_files(str(restored), store.get_manifest(key, revision))
+    monkeypatch.setattr(service.transfer, "verify", verify)
     original_bool = service.container.config_service.get_bool
     monkeypatch.setattr(service.container.config_service, "get_bool", lambda key, default=False:
                         True if key == "workspace.modal.enabled" else original_bool(key, default))
@@ -311,19 +323,26 @@ async def test_lazy_concurrent_execution_restores_one_shared_cloud_runtime(proje
         return replacement
     restored = tmp_path / "restored"
     async def restore(ref, store, key, revision):
-        assert (await service.rows(project["id"]))[2].status == "restoring"
+        runtime = (await service.rows(project["id"]))[2]
+        assert runtime.status == "unavailable" and runtime.generation == before.runtime_generation
         await asyncio.to_thread(service.transfer.materialize, store, key, revision, restored)
     create = AsyncMock(return_value=replacement)
     transfer = AsyncMock(side_effect=restore)
     monkeypatch.setattr(workspaces, "attach_workspace_backend", attach)
     monkeypatch.setattr(workspaces, "create_workspace_backend", create)
     monkeypatch.setattr(service.transfer, "restore", transfer)
+    async def verify(ref, store, key, revision):
+        from agent.modules.projects.snapshot_worker import verify as verify_files
+        verify_files(str(restored), store.get_manifest(key, revision))
+    monkeypatch.setattr(service.transfer, "verify", verify)
     results = await asyncio.gather(*(service.ensure(project["id"], recover=True) for _ in range(4)))
     assert all(result.execution.locator == "sb-restored" for result in results)
     assert all(result.project_workspace_id == before.project_workspace_id for result in results)
     assert all(result.runtime_generation == before.runtime_generation + 1 for result in results)
     assert all(result.scope.key == before.scope.key for result in results)
-    create.assert_awaited_once_with("modal", label=expired.label)
+    create.assert_awaited_once()
+    assert create.call_args.args == ("modal",)
+    assert callable(create.call_args.kwargs["on_created"])
     transfer.assert_awaited_once()
     assert (restored / "file.txt").read_text() == (root / "file.txt").read_text() == "original"
     _, workspace, runtime = await service.rows(project["id"])
@@ -399,6 +418,7 @@ async def test_lazy_failed_restore_keeps_saved_files_and_never_replays_commands(
         await asyncio.to_thread(service.transfer.materialize, store, key, saved_revision, tmp_path / "restored-after-retry")
     monkeypatch.setattr(service.transfer, "restore", restore)
     monkeypatch.setattr(service.transfer, "capture", AsyncMock(return_value=manifest))
+    monkeypatch.setattr(service.transfer, "verify", AsyncMock())
     executor = await workspaces.get_workspace_command_executor(await service.binding(project["id"]))
     try:
         with pytest.raises(ProjectWorkspaceError, match="restore failed"):
@@ -413,7 +433,7 @@ async def test_lazy_failed_restore_keeps_saved_files_and_never_replays_commands(
         execute.assert_awaited_once_with("requested command")
         assert attempts == ["sb-partial", "sb-ready"]
         after = await service.binding(project["id"])
-        assert after.runtime_generation == before.runtime_generation + 2
+        assert after.runtime_generation == before.runtime_generation + 1
         assert after.project_workspace_id == before.project_workspace_id
         assert (root / "file.txt").read_text() == "original"
     finally:
@@ -619,7 +639,8 @@ async def test_batch_preparation_recovers_runtime_before_authorization(project_s
     restored = tmp_path / "restored"
     async def restore(ref, store, key, revision):
         _, _, runtime = await service.rows(project["id"])
-        assert runtime.status == "restoring"
+        assert runtime.status == "unavailable" and runtime.generation == binding.runtime_generation
+        assert json.loads(runtime.transition_json)["target"]["locator"] == ref.locator
         service.transfer.materialize(store, key, revision, restored)
 
     create = AsyncMock(return_value=replacement)
@@ -627,6 +648,10 @@ async def test_batch_preparation_recovers_runtime_before_authorization(project_s
     monkeypatch.setattr(runtimes, "create_workspace_backend", create)
     monkeypatch.setattr(service.transfer, "restore", restore)
     # The first tool restores the selected backend before authorization.
+    async def verify(ref, store, key, revision):
+        from agent.modules.projects.snapshot_worker import verify as verify_files
+        verify_files(str(restored), store.get_manifest(key, revision))
+    monkeypatch.setattr(service.transfer, "verify", verify)
     original_bool = service.container.config_service.get_bool
     monkeypatch.setattr(service.container.config_service, "get_bool", lambda key, default=False:
                         True if key == "workspace.modal.enabled" else original_bool(key, default))
@@ -1103,11 +1128,16 @@ async def test_restart_detects_expired_cloud_checkpoint_and_restores_on_demand(
     restored = tmp_path / "restored"
 
     async def restore(ref, store, key, revision):
-        assert (await restarted.rows(project["id"]))[2].status == "restoring"
+        runtime = (await restarted.rows(project["id"]))[2]
+        assert runtime.status == "unavailable" and runtime.generation == before.runtime_generation
         await asyncio.to_thread(restarted.transfer.materialize, store, key, revision, restored)
 
     transfer = AsyncMock(side_effect=restore)
     monkeypatch.setattr(restarted.transfer, "restore", transfer)
+    async def verify(ref, store, key, revision):
+        from agent.modules.projects.snapshot_worker import verify as verify_files
+        verify_files(str(restored), store.get_manifest(key, revision))
+    monkeypatch.setattr(restarted.transfer, "verify", verify)
     caplog.set_level("INFO", logger="agent.modules.projects.workspaces")
     restarted.checkpoint_requested.set()
     restarted.start()
@@ -1150,7 +1180,8 @@ async def test_restart_detects_expired_cloud_checkpoint_and_restores_on_demand(
         assert all(binding.project_workspace_id == before.project_workspace_id for binding in bindings)
         assert all(binding.runtime_generation == before.runtime_generation + 1 for binding in bindings)
         assert all(binding.execution.backend == backend and binding.execution.locator == replacement.locator for binding in bindings)
-        create.assert_awaited_once_with(backend, label=expired.label)
+        create.assert_awaited_once()
+        assert create.call_args.args == (backend,) and callable(create.call_args.kwargs["on_created"])
         transfer.assert_awaited_once()
         assert (restored / "file.txt").read_bytes() == b"original"
         _, workspace, runtime = await restarted.rows(project["id"])
@@ -1637,7 +1668,7 @@ async def test_temporary_capture_survives_host_failure_and_provider_deletion(swi
     remote = fixture.roots[ref.locator]
     (remote / "file.txt").write_text("original")
     async with fixture.maker() as session:
-        session.add(ThreadWorkspace(thread_id="failed-mirror", execution_backend=ref.backend, execution_locator=ref.locator,
+        session.add(ThreadWorkspace(thread_id="failed-mirror", sync_policy="mirror_strict", execution_backend=ref.backend, execution_locator=ref.locator,
                                     execution_metadata_json=json.dumps(ref.metadata)))
         await session.commit()
     monkeypatch.setattr("agent.modules.workspaces.service.temp_workspace_root", lambda: tmp_path / "temporary")
@@ -1711,6 +1742,450 @@ async def test_legacy_local_runtime_rebinds_to_original_without_removing_the_old
     assert (fixture.root / "file.txt").read_text() == "legacy runtime edit"
     assert (legacy / "file.txt").read_text() == "legacy runtime edit"
     assert not fixture.created
+
+
+async def enable_manual_apply(fixture):
+    async with fixture.maker() as session:
+        workspace = (await session.execute(select(ProjectWorkspace).where(ProjectWorkspace.project_id == fixture.project["id"]))).scalar_one()
+        workspace.sync_policy = "manual_apply"
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_thread_tool_receipt_survives_checkpoint_failure_without_replaying(switch_service, monkeypatch, tmp_path):
+    from agent.modules.tools.coding.adapter import SCHEMAS
+    from agent.modules.tools.coding.models import InvocationContext, ToolDefinition, ToolResult
+    from agent.modules.tools.coding.service import CodingService
+    fixture, service = switch_service, switch_service.service
+    ref = await fixture.create("daytona")
+    ref.metadata["temp"] = True
+    async with fixture.maker() as session:
+        session.add(ThreadWorkspace(thread_id="receipt-thread", execution_backend=ref.backend, execution_locator=ref.locator,
+                                    execution_metadata_json=json.dumps(ref.metadata)))
+        await session.commit()
+    coding = CodingService(tmp_path / "thread-coding")
+    monkeypatch.setattr(coding.remote, "prepare", AsyncMock())
+    effects = []
+    async def execute(args, context, runtime):
+        effects.append(args.content)
+        (fixture.roots[ref.locator] / args.path).write_text(args.content)
+        return ToolResult(content="written")
+    definition = ToolDefinition("write", "write", SCHEMAS["write"], execute)
+    context = InvocationContext("test", "/workspace", "receipt-thread", backend=ref.backend, locator=ref.locator,
+                                message_id="message", tool_call_id="call")
+    try:
+        saved = await coding.invoke(definition, {"path": "output.txt", "content": "saved"}, context)
+        assert saved.data["persistence"]["saved"]
+        monkeypatch.setattr(service.transfer, "capture", AsyncMock(side_effect=OSError("storage unavailable")))
+        failed_context = replace(context, tool_call_id="failed-call")
+        args = {"path": "output.txt", "content": "not-yet-saved"}
+        first = await coding.invoke(definition, args, failed_context)
+        assert first.data["persistence"]["saved"] is False and first.warnings
+        second = await coding.invoke(definition, args, failed_context)
+        assert second.data["persistence"]["saved"] is False
+        assert effects == ["saved", "not-yet-saved"]
+        assert (fixture.roots[ref.locator] / "output.txt").read_text() == "not-yet-saved"
+    finally:
+        await coding.processes.close()
+        await coding.storage.close()
+
+
+@pytest.mark.asyncio
+async def test_new_thread_alias_inherits_policy_and_ref_change_preserves_it(project_service, monkeypatch):
+    from agent.modules.workspaces import repository
+    _, _, _, maker = project_service
+    monkeypatch.setattr(repository, "get_async_session", catalog.get_async_session)
+    repo = repository.ThreadWorkspaceRepository()
+    old = WorkspaceRef(backend="modal", locator="legacy", metadata={"temp": True, "root": "/workspace"})
+    await repo.upsert(thread_id="original-thread", workspace=old)
+    async with maker() as session:
+        row = (await session.execute(select(ThreadWorkspace).where(ThreadWorkspace.thread_id == "original-thread"))).scalar_one()
+        row.sync_policy = "mirror_strict"
+        await session.commit()
+    alias = await repo.upsert(thread_id="alias-thread", workspace=old)
+    assert alias["sync_policy"] == "mirror_strict"
+    changed = await repo.upsert(thread_id="original-thread", workspace=old.model_copy(update={"locator": "new"}))
+    assert changed["sync_policy"] == "mirror_strict"
+
+
+@pytest.mark.asyncio
+async def test_thread_retirement_saves_before_provider_action_and_preserves_on_failure(switch_service, monkeypatch):
+    fixture, service = switch_service, switch_service.service
+    ref = await fixture.create("daytona")
+    ref.metadata["temp"] = True
+    (fixture.roots[ref.locator] / "output.txt").write_text("saved before stop")
+    async with fixture.maker() as session:
+        session.add(ThreadWorkspace(thread_id="retire-thread", execution_backend=ref.backend, execution_locator=ref.locator,
+                                    execution_metadata_json=json.dumps(ref.metadata)))
+        await session.commit()
+    monkeypatch.setattr(service.host_mirrors, "_changes", AsyncMock(return_value={"token": "same", "changed": False}))
+    await service.retire_matching(ref, "stop")
+    assert len(fixture.retired) == 1
+    _, state = await service.host_mirrors.thread_status("retire-thread")
+    assert state["remote_revision"] and not state["path"]
+    async with service.host_mirrors.saved_thread_view("retire-thread") as saved:
+        assert (Path(saved.locator) / "output.txt").read_text() == "saved before stop"
+    monkeypatch.setattr(service.transfer, "capture", AsyncMock(side_effect=OSError("snapshot failed")))
+    with pytest.raises(OSError, match="snapshot failed"):
+        await service.retire_matching(ref, "delete")
+    assert len(fixture.retired) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["daytona", "modal"])
+async def test_pending_conversation_deletion_preserves_files_and_clears_history(switch_service, monkeypatch, backend):
+    import agent.modules.skills as skills
+    import agent.modules.workflows as workflows
+    import agent.modules.workspaces as workspace_api
+    import agent.modules.workspaces.service as workspace_service
+    from agent.delivery.http.dashboard.routes import conversations
+    from agent.modules.agent_runtime import get_active_session_registry
+    from agent.modules.projects.runtime_switch import WorkspaceRuntimeSwitcher
+    from agent.modules.workspaces import repository
+    from agent.modules.workspaces.host_mirror import thread_storage_key
+
+    fixture, service = switch_service, switch_service.service
+    ref = await fixture.create(backend)
+    ref.metadata["temp"] = True
+    (fixture.roots[ref.locator] / "output.txt").write_text("saved before deletion")
+    async with fixture.maker() as session:
+        for thread_id in ("pending-delete", "pending-delete:sub:child"):
+            session.add(ThreadWorkspace(thread_id=thread_id, execution_backend=ref.backend,
+                                        execution_locator=ref.locator, execution_metadata_json=json.dumps(ref.metadata)))
+        await session.commit()
+    rows, _ = await service.host_mirrors.thread_status("pending-delete")
+    key = thread_storage_key(rows)
+    monkeypatch.setattr(repository, "get_async_session", catalog.get_async_session)
+    monkeypatch.setattr(service.switcher, "_assert_no_interrupts",
+                        WorkspaceRuntimeSwitcher._assert_no_interrupts.__get__(service.switcher))
+    graph = SimpleNamespace(aget_state=AsyncMock(return_value=SimpleNamespace(next=("tools",), tasks=())))
+    monkeypatch.setattr(workflows, "get_workflow_graph", lambda name: graph)
+
+    for action in ("stop", "archive", "delete"):
+        with pytest.raises(ProjectWorkspaceError) as pending:
+            await service.retire_matching(ref, action)
+        assert pending.value.code == "workspace_busy"
+    registry = get_active_session_registry(service.container)
+    with registry.reserve_thread_mutation("pending-delete"):
+        with pytest.raises(ProjectWorkspaceError) as busy:
+            await service.retire_matching(ref, "delete", deleting_thread_id="pending-delete")
+        assert busy.value.code == "workspace_busy"
+    assert not fixture.retired
+
+    async def retire(backend, loader, target, **kwargs):
+        manifest = service.host_mirrors.temporary_storage.get_manifest(key, (
+            await service.host_mirrors.thread_status("pending-delete"))[1]["remote_revision"])
+        assert "output.txt" in manifest["entries"]
+        fixture.retired.append(target)
+        return target.locator
+
+    monkeypatch.setattr(workspace_api, "call_workspace_backend_loader", retire)
+    monkeypatch.setattr(service.host_mirrors, "_changes", AsyncMock(return_value={"token": "changed", "changed": True}))
+    transport = SimpleNamespace(operation=AsyncMock(return_value={}))
+    packages = SimpleNamespace(snapshots=SimpleNamespace(release=lambda conversation: None),
+                               execution_transport=lambda *args: transport)
+    monkeypatch.setattr(skills, "get_skill_packages", lambda: packages)
+    lifecycle = SimpleNamespace(delete_workspace=AsyncMock())
+    monkeypatch.setattr(workspace_service, "get_workspace_lifecycle_manager", AsyncMock(return_value=lifecycle))
+    mark_deleted, clear_history = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(conversations, "mark_conversation_thread_deleted", mark_deleted)
+    monkeypatch.setattr(conversations, "delete_workflow_thread_tree", clear_history)
+    graph.aget_state.reset_mock()
+
+    result = await conversations.delete_chat_thread("pending-delete")
+
+    assert result == {"status": "deleted", "thread_id": "pending-delete"}
+    assert len(fixture.retired) == 1
+    graph.aget_state.assert_not_awaited()
+    lifecycle.delete_workspace.assert_not_awaited()
+    mark_deleted.assert_awaited_once_with("pending-delete")
+    clear_history.assert_awaited_once_with("pending-delete")
+    assert await repository.ThreadWorkspaceRepository().get("pending-delete") is None
+
+
+@pytest.mark.asyncio
+async def test_conversation_deletion_keeps_other_threads_pending_approvals(switch_service, monkeypatch):
+    import agent.modules.workflows as workflows
+    from agent.modules.projects.runtime_switch import WorkspaceRuntimeSwitcher
+
+    fixture, service = switch_service, switch_service.service
+    ref = await fixture.create("daytona")
+    async with fixture.maker() as session:
+        for thread_id in ("pending-delete", "pending-delete-other"):
+            session.add(ThreadWorkspace(thread_id=thread_id, execution_backend=ref.backend,
+                                        execution_locator=ref.locator, execution_metadata_json=json.dumps(ref.metadata)))
+        await session.commit()
+    monkeypatch.setattr(service.switcher, "_assert_no_interrupts",
+                        WorkspaceRuntimeSwitcher._assert_no_interrupts.__get__(service.switcher))
+    graph = SimpleNamespace(aget_state=AsyncMock(return_value=SimpleNamespace(next=("tools",), tasks=())))
+    monkeypatch.setattr(workflows, "get_workflow_graph", lambda name: graph)
+
+    with pytest.raises(ProjectWorkspaceError) as pending:
+        await service.retire_matching(ref, "delete", deleting_thread_id="pending-delete")
+
+    assert pending.value.code == "workspace_busy"
+    assert graph.aget_state.call_args.args[0]["configurable"]["thread_id"] == "pending-delete-other"
+    assert not fixture.retired
+
+
+@pytest.mark.asyncio
+async def test_runtime_cleanup_respects_unbound_thread_ownership(switch_service):
+    fixture, service = switch_service, switch_service.service
+    _, cloud = await finish_switch(fixture, "daytona")
+    async with fixture.maker() as session:
+        session.add(ThreadWorkspace(thread_id="another-owner", execution_backend=cloud.execution.backend,
+                                    execution_locator=cloud.execution.locator,
+                                    execution_metadata_json=json.dumps({"root": "/another-root"})))
+        await session.commit()
+    await finish_switch(fixture, "modal")
+    assert not any(ref.locator == cloud.execution.locator for ref in fixture.retired)
+    async with fixture.maker() as session:
+        row = (await session.execute(select(ThreadWorkspace).where(ThreadWorkspace.thread_id == "another-owner"))).scalar_one()
+        await session.delete(row)
+        await session.commit()
+    await service.switcher.recover()
+    assert any(ref.locator == cloud.execution.locator for ref in fixture.retired)
+
+
+@pytest.mark.asyncio
+async def test_idle_monitor_does_not_execute_commands_and_uses_backoff(switch_service, monkeypatch):
+    fixture, service = switch_service, switch_service.service
+    _, binding = await finish_switch(fixture, "daytona")
+    _, workspace, runtime = await service.rows(binding.project_id)
+    changes = AsyncMock(side_effect=AssertionError("Idle observation must not execute worker RPCs."))
+    monkeypatch.setattr(service.host_mirrors, "_changes", changes)
+    await service.host_mirrors._poll_project(workspace, runtime, observe_only=True)
+    changes.assert_not_awaited()
+    monkeypatch.setattr("agent.modules.workspaces.host_mirror.time", SimpleNamespace(monotonic=lambda: 100))
+    identity = ("project", workspace.id, runtime.generation)
+    for expected in (105, 115, 160):
+        await service.host_mirrors._guard(identity, AsyncMock(return_value=False))
+        assert service.host_mirrors.next_poll[identity] == expected
+
+
+@pytest.mark.asyncio
+async def test_new_workspace_defaults_to_manual_apply(project_service, tmp_path):
+    service, _, _, _ = project_service
+    directory = tmp_path / "new-project"
+    directory.mkdir()
+    (directory / "input.txt").write_text("input")
+    project = await catalog.add_project(WorkspaceRef(locator=str(directory)))
+    await service.ensure(project["id"])
+    assert (await service.rows(project["id"]))[1].sync_policy == "manual_apply"
+    assert (await service.describe(project["id"]))["sync_policy"] == "manual_apply"
+
+
+@pytest.mark.asyncio
+async def test_manual_checkpoint_preserves_local_files_and_merges_before_local_activation(switch_service):
+    fixture, service = switch_service, switch_service.service
+    await enable_manual_apply(fixture)
+    _, cloud = await finish_switch(fixture, "daytona")
+    remote = fixture.roots[cloud.execution.locator]
+    (remote / "remote.txt").write_text("cloud output")
+    (fixture.root / "file.txt").write_text("local-only edit")
+    (fixture.root / "private.txt").write_text("local-only addition")
+    saved = await service.checkpoint(cloud.project_id, generation=cloud.runtime_generation)
+    assert saved["saved"] and not (fixture.root / "remote.txt").exists()
+    assert (fixture.root / "file.txt").read_text() == "local-only edit"
+    with pytest.raises(ProjectWorkspaceError) as blocked:
+        await service.switcher.request(cloud.project_id, "local", cloud.runtime_generation)
+    assert blocked.value.code == "local_preview_required"
+    preview = await service.local_sync.synchronize(cloud.project_id, cloud.runtime_generation)
+    assert not preview["conflicts"] and not preview["applied"]
+    assert not (fixture.root / "remote.txt").exists()
+    await service.switcher.request(cloud.project_id, "local", cloud.runtime_generation, preview_token=preview["preview_token"])
+    await service.switcher.tasks[cloud.project_workspace_id]
+    binding = await service.binding(cloud.project_id)
+    assert binding.execution.backend == "local" and binding.execution.locator == str(fixture.root)
+    assert binding.runtime_generation == cloud.runtime_generation + 1
+    assert (fixture.root / "remote.txt").read_text() == "cloud output"
+    assert (fixture.root / "file.txt").read_text() == "local-only edit"
+    assert (await service.read_saved(cloud.project_id, "private.txt"))[0] == b"local-only addition"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["daytona", "modal"])
+async def test_manual_github_task_can_preview_and_recover_locally(switch_service, monkeypatch, backend):
+    from agent.modules.projects.workspaces import register_workspace
+
+    fixture, service = switch_service, switch_service.service
+    ref = await fixture.create(backend)
+    ref.metadata["workspace_kind"] = "github_task"
+    (fixture.roots[ref.locator] / "output.txt").write_text("saved task result")
+    async with fixture.maker() as session:
+        project = await session.get(Project, fixture.project["id"])
+        binding = await register_workspace(session, project, ref, kind="github_task")
+        await session.commit()
+    await service.checkpoint(binding.project_id, binding.project_workspace_id)
+    project, workspace, runtime = await service.rows(binding.project_id, binding.project_workspace_id)
+    assert workspace.sync_policy == "manual_apply"
+    await service._record_provision_decision(project, workspace, runtime)
+    fixture.roots.pop(ref.locator)
+    capture = service.transfer.capture
+    async def capture_local(target, *args):
+        assert target.backend == "local", "Recovery must not capture the lost runtime."
+        return await capture(target, *args)
+    monkeypatch.setattr(service.transfer, "capture", capture_local)
+    with pytest.raises(ProjectWorkspaceError) as required:
+        await service.confirm_provision(project.id, "local", runtime.generation, workspace.id)
+    assert required.value.code == "local_preview_required"
+    with pytest.raises(ProjectWorkspaceError) as stale:
+        await service.local_sync.synchronize(project.id, runtime.generation + 1, workspace.id)
+    assert stale.value.code == "stale_runtime"
+
+    preview = await service.local_sync.synchronize(project.id, runtime.generation, workspace.id)
+
+    destination = Path(preview["path"])
+    assert not preview["applied"] and not preview["conflicts"]
+    assert not destination.exists()
+    recovered = await service.confirm_provision(project.id, "local", runtime.generation, workspace.id,
+                                                preview_token=preview["preview_token"])
+    assert recovered.execution.backend == "local" and recovered.execution.locator == str(destination)
+    assert recovered.runtime_generation == runtime.generation + 1
+    assert (destination / "output.txt").read_text() == "saved task result"
+    assert (fixture.root / "file.txt").read_text() == "original"
+    _, saved, current = await service.rows(project.id, workspace.id)
+    assert saved.persistence_status == "clean" and current.status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_manual_cloud_switch_ignores_host_conflicts(switch_service, monkeypatch):
+    fixture, service = switch_service, switch_service.service
+    await enable_manual_apply(fixture)
+    _, cloud = await finish_switch(fixture, "daytona")
+    (fixture.roots[cloud.execution.locator] / "file.txt").write_text("cloud edit")
+    (fixture.root / "file.txt").write_text("host edit")
+    apply = AsyncMock(side_effect=AssertionError("Cloud-to-cloud must not materialize a host mirror."))
+    monkeypatch.setattr(service.host_mirrors, "_apply", apply)
+    _, destination = await finish_switch(fixture, "modal")
+    assert destination.execution.backend == "modal"
+    assert (fixture.roots[destination.execution.locator] / "file.txt").read_text() == "cloud edit"
+    assert (fixture.root / "file.txt").read_text() == "host edit"
+    apply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unknown_allocation_is_not_retried_and_survives_restart(switch_service, monkeypatch):
+    import agent.modules.workspaces as workspaces
+    from agent.modules.workspaces.transitions import RuntimeTransitionCoordinator
+    fixture, service = switch_service, switch_service.service
+    before = await service.binding(fixture.project["id"])
+    create = AsyncMock(side_effect=TimeoutError("allocation response lost"))
+    monkeypatch.setattr(workspaces, "create_workspace_backend", create)
+    monkeypatch.setattr(RuntimeTransitionCoordinator, "find_allocation", AsyncMock(return_value=None))
+    await service.switcher.request(before.project_id, "modal", before.runtime_generation)
+    await service.switcher.tasks[before.project_workspace_id]
+    assert (await service.describe(before.project_id))["runtime"]["transition"]["phase"] == "allocation_unknown"
+    await service.switcher.recover()
+    with pytest.raises(ProjectWorkspaceError):
+        await service.switcher.request(before.project_id, "modal", before.runtime_generation)
+    create.assert_awaited_once()
+    assert await service.binding(before.project_id) == before
+
+
+@pytest.mark.asyncio
+async def test_unknown_allocation_can_be_abandoned(switch_service, monkeypatch):
+    import agent.modules.workspaces as workspaces
+    from agent.modules.workspaces.transitions import RuntimeTransitionCoordinator
+    fixture, service = switch_service, switch_service.service
+    before = await service.binding(fixture.project["id"])
+    create = AsyncMock(side_effect=TimeoutError("allocation response lost"))
+    monkeypatch.setattr(workspaces, "create_workspace_backend", create)
+    monkeypatch.setattr(RuntimeTransitionCoordinator, "find_allocation", AsyncMock(return_value=None))
+    await service.switcher.request(before.project_id, "modal", before.runtime_generation)
+    await service.switcher.tasks[before.project_workspace_id]
+    transition = (await service.describe(before.project_id))["runtime"]["transition"]
+    assert transition["phase"] == "allocation_unknown"
+    with pytest.raises(ProjectWorkspaceError, match="abandon the switch"):
+        await service.switcher.request(before.project_id, "modal", before.runtime_generation)
+    binding = await service.switcher.abandon(before.project_id, expected_operation_id=transition["operation_id"])
+    assert binding == before
+    assert (await service.describe(before.project_id))["runtime"]["transition"]["phase"] == "failed"
+    monkeypatch.setattr(workspaces, "create_workspace_backend", fixture.create)
+    _, destination = await finish_switch(fixture, "modal")
+    assert destination.execution.backend == "modal"
+    assert create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_unknown_thread_allocation_can_be_abandoned(switch_service, monkeypatch):
+    import agent.modules.workspaces as workspaces
+    from agent.modules.workspaces.transitions import RuntimeTransitionCoordinator
+    fixture, service = switch_service, switch_service.service
+    ref = await fixture.create("daytona")
+    async with fixture.maker() as session:
+        session.add(ThreadWorkspace(thread_id="abandoned-thread", execution_backend=ref.backend,
+                                    execution_locator=ref.locator, execution_metadata_json=json.dumps(ref.metadata)))
+        await session.commit()
+    rows, _ = await service.host_mirrors.thread_status("abandoned-thread")
+    generation = mirror_state(rows[0]).get("generation") or source_key(ref)
+    create = AsyncMock(side_effect=TimeoutError("allocation response lost"))
+    monkeypatch.setattr(workspaces, "create_workspace_backend", create)
+    monkeypatch.setattr(RuntimeTransitionCoordinator, "find_allocation", AsyncMock(return_value=None))
+    with pytest.raises(ConnectionError):
+        await service.host_mirrors.switch_thread("abandoned-thread", "modal", generation)
+    rows, _ = await service.host_mirrors.thread_status("abandoned-thread")
+    transition = mirror_state(rows[0])["transition"]
+    assert transition["phase"] == "allocation_unknown"
+    with pytest.raises(ProjectWorkspaceError, match="abandon the previous switch"):
+        await service.host_mirrors.switch_thread("abandoned-thread", "modal", generation)
+    await service.host_mirrors.abandon_thread_switch("abandoned-thread", generation,
+                                                     expected_operation_id=transition["operation_id"])
+    rows, _ = await service.host_mirrors.thread_status("abandoned-thread")
+    assert not mirror_state(rows[0]).get("transition")
+    monkeypatch.setattr(workspaces, "create_workspace_backend", fixture.create)
+    await service.host_mirrors.switch_thread("abandoned-thread", "modal", generation)
+    rows, _ = await service.host_mirrors.thread_status("abandoned-thread")
+    assert service.host_mirrors.thread_ref(rows[0]).backend == "modal"
+    assert create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_thread_snapshot_requires_preview_to_create_host_files(switch_service, monkeypatch, tmp_path):
+    fixture, service = switch_service, switch_service.service
+    ref = await fixture.create("daytona")
+    (fixture.roots[ref.locator] / "output.txt").write_text("result")
+    async with fixture.maker() as session:
+        session.add(ThreadWorkspace(thread_id="manual-thread", execution_backend=ref.backend, execution_locator=ref.locator,
+                                    execution_metadata_json=json.dumps(ref.metadata)))
+        await session.commit()
+    monkeypatch.setattr("agent.modules.workspaces.service.temp_workspace_root", lambda: tmp_path / "temporary")
+    monkeypatch.setattr(service.host_mirrors, "_changes", AsyncMock(return_value={"token": "changed", "changed": True}))
+    rows, _ = await service.host_mirrors.thread_status("manual-thread")
+    await service.host_mirrors._poll_threads(rows, force=True)
+    _, state = await service.host_mirrors.thread_status("manual-thread")
+    assert state["remote_revision"] and not state["path"]
+    assert not (tmp_path / "temporary").exists()
+    generation = state["generation"]
+    preview = await service.host_mirrors.synchronize_thread_local("manual-thread", generation)
+    assert not Path(preview["path"]).exists()
+    await service.host_mirrors.switch_thread("manual-thread", "local", generation, preview_token=preview["preview_token"])
+    rows, state = await service.host_mirrors.thread_status("manual-thread")
+    assert service.host_mirrors.thread_ref(rows[0]).backend == "local"
+    assert (Path(state["path"]) / "output.txt").read_text() == "result"
+
+
+@pytest.mark.asyncio
+async def test_stopped_daytona_thread_resumes_before_capturing_newer_files(switch_service, monkeypatch):
+    import agent.modules.workspaces as workspaces
+    fixture, service = switch_service, switch_service.service
+    ref = await fixture.create("daytona")
+    (fixture.roots[ref.locator] / "file.txt").write_text("newer than snapshot")
+    async with fixture.maker() as session:
+        session.add(ThreadWorkspace(thread_id="stopped-daytona", execution_backend=ref.backend, execution_locator=ref.locator,
+                                    execution_metadata_json=json.dumps(ref.metadata)))
+        await session.commit()
+    monkeypatch.setattr("agent.modules.workspaces.host_mirror.workspace_runtime_status", AsyncMock(return_value="stopped"))
+    attach = AsyncMock(return_value=ref)
+    monkeypatch.setattr(workspaces, "attach_workspace_backend", attach)
+    rows, state = await service.host_mirrors.thread_status("stopped-daytona")
+    generation = (state or {}).get("generation") or source_key(ref)
+    await service.host_mirrors.switch_thread("stopped-daytona", "modal", generation)
+    attach.assert_awaited_once()
+    rows, _ = await service.host_mirrors.thread_status("stopped-daytona")
+    target = service.host_mirrors.thread_ref(rows[0])
+    assert target.backend == "modal"
+    assert (fixture.roots[target.locator] / "file.txt").read_text() == "newer than snapshot"
 
 
 @pytest.mark.asyncio
@@ -1820,7 +2295,7 @@ async def test_temporary_mirrors_share_aliases_and_keep_the_host_folder_across_s
     (remote / "file.txt").write_text("sandbox")
     async with fixture.maker() as session:
         for thread_id in ("mirror-main", "mirror-main:sub:child", "mirror-alias"):
-            session.add(ThreadWorkspace(thread_id=thread_id, execution_backend=ref.backend, execution_locator=ref.locator,
+            session.add(ThreadWorkspace(thread_id=thread_id, sync_policy="mirror_strict", execution_backend=ref.backend, execution_locator=ref.locator,
                                         execution_metadata_json=json.dumps(ref.metadata)))
         await session.commit()
     monkeypatch.setattr("agent.modules.workspaces.service.temp_workspace_root", lambda: tmp_path / "temporary")

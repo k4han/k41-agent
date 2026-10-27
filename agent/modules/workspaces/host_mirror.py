@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import ExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, ExitStack, asynccontextmanager
 import hashlib
 import json
 import logging
@@ -16,12 +16,13 @@ from uuid import uuid4
 from sqlalchemy import and_, or_, select, update
 
 from agent.modules.projects.local_sync import (
-    _apply, _capture, _plan, _recover_replacement, _run_writer, _same_entry, _sweep_temporary, _verify,
+    _apply, _capture, _plan, _recover_replacement, _run_writer, _same_entry, _sweep_temporary, _verify, plan_changes,
 )
 from agent.modules.projects.models import ProjectWorkspace, WorkspaceRuntime
 from agent.modules.projects.storage import LocalProjectStorage
 from agent.modules.projects.workspaces import ProjectWorkspaceError, _session, source_key, storage_timestamp
 from agent.modules.workspaces.models import ThreadWorkspace
+from agent.modules.workspaces.policies import MANUAL_APPLY, MIRROR_STRICT, sync_policy
 from agent.modules.workspaces.refs import WorkspaceRef, workspace_ref_from_columns
 from agent.shared.infrastructure.db.base import utcnow
 
@@ -33,13 +34,21 @@ def mirror_state(row) -> dict:
     return json.loads(getattr(row, "host_mirror_json", None) or "{}")
 
 
+def transition_active(transition) -> bool:
+    """Only a live phase blocks work; a failed transition stays as history."""
+    if not transition:
+        return False
+    from agent.modules.projects.runtime_switch import ACTIVE_PHASES
+    return transition.get("phase") in ACTIVE_PHASES
+
+
 def mirror_summary(row) -> dict | None:
     state = mirror_state(row)
-    return {name: state.get(name) for name in (
+    return dict({name: state.get(name) for name in (
         "path", "status", "revision", "remote_revision", "generation", "last_synced_at",
         "last_error", "conflicts", "resolution_token",
         "backend_status",
-    )} if state.get("path") else None
+    )}, sync_policy=sync_policy(row)) if state.get("path") or state.get("remote_revision") or (sync_policy(row) == MANUAL_APPLY and state) else None
 
 
 def thread_storage_key(rows) -> str:
@@ -91,14 +100,7 @@ def validate_host_names(manifest: dict) -> None:
 
 
 def comparison(base, desired, current, root):
-    changes, conflicts = _plan(base, desired, current, root)
-    # Host-only changes must not silently become part of the next baseline.
-    conflicts = set(conflicts)
-    for name in base["entries"].keys() | current["entries"].keys():
-        actual = current["entries"].get(name)
-        if not _same_entry(actual, base["entries"].get(name)) and not _same_entry(actual, desired["entries"].get(name)):
-            conflicts.add(name)
-    return changes, sorted(conflicts)
+    return plan_changes(base, desired, current, root, MIRROR_STRICT)
 
 
 def cloud_entry(entry, previous):
@@ -130,6 +132,9 @@ class HostMirrorService:
         self.last_reconciled = {}
         self.failures = {}
         self.transitions = set()
+        self.next_poll = {}
+        self.unchanged_polls = {}
+        self.observing = set()
 
     def journal_path(self, store, key):
         root = getattr(store, "root", None)
@@ -184,6 +189,17 @@ class HostMirrorService:
     async def after_checkpoint(self, workspace, runtime, revision):
         """Caller holds the project writer lock; mirror errors never invalidate a saved checkpoint."""
         state = mirror_state(workspace)
+        ref = WorkspaceRef.model_validate_json(runtime.execution_json)
+        manual = sync_policy(workspace) == MANUAL_APPLY
+        source = WorkspaceRef.model_validate_json(workspace.source_json)
+        if manual and ref.backend != "local":
+            if source.backend == "local":
+                state.setdefault("path", source.locator)
+            state.setdefault("revision", workspace.local_sync_revision)
+            state.update(remote_revision=revision, generation=runtime.generation,
+                         status="synced" if state.get("revision") == revision else "pending", last_error="")
+            await self._save_project(workspace, runtime, state)
+            return state
         state.setdefault("path", str(self.project_path(workspace, runtime)))
         state.setdefault("revision", workspace.local_sync_revision)
         ref = WorkspaceRef.model_validate_json(runtime.execution_json)
@@ -349,6 +365,123 @@ class HostMirrorService:
         _, result = await self.thread_status(thread_id)
         return result
 
+    async def synchronize_thread_local(self, thread_id, generation, *, preview_token=None):
+        """Apply a thread snapshot using the same preview contract as project workspaces."""
+        from agent.modules.agent_runtime import get_active_session_registry, ThreadMutationConflictError
+        from agent.modules.projects.local_sync import apply_workspace_revision
+        from agent.modules.workspaces.runtime import runtime_observation
+        from agent.modules.workspaces.service import temp_workspace_root
+        rows, _ = await self.thread_status(thread_id)
+        key = thread_storage_key(rows)
+        ref = self.thread_ref(rows[0])
+        registry = get_active_session_registry(self.service.container)
+        with ExitStack() as reservation:
+            with self.service.switcher.gate:
+                self.service.switcher.assert_available(-int(key))
+                if self.service.switcher.runs.get(-int(key)):
+                    raise ProjectWorkspaceError("Finish workspace runs before applying local files.", "workspace_busy")
+                self.service.switcher.switching.add(-int(key))
+            reservation.callback(self.service.switcher._release, -int(key))
+            for row in rows:
+                try:
+                    reservation.enter_context(registry.reserve_thread_mutation(row.thread_id, require_idle=True))
+                except ThreadMutationConflictError as exc:
+                    raise ProjectWorkspaceError(str(exc), "workspace_busy") from exc
+            await self.service.switcher._assert_no_interrupts({row.thread_id for row in rows})
+            async with self.thread_locks.setdefault(key, asyncio.Lock()):
+                rows = await self._refresh_threads(rows, ref)
+                state = mirror_state(rows[0])
+                if (state.get("generation") or source_key(ref)) != generation:
+                    raise ProjectWorkspaceError("Execution runtime changed.", "stale_runtime")
+                if transition_active(state.get("transition")):
+                    raise ProjectWorkspaceError("Reconcile or abandon the runtime transition before applying local files.", "workspace_switching")
+                status = await workspace_runtime_status(ref)
+                observation = runtime_observation(ref.backend, status)
+                if observation.can_resume:
+                    from agent.modules.workspaces import attach_workspace_backend
+                    await attach_workspace_backend(ref.backend, ref.locator, root=ref.metadata.get("root"))
+                    status = "started"
+                if status == "started":
+                    if ref.backend != "local":
+                        from agent.modules.tools import get_coding_service
+                        if await get_coding_service(self.service.container).remote.workspace_processes(ref):
+                            raise ProjectWorkspaceError("Stop sandbox processes before applying local files.", "workspace_busy")
+                    manifest = await self.service.transfer.capture(ref, self.temporary_storage, key)
+                    revision = await asyncio.to_thread(self.temporary_storage.put_manifest, key, manifest)
+                elif observation.needs_replacement:
+                    revision = state.get("remote_revision") or state.get("revision")
+                else:
+                    raise ProjectWorkspaceError("Cannot determine the live runtime state.", "runtime_unavailable")
+                if not revision:
+                    raise ProjectWorkspaceError("No saved files are available.", "missing_data")
+                destination = state.get("path") or str(temp_workspace_root() / ("cloud-" + key))
+                result = await apply_workspace_revision(self.service.transfer, self.temporary_storage, key, revision,
+                    state.get("revision"), Path(destination), generation, preview_token=preview_token, policy=MANUAL_APPLY,
+                    journal=self.journal_path(self.temporary_storage, key).with_name("local-sync.json"))
+                state.update(storage_key=key, remote_revision=revision, path=destination, generation=generation)
+                if result["applied"]:
+                    state.update(revision=revision, status="synced", conflicts=[], last_error="",
+                                 last_synced_at=storage_timestamp(utcnow()))
+                await self._save_threads(rows, ref, state)
+                return result
+
+    @asynccontextmanager
+    async def reserve_retirement(self, ref, action, *, deleting_thread_id=None):
+        """Keep unbound thread snapshots and admission protected through provider retirement."""
+        from agent.modules.agent_runtime import get_active_session_registry, ThreadMutationConflictError
+        from agent.modules.workspaces.runtime import runtime_observation
+        from agent.shared.thread_ids import resolve_thread_id
+        deleted_thread = resolve_thread_id(deleting_thread_id) if action == "delete" and deleting_thread_id else None
+        groups = [rows for rows in (await self._thread_rows()).values()
+                  if rows[0].execution_backend == ref.backend and rows[0].execution_locator == ref.locator]
+        registry = get_active_session_registry(self.service.container)
+        with ExitStack() as reservations:
+            async with AsyncExitStack() as locks:
+                saved = []
+                for rows in groups:
+                    key = thread_storage_key(rows)
+                    owner = -int(key)
+                    with self.service.switcher.gate:
+                        self.service.switcher.assert_available(owner)
+                        if self.service.switcher.runs.get(owner):
+                            raise ProjectWorkspaceError("Finish workspace runs before retiring its runtime.", "workspace_busy")
+                        self.service.switcher.switching.add(owner)
+                    reservations.callback(self.service.switcher._release, owner)
+                    for row in rows:
+                        try:
+                            reservations.enter_context(registry.reserve_thread_mutation(row.thread_id, require_idle=True))
+                        except ThreadMutationConflictError as exc:
+                            raise ProjectWorkspaceError(str(exc), "workspace_busy") from exc
+                    # Conversation deletion also removes its pending checkpoints and descendants.
+                    threads = {row.thread_id for row in rows if not deleted_thread or (
+                        row.thread_id != deleted_thread and not row.thread_id.startswith(deleted_thread + ":sub:"))}
+                    await self.service.switcher._assert_no_interrupts(threads)
+                    await locks.enter_async_context(self.thread_locks.setdefault(key, asyncio.Lock()))
+                    actual = self.thread_ref(rows[0])
+                    rows = await self._refresh_threads(rows, actual)
+                    state = mirror_state(rows[0])
+                    if transition_active(state.get("transition")):
+                        raise ProjectWorkspaceError("Reconcile or abandon the runtime transition before retiring it.", "workspace_switching")
+                    status = await workspace_runtime_status(actual)
+                    if status == "unknown":
+                        raise ProjectWorkspaceError("Runtime availability is unknown; its identity has been retained.", "runtime_unavailable")
+                    if not runtime_observation(actual.backend, status).needs_replacement:
+                        coding = self.service.container._coding_service
+                        if coding:
+                            for client in tuple(coding.remote.clients.values()):
+                                if client.backend.ref.backend == actual.backend and client.backend.ref.locator == actual.locator:
+                                    await client.call({"operation": "stop_workspace", "workspace": client.backend.root})
+                        manifest = await self.service.transfer.capture(actual, self.temporary_storage, key)
+                        revision = await asyncio.to_thread(self.temporary_storage.put_manifest, key, manifest)
+                        state.update(remote_revision=revision, storage_key=key, last_saved_at=storage_timestamp(utcnow()))
+                        state.setdefault("status", "pending")
+                        await self._save_threads(rows, actual, state)
+                    saved.append((rows, actual, state))
+                yield bool(groups)
+                for rows, actual, state in saved:
+                    state["backend_status"] = {"stop": "stopped", "archive": "archived", "delete": "destroyed"}[action]
+                    await self._save_threads(rows, actual, state)
+
     async def _changes(self, ref, identity, *, force=False, checked=False):
         if not checked:
             status = await workspace_runtime_status(ref)
@@ -360,12 +493,16 @@ class HostMirrorService:
         context = InvocationContext(agent_name="host-mirror", workspace=str(ref.metadata.get("root", "")),
                                     thread_id="", backend=ref.backend, locator=ref.locator)
         remote = get_coding_service(self.service.container).remote
+        metrics = getattr(self.service, "metrics", None)
+        if metrics is not None:
+            metrics.monitor_rpc_count += 1
+            metrics.last_monitor_activity = storage_timestamp(utcnow())
         client = await remote.client(context, passive=True)
         await client.ensure_started()
         return await client.call({"operation": "workspace_changes", "workspace": client.backend.root,
                                   "since": self.tokens.get(identity), "force": force})
 
-    async def _poll_project(self, workspace, runtime):
+    async def _poll_project(self, workspace, runtime, *, observe_only=False):
         identity = ("project", workspace.id, runtime.generation)
         ref = WorkspaceRef.model_validate_json(runtime.execution_json)
         if ref.backend == "local":
@@ -393,7 +530,9 @@ class HostMirrorService:
                     if state != previous:
                         await self._save_project(current, active, state)
             return
-        force = time.monotonic() - self.last_reconciled.get(identity, 0) >= 30
+        if observe_only:
+            return False
+        force = time.monotonic() - self.last_reconciled.get(identity, 0) >= 60
         changes = await self._changes(ref, identity, checked=True, force=force)
         if runtime.status == "stopped":
             async with self.service.lock(workspace.id):
@@ -404,12 +543,15 @@ class HostMirrorService:
                         WorkspaceRuntime.status == "stopped",
                     ).values(status="ready", updated_at=utcnow()))
                     await session.commit()
-        if changes and (changes["changed"] or mirror_state(workspace).get("status") in {None, "pending", "error"}):
+        needs_mirror = sync_policy(workspace) != MANUAL_APPLY and mirror_state(workspace).get("status") in {None, "pending", "error"}
+        if changes and (changes["changed"] or not workspace.head_revision or needs_mirror):
             state = await self.synchronize_project(workspace.project_id, workspace.id, generation=runtime.generation, passive=True)
             if state["status"] == "error":
                 raise ProjectWorkspaceError(state["last_error"], "host_sync_error")
             self.tokens[identity] = changes["token"]
             self.last_reconciled[identity] = time.monotonic()
+            return True
+        return False
 
     async def _thread_rows(self):
         session = await _session()
@@ -455,7 +597,53 @@ class HostMirrorService:
             await session.commit()
         self._notify(thread_id=rows[0].thread_id.split(":sub:", 1)[0])
 
-    async def _poll_threads(self, rows, *, force=False):
+    async def checkpoint_thread(self, rows, ref, *, sync_host=True):
+        """Publish a thread snapshot before attempting its independent host policy."""
+        started = time.monotonic()
+        try:
+            return await self._checkpoint_thread(rows, ref, sync_host=sync_host)
+        finally:
+            metrics = getattr(self.service, "metrics", None)
+            if metrics is not None:
+                metrics.checkpoint_count += 1
+                metrics.checkpoint_seconds += time.monotonic() - started
+
+    async def _checkpoint_thread(self, rows, ref, *, sync_host=True):
+        rows = await self._refresh_threads(rows, ref)
+        key = thread_storage_key(rows)
+        state = mirror_state(rows[0])
+        if sync_host and sync_policy(rows[0]) != MANUAL_APPLY:
+            from agent.modules.workspaces.service import temp_workspace_root
+            state.setdefault("path", str(temp_workspace_root() / ("cloud-" + source_key(ref)[:32])))
+        generation = state.get("generation") or source_key(ref)
+        previous = state.get("remote_revision") or state.get("revision")
+        manifest = await self.service.transfer.capture(ref, self.temporary_storage, key)
+        revision = await asyncio.to_thread(self.temporary_storage.put_manifest, key, manifest)
+        rows = await self._refresh_threads(rows, ref)
+        current = mirror_state(rows[0])
+        if (current.get("generation") or source_key(ref)) != generation:
+            raise ProjectWorkspaceError("Thread runtime changed while saving.", "stale_runtime")
+        state.update(remote_revision=revision, storage_key=key, generation=generation,
+                     backend_status="started", last_saved_at=storage_timestamp(utcnow()))
+        if previous and previous != revision:
+            state["previous_revision"] = previous
+        await self._save_threads(rows, ref, state)
+        if sync_policy(rows[0]) == MANUAL_APPLY:
+            state.update(status="synced" if state.get("revision") == revision else "pending", last_error="")
+        elif sync_host:
+            try:
+                state = await self._apply(self.temporary_storage, key, state, revision, generation)
+            except Exception as exc:
+                state.update(status="error", last_error=str(exc))
+        await self._save_threads(rows, ref, state)
+        keep = {state[name] for name in ("revision", "remote_revision", "previous_revision", "host_backup_revision") if state.get(name)}
+        try:
+            await _run_writer(self.temporary_storage.collect, key, keep)
+        except Exception:
+            logger.warning("Saved thread snapshot retained with collection pending key=%s", key, exc_info=True)
+        return {"saved": True, "revision": revision, "host_mirror": state}
+
+    async def _poll_threads(self, rows, *, force=False, observe_only=False):
         row = sorted(rows, key=lambda item: (":sub:" in item.thread_id, item.id))[0]
         ref = self.thread_ref(row)
         key = thread_storage_key(rows)
@@ -477,13 +665,20 @@ class HostMirrorService:
                 if state != mirror_state(row):
                     await self._save_threads(rows, ref, state)
                 return
-            from agent.modules.workspaces.service import temp_workspace_root
-            state.setdefault("path", str(temp_workspace_root() / ("cloud-" + source_key(ref)[:32])))
+            if sync_policy(row) != MANUAL_APPLY:
+                from agent.modules.workspaces.service import temp_workspace_root
+                state.setdefault("path", str(temp_workspace_root() / ("cloud-" + source_key(ref)[:32])))
             state.setdefault("generation", generation)
             state.setdefault("status", "pending")
             state.setdefault("conflicts", [])
-            if not mirror_state(row).get("path"):
+            if state != mirror_state(row):
                 await self._save_threads(rows, ref, state)
+            if observe_only:
+                status = await workspace_runtime_status(ref)
+                if state.get("backend_status") != status:
+                    state["backend_status"] = status
+                    await self._save_threads(rows, ref, state)
+                return False
             force = force or time.monotonic() - self.last_reconciled.get(identity, 0) >= 30
             changes = await self._changes(ref, identity, force=force)
             if changes is None or changes.get("backend_status", "started") != "started":
@@ -494,31 +689,22 @@ class HostMirrorService:
                     await self._save_threads(rows, ref, state)
                 return
             state["backend_status"] = "started"
-            if not changes["changed"] and state.get("status") in {"synced", "conflict"}:
+            if not changes["changed"] and (state.get("status") in {"synced", "conflict"}
+                                          or (sync_policy(row) == MANUAL_APPLY and state.get("remote_revision"))):
                 return
             try:
                 ref = ref.model_copy(deep=True)
                 ref.metadata["_require_running"] = True
-                previous_revision = state.get("revision")
-                manifest = await self.service.transfer.capture(ref, self.temporary_storage, key)
-                revision = await asyncio.to_thread(self.temporary_storage.put_manifest, key, manifest)
-                await self._refresh_threads(rows, ref)
-                # Keep the durable sandbox capture even if applying it to the host fails.
-                state["remote_revision"] = revision
-                await self._save_threads(rows, ref, state)
-                state = await self._apply(self.temporary_storage, key, state, revision, generation)
-                if previous_revision and previous_revision != state.get("revision"):
-                    state["previous_revision"] = previous_revision
+                saved = await self.checkpoint_thread(rows, ref)
+                state = saved["host_mirror"]
             except Exception as exc:
                 state.update(status="error", last_error=str(exc), generation=generation)
             await self._save_threads(rows, ref, state)
-            keep = {state[name] for name in ("revision", "remote_revision", "previous_revision", "host_backup_revision") if state.get(name)}
-            if keep:
-                await _run_writer(self.temporary_storage.collect, key, keep)
             if state["status"] == "error":
                 raise ProjectWorkspaceError(state["last_error"], "host_sync_error")
             self.tokens[identity] = changes["token"]
             self.last_reconciled[identity] = time.monotonic()
+            return True
 
     @asynccontextmanager
     async def saved_thread_view(self, thread_id):
@@ -530,12 +716,14 @@ class HostMirrorService:
             with tempfile.TemporaryDirectory(prefix="k41-thread-view-") as path:
                 revision = state.get("remote_revision") or state["revision"]
                 await _run_writer(self.service.transfer.materialize, self.temporary_storage, key, revision, Path(path))
-                yield WorkspaceRef(locator=path, metadata={"saved_revision": revision, "last_saved_at": state.get("last_synced_at")})
+                raw_state = mirror_state(rows[0])
+                yield WorkspaceRef(locator=path, metadata={"saved_revision": revision,
+                    "last_saved_at": raw_state.get("last_saved_at") or state.get("last_synced_at")})
 
-    async def switch_thread(self, thread_id, backend, generation):
+    async def switch_thread(self, thread_id, backend, generation, *, preview_token=None):
         if self.service.closing:
             raise ProjectWorkspaceError("The application is shutting down.", "workspace_closing")
-        task = asyncio.create_task(self._switch_thread(thread_id, backend, generation))
+        task = asyncio.create_task(self._switch_thread(thread_id, backend, generation, preview_token=preview_token))
         self.transitions.add(task)
         def completed(done):
             self.transitions.discard(done)
@@ -544,7 +732,65 @@ class HostMirrorService:
         task.add_done_callback(completed)
         return await asyncio.shield(task)
 
-    async def _switch_thread(self, thread_id, backend, generation):
+    async def _switch_thread(self, thread_id, backend, generation, *, preview_token=None):
+        """Record a failed or interrupted transition even when the caller has gone away."""
+        try:
+            return await self._run_thread_switch(thread_id, backend, generation, preview_token=preview_token)
+        except asyncio.CancelledError:
+            await asyncio.shield(self._reconcile_thread_transition(thread_id))
+            raise
+        except Exception:
+            await asyncio.shield(self._reconcile_thread_transition(thread_id))
+            raise
+
+    async def _reconcile_thread_transition(self, thread_id):
+        try:
+            rows, _ = await self.thread_status(thread_id)
+            key = thread_storage_key(rows)
+            async with self.thread_locks.setdefault(key, asyncio.Lock()):
+                rows = await self._refresh_threads(rows, self.thread_ref(rows[0]))
+                ref = self.thread_ref(rows[0])
+                await self._cleanup_threads(rows, ref, mirror_state(rows[0]))
+        except ProjectWorkspaceError as exc:
+            if exc.code != "allocation_unknown":
+                logger.warning("Temporary transition retained for reconciliation thread=%s", thread_id, exc_info=True)
+        except Exception:
+            logger.warning("Temporary transition retained for reconciliation thread=%s", thread_id, exc_info=True)
+
+    async def abandon_thread_switch(self, thread_id, generation, *, expected_operation_id=None):
+        """Unblock a thread whose provider allocation could not be identified."""
+        if self.service.closing:
+            raise ProjectWorkspaceError("The application is shutting down.", "workspace_closing")
+        rows, _ = await self.thread_status(thread_id)
+        key = thread_storage_key(rows)
+        async with self.thread_locks.setdefault(key, asyncio.Lock()):
+            rows = await self._refresh_threads(rows, self.thread_ref(rows[0]))
+            ref = self.thread_ref(rows[0])
+            state = mirror_state(rows[0])
+            if (state.get("generation") or source_key(ref)) != generation:
+                raise ProjectWorkspaceError("Execution runtime changed.", "stale_runtime")
+            transition = state.get("transition")
+            if not transition or transition.get("phase") != "allocation_unknown":
+                raise ProjectWorkspaceError("There is no unresolved allocation to abandon.", "transition_unavailable")
+            if expected_operation_id and transition.get("operation_id") != expected_operation_id:
+                raise ProjectWorkspaceError("The runtime transition changed.", "stale_runtime")
+            # A late provider response may still identify the sandbox created by the abandoned attempt.
+            from agent.modules.workspaces.transitions import RuntimeTransitionCoordinator
+            try:
+                target = await RuntimeTransitionCoordinator.find_allocation(
+                    transition.get("target_backend") or ref.backend, transition.get("operation_id"))
+            except Exception:
+                target = None
+            if target is not None:
+                transition["target"] = target.model_dump()
+            transition.update(phase="failed",
+                              error="The unresolved allocation was abandoned. Reconcile the provider inventory before retrying.")
+            state["last_error"] = transition["error"]
+            await self._save_threads(rows, ref, state)
+            state = await self._cleanup_threads(rows, ref, state)
+        return state
+
+    async def _run_thread_switch(self, thread_id, backend, generation, *, preview_token=None):
         from agent.modules.workspaces import create_workspace_backend, get_workspace_backend_registry, is_backend_enabled
         descriptor = get_workspace_backend_registry(self.service.container).require(backend)
         if backend not in {"local", "daytona", "modal"} or not is_backend_enabled(descriptor, config_service=self.service.container.config_service):
@@ -556,7 +802,19 @@ class HostMirrorService:
             raise ProjectWorkspaceError("Execution runtime changed.", "stale_runtime")
         state = mirror_state(row)
         source_status = await workspace_runtime_status(ref)
-        source_lost = ref.backend != "local" and source_status in {"stopped", "destroyed"}
+        from agent.modules.workspaces.runtime import runtime_observation
+        observation = runtime_observation(ref.backend, source_status)
+        source_lost = observation.needs_replacement
+        manual = sync_policy(row) == MANUAL_APPLY
+        if source_status == "unknown":
+            raise ProjectWorkspaceError("Cannot determine the runtime state. Its identity has been retained.", "runtime_unavailable")
+        if state.get("transition", {}).get("phase") == "allocation_unknown":
+            raise ProjectWorkspaceError("Reconcile the provider inventory, then abandon the previous switch before retrying.", "allocation_unknown")
+        if backend == "local" and ref.backend != "local" and manual and not preview_token:
+            raise ProjectWorkspaceError("Preview local changes before continuing locally.", "local_preview_required")
+        if observation.can_resume:
+            from agent.modules.workspaces import attach_workspace_backend
+            await attach_workspace_backend(ref.backend, ref.locator, label=ref.label, root=ref.metadata.get("root"))
         if backend == ref.backend and not source_lost:
             return
         key = thread_storage_key(rows)
@@ -602,28 +860,61 @@ class HostMirrorService:
                     revision = await asyncio.to_thread(self.temporary_storage.put_manifest, key, manifest)
                 if ref.backend == "local":
                     state.update(path=ref.locator, revision=revision, remote_revision=revision, status="synced", conflicts=[])
-                else:
+                elif not manual and backend == "local":
                     if not state.get("path"):
                         from agent.modules.workspaces.service import temp_workspace_root
                         state["path"] = str(temp_workspace_root() / ("cloud-" + source_key(ref)[:32]))
                     state = await self._apply(self.temporary_storage, key, state, revision, generation)
+                else:
+                    state.update(remote_revision=revision, status="pending", generation=generation)
                 state["storage_key"] = key
                 await self._save_threads(rows, ref, state)
                 host_status = state["status"]
-                if host_status != "synced" and not (source_lost and backend == ref.backend):
+                if backend == "local" and not manual and host_status != "synced":
                     raise ProjectWorkspaceError("Resolve host synchronization before switching backends.", "host_sync_conflict")
                 state = await self._cleanup_threads(rows, ref, state)
-                async def record_target(created):
-                    state["transition"] = {"target": created.model_dump(), "phase": "restoring"}
-                    state["status"] = "syncing"
+                operation_id = uuid4().hex
+                state["transition"] = {"operation_id": operation_id, "phase": "saving", "source": ref.model_dump(),
+                                       "source_generation": generation, "revision": revision, "target": None, "target_backend": backend}
+                state["remote_revision"] = revision
+                await self._save_threads(rows, ref, state)
+                async def phase(value):
+                    if value == "provisioning" and state["transition"]["phase"] != value:
+                        self.service.metrics.provision_count += 1
+                    state["transition"]["phase"] = value
                     await self._save_threads(rows, ref, state)
-                target = WorkspaceRef(locator=state["path"], metadata={"temp": True}) if backend == "local" else await create_workspace_backend(backend, on_created=record_target)
+                async def record_target(created):
+                    state["transition"]["target"] = created.model_dump()
+                    await self._save_threads(rows, ref, state)
+                if backend == "local":
+                    if manual:
+                        from agent.modules.projects.local_sync import apply_workspace_revision
+                        from agent.modules.workspaces.service import temp_workspace_root
+                        destination = state.get("path") or str(temp_workspace_root() / ("cloud-" + key))
+                        applied = await apply_workspace_revision(self.service.transfer, self.temporary_storage, key, revision,
+                            state.get("revision"), Path(destination), generation, preview_token=preview_token,
+                            journal=self.journal_path(self.temporary_storage, key).with_name("local-sync.json"))
+                        revision = applied["merged_revision"]
+                        state.update(path=destination, revision=revision, remote_revision=revision)
+                        host_status = "synced"
+                    target = WorkspaceRef(locator=state["path"], metadata={"temp": True})
+                    await record_target(target)
+                    await phase("verifying")
+                    await self.service.transfer.verify(target, self.temporary_storage, key, revision)
+                else:
+                    from agent.modules.workspaces.transitions import RuntimeTransitionCoordinator
+                    try:
+                        target = await RuntimeTransitionCoordinator.prepare_cloud(backend, self.service.transfer,
+                            self.temporary_storage, key, revision, on_created=record_target, phase=phase,
+                            label="k41-switch-" + operation_id)
+                    except (TimeoutError, ConnectionError):
+                        if not state["transition"].get("target"):
+                            await phase("allocation_unknown")
+                        raise
                 target.metadata.update({name: value for name, value in ref.metadata.items()
                                         if name not in {"root", "status", "last_used_at", "_require_running"}})
                 target.metadata["temp"] = True
-                if backend != "local":
-                    await self.service.transfer.restore(target, self.temporary_storage, key, revision)
-                await self.service.transfer.verify(target, self.temporary_storage, key, revision)
+                target.metadata.update(files_restored=True, environment_state="unknown")
                 state.update(generation=hashlib.sha256(uuid4().bytes).hexdigest(), status=host_status, backend_status="started")
                 if host_status == "synced":
                     state["last_synced_at"] = storage_timestamp(utcnow())
@@ -647,7 +938,7 @@ class HostMirrorService:
 
     async def _retire_cloud(self, ref, *, delete=False):
         if ref.backend == "local":
-            return
+            return True
         session = await _session()
         async with session:
             threads = (await session.execute(select(ThreadWorkspace).where(
@@ -655,28 +946,45 @@ class HostMirrorService:
             runtimes = (await session.execute(select(WorkspaceRuntime).where(WorkspaceRuntime.status != "destroyed"))).scalars().all()
         if threads or any((current := WorkspaceRef.model_validate_json(runtime.execution_json)).backend == ref.backend
                           and current.locator == ref.locator for runtime in runtimes):
-            return
+            return False
         from agent.modules.workspaces import get_workspace_backend_registry, call_workspace_backend_loader
         descriptor = get_workspace_backend_registry(self.service.container).require(ref.backend)
         loader = descriptor.delete_loader if delete else descriptor.stop_loader or descriptor.delete_loader
         if not loader:
             raise ValueError("The backend cannot retire unused sandboxes.")
         await call_workspace_backend_loader(ref.backend, loader, ref, in_thread=ref.backend == "daytona")
+        return True
 
     async def _cleanup_threads(self, rows, ref, state):
         state = dict(state)
         pending = list(state.get("cleanup", []))
-        transition = state.pop("transition", None)
+        transition = state.get("transition")
         if transition:
-            pending.append(dict(transition["target"], _delete_incomplete=True))
+            target = transition.get("target")
+            if transition.get("phase") == "allocation_unknown" or (transition.get("phase") == "provisioning" and not target):
+                from agent.modules.workspaces.transitions import RuntimeTransitionCoordinator
+                target_ref = await RuntimeTransitionCoordinator.find_allocation(
+                    transition.get("target_backend") or ref.backend, transition.get("operation_id"))
+                if target_ref:
+                    target = target_ref.model_dump()
+                else:
+                    transition["phase"] = "allocation_unknown"
+                    await self._save_threads(rows, ref, state)
+                    raise ProjectWorkspaceError("Allocation outcome is unknown; reconcile provider inventory, then abandon the switch.", "allocation_unknown")
+            state.pop("transition", None)
+            if target and source_key(WorkspaceRef.model_validate(target)) != source_key(ref):
+                pending.append(dict(target, _delete_incomplete=True))
         if not pending:
+            if transition:
+                await self._save_threads(rows, ref, state)
             return state
         remaining = []
         for item in pending:
             item = dict(item)
             delete = item.pop("_delete_incomplete", False)
             try:
-                await self._retire_cloud(WorkspaceRef.model_validate(item), delete=delete)
+                if await self._retire_cloud(WorkspaceRef.model_validate(item), delete=delete) is False:
+                    remaining.append(dict(item, **({"_delete_incomplete": True} if delete else {})))
             except Exception as exc:
                 remaining.append(dict(item, **({"_delete_incomplete": True} if delete else {})))
                 state["last_error"] = "Old sandbox cleanup will be retried: " + str(exc)
@@ -702,7 +1010,10 @@ class HostMirrorService:
         if time.monotonic() < retry_at:
             return
         try:
-            await operation()
+            changed = await operation()
+            unchanged = 0 if changed else self.unchanged_polls.get(identity, -1) + 1
+            self.unchanged_polls[identity] = unchanged
+            self.next_poll[identity] = time.monotonic() + (5, 15, 60)[min(unchanged, 2)]
             self.failures.pop(identity, None)
         except asyncio.CancelledError:
             raise
@@ -745,21 +1056,42 @@ class HostMirrorService:
                     ).join(Project, Project.id == ProjectWorkspace.project_id).where(
                         Project.migration_status == "ready", ProjectWorkspace.kind != "legacy", WorkspaceRuntime.status.in_(["ready", "stopped"]),
                     ))).all()
-                operations = [(('project', workspace.id, runtime.generation), lambda w=workspace, r=runtime: self._poll_project(w, r))
-                              for workspace, runtime in projects]
-                operations += [(('thread', key), lambda rows=rows: self._poll_threads(rows))
-                               for key, rows in (await self._thread_rows()).items()]
+                operations = []
+                for workspace, runtime in projects:
+                    identity = ('project', workspace.id, runtime.generation)
+                    active_work = bool(self.service.switcher.runs.get(workspace.id) or
+                                       any(owner == workspace.id for owner, _ in self.service.running_processes))
+                    final_capture = identity in self.observing and not active_work
+                    if active_work != (identity in self.observing):
+                        self.next_poll[identity] = 0
+                    self.observing.add(identity) if active_work else self.observing.discard(identity)
+                    operations.append((identity, lambda w=workspace, r=runtime, passive=not active_work and not final_capture:
+                                       self._poll_project(w, r, observe_only=passive)))
+                for key, rows in (await self._thread_rows()).items():
+                    identity = ('thread', key)
+                    owner = -int(thread_storage_key(rows))
+                    active_work = bool(self.service.switcher.runs.get(owner) or
+                                       any(current == owner for current, _ in self.service.running_processes))
+                    final_capture = identity in self.observing and not active_work
+                    if active_work != (identity in self.observing):
+                        self.next_poll[identity] = 0
+                    self.observing.add(identity) if active_work else self.observing.discard(identity)
+                    operations.append((identity, lambda rows=rows, passive=not active_work and not final_capture:
+                                       self._poll_threads(rows, observe_only=passive)))
                 active = {identity for identity, _ in operations}
                 for identity in tuple(self.jobs):
                     if identity not in active and self.jobs[identity].done():
                         self.jobs.pop(identity)
                         self.failures.pop(identity, None)
+                        self.next_poll.pop(identity, None)
+                        self.unchanged_polls.pop(identity, None)
+                        self.observing.discard(identity)
                 for identity, operation in operations:
-                    if identity not in self.jobs or self.jobs[identity].done():
+                    if time.monotonic() >= self.next_poll.get(identity, 0) and (identity not in self.jobs or self.jobs[identity].done()):
                         self.jobs[identity] = asyncio.create_task(self._guard(identity, operation))
             except Exception:
                 logger.debug("Host mirror discovery deferred", exc_info=True)
-            await asyncio.sleep(1)
+            await asyncio.sleep(5)
 
     async def close(self):
         await asyncio.gather(*tuple(self.transitions), return_exceptions=True)

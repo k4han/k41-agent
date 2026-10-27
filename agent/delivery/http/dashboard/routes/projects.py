@@ -80,6 +80,7 @@ class MigrationSelectionBody(BaseModel):
 class ProjectRuntimeSwitchBody(ProjectRuntimeBody):
     backend: Literal["local", "daytona", "modal"]
     expected_generation: int = Field(ge=1)
+    preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 @router.get("/dashboard-api/workspace/runtime/{thread_id:path}")
@@ -95,7 +96,10 @@ async def get_thread_runtime(thread_id: str):
                 from agent.modules.workspaces import binding_from_record
                 rows, state = await service.host_mirrors.thread_status(thread_id)
                 ref = service.host_mirrors.thread_ref(rows[0])
+                from agent.modules.workspaces.host_mirror import mirror_state
                 return {"workspace": binding_from_record(rows[0], ref).model_dump(), "runtime": None, "host_mirror": state,
+                        "transition": mirror_state(rows[0]).get("transition"),
+                        "sync_policy": rows[0].sync_policy,
                         "workspace_name": "temporary"}
             except KeyError:
                 return {"workspace": None, "runtime": None}
@@ -103,7 +107,8 @@ async def get_thread_runtime(thread_id: str):
         workspace = next(item for item in description["workspaces"] if item["id"] == binding.project_workspace_id)
         return {"workspace": binding.model_dump(), "runtime": workspace["runtime"], "kind": workspace["kind"],
                 "workspace_name": workspace["name"], "persistence": workspace["persistence"],
-                "local_link": workspace["local_link"], "host_mirror": workspace["host_mirror"]}
+                "local_link": workspace["local_link"], "host_mirror": workspace["host_mirror"],
+                "sync_policy": workspace["sync_policy"]}
     except Exception as exc:
         raise project_resource_error(exc) from exc
 
@@ -123,6 +128,18 @@ class ThreadRuntimeSwitchBody(BaseModel):
     thread_id: str = Field(min_length=1, max_length=512)
     backend: Literal["local", "daytona", "modal"]
     expected_generation: str = Field(pattern=r"^[a-f0-9]{64}$")
+    preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
+class ProjectRuntimeAbandonBody(ProjectRuntimeBody):
+    expected_operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+
+
+class ThreadRuntimeAbandonBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    thread_id: str = Field(min_length=1, max_length=512)
+    expected_generation: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
 @router.post("/dashboard-api/workspace/runtime/switch")
@@ -132,7 +149,33 @@ async def switch_thread_runtime(body: ThreadRuntimeSwitchBody):
         service = get_project_workspace_service()
         if await service.resolve_thread(body.thread_id):
             raise ValueError("Use the project runtime endpoint for a project workspace.")
-        await service.host_mirrors.switch_thread(body.thread_id, body.backend, body.expected_generation)
+        await service.host_mirrors.switch_thread(body.thread_id, body.backend, body.expected_generation,
+                                                **({"preview_token": body.preview_token} if body.preview_token else {}))
+        return await get_thread_runtime(body.thread_id)
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
+
+
+@router.post("/dashboard-api/projects/{project_id}/runtime/abandon")
+async def abandon_project_runtime(body: ProjectRuntimeAbandonBody, project_id: int = Path(ge=1)):
+    from agent.modules.projects import get_project_workspace_service
+    try:
+        binding = await get_project_workspace_service().switcher.abandon(
+            project_id, body.project_workspace_id, expected_operation_id=body.expected_operation_id)
+        return {"workspace": binding.model_dump()}
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
+
+
+@router.post("/dashboard-api/workspace/runtime/abandon")
+async def abandon_thread_runtime(body: ThreadRuntimeAbandonBody):
+    from agent.modules.projects import get_project_workspace_service
+    try:
+        service = get_project_workspace_service()
+        if await service.resolve_thread(body.thread_id):
+            raise ValueError("Use the project runtime endpoint for a project workspace.")
+        await service.host_mirrors.abandon_thread_switch(
+            body.thread_id, body.expected_generation, expected_operation_id=body.expected_operation_id)
         return await get_thread_runtime(body.thread_id)
     except Exception as exc:
         raise project_resource_error(exc) from exc
@@ -165,6 +208,7 @@ async def switch_project_runtime(body: ProjectRuntimeSwitchBody, project_id: int
     try:
         return await get_project_workspace_service().switcher.request(
             project_id, body.backend, body.expected_generation, body.project_workspace_id,
+            **({"preview_token": body.preview_token} if body.preview_token else {}),
         )
     except Exception as exc:
         raise project_resource_error(exc) from exc
@@ -183,11 +227,32 @@ async def ensure_project_runtime(body: ProjectRuntimeBody, project_id: int = Pat
 class ProjectRuntimeRecoveryBody(ProjectRuntimeBody):
     action: Literal["restore", "local"]
     expected_generation: int = Field(ge=1)
+    preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class ProjectLocalSyncBody(ProjectRuntimeBody):
     expected_generation: int = Field(ge=1)
     preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
+class ThreadLocalSyncBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    thread_id: str = Field(min_length=1, max_length=512)
+    expected_generation: str = Field(pattern=r"^[a-f0-9]{64}$")
+    preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
+@router.post("/dashboard-api/workspace/local-sync")
+async def synchronize_thread_local(body: ThreadLocalSyncBody):
+    from agent.modules.projects import get_project_workspace_service
+    try:
+        service = get_project_workspace_service()
+        if await service.resolve_thread(body.thread_id):
+            raise ValueError("Use the project local-sync endpoint for project workspaces.")
+        return await service.host_mirrors.synchronize_thread_local(body.thread_id, body.expected_generation,
+                                                                  preview_token=body.preview_token)
+    except Exception as exc:
+        raise project_resource_error(exc) from exc
 
 
 @router.post("/dashboard-api/projects/{project_id}/local-sync")
@@ -207,7 +272,8 @@ async def confirm_project_runtime_recovery(body: ProjectRuntimeRecoveryBody, pro
     from agent.modules.projects import get_project_workspace_service
     try:
         binding = await get_project_workspace_service().confirm_provision(
-            project_id, body.action, body.expected_generation, body.project_workspace_id)
+            project_id, body.action, body.expected_generation, body.project_workspace_id,
+            **({"preview_token": body.preview_token} if body.preview_token else {}))
         return {"workspace": binding.model_dump()}
     except Exception as exc:
         raise project_resource_error(exc) from exc

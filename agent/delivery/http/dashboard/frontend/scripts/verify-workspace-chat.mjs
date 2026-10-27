@@ -29,6 +29,7 @@ let runtimeScenario = false;
 let switchFailure = false;
 const runtimeRequests = [];
 const hostSyncRequests = [];
+const localSyncRequests = [];
 let runtimeStatusRequests = 0;
 let runtimePayload = { kind: 'shared', workspace: { project_id: 41, project_workspace_id: 51, runtime_generation: 1,
   scope: { key: 'shared-project', kind: 'local', label: 'Shared project', metadata: {} }, execution: { ...workspace, label: 'Shared project' } },
@@ -95,6 +96,14 @@ const server = http.createServer(async (req, res) => {
       hostSyncRequests.push(JSON.parse(raw));
       runtimePayload.host_mirror = { ...runtimePayload.host_mirror, status: 'synced', conflicts: [], resolution_token: null };
       return reply(runtimePayload.host_mirror);
+    }
+    if (url.pathname === '/dashboard-api/projects/41/local-sync') {
+      let raw = '';
+      for await (const chunk of req) raw += chunk;
+      const body = JSON.parse(raw);
+      localSyncRequests.push(body);
+      return reply({ path: root, revision: 'b'.repeat(64), preview_token: 'd'.repeat(64),
+        changes: [{ path: 'output.txt', action: 'add' }], conflicts: [], applied: Boolean(body.preview_token) });
     }
     if (url.pathname.startsWith('/dashboard-api/workspace/runtime/')) {
       runtimeStatusRequests += 1;
@@ -775,6 +784,21 @@ try {
   await click('.composer-runtime-picker button.btn-primary');
   await until(() => js('document.querySelector(".composer-runtime-picker [role=alert]")?.textContent.includes("Another conversation")'), 'busy workspace error shown');
   assert.equal(await js('document.querySelector(".composer-workspace-backend").textContent.includes("Daytona")'), true, 'failed switch retains current backend');
+  runtimePayload.sync_policy = 'manual_apply';
+  runtimePayload.local_link = { ...runtimePayload.local_link, status: 'pending' };
+  const beforeManualPreview = fs.readFileSync(filePath, 'utf8');
+  await js(`window.dispatchEvent(new CustomEvent('k41:workspace-files-changed', { detail: { project_workspace_id: 51 } }))`);
+  await until(() => js(`Array.from(document.querySelectorAll('.composer-runtime-picker button')).some(el => el.textContent === 'Preview local changes')`), 'manual policy exposes preview');
+  assert.equal(await js('!!document.querySelector(".workspace-host-mirror")'), false, 'manual workspaces hide automatic host mirror controls');
+  await js(`Array.from(document.querySelectorAll('.composer-runtime-picker button')).find(el => el.textContent === 'Preview local changes').click()`);
+  await until(() => localSyncRequests.length === 1, 'manual local preview requested');
+  assert.equal(localSyncRequests[0].preview_token, undefined, 'preview does not apply files');
+  assert.equal(fs.readFileSync(filePath, 'utf8'), beforeManualPreview, 'preview preserves original local data');
+  await until(() => js(`Array.from(document.querySelectorAll('.composer-runtime-picker button')).some(el => el.textContent === 'Apply and continue locally')`), 'manual local continuation requires reviewed preview');
+  await js(`Array.from(document.querySelectorAll('.composer-runtime-picker button')).find(el => el.textContent === 'Apply and continue locally').click()`);
+  await until(() => runtimeRequests.length === 3, 'reviewed local switch requested');
+  assert.equal(runtimeRequests.at(-1).preview_token, 'd'.repeat(64), 'local switch is bound to the reviewed preview');
+  await until(() => js(`document.querySelector('.composer-runtime-picker').textContent.includes('Another conversation')`), 'manual switch retains busy error');
   await escape();
   runtimePayload = { ...runtimePayload, runtime: { status: 'unavailable', generation: 2, transition: null,
     decision: { reason: 'sandbox_lost', backend: 'daytona' } } };

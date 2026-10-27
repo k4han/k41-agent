@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import posixpath
+from pathlib import PureWindowsPath
 
 
 def normalize_posix_path(value: str) -> str:
@@ -26,18 +27,24 @@ def resolve_remote_path(root: str, path: str) -> str:
     Guards against directory traversal (``..``) escapes.
     """
     clean_root = normalize_posix_path(root) or "/"
-    clean_path = str(path or "").strip()
+    raw = str(path or "").strip()
+    if "\x00" in raw or PureWindowsPath(raw).drive or raw.startswith(("\\", "//")):
+        raise ValueError(f"Invalid workspace path: {path!r}")
+    raw = raw.replace("\\", "/")
+    if ".." in raw.split("/"):
+        raise ValueError(f"Path escapes workspace: {path!r}")
+    clean_path = normalize_posix_path(raw)
     if not clean_path:
         return clean_root
-    if clean_path == ".":
-        return clean_root
-    if not posixpath.isabs(clean_path):
-        clean_path = posixpath.normpath(f"{clean_root}/{clean_path}")
+    if clean_path == clean_root or clean_path.startswith(clean_root.rstrip("/") + "/"):
+        target = clean_path
+    elif posixpath.isabs(clean_path):
+        if clean_root != "/":
+            raise ValueError(f"Path escapes workspace: {path!r}")
+        target = clean_path
     else:
-        clean_path = posixpath.normpath(clean_path)
-    if ".." in clean_path.split("/"):
-        raise ValueError(f"Path escapes workspace: {path!r}")
-    return normalize_posix_path(clean_path)
+        target = posixpath.join(clean_root, clean_path)
+    return normalize_posix_path(target)
 
 
 def relative_remote_path(root: str, target: str) -> str:

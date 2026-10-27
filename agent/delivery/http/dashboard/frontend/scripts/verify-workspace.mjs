@@ -155,7 +155,8 @@ try {
   assert.equal(await js('workspaceTest.requests.length'), countBefore, 'equivalent workspace props and unrelated events must not refetch');
   await js(`workspaceTest.hold('file:file-0.txt'); ${row('file-0.txt')}.click();`);
   await until(() => js('workspaceTest.pendingCount("file:file-0.txt") === 1'), 'pending file preview');
-  assert.equal(await js('getComputedStyle(document.querySelector(".workspace-tree-section")).display'), 'none');
+  assert.notEqual(await js('getComputedStyle(document.querySelector(".workspace-tree-section")).display'), 'none',
+    'the current layout keeps the tree available while a file preview is loading');
   const rootsBefore = await js('workspaceTest.requests.filter(request => request.kind === "tree" && !request.path).length');
   await js('workspaceTest.refresh(); workspaceTest.refresh();');
   await until(() => js(`workspaceTest.requests.filter(request => request.kind === "tree" && !request.path).length === ${rootsBefore + 1}`), 'coalesced refresh starts');

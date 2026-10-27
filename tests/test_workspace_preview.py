@@ -99,3 +99,21 @@ def test_remote_preview_and_download_use_public_binary_reader(client, monkeypatc
         assert response.content == b"\x00\xff\x80"
         reader.read_bytes.assert_awaited_with("image.png")
         getter.assert_awaited_with(workspace, thread_id="test-thread")
+
+
+def test_saved_binary_responses_include_source_and_revision_headers(client, monkeypatch):
+    import agent.delivery.http.dashboard.routes.workspace as routes
+    import agent.modules.workspaces as workspaces
+    from agent.modules.workspaces.reads import WorkspaceReadResult
+    workspace = WorkspaceRef(backend="modal", locator="unavailable", metadata={"root": "/workspace"})
+    monkeypatch.setattr(routes, "workspace_ref_from_request", AsyncMock(return_value=workspace))
+    result = WorkspaceReadResult(b"\x00\xffsaved", "saved", 7, "revision", "timestamp", "provider_unavailable")
+    reader = SimpleNamespace(read_result=AsyncMock(return_value=result))
+    monkeypatch.setattr(workspaces, "get_workspace_file_io", AsyncMock(return_value=reader))
+    for action in ("preview", "download"):
+        response = client.get(f"/dashboard-api/workspace/{action}", params={"thread_id": "thread", "path": "image.png"})
+        assert response.status_code == 200 and response.content == result.data
+        assert response.headers["x-workspace-data-source"] == "saved"
+        assert response.headers["x-workspace-saved-revision"] == "revision"
+        assert response.headers["x-workspace-generation"] == "7"
+        reader.read_result.assert_awaited_with("read_bytes", "image.png", consistency="saved_ok")

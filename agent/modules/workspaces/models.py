@@ -8,6 +8,7 @@ class ThreadWorkspace(BaseModel):
 
     thread_id = Column(String(512), nullable=False, index=True)
     host_mirror_json = Column(Text, nullable=False, default="{}")
+    sync_policy = Column(String(30), nullable=False, default="manual_apply", server_default="mirror_strict")
     working_dir = Column(Text, nullable=True)
     project_id = Column(Integer, nullable=True, index=True)
     project_workspace_id = Column(Integer, nullable=True, index=True)

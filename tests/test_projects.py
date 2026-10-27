@@ -330,12 +330,33 @@ def test_runtime_switch_api_accepts_background_operation_and_reports_conflicts(m
         response = client.post(url, json=body)
         assert response.status_code == 202 and response.json()["operation_id"] == "switch"
         request.assert_awaited_once_with(7, "daytona", 3, 11)
+        assert client.post(url, json={**body, "preview_token": "a" * 64}).status_code == 202
+        request.assert_awaited_with(7, "daytona", 3, 11, preview_token="a" * 64)
         for invalid in ({**body, "backend": "unknown"}, {**body, "expected_generation": 0}, {"backend": "local"}, {**body, "force": True}):
             assert client.post(url, json=invalid).status_code == 422
         for code in ("workspace_busy", "workspace_switching", "stale_runtime"):
             request.side_effect = ProjectWorkspaceError("Workspace cannot switch", code)
             response = client.post(url, json=body)
             assert response.status_code == 409 and response.json()["detail"]["code"] == code
+
+
+def test_runtime_abandon_api_requires_an_unknown_allocation(monkeypatch, isolated_container):
+    from agent.modules.projects import ProjectWorkspaceError
+    from agent.modules.projects.workspaces import get_project_workspace_service
+    projects = get_project_workspace_service(isolated_container)
+    abandon = AsyncMock(return_value=SimpleNamespace(model_dump=lambda: {"project_id": 7, "project_workspace_id": 11}))
+    monkeypatch.setattr(projects.switcher, "abandon", abandon)
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app) as client:
+        url = "/dashboard-api/projects/7/runtime/abandon"
+        response = client.post(url, json={"project_workspace_id": 11, "expected_operation_id": "a" * 32})
+        assert response.status_code == 200 and response.json()["workspace"]["project_workspace_id"] == 11
+        abandon.assert_awaited_once_with(7, 11, expected_operation_id="a" * 32)
+        assert client.post(url, json={"expected_operation_id": "bad"}).status_code == 422
+        abandon.side_effect = ProjectWorkspaceError("Nothing to abandon", "transition_unavailable")
+        response = client.post(url, json={})
+        assert response.status_code == 409 and response.json()["detail"]["code"] == "transition_unavailable"
 
 
 def test_local_sync_api_previews_by_default_and_rejects_arbitrary_target_paths(monkeypatch, isolated_container):
@@ -407,7 +428,13 @@ def test_runtime_switch_migration_adds_transition_without_changing_existing_runt
     migrate_workspace_tables(url)
     with engine.connect() as connection:
         row = connection.execute(text("SELECT execution_json, transition_json FROM workspace_runtimes WHERE id=1")).one()
-        workspace = connection.execute(text("SELECT source_json, local_sync_revision, host_mirror_json FROM project_workspaces WHERE id=1")).one()
+        workspace = connection.execute(text("SELECT source_json, local_sync_revision, host_mirror_json, sync_policy FROM project_workspaces WHERE id=1")).one()
+    assert workspace.sync_policy == "mirror_strict"
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE project_workspaces SET sync_policy='manual_apply' WHERE id=1"))
+    migrate_workspace_tables(url)
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT sync_policy FROM project_workspaces WHERE id=1")).scalar_one() == "manual_apply"
     assert workspace.local_sync_revision is None
     assert json.loads(workspace.host_mirror_json) == {}
     assert json.loads(workspace.source_json)["locator"] == "/original"

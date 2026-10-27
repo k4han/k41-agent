@@ -279,6 +279,11 @@ def create_daytona_workspace(*, label: str | None = None, on_created=None) -> Wo
     _, _, root = _config()
     client = get_daytona_client()
     create_cfg = _sandbox_create_config()
+    from agent.modules.workspaces.transitions import RuntimeTransitionCoordinator
+    operation_id = RuntimeTransitionCoordinator.operation_id(label)
+    if operation_id:
+        params = create_cfg["params"]
+        params.labels = dict(params.labels or {}, k41_operation_id=operation_id, name=label)
     sandbox = client.create(create_cfg["params"])
     sandbox_id = str(getattr(sandbox, "id", "") or "").strip()
     if not sandbox_id:
@@ -845,32 +850,8 @@ async def stop_daytona_lifecycle_sweeper() -> None:
 
 
 def resolve_daytona_path(root: str, path: str | None = None) -> str:
-    normalized_root = _normalize_posix_path(root)
-    raw_path = str(path or "").strip()
-    if not raw_path or raw_path == ".":
-        return normalized_root
-    if any(part == ".." for part in raw_path.replace("\\", "/").split("/")):
-        raise ValueError(f"Path escapes workspace: {path}")
-
-    normalized_input = _normalize_posix_path(raw_path)
-    if normalized_root == "/":
-        if posixpath.isabs(normalized_input):
-            return normalized_input
-        return _normalize_posix_path(posixpath.join(normalized_root, normalized_input))
-    if normalized_input == normalized_root or normalized_input.startswith(
-        f"{normalized_root}/"
-    ):
-        target = normalized_input
-    elif posixpath.isabs(normalized_input):
-        raise ValueError(f"Path escapes workspace: {path}")
-    else:
-        target = _normalize_posix_path(
-            posixpath.join(normalized_root, normalized_input)
-        )
-
-    if target != normalized_root and not target.startswith(f"{normalized_root}/"):
-        raise ValueError(f"Path escapes workspace: {path}")
-    return target
+    from agent.modules.workspaces.posix_utils import resolve_remote_path
+    return resolve_remote_path(root, path)
 
 
 def daytona_relative_path(root: str, path: str) -> str:

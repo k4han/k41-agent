@@ -98,13 +98,15 @@ export function ProjectDetailPage() {
           <Show when={saved().last_error}><p role="alert">{saved().last_error}</p></Show>
           <button class="btn" disabled={saving()} onClick={() => void projectAction("checkpoint")}>{saving() ? "Saving..." : saved().status === "error" ? "Retry save" : "Save now"}</button>
         </div>}</Show>
-        <Show when={current().host_mirror}>{(state) => <WorkspaceHostMirror state={state()} projectId={current().id}
+        <Show when={current().sync_policy !== "manual_apply" && current().host_mirror}>{(state) => <WorkspaceHostMirror state={state()} projectId={current().id}
           workspaceId={current().workspace.project_workspace_id} generation={current().runtime?.generation}
           disabled={saving() || runtimeTransitionBusy(current().runtime || null)} />}</Show>
-        <Show when={!current().host_mirror && current().local_link && current().runtime}>{(runtime) => <ProjectLocalSync
+        <Show when={(current().sync_policy === "manual_apply" || !current().host_mirror)
+          && (current().local_link ? current().local_link!.status !== "active" : current().sync_policy === "manual_apply" && current().workspace.execution.backend !== "local")
+          && current().runtime}>{(runtime) => <ProjectLocalSync
           projectId={current().id} workspaceId={current().workspace.project_workspace_id}
           generation={runtime().generation} localLink={current().local_link!}
-          disabled={saving() || runtimeTransitionBusy(runtime()) || runtime().status !== "ready"}
+          disabled={saving() || runtimeTransitionBusy(runtime())}
           onApplied={() => void load(true)} />}</Show>
         <Show when={current().migration_status && current().migration_status !== "ready"}>
           <section class="project-storage-status" aria-label="Workspace migration">

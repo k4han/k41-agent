@@ -62,10 +62,17 @@ async def _workspace_file_response(
         "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(name, safe='')}",
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "no-store",
+        "X-Workspace-Data-Source": "live",
     }
     if inline and media_type == "image/svg+xml":
         headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
     if workspace.backend == "local":
+        from agent.modules.projects import get_project_workspace_service
+        projects = get_project_workspace_service()
+        if projects.container._persistence_ready:
+            binding = await projects.find_binding(workspace, thread_id=thread_id)
+            if binding and binding.runtime_generation is not None:
+                headers["X-Workspace-Generation"] = str(binding.runtime_generation)
         from agent.modules.tools import resolve_safe_path
         from agent.modules.workspaces import resolve_workspace_root
 
@@ -78,6 +85,11 @@ async def _workspace_file_response(
     from agent.modules.workspaces import get_workspace_file_io
 
     file_io = await get_workspace_file_io(workspace, thread_id=thread_id)
+    read_result = getattr(file_io, "read_result", None)
+    if read_result is not None:
+        result = await read_result("read_bytes", path, consistency="saved_ok")
+        headers.update(result.headers())
+        return Response(content=result.data, media_type=media_type, headers=headers)
     return Response(content=await file_io.read_bytes(path), media_type=media_type, headers=headers)
 
 

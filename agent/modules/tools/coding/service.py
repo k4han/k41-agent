@@ -54,39 +54,62 @@ class CodingService(CodingEngine):
         else:
             result = await super().execute(name, values, context)
             result = ToolResult.model_validate(result.to_dict())
-        if context.project_workspace_id and result.status == "running" and result.data.get("process_id"):
+        if result.status == "running" and result.data.get("process_id"):
+            if not context.project_workspace_id:
+                from agent.bootstrap.container import get_active_container
+                container = get_active_container()
+                if container is None or not container._persistence_ready:
+                    return result
             from agent.modules.projects import get_project_workspace_service
             projects = get_project_workspace_service()
+            owner = context.project_workspace_id
+            if owner is None and context.thread_id and projects.container._persistence_ready:
+                from agent.modules.workspaces.host_mirror import thread_storage_key
+                try:
+                    rows, _ = await projects.host_mirrors.thread_status(context.thread_id)
+                    owner = -int(thread_storage_key(rows))
+                except KeyError:
+                    pass
+            if owner is None:
+                return result
             process_id = result.data["process_id"]
-            process_key = (context.project_workspace_id, process_id)
+            process_key = (owner, process_id)
             if process_key not in projects.running_processes:
                 projects.running_processes.add(process_key)
-                task = asyncio.create_task(self._watch_project_process(context, process_id))
+                task = asyncio.create_task(self._watch_project_process(context, process_id, owner))
                 self.project_watchers.add(task)
                 task.add_done_callback(self.project_watchers.discard)
         return result
 
-    async def _watch_project_process(self, context, process_id):
+    async def _watch_project_process(self, context, process_id, owner=None):
         try:
             if context.backend == "local":
                 await self.processes.get(context, process_id).finished.wait()
             else:
                 client = await self.remote.client(context)
+                attempt = 0
                 while True:
-                    await asyncio.sleep(1)
                     response = await client.call(self.remote.request("process_state", "", {"process_id": process_id}, context))
                     if response["finished"]:
                         break
+                    await asyncio.sleep((5, 15, 60)[min(attempt, 2)])
+                    attempt += 1
             from agent.modules.projects import get_project_workspace_service
-            await get_project_workspace_service().checkpoint(context.project_id, context.project_workspace_id,
-                                                              generation=context.runtime_generation)
+            projects = get_project_workspace_service()
+            if context.project_workspace_id:
+                await projects.checkpoint(context.project_id, context.project_workspace_id, generation=context.runtime_generation)
+            else:
+                rows, _ = await projects.host_mirrors.thread_status(context.thread_id)
+                ref = projects.host_mirrors.thread_ref(rows[0])
+                if ref.backend == context.backend and ref.locator == context.locator:
+                    await projects.host_mirrors._poll_threads(rows, force=True)
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.warning("Could not save completed project process workspace=%s", context.project_workspace_id, exc_info=True)
         finally:
             from agent.modules.projects import get_project_workspace_service
-            get_project_workspace_service().running_processes.discard((context.project_workspace_id, process_id))
+            get_project_workspace_service().running_processes.discard((owner or context.project_workspace_id, process_id))
 
     async def _execute_project_operation(self, definition, parsed, context, fingerprint):
         from agent.modules.projects import get_project_workspace_service
@@ -113,6 +136,32 @@ class CodingService(CodingEngine):
         from agent.modules.projects import get_project_workspace_service
         return await get_project_workspace_service().resolve_context(
             context, allow_unready=name in {"read", "list_dir", "glob", "grep", "read_process_output", "stop_process"})
+
+    async def _persist_thread_result(self, context, result):
+        from agent.bootstrap.container import get_active_container
+        container = get_active_container()
+        if container is None or not container._persistence_ready:
+            return
+        from agent.modules.projects import get_project_workspace_service
+        projects = get_project_workspace_service(container)
+        try:
+            rows, _ = await projects.host_mirrors.thread_status(context.thread_id)
+        except KeyError:
+            return
+        try:
+            ref = projects.host_mirrors.thread_ref(rows[0])
+            if (ref.backend, ref.locator) != (context.backend, context.locator):
+                raise CodingError("stale_runtime", "Execution runtime changed before checkpointing.")
+            from agent.modules.workspaces.host_mirror import thread_storage_key
+            key = thread_storage_key(rows)
+            async with projects.host_mirrors.thread_locks.setdefault(key, asyncio.Lock()):
+                rows = await projects.host_mirrors._refresh_threads(rows, ref)
+                ref = ref.model_copy(deep=True)
+                ref.metadata["_require_running"] = True
+                result.data["persistence"] = await projects.host_mirrors.checkpoint_thread(rows, ref)
+        except Exception as exc:
+            result.data["persistence"] = {"saved": False, "status": "error", "message": str(exc)}
+            result.warnings.append("Execution finished, but thread changes could not be checkpointed. Retry saving before retiring the runtime.")
 
     async def prepare_batch(self, invocations: list[CodingInvocation]) -> ToolResult | None:
         """Authorize every operation before a batch can execute any effects."""
@@ -155,6 +204,13 @@ class CodingService(CodingEngine):
             context = await self._resolve_context(definition.name, context)
         except (CodingError, OSError, ValueError, RuntimeError) as exc:
             return self.failure(exc)
+        from agent.bootstrap.container import get_active_container
+        from agent.modules.projects.workspaces import storage_timestamp
+        from agent.shared.infrastructure.db.base import utcnow
+        container = get_active_container()
+        projects = getattr(container, "_project_workspace_service", None) if container is not None else None
+        if projects is not None:
+            projects.metrics.last_user_activity = storage_timestamp(utcnow())
         started = time.monotonic()
         # Reads must observe the current file, including when a call ID is reused.
         use_journal = definition.name != "read"
@@ -212,6 +268,13 @@ class CodingService(CodingEngine):
                 result = self.storage.bound(result, context, tail=definition.name in PROCESS_TOOLS)
                 if use_journal:
                     self.storage.complete(context, fingerprint, result)
+                if not context.project_workspace_id and context.backend != "local" and context.thread_id and definition.name in {
+                    "write", "edit", "bash", "write_process_input", "stop_process",
+                }:
+                    # Settle effects before checkpointing so a failed save cannot replay the command.
+                    await self._persist_thread_result(context, result)
+                    if use_journal:
+                        self.storage.complete(context, fingerprint, result)
                 return result
         except (CodingError, ValidationError, OSError, ValueError) as exc:
             result = self.failure(exc)

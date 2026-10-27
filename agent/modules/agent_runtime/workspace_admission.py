@@ -3,6 +3,22 @@
 from contextlib import asynccontextmanager
 from functools import wraps
 import inspect
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def _save_run(projects, *, binding=None, rows=None):
+    try:
+        if binding:
+            _, workspace, runtime = await projects.rows(binding.project_id, binding.project_workspace_id)
+            if workspace.persistence_status == "dirty" and runtime.status == "ready":
+                await projects.checkpoint(binding.project_id, binding.project_workspace_id, generation=runtime.generation)
+        elif rows:
+            await projects.host_mirrors._poll_threads(rows, force=True)
+    except Exception:
+        logger.warning("Agent run completed with files pending checkpoint.", exc_info=True)
 
 
 @asynccontextmanager
@@ -36,13 +52,19 @@ async def workspace_run(arguments):
         if rows:
             with projects.switcher.run_lease(-int(thread_storage_key(rows))):
                 arguments["workspace"] = binding_from_record(rows[0], projects.host_mirrors.thread_ref(rows[0])).model_dump()
-                yield
+                try:
+                    yield
+                finally:
+                    await asyncio.shield(_save_run(projects, rows=rows))
         else:
             yield
         return
     with projects.switcher.run_lease(binding.project_workspace_id):
         arguments["workspace"] = binding.model_dump()
-        yield
+        try:
+            yield
+        finally:
+            await asyncio.shield(_save_run(projects, binding=binding))
 
 
 def guard_workspace_run(function):

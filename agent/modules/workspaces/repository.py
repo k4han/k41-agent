@@ -38,6 +38,7 @@ def serialize_thread_workspace(record: ThreadWorkspace) -> dict[str, Any]:
         "thread_id": record.thread_id,
         "workspace": workspace.model_dump() if workspace else None,
         "host_mirror": mirror_summary(record),
+        "sync_policy": record.sync_policy,
         "created_at": record.created_at.isoformat() if record.created_at else None,
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
     }
@@ -60,6 +61,17 @@ def _binding_from_record(record: ThreadWorkspace) -> WorkspaceBinding | None:
     if execution is None:
         return None
     return binding_from_record(record, execution)
+
+
+async def _policy_for_workspace(session, ref):
+    from agent.modules.projects.workspaces import source_key
+    from agent.modules.workspaces.policies import MANUAL_APPLY, sync_policy
+    peers = (await session.execute(select(ThreadWorkspace).where(
+        ThreadWorkspace.execution_backend == ref.backend,
+        ThreadWorkspace.execution_locator == ref.locator,
+    ))).scalars().all()
+    return next((sync_policy(peer) for peer in peers if _execution_from_record(peer) is not None
+                 and source_key(_execution_from_record(peer)) == source_key(ref)), MANUAL_APPLY)
 
 
 class ThreadWorkspaceRepository:
@@ -99,6 +111,7 @@ class ThreadWorkspaceRepository:
             if record is None:
                 record = ThreadWorkspace(
                     thread_id=normalized_thread_id,
+                    sync_policy=await _policy_for_workspace(session, workspace_ref),
                     working_dir=workspace_ref.locator,
                     created_at=now,
                     updated_at=now,
@@ -108,6 +121,7 @@ class ThreadWorkspaceRepository:
                 previous_ref = _execution_from_record(record)
                 from agent.modules.projects.workspaces import source_key
                 if previous_ref is not None and source_key(previous_ref) != source_key(workspace_ref):
+                    # The policy belongs to the workspace identity; a new execution ref must not rewrite a migrated row.
                     record.host_mirror_json = "{}"
                 record.working_dir = workspace_ref.locator
                 record.updated_at = now

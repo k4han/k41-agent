@@ -2,6 +2,8 @@
 
 from agent.modules.workspaces.refs import WorkspaceBinding, WorkspaceInput, WorkspaceRef, WorkspaceScope, bind_workspace_ref, binding_from_record, workspace_ref_from_columns
 from agent.modules.workspaces.models import ThreadWorkspace
+from agent.modules.workspaces.reads import ReadConsistency, WorkspaceReadResult, WorkspaceReadService
+from agent.modules.workspaces.policies import WorkspaceSyncPolicy
 
 from agent.modules.workspaces.backends import (
     CommandResult,
@@ -137,6 +139,7 @@ from agent.modules.workspaces.github_clone import (
 )
 
 __all__ = [
+    "ReadConsistency", "WorkspaceReadResult", "WorkspaceReadService", "WorkspaceSyncPolicy",
     "is_workspace_unavailable_error",
     "binding_from_record", "create_workspace_runtime_backend", "merge_ready_workspace_metadata", "call_workspace_backend_loader",
     "NO_WORKSPACE_KEY", "NO_WORKSPACE_LABEL", "TEMP_WORKSPACE_KEY", "TEMP_WORKSPACE_LABEL",

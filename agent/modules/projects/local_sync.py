@@ -20,6 +20,7 @@ from agent.modules.projects import snapshot_worker
 from agent.modules.projects.models import ProjectWorkspace
 from agent.modules.projects.workspaces import ProjectWorkspaceError, _session, source_key
 from agent.modules.workspaces import WorkspaceRef
+from agent.modules.workspaces.policies import MANUAL_APPLY, MIRROR_STRICT, sync_policy
 
 logger = logging.getLogger(__name__)
 _WINDOWS = os.name == "nt"
@@ -97,6 +98,62 @@ def _plan(base: dict, desired: dict, current: dict, root: Path) -> tuple[list[di
                 if child.relative_to(root).as_posix() not in removals:
                     conflicts.add(name)
     return changes, sorted(conflicts)
+
+
+def plan_changes(base, desired, current, root, policy=MANUAL_APPLY):
+    changes, conflicts = _plan(base, desired, current, root)
+    if policy == MIRROR_STRICT:
+        conflicts = set(conflicts)
+        for name in base["entries"].keys() | current["entries"].keys():
+            actual = current["entries"].get(name)
+            if not _same_entry(actual, base["entries"].get(name)) and not _same_entry(actual, desired["entries"].get(name)):
+                conflicts.add(name)
+    return changes, sorted(conflicts)
+
+
+async def apply_workspace_revision(transfer, store, key, revision, baseline, root, generation, *, preview_token=None,
+                                   policy=MANUAL_APPLY, journal=None):
+    """Preview or apply a pinned revision without changing its runtime or baseline."""
+    from agent.modules.workspaces.host_mirror import validate_host_names
+    root = Path(root)
+    desired = await asyncio.to_thread(store.get_manifest, key, revision)
+    validate_host_names(desired)
+    base = await asyncio.to_thread(store.get_manifest, key, baseline) if baseline else {"version": 1, "entries": {}}
+    if root.is_symlink() or root.is_junction():
+        raise ProjectWorkspaceError("Local workspace root must not be a link.", "stale_content")
+    if not root.exists() and baseline:
+        raise ProjectWorkspaceError("The linked local directory is unavailable.", "local_sync_unsupported")
+    journal = Path(journal) if journal is not None else Path(store.root) / key / "local-sync.json"
+    if root.exists():
+        await _run_writer(_recover_replacement, root, journal)
+        await _run_writer(_sweep_temporary, root, base["entries"].keys() | desired["entries"].keys())
+        current, signatures = await asyncio.to_thread(_capture, root)
+    else:
+        current, signatures = {"version": 1, "entries": {}}, {}
+    changes, conflicts = await asyncio.to_thread(plan_changes, base, desired, current, root, policy)
+    identity = {"generation": generation, "revision": revision, "base": baseline,
+                "current": current, "path": str(root.resolve()), "policy": policy}
+    token = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    result = {"path": str(root), "revision": revision, "preview_token": token,
+              "changes": changes, "conflicts": conflicts, "applied": False}
+    if preview_token is None:
+        return result
+    if preview_token != token:
+        raise ProjectWorkspaceError("Workspace or local files changed. Preview the changes again.", "stale_content")
+    if conflicts:
+        raise ProjectWorkspaceError("Resolve local file conflicts before applying changes.", "local_sync_conflict")
+
+    def apply():
+        root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="k41-local-apply-") as stage:
+            transfer.materialize(store, key, revision, Path(stage))
+            _apply(root, Path(stage), desired, current, signatures, changes, journal=journal)
+            verified, _ = _capture(root)
+            _verify(base, desired, verified)
+    await _run_writer(apply)
+    merged = await transfer.capture(WorkspaceRef(locator=str(root)), store, key)
+    merged_revision = await asyncio.to_thread(store.put_manifest, key, merged)
+    return dict(result, applied=True, merged_revision=merged_revision)
 
 
 def _target(root: Path, name: str) -> Path:
@@ -352,14 +409,17 @@ class WorkspaceLocalSync:
                           *, preview_token: str | None = None) -> dict:
         service = self.service
         project, workspace, runtime = await service.rows(project_id, workspace_id)
-        if service.closing or project.migration_status != "ready" or workspace.kind != "shared" or runtime.status != "ready":
-            raise ProjectWorkspaceError("Recover the main workspace before synchronizing local files.", "workspace_busy")
+        supported = workspace.kind == "shared" or (workspace.kind == "github_task" and sync_policy(workspace) == MANUAL_APPLY)
+        if service.closing or project.migration_status != "ready" or not supported or runtime.status not in {"ready", "unavailable"}:
+            raise ProjectWorkspaceError("Recover the workspace before synchronizing local files.", "workspace_busy")
         link = local_link_summary(workspace, runtime)
+        if link is None and sync_policy(workspace) == MANUAL_APPLY:
+            link = {"path": str(service.host_mirrors.project_path(workspace, runtime)), "status": "pending"}
         if link is None or link["status"] == "active":
             raise ValueError("This workspace is not using a separate linked local directory.")
-        if not workspace.local_sync_revision:
+        if not workspace.local_sync_revision and WorkspaceRef.model_validate_json(workspace.source_json).backend == "local":
             raise ProjectWorkspaceError("No baseline is available for the linked directory. Existing local files have been preserved.", "local_sync_unsupported")
-        await service.switcher.reserve_idle(workspace, runtime, expected_generation)
+        await service.switcher.reserve_idle(workspace, runtime, expected_generation, allow_unavailable=runtime.status == "unavailable")
         task = asyncio.create_task(self._synchronize(project_id, workspace.id, expected_generation, link, preview_token))
         service.switcher.tasks[workspace.id] = task
 
@@ -379,40 +439,26 @@ class WorkspaceLocalSync:
                 if runtime.generation != expected_generation:
                     raise ProjectWorkspaceError("Execution runtime changed; preview the local changes again.", "stale_runtime")
                 # A preview must not apply files as a side effect of capturing the sandbox.
-                saved = await service._checkpoint(project_id, workspace.id, expected_generation, sync_host=False)
-                desired = await asyncio.to_thread(service.storage.get_manifest, str(workspace.id), saved["revision"])
-                base = await asyncio.to_thread(service.storage.get_manifest, str(workspace.id), workspace.local_sync_revision)
-                root = Path(link["path"])
-                journal = service.runtime_root / str(workspace.id) / "local-sync.json"
-                await _run_writer(_recover_replacement, root, journal)
-                await _run_writer(_sweep_temporary, root, base["entries"].keys() | desired["entries"].keys())
-                current, signatures = await asyncio.to_thread(_capture, root)
-                changes, conflicts = await asyncio.to_thread(_plan, base, desired, current, root)
-                identity = {"generation": expected_generation, "revision": saved["revision"], "base": workspace.local_sync_revision,
-                            "current": current, "path": str(root)}
-                token = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
-                result = {"path": str(root), "revision": saved["revision"], "preview_token": token,
-                          "changes": changes, "conflicts": conflicts, "applied": False}
-                if preview_token is None:
+                saved = ({"revision": workspace.head_revision} if runtime.status == "unavailable" else
+                         await service._checkpoint(project_id, workspace.id, expected_generation, sync_host=False))
+                if not saved["revision"]:
+                    raise ProjectWorkspaceError("No saved files are available.", "missing_data")
+                result = await apply_workspace_revision(service.transfer, service.storage, str(workspace.id),
+                    saved["revision"], workspace.local_sync_revision, Path(link["path"]), expected_generation,
+                    preview_token=preview_token, policy=MANUAL_APPLY,
+                    journal=service.runtime_root / str(workspace.id) / "local-sync.json")
+                if not result["applied"]:
                     return result
-                if preview_token != token:
-                    raise ProjectWorkspaceError("Workspace or linked local files changed. Preview the changes again.", "stale_content")
-                if conflicts:
-                    raise ProjectWorkspaceError("Resolve the linked local file conflicts before applying changes.", "local_sync_conflict")
-
-                def apply():
-                    with tempfile.TemporaryDirectory(prefix="k41-local-apply-") as stage:
-                        service.transfer.materialize(service.storage, str(workspace.id), saved["revision"], Path(stage))
-                        _apply(root, Path(stage), desired, current, signatures, changes, journal=journal)
-                        verified, _ = _capture(root)
-                        _verify(base, desired, verified)
-                await _run_writer(apply)
                 session = await _session()
                 async with session:
-                    await session.execute(update(ProjectWorkspace).where(ProjectWorkspace.id == workspace.id).values(local_sync_revision=saved["revision"]))
+                    state = json.loads(workspace.host_mirror_json or "{}")
+                    state.update(path=link["path"], revision=saved["revision"], remote_revision=saved["revision"],
+                                 status="synced", generation=expected_generation, conflicts=[], last_error="")
+                    await session.execute(update(ProjectWorkspace).where(ProjectWorkspace.id == workspace.id).values(
+                        local_sync_revision=saved["revision"], host_mirror_json=json.dumps(state)))
                     await session.commit()
                 service._notify_runtime_changed(project_id, workspace.id)
-                return dict(result, applied=True)
+                return result
         finally:
             if service.switcher.tasks.get(workspace_id) is owner:
                 service.switcher.tasks.pop(workspace_id, None)

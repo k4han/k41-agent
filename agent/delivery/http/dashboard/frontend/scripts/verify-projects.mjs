@@ -26,6 +26,9 @@ let projects = [makeProject(1, 'Empty project'), makeProject(2, 'Other project')
 const mutations = [];
 const localSyncRequests = [];
 const runtimeRequests = [];
+const switchRequests = [];
+const chatRequests = [];
+let switchFailure = false;
 let localSyncConflict = true;
 let unavailable = false;
 let delayRuntimeFailure = false;
@@ -51,6 +54,14 @@ const fixtures = {
 };
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/api/chat/events') {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    chatRequests.push(JSON.parse(raw));
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.end();
+    return;
+  }
   if (url.pathname.endsWith('/sessions/events')) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.write('event: snapshot\ndata: {"sessions":[]}\n\n');
@@ -65,6 +76,16 @@ const server = http.createServer(async (req, res) => {
     const body = raw ? JSON.parse(raw) : {};
     const send = data => res.end(JSON.stringify(data));
     const instructions = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/instructions$/);
+    const runtimeSwitch = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/runtime\/switch$/);
+    if (runtimeSwitch) {
+      switchRequests.push({ projectId: Number(runtimeSwitch[1]), body });
+      if (switchFailure) {
+        res.writeHead(409); send({ detail: 'Another conversation is running.' }); return;
+      }
+      const project = projects.find(item => item.id === Number(runtimeSwitch[1]));
+      project.runtime.transition = { operation_id: 'new-chat-switch', phase: 'saving', target_backend: body.backend };
+      res.writeHead(202); send({ transition: project.runtime.transition }); return;
+    }
     if (/\/runtime\/(ensure|recovery)$/.test(url.pathname)) {
       runtimeRequests.push({ path: url.pathname, body });
       res.writeHead(500); send({ detail: 'Chat navigation must not initialize execution.' }); return;
@@ -439,6 +460,56 @@ try {
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: project details, instruction editing and conflicts, unsaved guards, read-only skills, resources, downloads, errors, and direct links.');
 
+  for (const entry of ['catalog', 'detail', 'sidebar']) {
+    const project = makeProject(1, 'Sandbox switch project');
+    project.workspace = { ...project.workspace, project_id: 1, project_workspace_id: 51, runtime_generation: 1 };
+    projects = [project];
+    fixtures['/dashboard-api/catalog'].backends = [
+      { name: 'local', title: 'Local', enabled: true },
+      { name: 'daytona', title: 'Daytona', enabled: true },
+    ];
+    await js(`localStorage.setItem('k41-dashboard-sidebar', 'expanded')`);
+    await call('Page.navigate', { url: `${base}${entry === 'detail' ? '/projects/1' : '/projects'}` });
+    await until(() => js(entry === 'detail' ? `document.querySelector('.page-title')?.textContent === 'Sandbox switch project'`
+      : `!!document.querySelector('.project-card[aria-label="Sandbox switch project"]')`), `${entry} project entry`);
+    if (entry === 'sidebar') {
+      await until(() => js(`!!document.querySelector('[aria-label="New chat in Sandbox switch project"]')`), 'sidebar new chat');
+      await js(`document.querySelector('[aria-label="New chat in Sandbox switch project"]').click()`);
+    } else await clickText('New chat');
+    await until(() => js(`location.pathname === '/chat' && !!document.querySelector('.composer-workspace-trigger')`), `${entry} draft chat`);
+    await js(`document.querySelector('.composer-workspace-trigger').click()`);
+    await until(() => js(`!!document.querySelector('.composer-runtime-picker')`), `${entry} project runtime before first message`);
+    assert.equal(await js(`!!document.querySelector('.workspace-selector')`), false, 'project draft must retain its shared workspace');
+    await js(`document.querySelector('[aria-label="Execution backend"]').click()`);
+    await js(`[...document.querySelectorAll('[role="option"]')].find(el => el.textContent.trim() === 'Daytona').click()`);
+    const beforeSwitch = switchRequests.length;
+    if (entry === 'catalog') {
+      switchFailure = true;
+      await clickText('Switch backend');
+      await until(() => js(`document.querySelector('.composer-runtime-picker [role="alert"]')?.textContent.includes('Another conversation')`), 'draft switch failure');
+      assert.equal(await js(`document.querySelector('.composer-workspace-backend').textContent.includes('Local')`), true);
+      switchFailure = false;
+    }
+    await clickText('Switch backend');
+    await until(() => switchRequests.length === beforeSwitch + (entry === 'catalog' ? 2 : 1), `${entry} draft switch accepted`);
+    assert.deepEqual(switchRequests.at(-1), { projectId: 1, body: { backend: 'daytona', project_workspace_id: 51, expected_generation: 1 } });
+    await until(() => js(`document.querySelector('.chat-prompt-input').disabled`), 'draft messages wait for switching');
+    assert.equal(chatRequests.length, entry === 'catalog' ? 0 : entry === 'detail' ? 1 : 2, 'switching must not create a thread');
+    const execution = { backend: 'daytona', locator: `sandbox-${entry}`, label: project.label, metadata: { root: '/workspace' } };
+    project.workspace = { ...project.workspace, execution, runtime_generation: 2 };
+    project.runtime = { status: 'ready', generation: 2,
+      transition: { operation_id: 'new-chat-switch', phase: 'completed', target_backend: 'daytona' } };
+    await js(`dispatchEvent(new CustomEvent('k41:workspace-runtime-changed', { detail: { project_workspace_id: 51 } }))`);
+    await until(() => js(`document.querySelector('.composer-workspace-backend').textContent.includes('Daytona') && !document.querySelector('.chat-prompt-input').disabled`), `${entry} draft follows switched backend`);
+    await js(`document.querySelector('[aria-label="Close project picker"]').click()`);
+    const beforeChat = chatRequests.length;
+    await input('.chat-prompt-input', 'Explain this project.');
+    await js(`document.querySelector('[aria-label="Send message"]').click()`);
+    await until(() => chatRequests.length === beforeChat + 1, `${entry} first message`);
+    assert.deepEqual(chatRequests.at(-1).workspace, execution, 'first message uses the switched project files');
+  }
+  console.log('PASS: catalog, detail, and sidebar project drafts switch to sandbox before the first message, show failures, and block sends during switching.');
+
   const prepareLostProject = (modalEnabled = true) => {
     const project = makeProject(1, 'Lost Modal project');
     project.workspace = { ...project.workspace, project_id: 1, project_workspace_id: 51, runtime_generation: 7,
@@ -455,7 +526,7 @@ try {
     assert.equal(await js(`document.querySelector('.composer-workspace-backend').textContent.includes('Modal')`), true, 'cloud execution preference is preserved');
     if (fixtures['/dashboard-api/catalog'].backends.find(backend => backend.name === 'modal').enabled) {
       await js(`document.querySelector('.composer-workspace-trigger').click()`);
-      await until(() => js(`[...document.querySelectorAll('.composer-workspace-popover input')].some(input => input.value === 'sb-expired')`), 'previous cloud execution is retained');
+      await until(() => js(`document.querySelector('.workspace-storage-summary')?.textContent.includes('sb-expired')`), 'previous cloud execution is retained');
       await js(`document.querySelector('[aria-label="Close project picker"]').click()`);
     }
   };

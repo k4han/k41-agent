@@ -2,29 +2,45 @@ import { batch, createEffect, createMemo, createSignal, onCleanup, onMount } fro
 
 import { apiFetch, postJson } from "@/lib/api";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
-import type { ThreadRuntimePayload, WorkspaceBackendKey, WorkspaceBinding } from "@/types";
+import type { ProjectSummary, ThreadRuntimePayload, WorkspaceBackendKey, WorkspaceBinding } from "@/types";
 
 export function runtimeTransitionBusy(runtime: ThreadRuntimePayload["runtime"]): boolean {
   const phase = runtime?.transition?.phase;
   return Boolean(phase && phase !== "completed" && phase !== "failed");
 }
 
-export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (binding: WorkspaceBinding) => void) {
+function payloadTransitionBusy(payload: ThreadRuntimePayload): boolean {
+  const phase = payload.transition?.phase;
+  return runtimeTransitionBusy(payload.runtime) || Boolean(phase && phase !== "completed" && phase !== "failed");
+}
+
+export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (binding: WorkspaceBinding) => void,
+  projectId: () => number | undefined = () => undefined) {
   const [payload, setPayload] = createSignal<ThreadRuntimePayload>({ workspace: null, runtime: null });
   const [requesting, setRequesting] = createSignal(false);
   const [error, setError] = createSignal("");
-  const busy = createMemo(() => requesting() || runtimeTransitionBusy(payload().runtime));
+  const busy = createMemo(() => requesting() || payloadTransitionBusy(payload()));
   let revision = 0;
+  const scope = () => threadId() ? `thread:${threadId()}` : projectId() ? `project:${projectId()}` : "";
 
   const refresh = async () => {
     const thread = threadId();
+    const project = projectId();
+    const currentScope = scope();
     const version = ++revision;
-    if (!thread) return null;
-    const result = await apiFetch<ThreadRuntimePayload>(`/dashboard-api/workspace/runtime/${encodeURIComponent(thread)}`);
-    if (version !== revision || thread !== threadId()) return null;
+    if (!currentScope) return null;
+    let result: ThreadRuntimePayload;
+    if (thread) {
+      result = await apiFetch<ThreadRuntimePayload>(`/dashboard-api/workspace/runtime/${encodeURIComponent(thread)}`);
+    } else {
+      const summary = await apiFetch<ProjectSummary>(`/dashboard-api/projects/${project}`);
+      result = { ...summary, runtime: summary.runtime || null,
+        kind: summary.workspace.project_workspace_id && summary.migration_status === "ready" ? "shared" : undefined };
+    }
+    if (version !== revision || currentScope !== scope()) return null;
     const bindingChanged = JSON.stringify(result.workspace) !== JSON.stringify(payload().workspace);
     batch(() => {
-      if (runtimeTransitionBusy(payload().runtime) && !runtimeTransitionBusy(result.runtime)) setError("");
+      if (payloadTransitionBusy(payload()) && !payloadTransitionBusy(result)) setError("");
       setPayload(result);
       if (result.workspace && bindingChanged) applyWorkspace(result.workspace);
     });
@@ -33,7 +49,7 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
 
   const refreshQuietly = () => { void refresh().catch(() => undefined); };
   createEffect(() => {
-    threadId();
+    scope();
     revision += 1;
     batch(() => {
       setPayload({ workspace: null, runtime: null });
@@ -43,7 +59,7 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
     refreshQuietly();
   });
   createEffect(() => {
-    const switching = runtimeTransitionBusy(payload().runtime);
+    const switching = payloadTransitionBusy(payload());
     if (!payload().workspace && !switching) return;
     const timer = window.setInterval(refreshQuietly, switching ? 2000 : 5000);
     onCleanup(() => window.clearInterval(timer));
@@ -64,20 +80,23 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
     });
   });
 
-  const switchBackend = async (backend: WorkspaceBackendKey) => {
+  const switchBackend = async (backend: WorkspaceBackendKey, previewToken?: string) => {
     if (busy()) return;
     const binding = payload().workspace;
     const thread = threadId();
+    const currentScope = scope();
     if (!binding) return;
     if (!binding.project_id) {
       const generation = payload().host_mirror?.generation;
       if (!generation || !thread) return;
       setRequesting(true); setError("");
       try {
-        await postJson("/dashboard-api/workspace/runtime/switch", { thread_id: thread, backend, expected_generation: generation });
+        await postJson("/dashboard-api/workspace/runtime/switch", { thread_id: thread, backend, expected_generation: generation,
+          ...(previewToken ? { preview_token: previewToken } : {}) });
         if (thread === threadId()) await refresh();
       } catch (reason) {
         if (thread === threadId()) setError(reason instanceof Error ? reason.message : "Failed to switch execution backend.");
+        if (previewToken) throw reason;
       } finally { if (thread === threadId()) setRequesting(false); }
       return;
     }
@@ -88,25 +107,56 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
       const result = await postJson<{ transition: NonNullable<ThreadRuntimePayload["runtime"]>["transition"] }>(
         `/dashboard-api/projects/${binding.project_id}/runtime/switch`, {
           backend, project_workspace_id: binding.project_workspace_id, expected_generation: binding.runtime_generation,
+          ...(previewToken ? { preview_token: previewToken } : {}),
         },
       );
-      if (thread !== threadId()) return;
+      if (currentScope !== scope()) return;
       // Retain the accepted state even when the first status refresh loses its connection.
       setPayload((current) => ({ ...current, runtime: { status: "ready", generation: binding.runtime_generation!, transition: result.transition } }));
       await refresh();
     } catch (reason) {
-      if (thread === threadId()) {
+      if (currentScope === scope()) {
         setError(reason instanceof Error ? reason.message : "Failed to switch execution backend.");
         refreshQuietly();
       }
+      if (previewToken) throw reason;
     } finally {
-      if (thread === threadId()) setRequesting(false);
+      if (currentScope === scope()) setRequesting(false);
     }
   };
-  const confirmRecovery = async (action: "restore" | "local") => {
-    if (busy()) return;
+  const abandon = async () => {
     const binding = payload().workspace;
     const thread = threadId();
+    const currentScope = scope();
+    const operationId = payload().runtime?.transition?.operation_id || payload().transition?.operation_id;
+    if (!binding || !operationId) return;
+    setRequesting(true);
+    setError("");
+    try {
+      if (!binding.project_id) {
+        const generation = payload().host_mirror?.generation;
+        if (!generation || !thread) return;
+        await postJson("/dashboard-api/workspace/runtime/abandon", { thread_id: thread, expected_generation: generation,
+          expected_operation_id: operationId });
+      } else if (binding.project_workspace_id) {
+        await postJson(`/dashboard-api/projects/${binding.project_id}/runtime/abandon`, {
+          project_workspace_id: binding.project_workspace_id, expected_operation_id: operationId,
+        });
+      }
+      if (currentScope === scope()) await refresh();
+    } catch (reason) {
+      if (currentScope === scope()) {
+        setError(reason instanceof Error ? reason.message : "Failed to abandon the switch.");
+        refreshQuietly();
+      }
+    } finally {
+      if (currentScope === scope()) setRequesting(false);
+    }
+  };
+  const confirmRecovery = async (action: "restore" | "local", previewToken?: string) => {
+    if (busy()) return;
+    const binding = payload().workspace;
+    const currentScope = scope();
     if (!binding?.project_id || !binding.project_workspace_id || !binding.runtime_generation) return;
     setRequesting(true);
     setError("");
@@ -114,18 +164,20 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
       await postJson<{ workspace: WorkspaceBinding }>(
         `/dashboard-api/projects/${binding.project_id}/runtime/recovery`, {
           action, project_workspace_id: binding.project_workspace_id, expected_generation: binding.runtime_generation,
+          ...(previewToken ? { preview_token: previewToken } : {}),
         },
       );
-      if (thread !== threadId()) return;
+      if (currentScope !== scope()) return;
       await refresh();
     } catch (reason) {
-      if (thread === threadId()) {
+      if (currentScope === scope()) {
         setError(reason instanceof Error ? reason.message : "Failed to recover the workspace.");
         refreshQuietly();
       }
+      if (previewToken) throw reason;
     } finally {
-      if (thread === threadId()) setRequesting(false);
+      if (currentScope === scope()) setRequesting(false);
     }
   };
-  return { payload, busy, error, refresh, switchBackend, confirmRecovery };
+  return { payload, busy, error, refresh, switchBackend, abandon, confirmRecovery };
 }

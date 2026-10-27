@@ -119,7 +119,7 @@ class SandboxWorker:
             return await asyncio.to_thread(self.filesystem_monitors[root].poll, request.get("since"),
                                            force=bool(request.get("force")))
         if request.get("operation") == "environment":
-            from agent.modules.prompt_variables import get_execution_environment
+            from agent.modules.prompt_variables.environment import get_execution_environment
 
             return get_execution_environment(resolve_shell())
         if request.get("operation") == "prepare_batch":

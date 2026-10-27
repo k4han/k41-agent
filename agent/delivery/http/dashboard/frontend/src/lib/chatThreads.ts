@@ -23,6 +23,7 @@ import type { ProjectSummary, WorkspaceBinding, WorkspaceRef } from "@/types";
 
 export type NewChatNavigationState = {
   newChatId: string;
+  projectId?: number;
   workspace: WorkspaceRef | null;
 };
 

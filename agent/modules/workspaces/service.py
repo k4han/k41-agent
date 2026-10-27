@@ -1319,7 +1319,11 @@ async def delete_thread_workspace(thread_id: str) -> WorkspaceRef | None:
         lifecycle = None
     if lifecycle is not None:
         try:
-            await lifecycle.delete_workspace()
+            retired = None
+            if active is not None and active._persistence_ready and workspace.backend != LOCAL_BACKEND:
+                retired = await get_project_workspace_service().retire_matching(workspace, "delete", deleting_thread_id=thread_id)
+            if retired is None:
+                await lifecycle.delete_workspace()
         except IntegrationUnavailableError as exc:
             logger.warning(
                 "Cloud backend for thread %s is unavailable; dropping local record only: %s",

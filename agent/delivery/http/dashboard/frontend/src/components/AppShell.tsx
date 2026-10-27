@@ -405,6 +405,7 @@ export function AppShell(props: {
       navigate("/chat", {
         state: {
           newChatId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          projectId: group.id,
           workspace: workspace ? cloneValue(unwrap(workspace)) : null,
         },
       });

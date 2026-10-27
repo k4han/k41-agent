@@ -11,6 +11,7 @@ export function notifyProjectsChanged() {
 
 export function projectChatState(workspace: WorkspaceRef | WorkspaceBinding) {
   return { newChatId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    projectId: "execution" in workspace ? workspace.project_id : undefined,
     workspace: "execution" in workspace ? workspace.execution : workspace };
 }
 

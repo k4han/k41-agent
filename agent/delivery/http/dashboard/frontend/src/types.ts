@@ -323,6 +323,7 @@ export type ProjectPersistence = {
 };
 
 export type ProjectWorkspaceSummary = {
+  sync_policy?: "manual_apply" | "mirror_strict";
   host_mirror?: WorkspaceHostMirrorState | null;
   id: number;
   kind: "shared" | "github_task" | "legacy";
@@ -340,6 +341,7 @@ export type ProjectLocalLink = {
 };
 
 export type WorkspaceHostMirrorState = {
+  sync_policy?: "manual_apply" | "mirror_strict";
   backend_status?: string | null;
   path: string;
   status: "pending" | "syncing" | "synced" | "conflict" | "error";
@@ -363,7 +365,7 @@ export type ProjectLocalSyncPreview = {
 
 export type WorkspaceRuntimeTransition = {
   operation_id: string;
-  phase: "saving" | "provisioning" | "restoring" | "verifying" | "activating" | "completed" | "failed";
+  phase: "saving" | "provisioning" | "restoring" | "verifying" | "activating" | "completed" | "failed" | "allocation_unknown";
   target_backend: WorkspaceBackendKey;
   revision?: string | null;
   error?: string;
@@ -387,6 +389,8 @@ export type WorkspaceRuntimeSummary = {
 };
 
 export type ThreadRuntimePayload = {
+  transition?: WorkspaceRuntimeTransition | null;
+  sync_policy?: "manual_apply" | "mirror_strict";
   host_mirror?: WorkspaceHostMirrorState | null;
   workspace: WorkspaceBinding | null;
   runtime: WorkspaceRuntimeSummary | null;
@@ -397,6 +401,7 @@ export type ThreadRuntimePayload = {
 };
 
 export type ProjectSummary = {
+  sync_policy?: "manual_apply" | "mirror_strict";
   host_mirror?: WorkspaceHostMirrorState | null;
   id: number;
   key: string;

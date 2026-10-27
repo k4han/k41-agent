@@ -1,0 +1,100 @@
+{
+  "completed_on": "2026-10-26",
+  "timezone": "Asia/Bangkok",
+  "originally_reviewed_commit": "216bb8c3b5aec1238913f25de849d28a7d78659f",
+  "completion_commit": "56f689f3e8fb922efaf590c94ff1d2f6b2457dce",
+  "reviewed_scope_unchanged_between_commits": [
+    "agent/modules/projects",
+    "agent/modules/workspaces",
+    "tests/test_host_mirror.py",
+    "tests/test_project_workspaces.py",
+    "tests/test_project_local_sync.py",
+    "tests/test_project_storage.py"
+  ],
+  "tests": {
+    "command": "uv run --locked --no-sync pytest tests/test_host_mirror.py tests/test_project_workspaces.py tests/test_project_local_sync.py tests/test_project_storage.py -q",
+    "exit_code": 0,
+    "passed": 192,
+    "skipped": 5,
+    "elapsed_seconds": 1046.84,
+    "real_cloud_provider_validation": false
+  },
+  "probe_command": "uv run --locked --no-sync python docs/research/sandbox-2026-10-25/evidence/workspace_contract_probe.py",
+  "probe": {
+    "synthetic_inputs_only": true,
+    "real_provider_calls": 0,
+    "path_resolution": [
+      {
+        "input": "src/main.py",
+        "provider_helper": {
+          "value": "/workspace/src/main.py"
+        },
+        "saved_browser": {
+          "value": "src/main.py"
+        }
+      },
+      {
+        "input": "../outside.txt",
+        "provider_helper": {
+          "value": "/outside.txt"
+        },
+        "saved_browser": {
+          "error": "ValueError",
+          "message": "Path escapes workspace."
+        }
+      },
+      {
+        "input": "/other/file.txt",
+        "provider_helper": {
+          "value": "/other/file.txt"
+        },
+        "saved_browser": {
+          "error": "ValueError",
+          "message": "Path escapes workspace."
+        }
+      },
+      {
+        "input": "C:\\project\\file.txt",
+        "provider_helper": {
+          "value": "/workspace/C:/project/file.txt"
+        },
+        "saved_browser": {
+          "value": "C:/project/file.txt"
+        }
+      }
+    ],
+    "live_missing_file": {
+      "text_result": "SYNTHETIC_SAVED_OLD_CONTENT",
+      "structured_result": {
+        "content": "SYNTHETIC_SAVED_OLD_CONTENT",
+        "saved_revision": "synthetic-revision",
+        "last_saved_at": "2026-10-25T00:00:00Z",
+        "data_source": "saved",
+        "stale": true
+      }
+    },
+    "independent_edits": {
+      "manual_local_sync": [
+        [
+          {
+            "path": "added.txt",
+            "action": "add"
+          }
+        ],
+        []
+      ],
+      "automatic_host_mirror": [
+        [
+          {
+            "path": "added.txt",
+            "action": "add"
+          }
+        ],
+        [
+          "file.txt"
+        ]
+      ]
+    },
+    "cloud_mirror_uses_original_local_path": true
+  }
+}

@@ -16,6 +16,10 @@ export function WorkspaceStorageStatus(props: {
   return <div class="workspace-storage-summary">
     <p>Workspace: <strong>{props.name || "main"}</strong></p>
     <p>Working location: <code>{location()}</code></p>
+    <Show when={props.execution.backend === "local"}><p>Commands run directly on this computer with the application's permissions.</p></Show>
+    <Show when={props.execution.metadata?.files_restored && props.execution.metadata?.environment_state === "unknown"}>
+      <p>Files have been restored. Installed dependencies and running processes have not been restored.</p>
+    </Show>
     <Show when={props.persistence}>{(saved) => <>
       <p role="status">{workspaceSaveLabel(saved())}
         <Show when={saved().last_saved_at}> · {new Date(saved().last_saved_at!).toLocaleString()}</Show>

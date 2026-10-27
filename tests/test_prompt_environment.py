@@ -142,7 +142,10 @@ async def test_local_variables_use_configured_coding_shell(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_worker_reports_its_own_environment(monkeypatch):
+@pytest.mark.parametrize("package_export", [True, False])
+async def test_worker_reports_its_own_environment(monkeypatch, package_export):
+    if not package_export:
+        monkeypatch.delattr("agent.modules.prompt_variables.get_execution_environment")
     monkeypatch.setattr("agent.modules.tools.coding.remote_worker.resolve_shell", lambda: "/bin/sh")
     worker = object.__new__(SandboxWorker)
     response = await worker.dispatch({"operation": "environment"})

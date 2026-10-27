@@ -731,7 +731,7 @@ export function WorkspaceExplorer(props: {
       }
     };
     const filePath = activeFilePath();
-    const diffPath = activeTab() === "changes" ? expandedChangePath() : "";
+    const diffPath = lastPrimaryTab() === "changes" ? expandedChangePath() : "";
     try {
       await Promise.all([
         reloadWithExpansion(),
@@ -852,6 +852,9 @@ export function WorkspaceExplorer(props: {
   createEffect(on(activeTab, (tab) => {
     const path = fileTabPath(tab);
     if (path) void loadFile(path);
+  }, { defer: true }));
+
+  createEffect(on(lastPrimaryTab, (tab) => {
     if (tab === "changes" && expandedChangePath()) void loadDiff(expandedChangePath());
   }, { defer: true }));
 

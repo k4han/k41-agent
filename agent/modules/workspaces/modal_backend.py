@@ -172,6 +172,10 @@ async def create_modal_workspace(*, label: str | None = None, on_created=None) -
     }
     if idle_timeout_seconds > 0:
         create_kwargs["idle_timeout"] = idle_timeout_seconds
+    from agent.modules.workspaces.transitions import RuntimeTransitionCoordinator
+    operation_id = RuntimeTransitionCoordinator.operation_id(label)
+    if operation_id:
+        create_kwargs["tags"] = {"k41_operation_id": operation_id, "name": label}
     if image_ref:
         create_kwargs["image"] = (
             modal.Image.from_registry(image_ref).apt_install("git")
@@ -532,34 +536,11 @@ def _raise_if_modal_unavailable(
 
 
 def resolve_modal_path(root: str, path: str | None = None) -> str:
+    from agent.modules.workspaces.posix_utils import resolve_remote_path
     normalized_root = _normalize_posix_path(root)
     if not posixpath.isabs(normalized_root):
-        normalized_root = _normalize_posix_path(f"/{normalized_root}")
-    raw_path = str(path or "").strip()
-    if not raw_path or raw_path == ".":
-        return normalized_root
-    if any(part == ".." for part in raw_path.replace("\\", "/").split("/")):
-        raise ValueError(f"Path escapes workspace: {path}")
-
-    normalized_input = _normalize_posix_path(raw_path)
-    if normalized_root == "/":
-        if posixpath.isabs(normalized_input):
-            return normalized_input
-        return _normalize_posix_path(posixpath.join(normalized_root, normalized_input))
-    if normalized_input == normalized_root or normalized_input.startswith(
-        f"{normalized_root}/"
-    ):
-        target = normalized_input
-    elif posixpath.isabs(normalized_input):
-        raise ValueError(f"Path escapes workspace: {path}")
-    else:
-        target = _normalize_posix_path(
-            posixpath.join(normalized_root, normalized_input)
-        )
-
-    if target != normalized_root and not target.startswith(f"{normalized_root}/"):
-        raise ValueError(f"Path escapes workspace: {path}")
-    return target
+        normalized_root = "/" + normalized_root
+    return resolve_remote_path(normalized_root, path)
 
 
 def modal_relative_path(root: str, path: str) -> str:

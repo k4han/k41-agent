@@ -14,7 +14,8 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
   runtimePayload?: ThreadRuntimePayload;
   runtimeBusy?: boolean;
   runtimeError?: string;
-  onSwitchBackend?: (backend: WorkspaceBackendKey) => Promise<void>;
+  onSwitchBackend?: (backend: WorkspaceBackendKey, previewToken?: string) => Promise<void>;
+  onAbandonBackend?: () => Promise<void>;
 }) {
   const [open, setOpen] = createSignal(false);
   const [nestedDialogOpen, setNestedDialogOpen] = createSignal(false);
@@ -164,7 +165,8 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
             />}>
               <WorkspaceRuntimePicker payload={props.runtimePayload!} busy={Boolean(props.runtimeBusy)}
                 threadId={props.threadId}
-                disabled={props.disabled} error={props.runtimeError || ""} onSwitch={props.onSwitchBackend!} portalMount={panelRef} />
+                disabled={props.disabled} error={props.runtimeError || ""} onSwitch={props.onSwitchBackend!}
+                onAbandon={props.onAbandonBackend} portalMount={panelRef} />
             </Show>
           </div>
         </Portal>

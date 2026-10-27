@@ -1,0 +1,59 @@
+{
+  "research_date": "2026-10-25",
+  "client_timezone": "Asia/Bangkok",
+  "repository_commit": "216bb8c3b5aec1238913f25de849d28a7d78659f",
+  "initial_worktree_clean": true,
+  "test_run": {
+    "command": "uv run --locked --no-sync pytest tests/test_coding_v2_approval.py tests/test_sandbox_transport.py tests/test_sandbox_status.py tests/test_remote_coding.py -q",
+    "passed": 83,
+    "skipped": 2,
+    "failed": 0,
+    "duration_seconds": 41.57,
+    "skip_reasons_in_source": [
+      "Sandbox daemon requires a POSIX host.",
+      "Sandbox transport uses a Linux daemon."
+    ],
+    "real_cloud_providers_exercised": false
+  },
+  "local_boundary_probe": {
+    "script": "local_boundary_probe.py",
+    "invocation": "uv run --locked --no-sync python docs/research/sandbox-2026-10-25/evidence/local_boundary_probe.py",
+    "original_execution_location": "temporary research directory outside the repository",
+    "result": {
+      "platform": "win32",
+      "synthetic_files_only": true,
+      "file_tool_read": "permission_denied",
+      "shell_exit_code": 0,
+      "shell_read_outside_workspace": true,
+      "shell_wrote_controller_canary": true
+    },
+    "scope": "Direct invocation of the existing CodingEngine, Permissions, FileService and ProcessManager with synthetic temporary files.",
+    "limitations": [
+      "Does not exercise dashboard authentication or tool catalog admission.",
+      "Assumes shell access is available and the shell command is not denied by a shell-specific policy.",
+      "Does not modify real approval records or credentials.",
+      "Does not demonstrate escape from a cloud provider sandbox.",
+      "Does not establish behavior on Linux or macOS.",
+      "Temporary synthetic files are retained for inspection."
+    ]
+  },
+  "locked_dependencies": {
+    "deepagents": "0.7.26",
+    "langchain-core": "1.6.11",
+    "langgraph": "1.2.15"
+  },
+  "observed_test_environment": {
+    "python": "3.13.15",
+    "platform": "win32",
+    "installed_dependency_versions_match_lock": true
+  },
+  "upstream_revisions": {
+    "openai/codex": "970111f6cb62cc02fe36a82ea7d71b37a2889c97",
+    "anomalyco/opencode": "450e7b92412c780a7b5a75226bb8d49aaca24e22",
+    "google-gemini/gemini-cli": "cd1b45c2db0a5ea7b7fc3b67c1ba5879601d6005",
+    "langchain-ai/deepagents": "f26eb54c9b9f66d2ea7edbb9748413d58744534d"
+  },
+  "application_runtime_changed_by_research": false,
+  "dependencies_changed_by_research": false,
+  "external_cli_binaries_built_or_run": false
+}

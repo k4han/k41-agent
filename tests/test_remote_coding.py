@@ -410,8 +410,13 @@ async def test_remote_job_ownership_includes_sandbox_locator(remote_coding):
 def test_bundle_imports_without_application_dependencies(tmp_path):
     bundle = tmp_path / "runtime.zip"
     bundle.write_bytes(build_runtime_bundle())
-    code = ("import sys; sys.path.insert(0,sys.argv[1]); "
+    code = ("import asyncio, sys; sys.path.insert(0,sys.argv[1]); "
             "from agent.modules.tools.coding.remote_worker import SandboxWorker; "
+            "from agent.modules.prompt_variables.environment import get_execution_environment; "
+            "from agent.modules.tools.coding.processes import resolve_shell; "
+            "worker = object.__new__(SandboxWorker); "
+            "environment = asyncio.run(worker.dispatch({'operation': 'environment'})); "
+            "assert environment == get_execution_environment(resolve_shell()); "
             "assert 'pydantic' not in sys.modules; assert 'langchain_core' not in sys.modules")
     subprocess.run([sys.executable, "-I", "-c", code, str(bundle)], cwd=tmp_path, check=True, timeout=15)
 
