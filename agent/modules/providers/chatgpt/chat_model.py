@@ -8,6 +8,7 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 import openai
 
 from agent.modules.providers.chatgpt.auth import USAGE_URL
+from agent.modules.providers.chatgpt.streaming import ResponsesClient
 from agent.modules.providers.openai_compatible.chat_model import OpenAICompatibleChatModel
 
 
@@ -93,8 +94,9 @@ class ChatGPTChatModel(OpenAICompatibleChatModel):
 
     def _stream_responses(self, *args: Any, **kwargs: Any) -> Iterator[ChatGenerationChunk]:
         completed = False
+        request_model = self.model_copy(update={"root_client": ResponsesClient(self.root_client)})
         try:
-            for chunk in super()._stream_responses(*args, **kwargs):
+            for chunk in super(ChatGPTChatModel, request_model)._stream_responses(*args, **kwargs):
                 completed = self._check_chunk(chunk) or completed
                 yield chunk
         except (ValueError, openai.APIStatusError) as exc:
@@ -104,8 +106,11 @@ class ChatGPTChatModel(OpenAICompatibleChatModel):
 
     async def _astream_responses(self, *args: Any, **kwargs: Any) -> AsyncIterator[ChatGenerationChunk]:
         completed = False
+        request_model = self.model_copy(update={
+            "root_async_client": ResponsesClient(self.root_async_client, asynchronous=True),
+        })
         try:
-            async for chunk in super()._astream_responses(*args, **kwargs):
+            async for chunk in super(ChatGPTChatModel, request_model)._astream_responses(*args, **kwargs):
                 completed = self._check_chunk(chunk) or completed
                 yield chunk
         except (ValueError, openai.APIStatusError) as exc:
