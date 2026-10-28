@@ -49,24 +49,25 @@ export function ConfigPage() {
     load();
   });
 
-  const categories = createMemo(() => {
+  const runtimeCategories = createMemo(() => {
     const payload = data();
     if (!payload) return [];
     const byCategory = payload.by_category as Record<string, Record<string, SettingInfo>>;
-    return Object.keys(byCategory).map((category) => ({
-      id: category,
-      label: categoryLabel(category),
-    }));
+    return Object.entries(byCategory).filter(([category]) => category !== "preferences");
   });
 
+  const categories = createMemo(() =>
+    runtimeCategories().map(([category]) => ({
+      id: category,
+      label: categoryLabel(category),
+    })),
+  );
+
   const filteredCategories = createMemo(() => {
-    const payload = data();
-    if (!payload) return [];
     const needle = search().trim().toLowerCase();
     const catFilter = selectedCategory();
-    const byCategory = payload.by_category as Record<string, Record<string, SettingInfo>>;
 
-    return Object.entries(byCategory)
+    return runtimeCategories()
       .filter(([category]) => catFilter === "all" || category === catFilter)
       .map(([category, settings]) => ({
         category,
