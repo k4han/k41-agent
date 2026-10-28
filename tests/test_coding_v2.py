@@ -297,9 +297,41 @@ async def test_process_timeout_and_stop(coding):
     result = await invoke(service, context, "bash", command=python_command("import time; time.sleep(30)"), yield_time_ms=0)
     job = service.processes.get(context, result.data["process_id"])
     started = time.monotonic()
-    await asyncio.wait_for(service.processes.stop(job), 8)
+    stopped = await asyncio.wait_for(invoke(service, context, "stop_process", process_id=job.id), 8)
     assert time.monotonic() - started < 8
     assert job.process.poll() is not None
+    assert stopped.status == "success" and stopped.error is None
+    assert stopped.data["state"] == "cancelled"
+    assert stopped.content.endswith("\n\nCommand was cancelled.")
+    repeated = await invoke(service, context, "stop_process", process_id=job.id)
+    assert repeated.status == "success" and repeated.error is None
+    observed = await invoke(service, context, "read_process_output", process_id=job.id)
+    assert observed.status == "error" and observed.error.code == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_stop_process_reports_real_errors(coding, monkeypatch):
+    service, context, workspace = coding
+    missing = await invoke(service, context, "stop_process", process_id="missing")
+    assert missing.status == "error" and missing.error.code == "not_found"
+    started = await invoke(service, context, "bash", command=python_command("import time; time.sleep(30)"), yield_time_ms=0)
+    process_id = started.data["process_id"]
+    try:
+        foreign = await invoke(service, replace(context, thread_id="foreign"), "stop_process", process_id=process_id)
+        assert foreign.status == "error" and foreign.error.code == "not_found"
+        denied_context = replace(context, permission_rules=(PermissionRule(action="stop_process", effect="deny"),))
+        denied = await invoke(service, denied_context, "stop_process", process_id=process_id)
+        assert denied.status == "error" and denied.error.code == "permission_denied"
+
+        def fail_stop(process):
+            raise OSError("Could not terminate process.")
+
+        with monkeypatch.context() as patch:
+            patch.setattr("agent.modules.tools.coding.processes.kill_tree", fail_stop)
+            failed = await invoke(service, context, "stop_process", process_id=process_id)
+        assert failed.status == "error" and failed.error.code == "execution_error"
+    finally:
+        await service.processes.close()
 
 
 @pytest.mark.asyncio

@@ -897,7 +897,7 @@ export function ToolCallDetail(props: {
   const summary = createMemo(() => toolCallSummary(props.name, props.args));
   const [visited, setVisited] = createSignal(props.defaultOpen ?? false);
   const shell = createMemo(() => isShellTool(props.name));
-  const shellResult = createMemo(() => visited() && shell() ? shellToolResult(props.result) : null);
+  const shellResult = createMemo(() => visited() && shell() ? shellToolResult(props.result, props.name) : null);
   const generatedImage = () =>
     props.name === GENERATE_IMAGE_TOOL_NAME
       ? generatedImageFromToolResult(props.result, props.threadId)

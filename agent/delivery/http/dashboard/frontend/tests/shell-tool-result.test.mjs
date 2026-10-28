@@ -32,6 +32,20 @@ test('failed exits, timeouts and cancellations are visibly distinct from running
   assert.equal(running.failed, false);
 });
 
+test('cancellation succeeds only for an explicit stop and uses the final receipt', () => {
+  const output = 'Command exited with code -9.\n\nCommand was cancelled.';
+  const stopped = shellToolResult(output, 'stop_process');
+  assert.equal(stopped.failed, false);
+  assert.equal(stopped.running, false);
+  assert.equal(stopped.outcome, 'Command was cancelled.');
+  for (const name of ['bash', 'read_process_output', 'write_process_input']) {
+    assert.equal(shellToolResult(output, name).failed, true);
+  }
+  for (const outcome of ['Command exited with code 2.', 'Command timed out.']) {
+    assert.equal(shellToolResult(`Command was cancelled.\n\n${outcome}`, 'stop_process').failed, true);
+  }
+});
+
 test('unrecognized and legacy results retain the generic tool rendering', () => {
   for (const value of [null, {}, 'plain output', '(no output)\n\nProcess old-id: completed; exit_code=0; next_cursor=0.']) {
     assert.equal(shellToolResult(value), null);

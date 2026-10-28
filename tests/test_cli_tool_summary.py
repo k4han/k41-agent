@@ -1,5 +1,7 @@
 """Unit tests for CLI tool execution summary (Pattern 2)."""
 
+import pytest
+
 from agent.delivery.cli.tool_summary import (
     format_tool_group_summary,
     get_tool_category,
@@ -51,6 +53,29 @@ def test_tool_failure_detection():
         )
         is True
     )
+
+
+@pytest.mark.parametrize("status", [None, "success", "error"])
+def test_stop_process_cancellation_is_success_including_legacy_status(status):
+    result = "Command exited with code -9.\n\nCommand was cancelled."
+    tools = [{"name": "stop_process", "result": result, "status": status} for _ in range(2)]
+    summary = format_tool_group_summary(tools)
+    assert summary.total_failed == 0
+    assert summary.full_label == "2 tools: 2 commands"
+    for name in ("bash", "read_process_output", "write_process_input"):
+        assert is_tool_failed({"name": name, "result": result}) is True
+
+
+@pytest.mark.parametrize("result", [
+    "[error] not_found: Process does not exist.",
+    "[error] permission_denied: Not allowed to stop this process.",
+    "[error] execution_error: Could not terminate process.",
+    "detail\n\nCommand timed out.",
+    "detail\n\nCommand exited with code 2.",
+    "Command was cancelled.\n\nCommand exited with code 2.",
+])
+def test_stop_process_real_errors_still_fail(result):
+    assert is_tool_failed({"name": "stop_process", "result": result}) is True
 
 
 def test_pattern_2_summary_with_failures():

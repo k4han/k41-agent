@@ -49,6 +49,32 @@ test('failure detection handles shell and generic errors', () => {
   assert.equal(isToolFailed({ name: 'custom', result: { status: 'error', message: 'fail' }, resultReceived: true }), true);
 });
 
+test('stopped processes do not count as failed commands in existing transcripts', () => {
+  const tools = [
+    { name: 'stop_process', result: 'ngrok ready\n\nCommand was cancelled.' },
+    { name: 'stop_process', result: 'Flask ready\n\nCommand was cancelled.' },
+  ];
+  const summary = formatToolGroupSummary(tools);
+  assert.equal(summary.totalFailed, 0);
+  assert.equal(summary.hasFailed, false);
+  assert.equal(summary.fullLabel, '2 tools: 2 commands');
+});
+
+test('stop errors and cancelled commands still count as failures', () => {
+  for (const result of [
+    '[error] not_found: Process does not exist.',
+    '[error] permission_denied: Not allowed to stop this process.',
+    '[error] execution_error: Could not terminate process.',
+    'detail\n\nCommand timed out.',
+    'detail\n\nCommand exited with code 2.',
+  ]) {
+    assert.equal(isToolFailed({ name: 'stop_process', result }), true);
+  }
+  for (const name of ['bash', 'read_process_output', 'write_process_input']) {
+    assert.equal(isToolFailed({ name, result: 'detail\n\nCommand was cancelled.' }), true);
+  }
+});
+
 test('formatToolGroupSummary matches Pattern 2 with breakdown and status', () => {
   // 9 reads, 8 commands (2 failed), 2 edits -> 19 tools
   const tools = [

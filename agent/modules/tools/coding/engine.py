@@ -62,5 +62,10 @@ class CodingEngine:
             await self.processes.send(job, values["text"])
         elif name == "stop_process":
             await self.processes.stop(job)
-        return await self.processes.observe(job, cursor=values.get("cursor", 0), yield_time_ms=values.get("yield_time_ms", 0))
+        result = await self.processes.observe(job, cursor=values.get("cursor", 0), yield_time_ms=values.get("yield_time_ms", 0))
+        if name == "stop_process" and result.error is not None and result.error.code == "cancelled":
+            # Cancellation is the expected process outcome of a successful stop.
+            result.status = "success"
+            result.error = None
+        return result
 

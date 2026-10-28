@@ -53,11 +53,15 @@ def is_tool_failed(tool: dict[str, Any]) -> bool:
     if not tool:
         return False
 
+    result = tool.get("result")
+    if (tool.get("name") == "stop_process" and isinstance(result, str)
+            and result.rstrip().endswith("\n\nCommand was cancelled.")):
+        return False
+
     status = tool.get("status")
     if status == "error":
         return True
 
-    result = tool.get("result")
     if result is None:
         return False
 

@@ -96,6 +96,24 @@ async def test_remote_shell_cleans_output_and_reports_nonzero_exit(remote_coding
 
 
 @pytest.mark.asyncio
+async def test_remote_stop_process_succeeds_and_keeps_command_cancellation(remote_coding):
+    service, context, _, worker = remote_coding
+    try:
+        started = await invoke(service, context, "bash", command=python_command("import time; time.sleep(30)"), yield_time_ms=0)
+        process_id = started.data["process_id"]
+        stopped = await invoke(service, context, "stop_process", process_id=process_id)
+        assert stopped.status == "success" and stopped.error is None
+        assert stopped.data["state"] == "cancelled"
+        assert worker.processes.get(context, process_id).process.poll() is not None
+        assert stopped.content.endswith("\n\nCommand was cancelled.")
+        observed = await invoke(service, context, "read_process_output", process_id=process_id)
+        assert observed.status == "error" and observed.error.code == "cancelled"
+    finally:
+        await service.processes.close()
+        await worker.processes.close()
+
+
+@pytest.mark.asyncio
 async def test_remote_versioned_edits_write_search_and_replay(remote_coding):
     service, context, workspace, _ = remote_coding
     source = workspace / "source.py"

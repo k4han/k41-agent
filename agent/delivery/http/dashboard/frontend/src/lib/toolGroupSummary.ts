@@ -57,8 +57,8 @@ const WEB_TOOLS = new Set([
 export function isToolFailed(tool: ToolGroupItem): boolean {
   if (!tool || !hasToolCallResult(tool)) return false;
   if (isShellTool(tool.name)) {
-    const res = shellToolResult(tool.result);
-    return Boolean(res?.failed);
+    const res = shellToolResult(tool.result, tool.name);
+    if (res) return res.failed;
   }
   const result = tool.result;
   if (typeof result === "string") {
