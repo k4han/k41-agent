@@ -27,11 +27,15 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const project = key => ({ key, label: key, threads: [{ thread_id: `${key}-thread`, workspace_key: key }] });
 const payload = (keys, hasMore = false) => ({ projects: keys.map(project), has_more: hasMore, next_cursor: hasMore ? keys.at(-1) : null });
 
-test('a project shows at most four chats including the active and running rows', () => {
+test('a project shows running chats first while retaining the selected chat within four previews', () => {
   const rows = Array.from({ length: 8 }, (_, index) => ({ thread_id: `thread-${index}` }));
   assert.deepEqual(navProjectThreads(rows, '', new Set()), rows.slice(0, 4));
-  assert.deepEqual(navProjectThreads(rows, 'thread-7', new Set(['thread-5'])), [rows[0], rows[1], rows[5], rows[7]]);
+  assert.deepEqual(navProjectThreads(rows, 'thread-7', new Set(['thread-5'])), [rows[5], rows[0], rows[1], rows[7]]);
+  assert.deepEqual(navProjectThreads(rows, 'thread-7', new Set(['thread-5', 'thread-3'])), [rows[3], rows[5], rows[0], rows[7]]);
   assert.equal(navProjectThreads(rows, 'thread-7', new Set(rows.map(row => row.thread_id))).length, 4);
+  assert.ok(navProjectThreads(rows, 'thread-7', new Set(rows.map(row => row.thread_id))).includes(rows[7]));
+  assert.deepEqual(navProjectThreads(rows, 'thread-7', new Set(['thread-5']), true), [rows[5], ...rows.filter(row => row !== rows[5])]);
+  assert.deepEqual(navProjectThreads(rows, 'thread-7', new Set(), true), rows);
 });
 
 test('empty catalog projects keep their representative workspace without inventing threads', async () => {

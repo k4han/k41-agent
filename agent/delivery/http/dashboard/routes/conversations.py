@@ -24,7 +24,11 @@ from agent.delivery.http.dashboard.routes.helpers.workspace import (
     TEMP_WORKSPACE_LABEL,
     workspace_ref_for_thread,
 )
-from agent.modules.agent_runtime import get_background_task_manager, get_background_task_repository
+from agent.modules.agent_runtime import (
+    get_active_session_registry,
+    get_background_task_manager,
+    get_background_task_repository,
+)
 from agent.modules.conversations import (
     CheckpointNotFoundError,
     CompactionConflictError,
@@ -169,7 +173,10 @@ async def get_nav_projects(
 ) -> dict[str, Any]:
     """List projects with four conversation previews each for navigation."""
     try:
-        return await list_conversation_projects(limit=limit, after=after, active_thread_id=active_thread_id)
+        running_thread_ids = [session["thread_id"] for session in get_active_session_registry().list_active()]
+        return await list_conversation_projects(
+            limit=limit, after=after, active_thread_id=active_thread_id, running_thread_ids=running_thread_ids,
+        )
     except Exception as exc:
         if isinstance(exc, ValueError):
             raise HTTPException(status_code=422, detail=str(exc)) from exc

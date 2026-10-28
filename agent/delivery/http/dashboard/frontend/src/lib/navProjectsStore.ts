@@ -42,12 +42,15 @@ function projectKeyBefore(left: string, right: string): boolean {
   return leftPoints.length < rightPoints.length;
 }
 
-/** Keep the active and running chats within the same four-row preview. */
-export function navProjectThreads(threads: ThreadSummary[], activeId: string, runningIds: ReadonlySet<string>) {
+/** Keep the selected chat visible and show running chats first, including expanded lists. */
+export function navProjectThreads(
+  threads: ThreadSummary[], activeId: string, runningIds: ReadonlySet<string>, expanded = false,
+) {
   const priority = (thread: ThreadSummary) => thread.thread_id === activeId ? 0 : runningIds.has(thread.thread_id) ? 1 : 2;
   const selected = new Set([...threads].sort((left, right) => priority(left) - priority(right))
     .slice(0, NAV_PROJECT_THREAD_LIMIT).map((thread) => thread.thread_id));
-  return threads.filter((thread) => selected.has(thread.thread_id));
+  return threads.filter((thread) => expanded || selected.has(thread.thread_id))
+    .sort((left, right) => Number(runningIds.has(right.thread_id)) - Number(runningIds.has(left.thread_id)));
 }
 
 export function newProjectWorkspace(group: ThreadWorkspaceGroup) {

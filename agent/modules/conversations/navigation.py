@@ -26,7 +26,10 @@ from agent.shared.thread_ids import resolve_thread_id
 NAV_PROJECT_THREAD_LIMIT = 4
 
 
-def _ranked_project_threads(*, dialect: str, active_thread_id: str, project_key_filter: str | None = None):
+def _ranked_project_threads(
+    *, dialect: str, active_thread_id: str, project_key_filter: str | None = None,
+    running_thread_ids: list[str] | None = None,
+):
     has_mapping = ThreadWorkspace.execution_locator.is_not(None)
 
     def workspace_column(name: str):
@@ -51,6 +54,8 @@ def _ranked_project_threads(*, dialect: str, active_thread_id: str, project_key_
         else_=func.coalesce(func.nullif(workspace_column("scope_key"), ""), NO_WORKSPACE_KEY),
     ).collate("C" if dialect == "postgresql" else "BINARY")
     order = [ConversationThread.updated_at.desc(), ConversationThread.id.desc()]
+    if running_thread_ids:
+        order.insert(0, case((ConversationThread.thread_id.in_(running_thread_ids), 0), else_=1))
     if active_thread_id:
         order.insert(0, case((ConversationThread.thread_id == active_thread_id, 0), else_=1))
 
@@ -144,6 +149,7 @@ async def list_project_threads(*, project_key: str, limit: int = 20, offset: int
 
 async def list_conversation_projects(
     *, limit: int = 20, after: str | None = None, active_thread_id: str = "",
+    running_thread_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Page catalog entries, including empty projects, with bounded conversation previews."""
     session = await get_async_session()
@@ -152,6 +158,7 @@ async def list_conversation_projects(
         ranked = _ranked_project_threads(
             dialect=dialect,
             active_thread_id=resolve_thread_id(active_thread_id) if active_thread_id else "",
+            running_thread_ids=running_thread_ids,
         )
         candidates = union_all(
             select(Project.id, Project.key, Project.label, Project.is_pinned, Project.workspace_json,

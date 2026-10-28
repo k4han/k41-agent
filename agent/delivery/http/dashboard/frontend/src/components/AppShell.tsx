@@ -38,6 +38,7 @@ import { deleteJson, patchJson, postJson } from "@/lib/api";
 import { checkForUpdates, openUpdateDialog, versionInfo } from "@/lib/versionStore";
 import {
   chatThreadHref,
+  sortWorkspaceGroups,
   threadApiPath,
   threadWorkspaceKey,
 } from "@/lib/chatThreads";
@@ -380,7 +381,12 @@ export function AppShell(props: {
   };
 
   const isThreadActive = (threadId: string) => selectedChatThreadId() === threadId;
-  const historyGroups = useThreadWorkspaceGroups(historyThreads, navProjectsStore.groups);
+  const workspaceGroups = useThreadWorkspaceGroups(historyThreads, navProjectsStore.groups);
+  const historyGroups = createMemo(() => {
+    const runningIds = runningThreadIds();
+    const isRunning = (group: ThreadWorkspaceGroup) => group.threads.some((thread) => runningIds.has(thread.thread_id));
+    return sortWorkspaceGroups(workspaceGroups()).sort((left, right) => Number(isRunning(right)) - Number(isRunning(left)));
+  });
   const [collapsedProjects, setCollapsedProjects] = createSignal(new Set<string>());
   const toggleProject = (key: string) => {
     setCollapsedProjects((current) => {
@@ -868,8 +874,8 @@ export function AppShell(props: {
                     {(group) => {
                       const open = () => !collapsedProjects().has(group.key);
                       const projectState = () => navProjectsStore.projectState(group.key);
-                      const previewThreads = createMemo(() => projectState()?.expanded ? group.threads : navProjectThreads(
-                        group.threads, selectedChatThreadId(), runningThreadIds(),
+                      const previewThreads = createMemo(() => navProjectThreads(
+                        group.threads, selectedChatThreadId(), runningThreadIds(), projectState()?.expanded,
                       ));
                       const groupId = `nav-project-${encodeURIComponent(group.key)}`;
                       return (

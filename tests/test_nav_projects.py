@@ -14,6 +14,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from agent.delivery.http.dashboard.routes import conversations
+from agent.modules.agent_runtime import ActiveSession, ActiveSessionRegistry
 from agent.modules.agent_runtime.models import BackgroundTaskRecord
 from agent.modules.conversations import navigation
 from agent.modules.conversations.models import ConversationThread
@@ -36,6 +37,8 @@ async def project_db(monkeypatch):
 
     monkeypatch.setattr(navigation, "get_async_session", get_session)
     monkeypatch.setattr(projects_service, "get_async_session", get_session)
+    registry = ActiveSessionRegistry()
+    monkeypatch.setattr(conversations, "get_active_session_registry", lambda: registry)
     try:
         yield maker
     finally:
@@ -99,6 +102,21 @@ async def test_projects_page_by_workspace_with_four_recent_previews(project_db, 
 async def test_active_old_conversation_stays_within_four_previews(project_db):
     await add_project(project_db, "a", 8)
     result = await navigation.list_conversation_projects(active_thread_id="a-0")
+    assert [row["thread_id"] for row in result["projects"][0]["threads"]] == ["a-7", "a-6", "a-5", "a-0"]
+
+
+@pytest.mark.asyncio
+async def test_running_old_conversations_remain_in_previews_after_reload(project_db):
+    await add_project(project_db, "a", 8)
+    registry = conversations.get_active_session_registry()
+    session_id = registry.register(ActiveSession(
+        thread_id="a-1", platform="api", user_id="dashboard", channel_id="", agent_name="default",
+    ))
+    result = await conversations.get_nav_projects(limit=20, after=None, active_thread_id="a-0")
+    rows = result["projects"][0]["threads"]
+    assert [row["thread_id"] for row in rows] == ["a-7", "a-6", "a-1", "a-0"]
+    registry.unregister(session_id)
+    result = await conversations.get_nav_projects(limit=20, after=None, active_thread_id="a-0")
     assert [row["thread_id"] for row in result["projects"][0]["threads"]] == ["a-7", "a-6", "a-5", "a-0"]
 
 
@@ -181,9 +199,10 @@ def test_navigation_api_validates_parameters_and_reports_unavailability(monkeypa
     client = TestClient(app)
     read = AsyncMock(return_value={"projects": [], "has_more": False, "next_cursor": None})
     monkeypatch.setattr(conversations, "list_conversation_projects", read)
+    monkeypatch.setattr(conversations, "get_active_session_registry", ActiveSessionRegistry)
     response = client.get("/dashboard-api/nav-projects", params={"limit": 2, "after": "local:C:/work", "active_thread_id": "old"})
     assert response.status_code == 200
-    read.assert_awaited_once_with(limit=2, after="local:C:/work", active_thread_id="old")
+    read.assert_awaited_once_with(limit=2, after="local:C:/work", active_thread_id="old", running_thread_ids=[])
     assert client.get("/dashboard-api/nav-projects", params={"limit": 0}).status_code == 422
     assert client.get("/dashboard-api/nav-projects", params={"limit": 101}).status_code == 422
     read.side_effect = RuntimeError("Database unavailable")

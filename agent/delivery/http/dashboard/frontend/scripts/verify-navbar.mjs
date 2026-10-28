@@ -31,6 +31,8 @@ const threads = [
     workspace_key: 'temp', workspace_label: 'Temp workspace', workspace: binding(`local:/scratch/thread-${index}`, 'Temp workspace', { ...temporary, locator: `/scratch/thread-${index}` }) })),
 ].map(thread => ({ latest_checkpoint_id: '', checkpoint_count: 1, platform: 'dashboard',
   user_id: 'dashboard', channel_id: '', agent_name: 'default', kind: 'interactive', ...thread }));
+const byLatest = (left, right) => Date.parse(right.updated_at || '1970-01-01T00:00:00Z')
+  - Date.parse(left.updated_at || '1970-01-01T00:00:00Z');
 const sends = [];
 const navRequests = [];
 const projectThreadRequests = [];
@@ -72,7 +74,7 @@ const server = http.createServer(async (req, res) => {
       const key = url.searchParams.get('project_key');
       const offset = Number(url.searchParams.get('offset'));
       const limit = Number(url.searchParams.get('limit'));
-      const matching = threads.filter(thread => (thread.workspace_key || thread.workspace?.scope.key || 'no-workspace') === key);
+      const matching = threads.filter(thread => (thread.workspace_key || thread.workspace?.scope.key || 'no-workspace') === key).sort(byLatest);
       const rows = matching.slice(offset, offset + limit);
       res.end(JSON.stringify({ threads: rows, has_more: offset + rows.length < matching.length, next_offset: offset + rows.length }));
       return;
@@ -92,6 +94,7 @@ const server = http.createServer(async (req, res) => {
       }
       const active = url.searchParams.get('active_thread_id');
       const projects = [...groups.values()].map(group => {
+        group.threads.sort(byLatest);
         const selected = new Set([...group.threads].sort((left, right) => Number(right.thread_id === active) - Number(left.thread_id === active)).slice(0, 4));
         return { ...group, threads: group.threads.filter(thread => selected.has(thread)) };
       });
@@ -225,11 +228,30 @@ try {
   await js(`window.firstThreadRow = document.querySelector('.nav-history-item-wrapper'); window.dispatchEvent(new CustomEvent('k41:thread-title-updated', { detail: { threadId: 'local-0', title: 'Updated conversation title' } }))`);
   assert.equal(await js(`document.querySelector('.nav-history-title').textContent`), 'Updated conversation title');
   assert.equal(await js(`firstThreadRow === document.querySelector('.nav-history-item-wrapper')`), true, 'title updates preserve thread rows');
+  threads.find(thread => thread.thread_id === 'local-5').updated_at = new Date().toISOString();
   await js(`window.dispatchEvent(new CustomEvent('k41:thread-start-running', { detail: { threadId: 'local-5', workspace: ${JSON.stringify(local)} } }))`);
+  assert.equal(await js(`document.querySelector('.nav-history-link').getAttribute('href')`), '/c/local-5', 'running conversations appear first');
   assert.equal(await js(`document.querySelector('a[href="/c/local-5"]').closest('section').getAttribute('aria-label')`), 'flask test', 'running conversations remain under their project');
   assert.equal(await js(`document.querySelectorAll('a[href="/c/local-5"]').length`), 1);
   assert.equal(await js(`document.querySelector('a[href="/c/local-5"]').closest('section').querySelectorAll('.nav-history-item').length`), 4, 'running and active conversations share the four-row limit');
+  threads.find(thread => thread.thread_id === 'github-0').updated_at = new Date().toISOString();
+  await js(`window.dispatchEvent(new CustomEvent('k41:thread-start-running', { detail: { threadId: 'github-0' } }))`);
+  assert.equal(await js(`document.querySelector('.nav-history-workspace').getAttribute('aria-label')`), 'cloudflare', 'running projects use their latest activity to break ties');
   await js(`window.dispatchEvent(new CustomEvent('k41:thread-stop-running', { detail: { threadId: 'local-5' } }))`);
+  assert.equal(await js(`document.querySelector('.nav-history-workspace').getAttribute('aria-label')`), 'cloudflare', 'projects with running conversations move above idle projects');
+  assert.equal(await js(`document.querySelector('.nav-history-link').getAttribute('href')`), '/c/github-0');
+  await js(`window.dispatchEvent(new CustomEvent('k41:thread-stop-running', { detail: { threadId: 'github-0' } }))`);
+  assert.equal(await js(`document.querySelector('.nav-history-workspace').getAttribute('aria-label')`), 'cloudflare', 'completed projects keep their recent position');
+  const completedNavRequests = navRequests.length;
+  await js(`window.dispatchEvent(new CustomEvent('k41:threads-changed'))`);
+  await until(() => navRequests.length > completedNavRequests, 'navigation refresh after completion');
+  await until(() => js(`!document.querySelector('.nav-history-status')?.textContent.includes('Loading more')`), 'completed navigation refresh');
+  assert.equal(await js(`document.querySelector('.nav-history-workspace').getAttribute('aria-label')`), 'cloudflare', 'completed projects stay first after the final history refresh');
+  assert.equal(await js(`document.querySelector('.nav-history-workspace[aria-label="flask test"] .nav-history-link').getAttribute('href')`), '/c/local-5', 'completed conversations keep their recent position');
+  await call('Page.reload');
+  await ready();
+  assert.equal(await js(`document.querySelector('.nav-history-workspace').getAttribute('aria-label')`), 'cloudflare', 'recent project order survives a page reload');
+  assert.equal(await js(`document.querySelector('.nav-history-workspace[aria-label="flask test"] .nav-history-link').getAttribute('href')`), '/c/local-5');
   console.log('PASS: project tree, active conversation, 14px text, hover action, pointer/keyboard resize, persistence, and viewport limits.');
 
   failNav = true;
@@ -240,16 +262,16 @@ try {
   await js(`document.querySelector('.nav-history-retry').click()`);
   await until(() => js(`!document.querySelector('.nav-history-retry')`), 'navigation retry succeeds with existing rows');
 
-  await js(`document.querySelector('.nav-project-add').click()`);
+  await js(`document.querySelector('.nav-project-add[aria-label="New chat in flask test"]').click()`);
   await until(() => js(`location.pathname === '/chat' && !document.querySelector('.chat-prompt-input').disabled`), 'new local chat');
   assert.equal(await js(`document.querySelector('.transcript').textContent.includes('Existing conversation')`), false);
   await send(local);
   await draft('Discard this draft');
-  await js(`document.querySelector('.nav-project-add').click()`);
+  await js(`document.querySelector('.nav-project-add[aria-label="New chat in flask test"]').click()`);
   assert.equal(await js(`document.querySelector('.chat-prompt-input').value`), '', 'same-project action clears the previous draft');
-  await js(`document.querySelectorAll('.nav-project-add')[1].click()`);
+  await js(`document.querySelector('.nav-project-add[aria-label="New chat in cloudflare"]').click()`);
   await send(github);
-  await js(`document.querySelectorAll('.nav-project-add')[2].click()`);
+  await js(`document.querySelector('.nav-project-add[aria-label="New chat in Temp workspace"]').click()`);
   await send(undefined);
   console.log('PASS: project actions start fresh conversations and preserve local paths, sandbox locators, and GitHub metadata.');
 
@@ -269,6 +291,11 @@ try {
   assert.equal(await js(`!!document.querySelector('${localProject} .nav-project-view-all')`), false, 'exhausted project hides load action');
   assert.equal(await js('location.pathname'), previousPath, 'inline loading preserves the current conversation');
   assert.equal(await js(`document.querySelectorAll('.nav-history-workspace[aria-label="Temp workspace"] .nav-history-item').length`), 4, 'other projects stay collapsed to previews');
+  await js(`window.dispatchEvent(new CustomEvent('k41:thread-start-running', { detail: { threadId: 'local-26' } }))`);
+  await js(`window.dispatchEvent(new CustomEvent('k41:thread-title-updated', { detail: { threadId: 'local-0', title: 'Updated idle conversation' } }))`);
+  assert.equal(await js(`document.querySelector('${localProject} .nav-history-link').getAttribute('href')`), '/c/local-26', 'running conversations stay first in expanded projects after idle conversation updates');
+  assert.equal(await js(`document.querySelectorAll('${localProject} .nav-history-item').length`), 27);
+  await js(`window.dispatchEvent(new CustomEvent('k41:thread-stop-running', { detail: { threadId: 'local-26' } }))`);
   await js(`document.querySelector('.nav-history-all-btn').click()`);
   await until(() => js(`location.pathname === '/history' && !!document.querySelector('.select-control-trigger')`), 'global history remains accessible');
   await until(() => js(`document.querySelectorAll('${localProject} .nav-history-item').length === 27`), 'expanded conversations survive navigation');
