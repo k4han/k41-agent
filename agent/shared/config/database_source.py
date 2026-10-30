@@ -19,36 +19,17 @@ from agent.shared.config.constants import (
     is_sensitive_runtime_key,
 )
 from agent.shared.config.models import SettingsSource, SettingsValue, build_settings_values
-from agent.shared.infrastructure.config_file import DEFAULT_CONFIG_PATH
 from agent.shared.infrastructure.db.runtime_settings import RuntimeSetting
+from agent.shared.infrastructure.secret_cipher import (
+    default_key_path as _default_key_path,
+    SecretCipher,
+)
 
 logger = logging.getLogger(__name__)
 
 _MISSING = object()
 _LEGACY_WORKSPACE_ROOTS = ("~/k41-agent",)
 _LEGACY_GITHUB_WORKSPACE_ROOTS = ("~/k41-agent/github-workspaces",)
-
-
-def _default_key_path() -> Path:
-    return DEFAULT_CONFIG_PATH.parent / "data" / "runtime_config.key"
-
-
-def _load_or_create_fernet_key(path: Path) -> bytes:
-    try:
-        existing = path.read_bytes().strip()
-        if existing:
-            return existing
-    except FileNotFoundError:
-        pass
-
-    key = Fernet.generate_key()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(key)
-    try:
-        path.chmod(0o600)
-    except OSError:
-        logger.debug("Could not restrict permissions for runtime config key file: %s", path)
-    return key
 
 
 def _normalize_path_text(value: str) -> str:
@@ -329,7 +310,7 @@ class DatabaseConfigSource:
 
     def _get_fernet(self) -> Fernet:
         if self._fernet is None:
-            self._fernet = Fernet(_load_or_create_fernet_key(self._key_path))
+            self._fernet = SecretCipher(self._key_path).fernet(create=True)
         return self._fernet
 
 

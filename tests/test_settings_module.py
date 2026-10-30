@@ -470,6 +470,29 @@ class TestYamlConfigSource:
 
 
 class TestDatabaseConfigSource:
+    def test_empty_key_does_not_block_loading_runtime_settings(self, tmp_path: Path) -> None:
+        from agent.shared.config.database_source import DatabaseConfigSource
+        from agent.shared.infrastructure.db import Base, create_tables, load_orm_models
+
+        load_orm_models()
+        db_url = f"sqlite:///{(tmp_path / 'settings.db').as_posix()}"
+        create_tables(db_url, metadata=Base.metadata)
+        key_path = tmp_path / "runtime_config.key"
+        source = DatabaseConfigSource(db_url, key_path=key_path)
+        try:
+            source.update_settings({"recursion_limit": 42, "channels.telegram.bot_token": "old-token"})
+        finally:
+            source.close()
+        key_path.write_bytes(b"")
+        source = DatabaseConfigSource(db_url, key_path=key_path)
+        try:
+            assert source.get_all() == {"recursion_limit": 42}
+            assert key_path.read_bytes()
+            source.update_setting("channels.telegram.bot_token", "new-token")
+            assert source.get("channels.telegram.bot_token") == "new-token"
+        finally:
+            source.close()
+
     def test_round_trips_values_and_encrypts_sensitive_entries(self, tmp_path: Path) -> None:
         from sqlalchemy import create_engine, select
         from sqlalchemy.orm import Session

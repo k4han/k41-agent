@@ -1,4 +1,4 @@
-from agent.modules.projects.models import Project, ProjectWorkspace, WorkspaceRuntime
+from agent.modules.projects.models import Project, ProjectSecret, ProjectWorkspace, WorkspaceRuntime
 
 
 def __getattr__(name):
@@ -24,7 +24,7 @@ def __getattr__(name):
 
 from agent.modules.projects.service import add_project, get_project, import_existing_projects, list_projects, update_project
 
-__all__ = ["Project", "ProjectWorkspace", "WorkspaceRuntime", "add_project", "get_project", "import_existing_projects", "list_projects", "update_project"]
+__all__ = ["Project", "ProjectSecret", "ProjectWorkspace", "WorkspaceRuntime", "add_project", "get_project", "import_existing_projects", "list_projects", "update_project"]
 __all__ += ["get_project_workspace_service", "ProjectWorkspaceService", "ProjectWorkspaceError", "source_key", "managed_backend",
             "get_project_instructions", "save_project_instructions", "register_thread_project", "cursor_condition", "encode_cursor",
             "storage_timestamp", "_session", "LocalProjectStorage", "ACTIVE_PHASES", "transition_summary",

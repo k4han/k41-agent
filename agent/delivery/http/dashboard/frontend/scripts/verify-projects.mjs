@@ -39,6 +39,11 @@ const instructionRequests = [];
 let failCatalog = false;
 let failInstructions = false;
 let failSkills = false;
+let failSecrets = false;
+let delaySecrets = false;
+let finishSecrets;
+const secretRequests = [];
+const projectSecrets = new Map();
 let instructionDocument = { path: 'AGENTS.md', exists: false, content: '', version: null };
 const skillRequests = [];
 const makeSkill = (id, scope, extra = {}) => ({ id, name: 'demo', description: `A ${scope} skill`, enabled: true,
@@ -76,6 +81,30 @@ const server = http.createServer(async (req, res) => {
     for await (const chunk of req) raw += chunk;
     const body = raw ? JSON.parse(raw) : {};
     const send = data => res.end(JSON.stringify(data));
+    const secretRoute = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/secrets(?:\/([A-Z_][A-Z0-9_]*))?$/);
+    if (secretRoute) {
+      const id = Number(secretRoute[1]);
+      const name = secretRoute[2];
+      const entries = projectSecrets.get(id) || [];
+      projectSecrets.set(id, entries);
+      const metadata = entry => ({ name: entry.name, enabled: entry.enabled, created_at: entry.created_at, updated_at: entry.updated_at });
+      secretRequests.push({ id, name, method: req.method, body });
+      if (failSecrets) { res.writeHead(503); send({ detail: 'Secrets temporarily unavailable.' }); return; }
+      if (req.method === 'GET') {
+        const reply = () => send({ secrets: entries.map(metadata) });
+        if (delaySecrets) { delaySecrets = false; finishSecrets = reply; return; }
+        reply(); return;
+      }
+      if (req.method === 'POST') {
+        if (entries.some(entry => entry.name === body.name)) { res.writeHead(409); send({ detail: 'Secret already exists.' }); return; }
+        const entry = { ...body, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' };
+        entries.push(entry); res.writeHead(201); send(metadata(entry)); return;
+      }
+      const index = entries.findIndex(entry => entry.name === name);
+      if (index < 0) { res.writeHead(404); send({ detail: 'Secret not found.' }); return; }
+      if (req.method === 'DELETE') { entries.splice(index, 1); res.writeHead(204); res.end(); return; }
+      Object.assign(entries[index], body); send(metadata(entries[index])); return;
+    }
     const chatWorkspace = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/chat-workspace$/);
     if (chatWorkspace) {
       assert.equal(req.method, 'POST');
@@ -418,6 +447,109 @@ try {
   failInstructions = false;
   await call('Page.reload');
   await until(() => js(`location.search === '?tab=skills' && document.querySelectorAll('.project-skill-card').length === 3`), 'direct skill tab reload');
+  await js(`document.querySelector('.project-resource-tabs a[href$="tab=secrets"]').click()`);
+  await until(() => js(`document.querySelector('[aria-label="Project secrets"]')?.textContent.includes('This project has no secrets.')`), 'empty secret list');
+  await clickText('Add secret');
+  const secretProject = projects.find(project => project.id === 1);
+  const beforeSecretPoll = detailRequests.length;
+  const beforeSecretRefresh = secretRequests.length;
+  secretProject.persistence.last_saved_at = '2026-01-02T00:00:00Z';
+  await until(() => js(`document.querySelector('.project-storage-status')?.textContent.includes(new Date('2026-01-02T00:00:00Z').toLocaleString())`), 'project polling while empty secret form is open');
+  assert.ok(detailRequests.length > beforeSecretPoll);
+  assert.equal(await js(`!!document.querySelector('[aria-label="Secret name"]')`), true, 'polling keeps the empty secret form open');
+  assert.equal(secretRequests.length, beforeSecretRefresh, 'polling the same project does not reload secrets');
+  await input('[aria-label="Secret name"]', 'DEPLOY_TOKEN');
+  await input('[aria-label="Secret value"]', 'browser-private-token');
+  secretProject.persistence.last_saved_at = '2026-01-03T00:00:00Z';
+  await js(`window.dispatchEvent(new CustomEvent('k41:workspace-files-changed'))`);
+  await until(() => js(`document.querySelector('.project-storage-status')?.textContent.includes(new Date('2026-01-03T00:00:00Z').toLocaleString())`), 'workspace event refresh while secret draft is open');
+  assert.equal(await js(`document.querySelector('[aria-label="Secret name"]')?.value`), 'DEPLOY_TOKEN');
+  assert.equal(await js(`document.querySelector('[aria-label="Secret value"]')?.value`), 'browser-private-token');
+  assert.equal(secretRequests.length, beforeSecretRefresh, 'workspace event refresh preserves the same secret editor');
+  assert.equal(await js(`document.querySelector('[aria-label="Secret value"]').type`), 'password');
+  assert.equal(await js(`(() => { const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; })()`), true);
+  acceptDialog = false;
+  const beforeSecretDialog = dialogCount;
+  await js(`document.querySelector('.project-resource-tabs a[href$="tab=skills"]').click()`);
+  await until(() => dialogCount > beforeSecretDialog, 'unsaved secret tab guard');
+  assert.equal(await js(`location.search`), '?tab=secrets');
+  assert.equal(await js(`document.querySelector('[aria-label="Secret value"]').value`), 'browser-private-token');
+  await js(`document.querySelector('a[href="/projects"]').click()`);
+  await until(() => dialogCount > beforeSecretDialog + 1, 'unsaved secret project navigation guard');
+  assert.equal(await js(`location.pathname`), '/projects/1');
+  assert.equal(await js(`document.querySelector('[aria-label="Secret name"]').value`), 'DEPLOY_TOKEN');
+  acceptDialog = true;
+  await clickText('Save secret');
+  await until(() => js(`!!document.querySelector('[aria-label="Disable DEPLOY_TOKEN"]') && !document.querySelector('[aria-label="Secret value"]')`), 'create and clear secret form');
+  assert.equal(projectSecrets.get(1)[0].value, 'browser-private-token');
+  assert.equal(await js(`document.body.textContent.includes('browser-private-token')`), false);
+  assert.equal(await js(`JSON.stringify(localStorage).includes('browser-private-token') || JSON.stringify(sessionStorage).includes('browser-private-token')`), false);
+  await js(`document.querySelector('[aria-label="Disable DEPLOY_TOKEN"]').click()`);
+  await until(() => js(`!!document.querySelector('[aria-label="Enable DEPLOY_TOKEN"]')`), 'disable secret');
+  assert.deepEqual(secretRequests.filter(request => request.method === 'PATCH').at(-1).body, { enabled: false });
+  await js(`document.querySelector('[aria-label="Enable DEPLOY_TOKEN"]').click()`);
+  await until(() => js(`!!document.querySelector('[aria-label="Disable DEPLOY_TOKEN"]')`), 'enable secret');
+  await js(`document.querySelector('[aria-label="Edit DEPLOY_TOKEN"]').click()`);
+  assert.equal(await js(`document.querySelector('[aria-label="Secret value"]').value`), '');
+  await clickText('Save secret');
+  await until(() => js(`!document.querySelector('[aria-label="Secret value"]')`), 'empty replacement preserves value');
+  assert.equal(projectSecrets.get(1)[0].value, 'browser-private-token');
+  await js(`document.querySelector('[aria-label="Edit DEPLOY_TOKEN"]').click()`);
+  await input('[aria-label="Secret value"]', 'replaced-private-token');
+  secretProject.persistence.last_saved_at = '2026-01-04T00:00:00Z';
+  await until(() => js(`document.querySelector('.project-storage-status')?.textContent.includes(new Date('2026-01-04T00:00:00Z').toLocaleString())`), 'project polling while replacing a secret');
+  assert.equal(await js(`document.querySelector('[aria-label="Secret name"]')?.disabled`), true);
+  assert.equal(await js(`document.querySelector('[aria-label="Secret name"]')?.value`), 'DEPLOY_TOKEN');
+  assert.equal(await js(`document.querySelector('[aria-label="Secret value"]')?.value`), 'replaced-private-token');
+  await clickText('Save secret');
+  await until(() => projectSecrets.get(1)[0].value === 'replaced-private-token', 'replace secret');
+  failSecrets = true;
+  await until(() => js(`!document.querySelector('[aria-label="Secret value"]')`), 'replacement form closed');
+  await clickText('Reload secrets');
+  await until(() => js(`document.querySelector('[role="alert"]')?.textContent.includes('Secrets temporarily unavailable')`), 'secret loading failure');
+  failSecrets = false;
+  delaySecrets = true;
+  await clickText('Reload secrets');
+  await until(() => Boolean(finishSecrets), 'delayed secret response');
+  await js(`history.pushState(null, '', '/projects/2?tab=secrets'); dispatchEvent(new PopStateEvent('popstate'));`);
+  await until(() => js(`location.pathname === '/projects/2' && document.querySelector('[aria-label="Project secrets"]')?.textContent.includes('This project has no secrets.')`), 'switch secret project');
+  finishSecrets();
+  await delay(200);
+  assert.equal(await js(`document.querySelectorAll('.project-secret-row').length`), 0);
+  await clickText('Add secret');
+  await input('[aria-label="Secret name"]', 'UNSAVED_TOKEN');
+  await input('[aria-label="Secret value"]', 'unsaved-private-value');
+  const beforeDiscardSecretDialog = dialogCount;
+  await js(`document.querySelector('.project-resource-tabs a[href$="tab=skills"]').click()`);
+  await until(() => js(`location.search === '?tab=skills' && !document.querySelector('[aria-label="Secret value"]')`), 'discard secret draft before leaving');
+  assert.equal(dialogCount, beforeDiscardSecretDialog + 1);
+  await js(`document.querySelector('.project-resource-tabs a[href$="tab=secrets"]').click()`);
+  await until(() => js(`!!document.querySelector('[aria-label="Project secrets"]')`), 'return after discarding secret draft');
+  await clickText('Add secret');
+  assert.equal(await js(`document.querySelector('[aria-label="Secret value"]').value`), '');
+  await input('[aria-label="Secret name"]', 'UNSAVED_TOKEN');
+  await input('[aria-label="Secret value"]', 'unsaved-private-value');
+  await js(`history.pushState(null, '', '/projects/1?tab=secrets'); dispatchEvent(new PopStateEvent('popstate'));`);
+  await until(() => js(`!!document.querySelector('[aria-label="Delete DEPLOY_TOKEN"]')`), 'return to first secret project');
+  assert.equal(await js(`document.querySelector('[aria-label="Secret value"]')?.value || ''`), '');
+  await js(`document.querySelector('[aria-label="Delete DEPLOY_TOKEN"]').click()`);
+  await until(() => js(`document.querySelector('[aria-label="Project secrets"]')?.textContent.includes('This project has no secrets.')`), 'delete secret');
+  assert.equal(projectSecrets.get(1).length, 0);
+  await clickText('Add secret');
+  await input('[aria-label="Secret value"]', 'cancelled-private-value');
+  await clickText('Cancel');
+  await clickText('Add secret');
+  assert.equal(await js(`document.querySelector('[aria-label="Secret value"]').value`), '');
+  await clickText('Cancel');
+  projects.find(project => project.id === 1).runtime.status = 'stopped';
+  failInstructions = true;
+  const beforeSecretReload = await js('performance.timeOrigin');
+  await call('Page.reload');
+  await until(() => js(`performance.timeOrigin !== ${beforeSecretReload} && document.querySelector('[aria-label="Project secrets"]')?.textContent.includes('This project has no secrets.')`), 'secret management with stopped runtime');
+  projects.find(project => project.id === 1).runtime.status = 'ready';
+  failInstructions = false;
+  assert.equal(await js(`document.querySelector('[aria-label="Project secrets"]').textContent.includes('newly started commands')`), true);
+  console.log('PASS: project secret creation, replacement, toggles, deletion, errors, stale responses, draft clearing, and stopped runtimes.');
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   assert.equal(await js('document.documentElement.scrollWidth <= innerWidth'), true);
   await call('Page.navigate', { url: `${base}/projects/999` });

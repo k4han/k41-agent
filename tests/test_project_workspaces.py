@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from agent.modules.projects import service as catalog
-from agent.modules.projects.models import Project, ProjectWorkspace, WorkspaceRuntime
+from agent.modules.projects.models import Project, ProjectSecret, ProjectWorkspace, WorkspaceRuntime
 from agent.modules.projects.storage import LocalProjectStorage
 from agent.modules.projects.transfer import WorkspaceSnapshotTransfer
 from agent.modules.projects.workspaces import ProjectWorkspaceError, ProjectWorkspaceService, source_key
@@ -30,7 +30,7 @@ from agent.modules.workspaces.host_mirror import mirror_state, workspace_runtime
 async def project_service(tmp_path, isolated_container, monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite:///" + (tmp_path / "projects.db").as_posix())
     async with engine.begin() as connection:
-        for model in (Project, ProjectWorkspace, WorkspaceRuntime, ThreadWorkspace, BackgroundTaskRecord, ConversationThread):
+        for model in (Project, ProjectSecret, ProjectWorkspace, WorkspaceRuntime, ThreadWorkspace, BackgroundTaskRecord, ConversationThread):
             await connection.run_sync(model.__table__.create)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async def session():

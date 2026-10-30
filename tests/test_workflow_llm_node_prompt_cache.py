@@ -128,6 +128,35 @@ def cached_llm_node(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_project_secret_names_refresh_outside_the_cached_prompt(cached_llm_node, monkeypatch):
+    contexts = iter(("\n<project_secrets>TOKEN_ONE</project_secrets>", "\n<project_secrets>TOKEN_TWO</project_secrets>"))
+
+    async def names(workspace, *, thread_id=""):
+        return next(contexts)
+
+    monkeypatch.setattr("agent.modules.projects.secrets.project_secret_context", names)
+    await cached_llm_node.run()
+    await cached_llm_node.run()
+    assert cached_llm_node.calls["builder"] == 1
+    first, second = cached_llm_node.captured["system_prompts"]
+    assert "TOKEN_ONE" in first and "TOKEN_ONE" not in second and "TOKEN_TWO" in second
+
+
+@pytest.mark.asyncio
+async def test_stale_project_secret_binding_does_not_block_chat(cached_llm_node, isolated_container):
+    from unittest.mock import AsyncMock
+    from agent.modules.projects.workspaces import ProjectWorkspaceError
+
+    isolated_container._persistence_ready = True
+    isolated_container._project_workspace_service = SimpleNamespace(
+        find_binding=AsyncMock(side_effect=ProjectWorkspaceError("Runtime replaced.", "stale_runtime")),
+    )
+    result = await cached_llm_node.run(allowed_tool_names=[])
+    assert result["messages"][-1].content == "ok"
+    assert "<project_secrets>" not in cached_llm_node.captured["system_prompts"][0]
+
+
+@pytest.mark.asyncio
 async def test_pool_rebuilds_context_and_effort_and_commits_only_successful_history(cached_llm_node, monkeypatch):
     from agent.modules.providers.model_pools import ModelPoolService
     from agent.modules.providers.models import ResolvedChatModel

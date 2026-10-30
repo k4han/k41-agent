@@ -30,6 +30,8 @@ if os.name == "nt":
 else:
     spawn_contained = subprocess.Popen
 from agent.modules.tools.runtime.sandbox import build_safe_env
+from agent.modules.tools.runtime.secret_policy import validate_execution_secrets
+from agent.modules.tools.runtime.secret_redaction import SecretRedactor
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
 logger = logging.getLogger(__name__)
@@ -133,22 +135,26 @@ class ProcessJob:
     task: asyncio.Task[None] | None = None
     skill_lease: Path | None = None
     skill_leases: tuple[Path, ...] = ()
+    secret_values: tuple[str, ...] = field(default=(), repr=False)
 
     def capture(self, stream: Any, label: str) -> None:
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        redactor = SecretRedactor(self.secret_values)
         try:
             while raw := os.read(stream.fileno(), 16 * 1024):
                 text = decoder.decode(raw)
                 if text:
-                    self.append(text, label)
+                    self.append(redactor.feed(text), label)
             remaining = decoder.decode(b"", final=True)
             if remaining:
-                self.append(remaining, label)
+                self.append(redactor.feed(remaining), label)
         except (OSError, ValueError):
             pass
+        finally:
+            self.append(redactor.feed("", final=True), label)
 
     def append(self, text: str, label: str = "stdout") -> None:
-        # Store exact pipe text. Stream read boundaries are not logical lines
+        # Store sanitized pipe text. Stream read boundaries are not logical lines
         # and must never insert framing into output or its byte cursors.
         raw = text.encode("utf-8")
         with self.lock:
@@ -212,7 +218,12 @@ class ProcessManager:
         self.retiring_jobs: dict[str, ProcessJob] = {}
 
     async def start(self, context: InvocationContext, command: str, cwd: Path,
-                    timeout_seconds: float, shell: str) -> ProcessJob:
+                    timeout_seconds: float, shell: str, *, execution_secrets: dict[str, str] | None = None) -> ProcessJob:
+        execution_secrets = dict(execution_secrets or {})
+        try:
+            validate_execution_secrets(execution_secrets, context.skill_environment)
+        except ValueError as exc:
+            raise CodingError("invalid_secret_environment", str(exc)) from None
         name = Path(shell).name.lower()
         if name in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
             command = "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)\n[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n$OutputEncoding = [Console]::OutputEncoding\n" + command
@@ -231,6 +242,7 @@ class ProcessManager:
         environment = build_safe_env(extra_vars={"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1",
                                                "PYTHONDONTWRITEBYTECODE": "1", "K41_WORKSPACE_ROOT": context.workspace,
                                                **dict(context.skill_environment)})
+        environment.update(execution_secrets)
         lease_root = Path(context.workspace) / ".k41-agent" / "skills"
         if os.name == "nt" and not str(lease_root).startswith("\\\\?\\"):
             lease_root = Path("\\\\?\\" + str(lease_root.resolve()))
@@ -297,6 +309,7 @@ class ProcessManager:
                          process, None, None, timeout_seconds, self.storage, context, registry, session_id)
         job.skill_lease = skill_lease
         job.skill_leases = tuple(skill_leases)
+        job.secret_values = tuple(execution_secrets.values())
         self.jobs[job.id] = job
         job.task = asyncio.create_task(self._watch(job, script))
         return job
@@ -355,6 +368,8 @@ class ProcessManager:
                     except OSError as exc:
                         logger.debug("Failed to remove skill process lease %s: %s", lease, exc)
             with job.lock:
+                if not any(reader.is_alive() for reader in readers):
+                    job.secret_values = ()
                 job.finished.set()
                 if job.path is not None:
                     self.storage.active_paths.discard(job.path)

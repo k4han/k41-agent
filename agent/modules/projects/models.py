@@ -48,6 +48,21 @@ class ProjectWorkspace(BaseModel):
     __table_args__ = (UniqueConstraint("project_id", "identity_key", name="uq_project_workspace_identity"),)
 
 
+class ProjectSecret(BaseModel):
+    """Encrypted environment credentials owned by a durable project."""
+
+    __tablename__ = "project_secrets"
+
+    project_id = Column(Integer, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    encrypted_value = Column(Text, nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_project_secret_name"),)
+
+
 class WorkspaceRuntime(BaseModel):
     """The replaceable execution instance of one durable workspace."""
 

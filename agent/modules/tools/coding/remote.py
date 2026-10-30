@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import logging
+import posixpath
 import shlex
 import time
 import uuid
@@ -15,7 +16,7 @@ import zipfile
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from agent.modules.tools.coding.models import CodingError, ToolResult
 from agent.modules.tools.coding.remote_worker import permission_identity
@@ -25,6 +26,10 @@ logger = logging.getLogger(__name__)
 MAX_INLINE_REQUEST_BYTES = 8 * 1024
 WORKER_CHECK_INTERVAL_SECONDS = 60
 _prepared_permissions = ContextVar("coding_prepared_permissions", default=None)
+
+
+class _SandboxResponseError(CodingError):
+    """A structured worker error, separate from provider transport failures."""
 
 
 @contextmanager
@@ -44,6 +49,7 @@ RUNTIME_MODULES = (
     "tools/coding/names.py", "tools/coding/paths.py", "tools/coding/processes.py",
     "tools/coding/storage.py", "tools/coding/remote_worker.py", "tools/runtime/sandbox.py",
     "tools/runtime/shell_guard.py", "tools/runtime/output_policy.py", "workspaces/constants.py", "workspaces/search_utils.py",
+    "tools/runtime/secret_policy.py", "tools/runtime/secret_redaction.py",
     "workspaces/posix_utils.py",
     "prompt_variables/environment.py",
     "projects/snapshot_worker.py", "workspaces/filesystem_monitor.py",
@@ -81,6 +87,8 @@ except OSError:
     pass
 if not live:
     socket_path.unlink(missing_ok=True)
+    for abandoned in runtime.glob("*.secret-request"):
+        abandoned.unlink(missing_ok=True)
     outputs = pathlib.Path.home() / ".k41-agent" / "coding-runtime" / namespace
     daemon_script = ("import asyncio,sys; from pathlib import Path; sys.path.insert(0,sys.argv[1]); "
                      "from agent.modules.tools.coding.remote_worker import serve; "
@@ -162,6 +170,29 @@ class SandboxClient:
                         self.backend_name, self.last_activity - started)
 
     async def call(self, request):
+        private_path = None
+        endpoint = self.endpoint
+        if request.get("execution_secrets"):
+            root = request.get("context", {}).get("workspace") or self.backend.root
+            private_root = PurePosixPath(posixpath.normpath(endpoint["runtime_dir"]))
+            workspace_root = PurePosixPath(posixpath.normpath(root))
+            if private_root.is_relative_to(workspace_root):
+                raise CodingError("invalid_secret_environment", "Secret transport directory must be outside the project workspace.")
+            private_path = f"{endpoint['runtime_dir']}/{uuid.uuid4().hex}.secret-request"
+        try:
+            return await self._call(request, private_request_path=private_path)
+        except _SandboxResponseError:
+            raise
+        except Exception as exc:
+            if private_path is None:
+                raise
+            raise CodingError(getattr(exc, "code", "unknown_outcome"),
+                              "Sandbox execution with project secrets failed. Inspect the runtime before retrying.") from None
+        finally:
+            if private_path is not None:
+                await asyncio.shield(self._cleanup_response(endpoint, private_path))
+
+    async def _call(self, request, *, private_request_path=None):
         started = time.monotonic()
         from agent.bootstrap.container import get_active_container
         container = get_active_container()
@@ -170,12 +201,25 @@ class SandboxClient:
             projects.metrics.rpc_count += 1
         endpoint = self.endpoint
         request_id = uuid.uuid4().hex
-        request_path = f"{endpoint['runtime_dir']}/{request_id}.request"
+        request_path = private_request_path or f"{endpoint['runtime_dir']}/{request_id}.request"
         response_path = f"{endpoint['runtime_dir']}/{request_id}.response"
         raw_request = json.dumps(request, ensure_ascii=True).encode()
-        inline = len(raw_request) <= MAX_INLINE_REQUEST_BYTES
+        inline = private_request_path is None and len(raw_request) <= MAX_INLINE_REQUEST_BYTES
         if not inline:
-            await self.backend.upload_coding_file(raw_request, request_path)
+            if private_request_path is None:
+                await self.backend.upload_coding_file(raw_request, request_path)
+            else:
+                # Provider uploads may continue in a thread after cancellation.
+                # Settle the write before the caller removes the private file.
+                upload = asyncio.create_task(self.backend.upload_coding_file(raw_request, request_path))
+                try:
+                    await asyncio.shield(upload)
+                except asyncio.CancelledError:
+                    try:
+                        await upload
+                    except Exception:
+                        pass
+                    raise
         script = ("import sys; sys.path.insert(0, sys.argv[1]); "
                   "from pathlib import Path; from agent.modules.tools.coding.remote_worker import rpc_output; "
                   "rpc_output(Path(sys.argv[2]), sys.argv[3], Path(sys.argv[4]), sys.argv[5])")
@@ -224,7 +268,7 @@ class SandboxClient:
             error = response["error"]["error"]
             if error["code"] == "runtime_unavailable":
                 self.last_activity = 0.0
-            raise CodingError(error["code"], error["message"], **error.get("details", {}))
+            raise _SandboxResponseError(error["code"], error["message"], **error.get("details", {}))
         return response["result"]
 
     async def _cleanup_response(self, endpoint, response_path):
@@ -381,6 +425,15 @@ print(json.dumps({"running": running}))
         request = self.request("execute", name, values, context, workspace=client.backend.root)
         request["authorized"] = approved
         request["request_id"] = uuid.uuid4().hex
+        if name == "bash":
+            from agent.modules.tools.runtime.secret_policy import validate_execution_secrets
+            execution_secrets = await self.service.resolve_process_secrets(context)
+            try:
+                validate_execution_secrets(execution_secrets, context.skill_environment)
+            except ValueError as exc:
+                raise CodingError("invalid_secret_environment", str(exc)) from None
+            if execution_secrets:
+                request["execution_secrets"] = execution_secrets
         try:
             result = ToolResult.model_validate(await client.call(request))
         except asyncio.CancelledError:

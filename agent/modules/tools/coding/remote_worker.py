@@ -62,13 +62,17 @@ class WorkerPermissions(PathPermissions):
 
 
 class WorkerEngine(CodingEngine):
-    def __init__(self, storage, processes, *, authorized=None):
+    def __init__(self, storage, processes, *, authorized=None, execution_secrets=None):
         self.storage = storage
         self.permissions = WorkerPermissions(storage)
         self.permissions.authorized = authorized
         self.files = FileService(self.permissions)
         self.processes = processes
         self.shell = resolve_shell()
+        self._execution_secrets = execution_secrets or {}
+
+    async def resolve_process_secrets(self, context):
+        return self._execution_secrets
 
 
 class SandboxWorker:
@@ -172,7 +176,8 @@ class SandboxWorker:
             result = RuntimeResult.from_dict(request["result"])
             return self.storage.bound(result, context).to_dict()
         engine = WorkerEngine(self.storage, self.processes,
-                              authorized=set(request.get("authorized", [])) if operation == "execute" else None)
+                              authorized=set(request.get("authorized", [])) if operation == "execute" else None,
+                              execution_secrets=request.get("execution_secrets") if operation == "execute" and name == "bash" else None)
         engine.files.locks = self.file_locks
         if operation == "prepare":
             with measure_phase("preparation_duration_seconds"):
@@ -320,7 +325,16 @@ def rpc(runtime_dir: Path, request_path: Path, response_path: Path):
 def rpc_output(runtime_dir: Path, request_path: str, response_path: Path, payload: str):
     """Return small responses on stdout and spill large responses to a file."""
     try:
-        raw = Path(request_path).read_bytes() if request_path else base64.b64decode(payload, validate=True)
+        if request_path:
+            path = Path(request_path)
+            if path.name.endswith(".secret-request"):
+                if path.is_symlink() or path.parent.resolve() != runtime_dir.resolve():
+                    raise ValueError("Untrusted secret request path.")
+                path.chmod(0o600)
+            raw = path.read_bytes()
+            path.unlink()
+        else:
+            raw = base64.b64decode(payload, validate=True)
         response = rpc_request(runtime_dir, json.loads(raw))
         output = json.dumps({"response": response}, ensure_ascii=True)
         if len(output) + 1 > MAX_INLINE_RESPONSE_BYTES:

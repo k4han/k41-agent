@@ -1,6 +1,7 @@
 """Sandbox transport budgets and failure handling without cloud credentials."""
 
 import asyncio
+import base64
 import io
 import json
 import shlex
@@ -92,6 +93,136 @@ async def test_rpc_timings_exclude_arguments_and_contents(transport, caplog):
     assert record.worker_duration_seconds == 0.001
     assert record.duration_seconds >= 0 and record.transport_duration_seconds >= 0
     assert "private-content" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_secret_request_never_appears_in_transport_command_and_is_unlinked_before_dispatch(transport, monkeypatch):
+    client, calls, _, runtime = transport
+    await client.ensure_started()
+    execute = client.backend.execute_coding_command
+    commands = []
+
+    async def capture(command, *, timeout):
+        commands.append(command)
+        assert "transport-private-token" not in command
+        assert base64.b64encode(b"transport-private-token").decode() not in command
+        return await execute(command, timeout=timeout)
+
+    def dispatch(directory, request):
+        assert request["execution_secrets"] == {"TOKEN": "transport-private-token"}
+        assert not list(runtime.glob("*.secret-request"))
+        return {"result": "executed"}
+
+    monkeypatch.setattr(client.backend, "execute_coding_command", capture)
+    monkeypatch.setattr("agent.modules.tools.coding.remote_worker.rpc_request", dispatch)
+    assert await client.call({"operation": "execute", "name": "bash", "execution_secrets": {"TOKEN": "transport-private-token"}}) == "executed"
+    assert len(commands) == 2 and not list(runtime.iterdir())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_failed_or_cancelled_secret_transport_cleans_uploaded_file_without_replay(transport, monkeypatch, cancel):
+    client, _, _, runtime = transport
+    await client.ensure_started()
+    execute = client.backend.execute_coding_command
+    attempts = []
+
+    async def disconnected(command, *, timeout):
+        if "rpc_output(Path" in command:
+            attempts.append(command)
+            assert list(runtime.glob("*.secret-request"))
+            if cancel:
+                raise asyncio.CancelledError
+            return CommandResult("", 1)
+        return await execute(command, timeout=timeout)
+
+    monkeypatch.setattr(client.backend, "execute_coding_command", disconnected)
+    with pytest.raises(asyncio.CancelledError if cancel else CodingError):
+        await client.call({"operation": "execute", "execution_secrets": {"TOKEN": "private"}})
+    assert len(attempts) == 1 and not list(runtime.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_cancellation_waits_for_inflight_private_upload_before_cleanup(transport, monkeypatch):
+    client, calls, _, runtime = transport
+    await client.ensure_started()
+    calls.clear()
+    started, finish = asyncio.Event(), asyncio.Event()
+    upload = client.backend.upload_coding_file
+
+    async def slow_upload(content, path):
+        started.set()
+        await finish.wait()
+        await upload(content, path)
+
+    monkeypatch.setattr(client.backend, "upload_coding_file", slow_upload)
+    task = asyncio.create_task(client.call({"operation": "execute", "execution_secrets": {"TOKEN": "private"}}))
+    await started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    finish.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert calls == ["upload", "cleanup"]
+    assert not list(runtime.iterdir())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [OSError, CodingError])
+async def test_private_upload_errors_cannot_expose_request_values(transport, monkeypatch, error_type):
+    client, _, _, runtime = transport
+    await client.ensure_started()
+    upload = client.backend.upload_coding_file
+
+    async def failed_upload(content, path):
+        await upload(content, path)
+        if error_type is CodingError:
+            raise CodingError("execution_error", "Provider rejected private-upload-token", request=content.decode())
+        raise OSError("Provider rejected private-upload-token")
+
+    monkeypatch.setattr(client.backend, "upload_coding_file", failed_upload)
+    with pytest.raises(CodingError) as caught:
+        await client.call({"operation": "execute", "execution_secrets": {"TOKEN": "private-upload-token"}})
+    assert "private-upload-token" not in str(caught.value)
+    assert caught.value.details == {}
+    assert not list(runtime.iterdir())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["execution_error", "invalid_input", "permission_denied", "runtime_unavailable"])
+@pytest.mark.parametrize("spilled", [False, True])
+async def test_secret_execution_preserves_structured_worker_errors(transport, monkeypatch, code, spilled):
+    from agent.modules.tools.coding.remote_worker import failure
+
+    client, calls, _, runtime = transport
+    await client.ensure_started()
+    calls.clear()
+    details = {"operation": "spawn", "errno": 13}
+    if spilled:
+        details["diagnostic"] = "x" * MAX_INLINE_RESPONSE_BYTES
+    message = "Cannot spawn the requested process."
+    response = {"error": failure(CodingError(code, message, **details)).to_dict()}
+    monkeypatch.setattr("agent.modules.tools.coding.remote_worker.rpc_request", lambda *args: response)
+    with pytest.raises(CodingError) as caught:
+        await client.call({"operation": "execute", "execution_secrets": {"TOKEN": "private"}})
+    assert caught.value.code == code
+    assert str(caught.value) == message
+    assert caught.value.details == details
+    assert calls.count("rpc") == 1
+    assert not list(runtime.iterdir())
+    if code == "runtime_unavailable":
+        assert client.last_activity == 0
+
+
+@pytest.mark.asyncio
+async def test_private_transport_cannot_spill_inside_the_project_workspace(transport):
+    client, calls, _, _ = transport
+    client.endpoint = {"runtime_dir": "/workspace/.runtime"}
+    with pytest.raises(CodingError, match="outside the project workspace"):
+        await client.call({"operation": "execute", "context": {"workspace": "/workspace"},
+                           "execution_secrets": {"TOKEN": "private"}})
+    assert calls == []
 
 
 @pytest.mark.asyncio

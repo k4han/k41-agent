@@ -11,9 +11,9 @@ from cryptography.fernet import Fernet
 from sqlalchemy import delete, select
 
 from agent.modules.google_calendar.models import GoogleCalendarAccount
-from agent.shared.config.database_source import _default_key_path, _load_or_create_fernet_key
 from agent.shared.infrastructure.db.base import utcnow
 from agent.shared.infrastructure.db.session import get_async_session
+from agent.shared.infrastructure.secret_cipher import default_key_path, load_or_create_fernet_key
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +22,12 @@ class GoogleCalendarStore:
     """Repository managing Google Calendar account tokens with encryption at rest."""
 
     def __init__(self, key_path: Path | None = None) -> None:
-        self._key_path = key_path or _default_key_path()
+        self._key_path = key_path or default_key_path()
         self._fernet: Fernet | None = None
 
     def _get_fernet(self) -> Fernet:
         if self._fernet is None:
-            self._fernet = Fernet(_load_or_create_fernet_key(self._key_path))
+            self._fernet = Fernet(load_or_create_fernet_key(self._key_path))
         return self._fernet
 
     def encrypt_token(self, token: str) -> str:

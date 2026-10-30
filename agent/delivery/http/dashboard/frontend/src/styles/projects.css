@@ -98,3 +98,9 @@
   flex-basis: 100%;
   align-items: center;
 }
+
+.project-secret-form { margin: 20px 0; max-width: 560px; }
+.project-secret-list { display: grid; gap: 12px; margin-top: 16px; }
+.project-secret-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+.project-secret-info { display: grid; gap: 6px; flex: 1; min-width: 180px; overflow-wrap: anywhere; }
+.project-secret-info span { font-size: 12px; color: var(--muted); }

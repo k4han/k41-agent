@@ -3,6 +3,7 @@ import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid
 import { AppShell } from "@/components/AppShell";
 import { ProjectInstructions } from "@/components/ProjectInstructions";
 import { ProjectSkills } from "@/components/ProjectSkills";
+import { ProjectSecrets } from "@/components/ProjectSecrets";
 import { ProjectLocalSync } from "@/components/ProjectLocalSync";
 import { WorkspaceHostMirror } from "@/components/WorkspaceHostMirror";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
@@ -25,7 +26,7 @@ export function ProjectDetailPage() {
   const [opening, setOpening] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
   let revision = 0;
-  const tab = () => query.tab === "skills" ? "skills" : "instructions";
+  const tab = () => query.tab === "skills" ? "skills" : query.tab === "secrets" ? "secrets" : "instructions";
   const load = async (keepProject = false) => {
     const version = ++revision;
     if (!keepProject) setProject(null);
@@ -124,10 +125,13 @@ export function ProjectDetailPage() {
         <nav class="project-resource-tabs" aria-label="Project resources">
           <A class="btn" classList={{ "btn-primary": tab() === "instructions" }} aria-current={tab() === "instructions" ? "page" : undefined} href={`/projects/${current().id}?tab=instructions`}>AGENTS.md</A>
           <A class="btn" classList={{ "btn-primary": tab() === "skills" }} aria-current={tab() === "skills" ? "page" : undefined} href={`/projects/${current().id}?tab=skills`}>Skills</A>
+          <A class="btn" classList={{ "btn-primary": tab() === "secrets" }} aria-current={tab() === "secrets" ? "page" : undefined} href={`/projects/${current().id}?tab=secrets`}>Secrets</A>
         </nav>
-        <Show when={tab() === "instructions"} fallback={<ProjectSkills workspace={current().workspace.execution} />}>
+        <Show when={tab() === "instructions"}>
           <ProjectInstructions projectId={current().id} workspaceId={current().workspace.project_workspace_id} />
         </Show>
+        <Show when={tab() === "skills"}><ProjectSkills workspace={current().workspace.execution} /></Show>
+        <Show when={tab() === "secrets"}><ProjectSecrets projectId={current().id} /></Show>
       </>}</Show>
     </div>
   </AppShell>;

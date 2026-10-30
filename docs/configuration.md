@@ -142,6 +142,13 @@ Cấu hình global cho built-in tool (ví dụ provider và credentials của `w
 
 Fallback env (chỉ dùng khi global tool config để trống): `GOOGLE_API_KEY`, `GOOGLE_CSE_ID`, `TAVILY_API_KEY`, `FIRECRAWL_API_KEY`, `FIRECRAWL_BASE_URL`, `BING_API_KEY`, `BRAVE_API_KEY` cho `web_search`.
 
+## Project secrets
+
+Project-specific credentials are managed in the project's **Secrets** tab.
+Enabled values are encrypted in the database and supplied to newly started
+commands on Local, Daytona, and Modal. See [Project secrets](project-secrets.md)
+for lifecycle, reserved names, and execution behavior.
+
 ## Configuration Precedence
 
 Config được load theo thứ tự ưu tiên:

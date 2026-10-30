@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 class CodingService(CodingEngine):
+    async def resolve_process_secrets(self, context: InvocationContext) -> dict[str, str]:
+        from agent.modules.projects.secrets import resolve_execution_secrets
+        return await resolve_execution_secrets(context)
+
     def __init__(self, root: Path, *, shell: str | None = None) -> None:
         self.storage = OutputStore(root, result_loader=ToolResult.model_validate)
         self.permissions = Permissions(self.storage)

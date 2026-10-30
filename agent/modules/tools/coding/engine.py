@@ -13,6 +13,9 @@ from agent.modules.tools.runtime.shell_guard import check_command_blocked
 
 
 class CodingEngine:
+    async def resolve_process_secrets(self, context: InvocationContext) -> dict[str, str]:
+        return {}
+
     async def prepare(self, name: str, values: dict[str, Any], context: InvocationContext) -> None:
         if name in FILE_TOOLS:
             self.files.prepare(name, values, context)
@@ -51,7 +54,9 @@ class CodingEngine:
                 self.permissions.assert_allowed(context, "external_directory", str(cwd), allow_interrupt=False)
             self.permissions.assert_allowed(context, "shell", values["command"], shell=self.shell,
                                             workdir=str(cwd), allow_interrupt=False)
-            job = await self.processes.start(context, values["command"], cwd, values["timeout_seconds"], self.shell)
+            secrets = await self.resolve_process_secrets(context)
+            job = await self.processes.start(context, values["command"], cwd, values["timeout_seconds"], self.shell,
+                                             execution_secrets=secrets)
             try:
                 return await self.processes.observe(job, yield_time_ms=values["yield_time_ms"], preview=True)
             except asyncio.CancelledError:

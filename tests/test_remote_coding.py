@@ -62,6 +62,39 @@ def python_command(source):
 
 
 @pytest.mark.asyncio
+async def test_project_credentials_are_supplied_after_remote_authorization(remote_coding, monkeypatch):
+    service, context, workspace, worker = remote_coding
+    resolved = []
+    client = await service.remote.client(context)
+    call = client.call
+    requests = []
+
+    async def capture(request):
+        requests.append(request)
+        return await call(request)
+
+    async def credentials(current):
+        assert requests and requests[-1]["operation"] == "prepare"
+        resolved.append(current)
+        return {"TOKEN": "remote-host-private-token"}
+
+    monkeypatch.setattr(client, "call", capture)
+    monkeypatch.setattr(service, "resolve_process_secrets", credentials)
+    result = await invoke(service, context, "bash", command=python_command(
+        "import os; assert os.environ['TOKEN']; print(os.environ['TOKEN'])"), yield_time_ms=0)
+    assert result.error is None
+    job = worker.processes.jobs[result.data["process_id"]]
+    await job.finished.wait()
+    assert job.process.returncode == 0 and job.retained_plain().strip() == "[REDACTED]"
+    assert resolved == [context]
+    execute_request = next(request for request in requests if request["operation"] == "execute")
+    assert execute_request["execution_secrets"] == {"TOKEN": "remote-host-private-token"}
+    assert "remote-host-private-token" not in json.dumps(execute_request["context"])
+    assert "remote-host-private-token" not in json.dumps(execute_request["values"])
+    await worker.processes.close()
+
+
+@pytest.mark.asyncio
 async def test_workspace_state_counts_running_and_retiring_jobs_without_mutating_them(tmp_path):
     root = tmp_path / "workspace"
     root.mkdir()
