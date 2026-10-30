@@ -197,7 +197,7 @@ export function PromptVariablesPage() {
                       <div class="row-wrap" style="gap: 0.5rem; align-items: center;">
                         <div class="mono">{variable.name}</div>
                         <Show when={variable.is_system}>
-                          <span class="badge" style="background-color: var(--color-bg-subtle, rgba(255,255,255,0.05)); color: var(--color-text-muted, #a6adc8); font-size: 0.7rem; padding: 0.1rem 0.35rem; border-radius: 4px; border: 1px solid var(--color-border, rgba(255,255,255,0.1)); line-height: 1.2;">System</span>
+                          <span class="badge" style="font-size: 0.7rem; padding: 0.1rem 0.35rem; border-radius: 4px; line-height: 1.2;">System</span>
                         </Show>
                       </div>
                     </td>
@@ -226,7 +226,7 @@ export function PromptVariablesPage() {
                         <Show
                           when={!variable.is_system}
                           fallback={
-                            <span style="font-size: 0.8rem; font-style: italic; color: var(--color-text-muted, #a6adc8); opacity: 0.7;">
+                            <span style="font-size: 0.8rem; font-style: italic; color: var(--muted);">
                               Read-Only
                             </span>
                           }

@@ -106,13 +106,13 @@ export function AgentPromptTab(props: {
                   <span
                     style={{
                       "font-size": "0.5625rem",
-                      opacity: "0.6",
+                      opacity: "0.75",
                       "text-transform": "uppercase",
                       "font-weight": "bold",
-                      background: "rgba(255, 255, 255, 0.08)",
+                      background: "var(--surface-3)",
                       padding: "1px 4px",
                       "border-radius": "3px",
-                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      border: "1px solid var(--border)",
                       "flex-shrink": "0",
                     }}
                   >

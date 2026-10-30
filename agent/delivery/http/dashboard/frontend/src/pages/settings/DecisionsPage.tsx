@@ -237,14 +237,14 @@ export function DecisionsPage() {
                               display: "flex",
                               "align-items": "flex-start",
                               gap: "10px",
-                              background: "var(--panel-bg-subtle, rgba(255, 255, 255, 0.02))",
+                              background: "var(--surface-2)",
                             }}
                           >
                             <div
                               style={{
                                 padding: "6px",
                                 "border-radius": "6px",
-                                background: "var(--bg-muted, rgba(127, 127, 127, 0.1))",
+                                background: "var(--surface-3)",
                                 color: "var(--primary, #3b82f6)",
                               }}
                             >

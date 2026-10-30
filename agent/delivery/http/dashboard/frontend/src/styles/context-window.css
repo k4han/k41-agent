@@ -15,16 +15,28 @@
   height: 40px;
   min-width: 40px;
   min-height: 40px;
-  border-radius: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
   color: var(--muted);
   cursor: pointer;
   background: transparent;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
-.context-window-circle-btn:hover {
+.context-window-circle-btn:hover,
+.context-window-wrapper.is-open .context-window-circle-btn {
   background: var(--surface-3);
+  border-color: var(--border-strong);
   color: var(--fg);
+}
+
+.context-window-circle-btn:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 1px;
+}
+
+.context-window-circle-track {
+  stroke: color-mix(in srgb, var(--fg) 14%, transparent);
 }
 
 /* Hover & Tap Popover */

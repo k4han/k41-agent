@@ -77,7 +77,7 @@ export function ContextWindowIndicator(props: ContextWindowIndicatorProps) {
         aria-label="View Context Window details"
       >
         <svg width="18" height="18" viewBox="0 0 20 20">
-          <circle cx="10" cy="10" r="8" fill="none" stroke="rgba(255, 255, 255, 0.15)" stroke-width="2.5" />
+          <circle cx="10" cy="10" r="8" fill="none" class="context-window-circle-track" stroke-width="2.5" />
           <circle
             cx="10"
             cy="10"
