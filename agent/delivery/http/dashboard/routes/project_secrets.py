@@ -8,7 +8,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 
 from agent.modules.projects import secrets
-from agent.modules.tools.runtime.secret_policy import validate_secret_name, validate_secret_value
+from agent.modules.tools import validate_secret_name, validate_secret_value
 
 logger = logging.getLogger(__name__)
 

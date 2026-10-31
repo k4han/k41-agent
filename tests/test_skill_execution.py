@@ -182,6 +182,7 @@ def test_parent_search_excludes_inactive_skill_resources(tmp_path, monkeypatch, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 @pytest.mark.parametrize("mode", ["snapshot", "source"])
 async def test_actual_graph_script_uses_environment_variable_and_protects_source(execution, mode, monkeypatch, isolated_container):
     if not shutil.which("uv"):

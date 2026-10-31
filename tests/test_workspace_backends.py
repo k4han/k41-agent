@@ -1739,11 +1739,19 @@ def test_local_workspace_backend_execute_uses_safe_workspace(
             captured["command"] = args[0]
         captured.update(kwargs)
         return original_popen(*args, **kwargs)
-    async def capture_start(context, command, cwd, timeout_seconds, shell):
+    async def capture_start(context, command, cwd, timeout_seconds, shell, *, execution_secrets=None):
         captured["start_command"] = command
         captured["start_cwd"] = cwd
         captured["timeout"] = timeout_seconds
-        return await original_start(context, command, cwd, timeout_seconds, shell)
+        captured["execution_secrets"] = execution_secrets
+        return await original_start(
+            context,
+            command,
+            cwd,
+            timeout_seconds,
+            shell,
+            execution_secrets=execution_secrets,
+        )
     monkeypatch.setattr(windows_job.subprocess, "Popen", capture_popen)
     monkeypatch.setattr(processes_module, "spawn_contained", capture_spawn)
     monkeypatch.setattr(service.processes, "start", capture_start)

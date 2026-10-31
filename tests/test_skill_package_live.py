@@ -16,6 +16,9 @@ from agent.modules.tools.coding.storage import conversation_key
 from agent.modules.workspaces import get_workspace_file_io, WorkspaceRef
 
 
+pytestmark = [pytest.mark.live, pytest.mark.timeout(900)]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("backend", ["daytona", "modal"])
 async def test_live_skill_snapshot_runtime_and_restore(backend, tmp_path, isolated_container):

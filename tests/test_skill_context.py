@@ -259,6 +259,7 @@ async def test_skill_load_requires_a_subsequent_resource_batch(setup):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_actual_uv_script_uses_snapshot_resources_without_changing_source(setup):
     uv = shutil.which("uv")
     if not uv:

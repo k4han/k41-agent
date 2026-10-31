@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from agent.modules.projects import service as catalog
 from agent.modules.projects.models import Project, ProjectSecret
-from agent.modules.tools.runtime.secret_policy import validate_secret_name, validate_secret_value
+from agent.modules.tools import validate_secret_name, validate_secret_value
 from agent.shared.infrastructure.db.base import utcnow
 from agent.shared.infrastructure.secret_cipher import SecretCipher, default_key_path
 
@@ -114,7 +114,7 @@ async def delete_project_secret(project_id: int, name: str) -> None:
 async def resolve_execution_secrets(context) -> dict[str, str]:
     """Resolve only after authorization, against the current durable binding."""
     from agent.modules.projects import get_project_workspace_service
-    from agent.modules.tools.coding.contracts import CodingError
+    from agent.modules.tools import CodingError
     if not context.project_id and not context.project_workspace_id:
         return {}
     if not context.project_id or not context.project_workspace_id or not context.runtime_generation:
@@ -124,7 +124,7 @@ async def resolve_execution_secrets(context) -> dict[str, str]:
             or binding.execution.locator != context.locator):
         raise CodingError("stale_runtime", "Project execution runtime changed before resolving secrets.")
     expected_root = binding.execution.locator if context.backend == "local" else str(binding.execution.metadata.get("root", ""))
-    from agent.modules.tools.coding.paths import comparable_path
+    from agent.modules.tools import comparable_path
     roots_match = (comparable_path(expected_root) == comparable_path(context.workspace) if context.backend == "local"
                    else posixpath.normpath(expected_root) == posixpath.normpath(context.workspace))
     if not roots_match:

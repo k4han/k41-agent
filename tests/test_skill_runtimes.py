@@ -19,6 +19,9 @@ from agent.modules.skills.repository import FilesystemSkillRepository
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
 
+pytestmark = [pytest.mark.integration, pytest.mark.slow, pytest.mark.timeout(300)]
+
+
 def create_wheel(path):
     entries = {
         "skill_fixture/__init__.py": b"VALUE = 53\n",
@@ -45,12 +48,13 @@ def runtime_package(tmp_path, isolated_container):
     packages = SkillPackages(isolated_container.skill_repository)
     isolated_container._skill_packages = packages
     # Windows shells require a short cwd even when file APIs support long paths.
-    with tempfile.TemporaryDirectory(prefix="sr-", dir=Path.cwd() / ".tmp_pytest" / "runtime") as directory:
+    runtime_root = Path(tempfile.gettempdir())
+    with tempfile.TemporaryDirectory(prefix="sr-", dir=runtime_root) as directory:
         try:
             yield source, Path(directory), packages
         finally:
             target = native_path(Path(directory))
-            assert target.is_relative_to(native_path(Path.cwd() / ".tmp_pytest" / "runtime"))
+            assert target.is_relative_to(native_path(runtime_root))
             shutil.rmtree(target)
 
 

@@ -37,6 +37,18 @@ jobs:
           tests/test_workflow_runtime_tools.py tests/test_workflow_llm_node_prompt_cache.py
           tests/test_workflow_llm_node_skills.py tests/test_module_public_import_boundaries.py
           tests/test_agent_cards.py tests/test_dashboard_agents.py
+
+  full-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.12.13
+      - run: uv sync --group dev
+      - name: Run the full Python suite
+        run: uv run --no-sync python -m pytest -q
+
   dashboard:
     runs-on: ubuntu-latest
     steps:

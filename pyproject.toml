@@ -51,6 +51,9 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-cov>=7.1.0",
+    "pytest-timeout>=2.4.0",
+    "pytest-xdist>=3.8.0",
 ]
 
 [project.optional-dependencies]
@@ -100,3 +103,10 @@ exclude = ["tests*", "tmp*", "data*"]
 [tool.pytest.ini_options]
 addopts = "-p no:cacheprovider"
 cache_dir = ".tmp_pytest/cache"
+testpaths = ["tests", "agent/internal"]
+timeout = 180
+markers = [
+    "slow: takes more than a couple of seconds; excluded from the quick local loop",
+    "integration: needs external tools or services (uv, pnpm, node, git, Chrome, sandbox)",
+    "live: opt-in checks against real local services; enabled through environment variables",
+]

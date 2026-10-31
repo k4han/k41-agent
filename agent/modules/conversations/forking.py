@@ -18,8 +18,11 @@ from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START
 
 from agent.bootstrap.container import require_active_container
-from agent.modules.agent_runtime import get_active_session_registry, get_background_task_manager
-from agent.modules.agent_runtime.active_sessions import ThreadMutationConflictError
+from agent.modules.agent_runtime import (
+    ThreadMutationConflictError,
+    get_active_session_registry,
+    get_background_task_manager,
+)
 from agent.modules.agents import get_catalog_service
 from agent.modules.conversations.compaction import is_valid_message_sequence
 from agent.modules.conversations.history import (
@@ -84,7 +87,7 @@ def _copy_temp_workspace(source: WorkspaceRef, destination: WorkspaceRef) -> Non
 
 
 def _copy_temp_storage(source: WorkspaceRef, destination: WorkspaceRef) -> None:
-    from agent.modules.tools.runtime.thread_storage import THREAD_STORAGE_DIRS, workspace_storage_root
+    from agent.modules.tools import THREAD_STORAGE_DIRS, workspace_storage_root
 
     source_storage = workspace_storage_root(derive_workspace_scope(source))
     target_storage = workspace_storage_root(derive_workspace_scope(destination))
@@ -247,7 +250,7 @@ async def _fork_reserved(thread_id: str, checkpoint_id: str, message_index: int)
             projects.switcher.assert_available(binding.project_workspace_id, runtime)
             reservations.enter_context(projects.switcher.run_lease(binding.project_workspace_id))
         elif binding:
-            from agent.modules.workspaces.host_mirror import mirror_state, thread_storage_key, transition_active
+            from agent.modules.workspaces import mirror_state, thread_storage_key, transition_active
 
             try:
                 rows, _ = await projects.host_mirrors.thread_status(thread_id)
@@ -273,9 +276,8 @@ async def _fork_reserved(thread_id: str, checkpoint_id: str, message_index: int)
                         await _run_file_operation(_copy_temp_workspace, binding.execution, temp)
                     else:
                         await _copy_cloud_temp(binding.execution, temp, projects)
-                    from agent.modules.tools.runtime.thread_storage import workspace_storage_root
-                    from agent.modules.skills.context import activation_key
-                    from agent.modules.skills.sources import workspace_key
+                    from agent.modules.tools import workspace_storage_root
+                    from agent.modules.skills import activation_key, workspace_key
 
                     paths = [
                         (str(workspace_storage_root(binding.scope)), str(workspace_storage_root(new_binding.scope))),
@@ -331,8 +333,8 @@ async def _fork_reserved(thread_id: str, checkpoint_id: str, message_index: int)
                     except Exception:
                         logger.exception("Failed to release skill snapshots for unpublished conversation %s", new_id)
                 if temp is not None:
-                    from agent.modules.tools.runtime.thread_storage import THREAD_STORAGE_BASE_DIR, workspace_storage_root
-                    from agent.modules.workspaces.service import temp_workspace_root
+                    from agent.modules.tools import THREAD_STORAGE_BASE_DIR, workspace_storage_root
+                    from agent.modules.workspaces import temp_workspace_root
 
                     for path in (Path(temp.locator), workspace_storage_root(new_binding.scope)):
                         target = path.resolve()

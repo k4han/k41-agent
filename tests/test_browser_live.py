@@ -11,7 +11,11 @@ import pytest
 
 from agent.modules.browser.driver import CDPViewer, StagehandDriver
 
-pytestmark = pytest.mark.skipif(os.getenv("K41_TEST_BROWSER") != "1", reason="Set K41_TEST_BROWSER=1 to test installed Chrome")
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.timeout(900),
+    pytest.mark.skipif(os.getenv("K41_TEST_BROWSER") != "1", reason="Set K41_TEST_BROWSER=1 to test installed Chrome"),
+]
 
 
 class PageHandler(BaseHTTPRequestHandler):

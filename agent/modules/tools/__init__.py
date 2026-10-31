@@ -305,6 +305,12 @@ from agent.modules.tools.coding.storage import conversation_key
 from agent.modules.tools.coding.processes import kill_tree as kill_process_tree
 from agent.modules.tools.runtime.output_retention import retain_tool_messages
 from agent.modules.tools.runtime.output_policy import TextCapture
+from agent.modules.tools.runtime.secret_policy import (
+    validate_execution_secrets,
+    validate_secret_name,
+    validate_secret_value,
+)
+from agent.modules.tools.coding.paths import comparable_path
 
 __all__ += [
     "prepare_tool_batch",
@@ -314,6 +320,10 @@ __all__ += [
     "conversation_key",
     "retain_tool_messages",
     "TextCapture",
+    "validate_execution_secrets",
+    "validate_secret_name",
+    "validate_secret_value",
+    "comparable_path",
 ]
 
 

@@ -9,6 +9,7 @@ def __getattr__(name):
         "get_project_instructions": "resources", "save_project_instructions": "resources",
         "register_thread_project": "repository", "cursor_condition": "repository", "encode_cursor": "repository",
         "storage_timestamp": "workspaces", "_session": "workspaces",
+        "project_secret_context": "secrets", "resolve_execution_secrets": "secrets",
         "LocalProjectStorage": "storage",
         "ACTIVE_PHASES": "runtime_switch", "transition_summary": "runtime_switch",
         "apply_workspace_revision": "local_sync", "diff_workspace_revision": "local_sync",
@@ -27,6 +28,7 @@ from agent.modules.projects.service import add_project, get_project, import_exis
 __all__ = ["Project", "ProjectSecret", "ProjectWorkspace", "WorkspaceRuntime", "add_project", "get_project", "import_existing_projects", "list_projects", "update_project"]
 __all__ += ["get_project_workspace_service", "ProjectWorkspaceService", "ProjectWorkspaceError", "source_key", "managed_backend",
             "get_project_instructions", "save_project_instructions", "register_thread_project", "cursor_condition", "encode_cursor",
-            "storage_timestamp", "_session", "LocalProjectStorage", "ACTIVE_PHASES", "transition_summary",
+            "storage_timestamp", "_session", "project_secret_context", "resolve_execution_secrets",
+            "LocalProjectStorage", "ACTIVE_PHASES", "transition_summary",
             "apply_workspace_revision", "diff_workspace_revision", "has_conflicting_revision", "read_workspace_snapshot",
             "_apply", "_capture", "_plan", "_recover_replacement", "_run_writer", "_same_entry", "_sweep_temporary", "_verify", "plan_changes"]

@@ -22,6 +22,7 @@ def packages(tmp_path, isolated_container):
     return service
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(shutil.which("git") is None, reason="Git is required.")
 @pytest.mark.parametrize("layout,subdirectory", [
     ({".": "single-skill"}, ""),

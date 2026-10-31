@@ -116,7 +116,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         )
         store_system_prompt(cache_key, system_prompt, sections=prompt_sections)
 
-    from agent.modules.projects.secrets import project_secret_context
+    from agent.modules.projects import project_secret_context
     system_prompt += await project_secret_context(workspace, thread_id=thread_id or "")
 
     history = state["messages"]
