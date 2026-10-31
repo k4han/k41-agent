@@ -277,7 +277,7 @@ async def _fork_reserved(thread_id: str, checkpoint_id: str, message_index: int)
                     else:
                         await _copy_cloud_temp(binding.execution, temp, projects)
                     from agent.modules.tools import workspace_storage_root
-                    from agent.modules.skills import activation_key, workspace_key
+                    from agent.modules.skills import activation_key, skill_workspace_key
 
                     paths = [
                         (str(workspace_storage_root(binding.scope)), str(workspace_storage_root(new_binding.scope))),
@@ -285,7 +285,7 @@ async def _fork_reserved(thread_id: str, checkpoint_id: str, message_index: int)
                          else str(binding.execution.metadata.get("root") or "/workspace"), temp.locator),
                     ]
                     replacements += paths + [(old.replace("\\", "/"), new.replace("\\", "/")) for old, new in paths]
-                    replacements.append((workspace_key(binding.execution), workspace_key(temp)))
+                    replacements.append((skill_workspace_key(binding.execution), skill_workspace_key(temp)))
                     for key, entry in state.get("active_skills", {}).items():
                         replacements.append((key, activation_key(entry["agent_name"], temp, entry["name"])))
             state = _rebind_storage_references(state, replacements)

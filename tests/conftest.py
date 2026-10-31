@@ -14,12 +14,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # Keep test databases and scratch files on the OS temp volume. Repositories are
 # often stored on slow or network-backed drives where every SQLite fsync costs
 # hundreds of milliseconds; the suite becomes an order of magnitude slower.
-_DEFAULT_TEMP_ROOT = Path(tempfile.gettempdir()) / "k41-pytest"
+#
+# Directory names stay short: test workspaces live below the session directory
+# and Windows limits paths to 260 characters unless long paths are enabled.
+_DEFAULT_TEMP_ROOT = Path(tempfile.gettempdir()) / "k41p"
 PYTEST_TEMP_ROOT = Path(
     os.environ.get("K41_PYTEST_TEMP", os.fspath(_DEFAULT_TEMP_ROOT))
 ).expanduser()
-PYTEST_RUNTIME_TEMP = PYTEST_TEMP_ROOT / "runtime"
-PYTEST_BASETEMP_ROOT = PYTEST_TEMP_ROOT / "sessions"
+PYTEST_RUNTIME_TEMP = PYTEST_TEMP_ROOT / "r"
+PYTEST_BASETEMP_ROOT = PYTEST_TEMP_ROOT / "s"
 KEEP_SESSION_RUNS = 5
 RUNTIME_TEMP_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 
@@ -66,7 +69,17 @@ def pytest_configure(config) -> None:
     tempfile.tempdir = str(PYTEST_RUNTIME_TEMP)
 
     if getattr(config.option, "basetemp", None) is None:
-        config.option.basetemp = str(PYTEST_BASETEMP_ROOT / f"run-{uuid4()}")
+        config.option.basetemp = str(PYTEST_BASETEMP_ROOT / uuid4().hex[:6])
+
+    if len(str(config.option.basetemp)) > 120:
+        config.issue_config_time_warning(
+            pytest.PytestConfigWarning(
+                f"pytest temp directory is deep ({config.option.basetemp}); "
+                "set K41_PYTEST_TEMP to a shorter path if tests fail with "
+                "missing files on Windows."
+            ),
+            stacklevel=2,
+        )
 
 
 def pytest_report_header(config) -> str | None:
