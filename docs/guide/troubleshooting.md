@@ -59,7 +59,12 @@ invalid input does not automatically switch to another model.
 ## The browser does not start
 
 Install Chrome or Chromium on the K41 host and enable Browser tools for the
-selected agent. If needed, configure `browser.executable_path` in Settings.
+selected agent. On Debian/Ubuntu x86_64, run `k41 browser install` to install and
+verify Chrome, or `k41 browser install --force` to repair its system dependencies.
+Run `k41 browser check` as the agent's user to diagnose an existing installation.
+For a custom binary, pass `--executable-path /path/to/chrome` to the check and
+configure `browser.executable_path` in Settings. Startup failures retain the
+original exception in the server logs.
 
 Run the task in a dashboard conversation. Channel and scheduler runs do not
 provide the account identity required for browser sessions. See

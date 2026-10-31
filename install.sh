@@ -11,6 +11,7 @@ UvVersion="${K41_AGENT_UV_VERSION:-0.12.13}"
 UseBranchSource="${K41_AGENT_USE_BRANCH_SOURCE:-}"
 SkipInit="${K41_AGENT_SKIP_INIT:-}"
 EnableAutostart="${K41_AGENT_ENABLE_AUTOSTART:-true}"
+WithBrowser="${K41_AGENT_WITH_BROWSER:-false}"
 
 AgentName="k41-agent"
 DataHome="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -43,6 +44,7 @@ Options:
   --uv-version VALUE       Pinned uv version. Defaults to 0.12.13 (use "latest" to follow upstream).
   --use-branch-source      Download source from the configured branch instead of a release artifact.
   --skip-init              Skip runtime initialization.
+  --with-browser           Install and check Chrome (Debian/Ubuntu x86_64).
   --enable-autostart       Enable systemd user service autostart on boot (default).
   --no-autostart           Disable systemd user service autostart.
   --skip-autostart         Alias for --no-autostart.
@@ -114,6 +116,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-init)
       SkipInit="true"
+      shift
+      ;;
+    --with-browser)
+      WithBrowser="true"
       shift
       ;;
     --enable-autostart)
@@ -924,6 +930,11 @@ write_uninstall_wrapper
 stage "9. Initialize runtime"
 initialize_app
 
+if normalize_bool "$WithBrowser"; then
+  stage "Install browser support"
+  "$PythonExe" -m agent.bootstrap.cli browser install
+fi
+
 stage "10. Update PATH"
 add_user_path
 
@@ -940,3 +951,4 @@ echo "  k41"
 echo "  k41 status"
 echo "  k41 stop"
 echo "  k41 service status"
+echo "  k41 browser install  # Optional browser support on Debian/Ubuntu x86_64"

@@ -2,7 +2,11 @@
 
 K41 runs local Chrome through Stagehand v4. Enable the Browser tools for the desired agent in Settings > Agents > Tools. The default agent's tools are unchanged.
 
-Install dependencies with `uv sync`. Chrome or Chromium must be installed separately. Configure `browser.executable_path` in Settings > Configuration if automatic discovery fails. Browser libraries do not require a second model or a Browserbase account.
+Install dependencies with `uv sync`. On Debian/Ubuntu x86_64, run `k41 browser install` (or `uv run k41 browser install` from source) to install official Chrome with its system dependencies and verify automation. An existing Chrome/Chromium installation is reused; `--force` reinstalls Chrome to repair dependencies. Package installation requires root or cached sudo credentials (`sudo -v`). The shell installer also accepts `--with-browser` or `K41_AGENT_WITH_BROWSER=true`. On other platforms, install Chrome or Chromium with the system installer. Browser libraries do not require a second model or a Browserbase account.
+
+Run `k41 browser check` as the agent's user to test the real headless automation stack with a temporary profile. For a custom executable, use `k41 browser check --executable-path /path/to/chrome` and configure `browser.executable_path` in Settings > Configuration. The check does not modify saved login profiles. Startup failures include setup commands in the tool error and retain the original exception in server logs. Stagehand 4.3 automatically adds `--no-sandbox` when running as root; use a regular user for sandboxed browsing.
+
+Open Settings > Browser to view browser availability, install or reinstall Chrome, run a browser check, and edit the executable path, storage location, and timeouts. Setup runs in the background and retains its result while the server is running, including when you leave the page. Dashboard installation requires root or passwordless sudo for the server process. A custom executable override is also verified after installation.
 
 ## Using the browser
 

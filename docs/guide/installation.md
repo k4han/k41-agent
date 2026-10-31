@@ -73,8 +73,35 @@ chmod +x install.sh
 
 ## Optional browser support
 
-Install Chrome or Chromium separately if you want to use
-[browser automation](./browser). It is not required for a basic chat setup.
+On Debian/Ubuntu x86_64, install and verify Chrome for
+[browser automation](./browser) with:
+
+Open **Settings > Browser** and select **Install Chrome** to set it up from the
+dashboard. The server process needs root or passwordless sudo access. You can
+also install it from a terminal:
+
+```sh
+k41 browser install
+```
+
+The command reuses an existing Chrome/Chromium installation. Otherwise it
+downloads official Google Chrome and uses `apt-get` to install it with its system
+dependencies. Run it as the agent's user; package installation requires root or
+cached sudo credentials (`sudo -v`). It does not require a desktop session.
+
+To include this step in the shell installer:
+
+```sh
+curl -fsSL https://k4han.github.io/k41-agent/install.sh | bash -s -- --with-browser
+```
+
+`K41_AGENT_WITH_BROWSER=true` also enables this step. Browser setup failures stop
+the installer before autostart, so it never reports a successful browser setup
+when verification fails. Browser support is optional for basic chat.
+
+On other platforms, install Chrome or Chromium using the system installer, then
+run `k41 browser check` to verify it. From a source checkout, prefix these commands
+with `uv run`.
 
 ## Developing from source
 

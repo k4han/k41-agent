@@ -20,6 +20,18 @@ Run these commands in a new terminal after [installation](./installation).
 The default dashboard is at
 [http://127.0.0.1:4141](http://127.0.0.1:4141).
 
+## Browser setup
+
+| Command | Purpose |
+| --- | --- |
+| `k41 browser install` | Reuse Chrome/Chromium or install Chrome with system dependencies on Debian/Ubuntu x86_64, then verify automation. |
+| `k41 browser install --force` | Reinstall Chrome and repair system dependencies on Debian/Ubuntu x86_64. |
+| `k41 browser check` | Verify headless browser automation using a disposable profile. |
+| `k41 browser check --executable-path /path/to/chrome` | Verify a specific Chrome/Chromium executable. |
+
+Run these commands as the agent's user. Package installation requires root or
+cached sudo credentials (`sudo -v`). Existing browser profiles are not changed.
+
 ## Account and channels
 
 | Command | Purpose |

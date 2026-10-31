@@ -12,6 +12,7 @@ from typing import Any
 import typer
 
 from agent.bootstrap import ui
+from agent.bootstrap.browser import app as browser_app
 from agent.bootstrap.chatgpt import app as chatgpt_app
 from agent.bootstrap.version import APP_VERSION
 
@@ -40,6 +41,7 @@ app = typer.Typer(
 )
 
 app.add_typer(chatgpt_app, name="chatgpt")
+app.add_typer(browser_app, name="browser")
 
 PID_FILE = Path.home() / ".k41-agent" / "server.pid"
 SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"

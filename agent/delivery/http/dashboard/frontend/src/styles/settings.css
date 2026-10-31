@@ -385,6 +385,54 @@
   margin-left: auto;
 }
 
+.browser-setup-card .panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.browser-setup-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.browser-setup-path {
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+
+.browser-settings-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.browser-setup-output {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  font-size: 0.75rem;
+}
+
+.browser-setup-error {
+  color: var(--danger, #dc2626);
+  overflow-wrap: anywhere;
+}
+
+.browser-setup-result summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
 /* Content */
 .settings-content {
   display: flex;

@@ -73,6 +73,19 @@ async def browser(isolated_container, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_launch_failure_reports_setup_command_and_logs_original_error(browser, caplog):
+    async def fail(*args):
+        raise FileNotFoundError("Chrome installation not found")
+
+    browser.launcher = fail
+    with pytest.raises(BrowserError, match="k41 browser install") as caught:
+        await browser.ensure("missing-browser", "admin:1")
+    assert caught.value.code == "browser_unavailable"
+    assert "Chrome installation not found" in caplog.text
+    assert "missing-browser" not in browser.sessions
+
+
+@pytest.mark.asyncio
 async def test_isolation_profile_leases_and_ownership(browser):
     first = await browser.ensure("first", "admin:1")
     second = await browser.ensure("second", "admin:1")

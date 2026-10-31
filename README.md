@@ -102,6 +102,8 @@ k41 cli             # Open the chat CLI
 k41 reset-password  # Reset the admin password
 k41 pair-code       # Create a pairing code for Telegram or Discord
 k41 service status  # Check systemd autostart service (Linux)
+k41 browser install  # Install and check Chrome (Debian/Ubuntu x86_64)
+k41 browser check    # Check browser automation with a temporary profile
 ```
 
 ## Autostart on Ubuntu

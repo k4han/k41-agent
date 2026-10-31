@@ -6,6 +6,7 @@
   "scripts": {
     "test:browser": "node --test tests/browser-viewer.test.mjs",
     "test:browser-ui": "node scripts/verify-browser.mjs",
+    "test:browser-setup-ui": "node scripts/verify-browser-setup.mjs",
     "test:skills-ui": "node scripts/verify-skills.mjs",
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",

@@ -58,6 +58,9 @@ const ConnectionsPage = lazy(() =>
 const ConfigPage = lazy(() =>
   import("@/pages/settings/ConfigPage").then((module) => ({ default: module.ConfigPage })),
 );
+const BrowserPage = lazy(() =>
+  import("@/pages/settings/BrowserPage").then((module) => ({ default: module.BrowserPage })),
+);
 const DecisionsPage = lazy(() =>
   import("@/pages/settings/DecisionsPage").then((module) => ({ default: module.DecisionsPage })),
 );
@@ -114,6 +117,7 @@ render(
         <Route path="/scheduler" component={SchedulerPage} />
         <Route path="/settings" component={() => <Navigate href="/settings/config" />} />
         <Route path="/settings/config" component={ConfigPage} preload={() => preloadDashboardData("/dashboard-api/config")} />
+        <Route path="/settings/browser" component={BrowserPage} />
         <Route path="/settings/decisions" component={() => <DecisionsPage />} preload={() => preloadDashboardData("/dashboard-api/decisions")} />
         <Route path="/settings/tools" component={ToolsPage} preload={() => preloadDashboardData("/dashboard-api/tools")} />
         <Route path="/settings/backends" component={() => <Navigate href="/settings/providers?tab=workspace" />} />

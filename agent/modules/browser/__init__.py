@@ -1,6 +1,6 @@
 """Container-owned local browser automation."""
 
-from agent.modules.browser.driver import CDPViewer
+from agent.modules.browser.driver import CDPViewer, StagehandDriver
 from agent.modules.browser.models import BrowserArtifact, BrowserBinding, BrowserHandoffResume, BrowserInvocation, BrowserProfile
 from agent.modules.browser.service import BrowserError, BrowserService
 
@@ -21,5 +21,5 @@ async def delete_thread_browsers(thread_id: str) -> None:
 
 
 __all__ = ["BrowserArtifact", "BrowserBinding", "BrowserError", "BrowserHandoffResume",
-           "BrowserInvocation", "BrowserProfile", "BrowserService", "CDPViewer", "get_browser_service",
+           "BrowserInvocation", "BrowserProfile", "BrowserService", "CDPViewer", "StagehandDriver", "get_browser_service",
            "delete_thread_browsers"]

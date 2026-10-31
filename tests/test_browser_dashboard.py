@@ -15,6 +15,58 @@ from agent.shared.infrastructure.db.engine import initialize_async_engine, close
 from test_browser_sessions import FakeDriver, make_browser_metadata
 
 
+def test_browser_setup_requires_authentication_and_csrf(browser_client, monkeypatch):
+    client, _ = browser_client
+    monkeypatch.setattr(routes, "installation_unavailable_reason", lambda: None)
+    client.headers.pop("X-CSRF-Token")
+    assert client.post("/dashboard-api/browser/setup", json={"action": "install"}).status_code == 403
+    client.headers["X-CSRF-Token"] = client.cookies["csrf_token"]
+    client.headers.pop("X-Test-Admin")
+    assert client.get("/dashboard-api/browser/setup").status_code == 401
+    assert client.get("/dashboard-api/browser/configuration").status_code == 401
+    assert client.post("/dashboard-api/browser/setup", json={"action": "check"}).status_code == 401
+
+
+def test_browser_setup_reports_configured_binary_and_rejects_unsupported_install(browser_client, monkeypatch):
+    client, browser = browser_client
+    monkeypatch.setattr(browser.container.config_service, "get_str", lambda *args: "/missing/custom-chrome")
+    monkeypatch.setattr(routes, "find_browser", lambda: "/detected/chrome")
+    monkeypatch.setattr(routes, "installation_unavailable_reason", lambda: "This platform is unsupported")
+    status = client.get("/dashboard-api/browser/setup").json()
+    assert status["executable_path"] == "/missing/custom-chrome"
+    assert status["installed"] is False
+    assert status["installation_supported"] is False
+    assert client.post("/dashboard-api/browser/setup", json={"action": "install"}).status_code == 400
+    assert client.post("/dashboard-api/browser/setup", json={"action": "shell"}).status_code == 422
+    configuration = client.get("/dashboard-api/browser/configuration").json()
+    assert "browser.executable_path" in configuration["settings"]
+    assert all(key.startswith("browser.") for key in configuration["settings"])
+
+
+def test_browser_setup_returns_background_job_and_surfaces_conflicts(browser_client, monkeypatch):
+    client, browser = browser_client
+    captured = []
+    monkeypatch.setattr(browser.container.config_service, "get_str", lambda *args: "/custom/chrome")
+
+    class Manager:
+        def start(self, action, executable_path):
+            if captured:
+                raise routes.BrowserSetupBusyError("Setup is busy")
+            captured.append((action, executable_path))
+            return self.status()
+
+        def status(self):
+            return {"id": "job", "state": "running", "action": "check"}
+
+    monkeypatch.setattr(routes, "setup_manager", lambda request: Manager())
+    response = client.post("/dashboard-api/browser/setup", json={"action": "check"})
+    assert response.status_code == 202
+    assert response.json()["state"] == "running"
+    assert captured == [("check", "/custom/chrome")]
+    assert client.get("/dashboard-api/browser/setup").json()["job"]["id"] == "job"
+    assert client.post("/dashboard-api/browser/setup", json={"action": "check"}).status_code == 409
+
+
 @pytest.fixture
 def browser_client(isolated_container, tmp_path):
     async def launch(*args):

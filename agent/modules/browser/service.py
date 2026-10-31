@@ -5,6 +5,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import logging
 import secrets
 import shutil
 import time
@@ -14,6 +15,9 @@ from uuid import uuid4
 
 from agent.modules.browser.driver import StagehandDriver
 from agent.modules.browser.repository import BrowserRepository
+
+
+logger = logging.getLogger(__name__)
 
 
 class BrowserError(Exception):
@@ -105,7 +109,8 @@ class BrowserService:
                 driver = await asyncio.wait_for(self.launcher(profile, artifact_root,
                     self.container.config_service.get_str("browser.executable_path", "")), self.timeout)
             except Exception as exc:
-                raise BrowserError("browser_unavailable", "Could not start Chrome. Install Chrome/Chromium or set browser.executable_path; check that its profile is not locked.") from exc
+                logger.exception("Could not start the local browser")
+                raise BrowserError("browser_unavailable", "Could not start Chrome. Run 'k41 browser install' on the agent host to install and check Chrome, or 'k41 browser check' to diagnose an existing installation. Check browser.executable_path, profile locks, and server logs for the original error.") from exc
             current = BrowserSession(thread_id, owner_id, profile_key, driver)
             self.sessions[thread_id] = current
             return current

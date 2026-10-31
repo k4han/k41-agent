@@ -3,7 +3,10 @@
 import asyncio
 import contextlib
 import json
+import os
 import time
+from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -11,11 +14,69 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from agent.bootstrap.container import get_container
+from agent.bootstrap.browser import find_browser, installation_unavailable_reason
+from agent.bootstrap.browser_setup import BrowserSetupBusyError, BrowserSetupManager
+from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
 from agent.modules.admin_auth import get_current_admin
 from agent.modules.browser import BrowserError, CDPViewer
 
 router = APIRouter(prefix="/dashboard-api/browser")
 viewer_router = APIRouter()
+
+
+def setup_manager(request: Request) -> BrowserSetupManager:
+    manager = getattr(request.app.state, "browser_setup_manager", None)
+    if manager is None:
+        manager = BrowserSetupManager()
+        request.app.state.browser_setup_manager = manager
+    return manager
+
+
+class BrowserSetupBody(BaseModel):
+    action: Literal["install", "repair", "check"]
+
+
+@router.get("/configuration")
+async def browser_configuration(request: Request, admin: str = Depends(get_current_admin)):
+    config = get_request_config_service(request)
+    settings, sources = config.get_settings_overview_and_sources()
+    settings = {key: info for key, info in settings.items() if key.startswith("browser.")}
+    return {"settings": settings, "by_category": {"browser": settings},
+            "settings_sources": {key: info for key, info in sources.items() if key in settings}}
+
+
+@router.get("/setup")
+async def browser_setup_status(request: Request, admin: str = Depends(get_current_admin)):
+    configured = get_request_config_service(request).get_str("browser.executable_path", "")
+    detected = find_browser()
+    executable = configured or detected
+    installed = bool(executable and Path(executable).is_file() and (os.name == "nt" or os.access(executable, os.X_OK)))
+    try:
+        reason = installation_unavailable_reason()
+    except OSError as exc:
+        reason = f"Could not detect the host distribution: {exc}"
+    return {
+        "installed": installed, "executable_path": executable,
+        "configured_executable_path": configured,
+        "installation_supported": reason is None, "installation_unavailable_reason": reason,
+        "job": setup_manager(request).status(),
+    }
+
+
+@router.post("/setup", status_code=202)
+async def start_browser_setup(body: BrowserSetupBody, request: Request, admin: str = Depends(get_current_admin)):
+    if body.action != "check":
+        try:
+            reason = installation_unavailable_reason()
+        except OSError as exc:
+            raise HTTPException(400, f"Could not detect the host distribution: {exc}") from exc
+        if reason:
+            raise HTTPException(400, reason)
+    configured = get_request_config_service(request).get_str("browser.executable_path", "")
+    try:
+        return setup_manager(request).start(body.action, configured)
+    except BrowserSetupBusyError as exc:
+        raise HTTPException(409, str(exc)) from None
 
 
 def service(request: Request):

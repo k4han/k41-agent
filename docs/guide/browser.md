@@ -10,13 +10,35 @@ optional remote execution environment.
 
 ## Set up the browser
 
-1. Install Chrome or Chromium on the K41 host.
+1. Open **Settings > Browser** to view browser status, install Chrome, or check
+   an existing installation. Automatic installation supports Debian/Ubuntu x86_64;
+   on other platforms, install Chrome/Chromium with your system installer.
 2. Open **Settings > Agents** and select the intended agent.
 3. Enable its Browser tools under **Capabilities & Tools**.
 4. Start a dashboard conversation with that agent.
 
 If automatic browser discovery fails, set `browser.executable_path` in
-**Settings > Configuration**.
+**Settings > Browser**.
+
+The Browser settings page also manages browser storage, idle timeout, and
+operation timeout. Install, reinstall, and check actions run in the background;
+you can leave the page and return to see the result and operation output. Checks
+use a temporary profile and do not change your saved browser logins. If you set
+a custom executable path, save it before checking. A successful installation
+also verifies that custom path.
+
+Dashboard installation requires root or passwordless sudo access for the server
+process. It never prompts for a sudo password in the dashboard. When the server
+lacks permission, use the CLI from a terminal with the appropriate privileges.
+
+Run `k41 browser check` to test headless startup and browser automation with a
+temporary profile. If you configured a custom path, check that same binary with
+`k41 browser check --executable-path /path/to/chrome`. On Debian/Ubuntu x86_64,
+`k41 browser install --force` reinstalls Chrome and repairs system dependencies.
+Package installation requires root or cached sudo credentials (`sudo -v`);
+run the check as the same user that runs the agent. See
+[installation](./installation#optional-browser-support) to include browser setup
+in the shell installer.
 
 A source installation needs its normal `uv sync` dependencies. No Browserbase
 account or separately configured browser model is required.
