@@ -120,13 +120,22 @@ class DeferredWorkspaceBackend:
         if not isinstance(result, dict):
             return result
         presented = {}
+        resolved_local = Path(local_root).resolve()
         for key, value in result.items():
             if key in {"root", "path", "old_path", "new_path"} and isinstance(value, str):
                 try:
-                    relative = Path(value).relative_to(local_root).as_posix()
-                    value = self.root if relative == "." else posixpath.join(self.root, relative)
-                except ValueError:
-                    pass
+                    val_path = Path(value).resolve()
+                    if val_path == resolved_local:
+                        value = self.root
+                    elif val_path.is_relative_to(resolved_local):
+                        relative = val_path.relative_to(resolved_local).as_posix()
+                        value = posixpath.join(self.root, relative)
+                except (ValueError, OSError):
+                    try:
+                        relative = Path(value).relative_to(local_root).as_posix()
+                        value = self.root if relative == "." else posixpath.join(self.root, relative)
+                    except ValueError:
+                        pass
             presented[key] = self._present_paths(value, local_root)
         return presented
 

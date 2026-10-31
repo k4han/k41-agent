@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #
 # Directory names stay short: test workspaces live below the session directory
 # and Windows limits paths to 260 characters unless long paths are enabled.
-_DEFAULT_TEMP_ROOT = Path(tempfile.gettempdir()) / "k41p"
+_DEFAULT_TEMP_ROOT = Path(tempfile.gettempdir()).resolve() / "k41p"
 PYTEST_TEMP_ROOT = Path(
     os.environ.get("K41_PYTEST_TEMP", os.fspath(_DEFAULT_TEMP_ROOT))
 ).expanduser()
