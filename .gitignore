@@ -20,6 +20,8 @@ chatgpt-session*.k41
 
 # Node dependencies
 node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/.temp/
 
 data/
 local-dev/

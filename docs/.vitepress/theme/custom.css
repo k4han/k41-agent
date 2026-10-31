@@ -1,0 +1,103 @@
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("../../../website/assets/fonts/dm-sans-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Instrument Serif";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../../../website/assets/fonts/instrument-serif-italic-latin.woff2") format("woff2");
+}
+
+:root {
+  --vp-font-family-base: "DM Sans", "Segoe UI", sans-serif;
+  --vp-font-family-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  --vp-c-brand-1: #245c43;
+  --vp-c-brand-2: #367452;
+  --vp-c-brand-3: #245c43;
+  --vp-c-brand-soft: #245c4310;
+  --vp-c-bg: #f7f8f2;
+  --vp-c-bg-alt: #eef1e7;
+  --vp-c-bg-elv: #fffefa;
+  --vp-c-bg-soft: #edf1e4;
+  --vp-c-text-1: #202c25;
+  --vp-c-text-2: #596551;
+  --vp-c-text-3: #6b7860;
+  --vp-c-divider: #dce1d5;
+  --vp-c-gutter: #dce1d5;
+  --vp-c-border: #cdd6c1;
+  --vp-sidebar-bg-color: #f1f4e9;
+  --vp-nav-bg-color: #f7f8f2;
+  --vp-code-block-bg: #eef1e7;
+  --vp-code-copy-code-bg: #e4eadb;
+  --vp-code-copy-code-hover-bg: #d9e2cd;
+  --vp-code-tab-divider: #dce1d5;
+  --vp-button-brand-bg: #245c43;
+  --vp-button-brand-hover-bg: #194a34;
+  --vp-button-brand-text: #fff;
+  --vp-button-brand-hover-text: #fff;
+}
+
+.dark {
+  --vp-c-brand-1: #bfd99e;
+  --vp-c-brand-2: #cce4af;
+  --vp-c-brand-3: #90b16f;
+  --vp-c-brand-soft: #bfd99e16;
+  --vp-c-bg: #132019;
+  --vp-c-bg-alt: #0f1a13;
+  --vp-c-bg-elv: #1d3022;
+  --vp-c-bg-soft: #1c2d20;
+  --vp-c-text-1: #e7eede;
+  --vp-c-text-2: #b5c3a9;
+  --vp-c-text-3: #97ab87;
+  --vp-c-divider: #32452e;
+  --vp-c-gutter: #293a25;
+  --vp-c-border: #405735;
+  --vp-sidebar-bg-color: #101c14;
+  --vp-nav-bg-color: #132019;
+  --vp-code-block-bg: #0f1a13;
+  --vp-code-copy-code-bg: #22351e;
+  --vp-code-copy-code-hover-bg: #2d4327;
+  --vp-button-brand-bg: #bfd99e;
+  --vp-button-brand-hover-bg: #cee5b3;
+  --vp-button-brand-text: #17331e;
+  --vp-button-brand-hover-text: #17331e;
+}
+
+body { min-width: 0; }
+.VPNavBarTitle .title { font-size: 23px; font-weight: 550; letter-spacing: -1px; }
+.VPNavBarTitle .logo { height: 30px; width: 30px; margin-right: 10px; }
+.VPSidebarItem.level-0 > .item > .text { font-size: 11px; letter-spacing: 0.7px; text-transform: uppercase; }
+.vp-doc h1 { font-size: 38px; font-weight: 550; letter-spacing: -1.5px; line-height: 1.2; }
+.vp-doc h2 { font-weight: 550; letter-spacing: -0.6px; }
+.vp-doc h3 { font-weight: 550; letter-spacing: -0.3px; }
+.vp-doc p, .vp-doc li { line-height: 1.85; }
+.vp-doc div[class*="language-"] { border: 1px solid var(--vp-c-divider); border-radius: 8px; }
+.docs-overview .vp-doc h1 { max-width: 600px; font-family: "Instrument Serif", Georgia, serif; font-size: 57px; font-style: italic; font-weight: 400; letter-spacing: -1.4px; color: var(--vp-c-brand-1); }
+.docs-eyebrow { margin: 0 0 18px !important; font-size: 10px; letter-spacing: 1.8px; font-weight: 600; color: var(--vp-c-text-2); }
+.docs-lead { font-size: 18px; max-width: 570px; color: var(--vp-c-text-2); }
+.docs-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-block: 30px; }
+.vp-doc .docs-card { display: flex; flex-direction: column; gap: 9px; padding: 21px 23px; border: 1px solid var(--vp-c-divider); border-radius: 8px; text-decoration: none; color: var(--vp-c-text-1); background: var(--vp-c-bg-soft); transition: border-color 160ms, background 160ms; }
+.vp-doc .docs-card:hover { border-color: var(--vp-c-brand-2); background: var(--vp-c-brand-soft); }
+.docs-card > small { font-size: 9px; letter-spacing: 1.5px; color: var(--vp-c-brand-1); }
+.docs-card > strong { font-size: 17px; font-weight: 550; }
+.docs-card > span { font-size: 13px; line-height: 1.7; font-weight: 400; color: var(--vp-c-text-2); }
+.docs-card:focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: 4px; }
+.VPFooter { background: var(--vp-c-bg-alt); }
+
+@media (max-width: 640px) {
+  .vp-doc h1 { font-size: 31px; }
+  .docs-overview .vp-doc h1 { font-size: 44px; }
+  .docs-lead { font-size: 16px; }
+  .docs-cards { grid-template-columns: 1fr; gap: 12px; }
+  .vp-doc .docs-card { padding: 19px 21px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+}

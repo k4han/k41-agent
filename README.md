@@ -288,6 +288,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ## Documentation
 
+- [User documentation](https://k4han.github.io/k41-agent/docs/)
+- [Landing page and GitHub Pages](docs/github-pages.md)
 - `docs/configuration.md`
 - [Priority model pools](docs/model-pools.md)
 - [Project catalog](docs/project-catalog.md)

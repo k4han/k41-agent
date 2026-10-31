@@ -3,6 +3,15 @@
   "scripts": {
     "dashboard:dev": "pnpm --dir agent/delivery/http/dashboard/frontend dev",
     "dashboard:check": "pnpm --dir agent/delivery/http/dashboard/frontend check",
-    "dashboard:build": "pnpm --dir agent/delivery/http/dashboard/frontend build"
+    "dashboard:build": "pnpm --dir agent/delivery/http/dashboard/frontend build",
+    "site:dev": "node scripts/site.mjs dev",
+    "site:check": "node scripts/site.mjs check",
+    "site:build": "node scripts/site.mjs build",
+    "docs:dev": "vitepress dev docs --host 127.0.0.1 --port 5174",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs --host 127.0.0.1 --port 4174"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
   }
 }
