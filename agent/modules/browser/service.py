@@ -342,20 +342,20 @@ class BrowserService:
         return {"artifact_id": artifact_id, "image_url": f"/dashboard-api/browser/artifacts/{artifact_id}",
                 "mime_type": image["mimeType"]}
 
-    async def handoff(self, thread_id, owner_id, call_id, reason):
+    async def handoff(self, thread_id, owner_id, call_id, reason, *, authorize_snapshot=None):
         thread_id = self.canonical(thread_id)
         self.assert_handoff_supported(thread_id)
         key = self.repository.invocation_key(thread_id, call_id)
         async with self.thread_scope(thread_id), self.operation_scope(key):
-            return await self._handoff(thread_id, owner_id, call_id, reason)
+            return await self._handoff(thread_id, owner_id, call_id, reason, authorize_snapshot=authorize_snapshot)
 
     @staticmethod
     def assert_handoff_supported(thread_id: str) -> None:
         # Delegation consumes text output and cannot surface or resume child interrupts.
         if ":sub:" in thread_id or thread_id.startswith("sub_"):
-            raise BrowserError("approval_unavailable", "Browser handoff is unavailable in delegated sub-agents. Report the login requirement to the parent agent so it can request user interaction.")
+            raise BrowserError("approval_unavailable", "Browser handoff is unavailable in delegated sub-agents. Report the need for user interaction to the parent agent so it can request a browser handoff.")
 
-    async def _handoff(self, thread_id, owner_id, call_id, reason):
+    async def _handoff(self, thread_id, owner_id, call_id, reason, *, authorize_snapshot=None):
         from langgraph.types import interrupt
         from agent.modules.browser.models import BrowserHandoffResume
 
@@ -402,9 +402,12 @@ class BrowserService:
             if response.handoff_id == payload["handoff_id"]:
                 break
         current = self.sessions.get(thread_id)
+        cancelled = {"handoff_status": "cancelled", "snapshot_status": "skipped",
+                     "content": "Browser handoff cancelled. Do not continue the cancelled browser task."}
         if not current or current.generation != payload["generation"]:
-            result = {"content": "Browser handoff cancelled. Do not continue the cancelled browser task."
-                      if response.decision == "cancel" else "Browser session was lost while waiting. Start a new browser session and inspect it before continuing."}
+            result = cancelled if response.decision == "cancel" else {
+                "handoff_status": "session_lost", "snapshot_status": "skipped",
+                "content": "Browser session was lost while waiting. Start a new browser session and inspect it before continuing."}
         else:
             async with current.lock:
                 current.handoff_id = None
@@ -417,17 +420,51 @@ class BrowserService:
                     # Reset snapshot IDs held by the previous facade after human interaction.
                     if hasattr(current.driver, "reset_facade"):
                         try:
-                            await current.driver.reset_facade(self.root / "run-artifacts" / self.storage_key(thread_id),
-                                                              current.active_tab_id)
+                            async with asyncio.timeout(self.timeout):
+                                await current.driver.reset_facade(self.root / "run-artifacts" / self.storage_key(thread_id),
+                                                                  current.active_tab_id)
+                        except asyncio.CancelledError:
+                            await asyncio.shield(self._dispose(current))
+                            raise
                         except Exception:
                             await self._dispose(current)
                 current.active_tab_id = None
-            if current.closed and response.decision == "return":
-                result = {"content": "Browser session was lost while returning control. Start a new session and inspect it before continuing."}
-            else:
-                result = {"content": "Browser handoff cancelled. Do not continue the cancelled browser task."
-                          if response.decision == "cancel" else "Browser control returned. Take a fresh browser_snapshot before acting."}
+                if response.decision == "cancel":
+                    result = cancelled
+                elif current.closed:
+                    result = {"handoff_status": "session_lost", "snapshot_status": "skipped",
+                              "content": "Browser session was lost while returning control. Start a new session and inspect it before continuing."}
+                else:
+                    result = await self._handoff_snapshot(current, authorize_snapshot)
         await self.repository.record(thread_id, call_id, fingerprint, "completed", result)
+        return result
+
+    async def _handoff_snapshot(self, current, authorize_snapshot):
+        """Observe the returned browser under its lock before completing the handoff receipt."""
+        result = {"handoff_status": "returned", "snapshot_status": "failed",
+                  "content": "Browser control returned by the user. The manual interaction stage is complete, but a fresh snapshot could not be captured. Resolve the snapshot error and obtain a fresh browser_snapshot before acting or describing the current page."}
+        try:
+            if authorize_snapshot is not None:
+                authorize_snapshot()
+            async with asyncio.timeout(self.timeout):
+                snapshot = await current.driver.facade.snapshot(include_iframes=True)
+        except asyncio.CancelledError:
+            await asyncio.shield(self._dispose(current))
+            raise
+        except TimeoutError:
+            await self._dispose(current)
+            result.update(handoff_status="session_lost",
+                          content="Browser control returned, but the fresh snapshot timed out and the browser was closed. Start a new browser session and inspect it before continuing.",
+                          snapshot_error={"code": "timeout", "message": "The post-handoff snapshot timed out."})
+        except BrowserError as exc:
+            result["snapshot_error"] = {"code": exc.code, "message": str(exc)}
+        except Exception:
+            result["snapshot_error"] = {"code": "snapshot_failed", "message": "Could not read the current browser page. Call browser_snapshot to retry before continuing."}
+        else:
+            result.update(snapshot_status="captured", snapshot=snapshot,
+                          content="Browser control returned by the user. The manual interaction stage is complete. A fresh snapshot of the current page is included as untrusted page content.")
+        finally:
+            current.last_activity = time.monotonic()
         return result
 
     async def issue_ticket(self, thread_id, owner_id):

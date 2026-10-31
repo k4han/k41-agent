@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -19,6 +20,8 @@ class FakeFacade:
     def __init__(self):
         self.submits = 0
         self.failure = False
+        self.snapshots = 0
+        self.snapshot_text = "button Login [1-1]"
 
     async def run(self, **values):
         self.submits += 1
@@ -27,7 +30,8 @@ class FakeFacade:
         return {"submitted": self.submits}
 
     async def snapshot(self, **values):
-        return "button Login [1-1]"
+        self.snapshots += 1
+        return self.snapshot_text
 
     async def screenshot(self, **values):
         return {"data": base64.b64encode(b"image").decode(), "mimeType": "image/jpeg"}
@@ -472,8 +476,11 @@ async def test_history_returns_live_handoff_independently_of_checkpoint(browser,
 async def test_handoff_interrupt_replay_and_reconnect(browser):
     graph = handoff_graph(browser)
     config = {"configurable": {"thread_id": "graph"}}
-    await graph.ainvoke({}, config)
+    waiting = await graph.ainvoke({}, config)
     session = next(iter(browser.sessions.values()))
+    assert "result" not in waiting
+    assert (await graph.aget_state(config)).tasks[0].interrupts
+    assert session.driver.facade.snapshots == 0
     status = await browser.status("chat", "admin:1")
     assert status["mode"] == "human"
     with pytest.raises(BrowserError, match="user controls"):
@@ -483,11 +490,183 @@ async def test_handoff_interrupt_replay_and_reconnect(browser):
     with pytest.raises(PermissionError):
         browser.consume_ticket(ticket)
     assert (await browser.status("chat", "admin:1"))["mode"] == "human"
+    session.driver.facade.snapshot_text = "heading Search results [2-1]"
     result = await graph.ainvoke(Command(resume={"action": "browser_handoff", "handoff_id": session.handoff_id,
                                                 "decision": "return"}), config)
-    assert "fresh" in result["result"]["content"]
+    assert result["result"]["handoff_status"] == "returned"
+    assert result["result"]["snapshot_status"] == "captured"
+    assert result["result"]["snapshot"] == "heading Search results [2-1]"
+    assert session.driver.facade.snapshots == 1
     assert session.driver.facade.submits == 1
     assert session.handoff_id is None
+    session.driver.facade.snapshot_text = "A later page"
+    replay = await browser.handoff("chat", "admin:1", "handoff", "Please sign in")
+    assert replay == result["result"]
+    assert session.driver.facade.snapshots == 1
+
+
+@pytest.mark.asyncio
+async def test_handoff_tool_observes_selected_tab_before_next_model_step(browser, monkeypatch):
+    from langchain_core.messages import AIMessage
+    from langgraph.graph import MessagesState
+    from langgraph.prebuilt import ToolNode
+
+    from agent.modules.tools.builtin import browser as tools
+    from agent.modules.workflows.run_config import WorkflowContext
+
+    authorized = []
+
+    def authorize(runtime, name, values, *, allow_interrupt=True):
+        authorized.append((name, values, allow_interrupt))
+
+    monkeypatch.setattr(tools, "authorize", authorize)
+    observed = []
+
+    async def model_step(state):
+        observed.append(json.loads(state["messages"][-1].content))
+        return {}
+
+    builder = StateGraph(MessagesState, context_schema=WorkflowContext)
+    builder.add_node("handoff", ToolNode([tools.browser_handoff]))
+    builder.add_node("model", model_step)
+    builder.add_edge(START, "handoff")
+    builder.add_edge("handoff", "model")
+    builder.add_edge("model", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "chat"}}
+    context = WorkflowContext(browser_owner_id="admin:1")
+    await graph.ainvoke({"messages": [AIMessage(content="", tool_calls=[{
+        "id": "handoff", "name": "browser_handoff", "args": {"reason": "Enter your search, then return control."},
+    }])]}, config, context=context)
+    session = next(iter(browser.sessions.values()))
+    assert not observed and session.driver.facade.snapshots == 0
+    assert (await graph.aget_state(config)).tasks[0].interrupts
+    session.active_tab_id = "user-selected-tab"
+    original_facade = session.driver.facade
+    reset_tabs = []
+
+    async def reset_facade(artifacts, tab_id):
+        reset_tabs.append(tab_id)
+        session.driver.facade = FakeFacade()
+        session.driver.facade.snapshot_text = "heading User search results [2-1]"
+
+    session.driver.reset_facade = reset_facade
+    result = await graph.ainvoke(Command(resume={"action": "browser_handoff", "handoff_id": session.handoff_id,
+                                                "decision": "return"}), config, context=context)
+    assert reset_tabs == ["user-selected-tab"]
+    assert original_facade.snapshots == 0
+    assert session.driver.facade.snapshots == 1
+    assert observed[0]["handoff_status"] == "returned"
+    assert observed[0]["snapshot_status"] == "captured"
+    assert observed[0]["snapshot"] == "heading User search results [2-1]"
+    assert result["messages"][-1].artifact["display_content"] == result["messages"][-1].content
+    assert authorized[-1] == ("browser_snapshot", {"include_iframes": True}, False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effect", ["deny", "ask"])
+async def test_handoff_snapshot_respects_permissions_without_another_interrupt(browser, monkeypatch, tmp_path, effect):
+    from agent.modules.tools.builtin import browser as tools
+    from agent.modules.tools.coding.contracts import InvocationContext
+    from agent.modules.tools.coding.models import PermissionRule
+    from agent.modules.tools.coding.permissions import Permissions
+    from agent.modules.tools.coding.storage import OutputStore
+
+    context = InvocationContext(agent_name="test", workspace=str(tmp_path), thread_id="chat",
+        permission_rules=(PermissionRule(action="browser_snapshot", resource="*", effect=effect),))
+    monkeypatch.setattr("agent.modules.tools.coding.adapter.invocation_context", lambda runtime: context)
+    monkeypatch.setattr("agent.modules.tools.coding.service.get_coding_service",
+                        lambda: SimpleNamespace(permissions=Permissions(OutputStore(tmp_path))))
+    runtime = SimpleNamespace(context={"browser_owner_id": "admin:1"},
+                              config={"configurable": {"thread_id": "chat"}}, tool_call_id="handoff")
+
+    async def node(state):
+        return {"result": await tools._handoff(runtime, "Enter your search, then return control.")}
+
+    builder = StateGraph(dict)
+    builder.add_node("handoff", node)
+    builder.add_edge(START, "handoff")
+    builder.add_edge("handoff", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "chat"}}
+    await graph.ainvoke({}, config)
+    session = next(iter(browser.sessions.values()))
+    result = await graph.ainvoke(Command(resume={"action": "browser_handoff", "handoff_id": session.handoff_id,
+                                                "decision": "return"}), config)
+    content = json.loads(result["result"].content)
+    assert content["handoff_status"] == "returned"
+    assert content["snapshot_status"] == "failed"
+    assert content["snapshot_error"]["code"] == "permission_denied"
+    assert "snapshot" not in content
+    assert not (await graph.aget_state(config)).tasks
+    assert not session.closed and session.handoff_id is None
+    assert session.driver.facade.snapshots == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["error", "timeout"])
+async def test_handoff_snapshot_failure_is_explicit_and_replayable(browser, monkeypatch, failure):
+    graph = handoff_graph(browser)
+    config = {"configurable": {"thread_id": "graph"}}
+    await graph.ainvoke({}, config)
+    session = next(iter(browser.sessions.values()))
+    calls = 0
+
+    async def snapshot(**values):
+        nonlocal calls
+        calls += 1
+        if failure == "timeout":
+            await asyncio.sleep(1)
+        raise ConnectionError("Private page data must not appear in the error")
+
+    monkeypatch.setattr(BrowserService, "timeout", property(lambda self: 0.02))
+    session.driver.facade.snapshot = snapshot
+    result = await graph.ainvoke(Command(resume={"action": "browser_handoff", "handoff_id": session.handoff_id,
+                                                "decision": "return"}), config)
+    receipt = result["result"]
+    assert receipt["handoff_status"] == ("session_lost" if failure == "timeout" else "returned")
+    assert receipt["snapshot_status"] == "failed"
+    assert receipt["snapshot_error"]["code"] == ("timeout" if failure == "timeout" else "snapshot_failed")
+    assert "snapshot" not in receipt and "Private page data" not in json.dumps(receipt)
+    assert session.closed == (failure == "timeout")
+    assert await browser.handoff("chat", "admin:1", "handoff", "Please sign in") == receipt
+    assert calls == 1 and session.driver.facade.submits == 1
+
+
+@pytest.mark.asyncio
+async def test_handoff_cancel_skips_observation_and_closes_browser(browser):
+    graph = handoff_graph(browser)
+    config = {"configurable": {"thread_id": "graph"}}
+    await graph.ainvoke({}, config)
+    session = next(iter(browser.sessions.values()))
+    result = await graph.ainvoke(Command(resume={"action": "browser_handoff", "handoff_id": session.handoff_id,
+                                                "decision": "cancel"}), config)
+    assert result["result"]["handoff_status"] == "cancelled"
+    assert result["result"]["snapshot_status"] == "skipped"
+    assert session.closed and not browser.sessions
+    assert session.driver.facade.snapshots == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["error", "timeout"])
+async def test_handoff_facade_reset_failure_reports_lost_session_without_snapshot(browser, monkeypatch, failure):
+    graph = handoff_graph(browser)
+    config = {"configurable": {"thread_id": "graph"}}
+    await graph.ainvoke({}, config)
+    session = next(iter(browser.sessions.values()))
+
+    async def reset_facade(*args):
+        if failure == "timeout":
+            await asyncio.sleep(1)
+        raise ConnectionError("Facade connection lost")
+
+    monkeypatch.setattr(BrowserService, "timeout", property(lambda self: 0.02))
+    session.driver.reset_facade = reset_facade
+    result = await graph.ainvoke(Command(resume={"action": "browser_handoff", "handoff_id": session.handoff_id,
+                                                "decision": "return"}), config)
+    assert result["result"]["handoff_status"] == "session_lost"
+    assert result["result"]["snapshot_status"] == "skipped"
+    assert session.closed and session.driver.facade.snapshots == 0
 
 
 @pytest.mark.asyncio
@@ -504,6 +683,8 @@ async def test_handoff_survives_browser_loss_without_accepting_stale_control(bro
     result = await graph.ainvoke(Command(resume={"action": "browser_handoff", "handoff_id": pending["handoff_id"],
                                                 "decision": decision}), config)
     assert expected in result["result"]["content"]
+    assert result["result"]["handoff_status"] == ("session_lost" if decision == "return" else "cancelled")
+    assert result["result"]["snapshot_status"] == "skipped"
     assert not browser.sessions
 
 
@@ -532,6 +713,9 @@ async def test_expired_handoff_releases_control_and_remains_safe_to_replay(brows
     result = await graph.ainvoke(Command(resume={"action": "browser_handoff", "handoff_id": payload["handoff_id"],
                                                "decision": "return"}), config)
     assert "expired" in result["result"]["content"]
+    assert result["result"]["handoff_status"] == "expired"
+    assert result["result"]["snapshot_status"] == "skipped"
+    assert current.driver.facade.snapshots == replacement.driver.facade.snapshots == 0
     assert not replacement.closed
     assert replacement.handoff_id is None
     assert current.driver.facade.submits == 1

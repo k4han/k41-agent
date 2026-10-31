@@ -128,7 +128,8 @@ class BrowserRepository:
                     continue
                 expired.append(payload)
                 row.status = "completed"
-                row.result = json.dumps({"content": "Browser handoff expired and was cancelled. Start a new browser task and inspect a fresh snapshot before continuing."})
+                row.result = json.dumps({"handoff_status": "expired", "snapshot_status": "skipped",
+                                         "content": "Browser handoff expired and was cancelled. Start a new browser task and inspect a fresh snapshot before continuing."})
             if expired:
                 await session.commit()
         return expired
