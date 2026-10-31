@@ -29,7 +29,7 @@ To install a specific release:
 
 ```powershell
 Invoke-WebRequest -Uri "https://k4han.github.io/k41-agent/install.ps1" -OutFile ".\install.ps1"
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.34
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.35
 ```
 
 ### macOS or Linux
@@ -51,7 +51,7 @@ To install a specific release:
 ```sh
 curl -fsSL https://k4han.github.io/k41-agent/install.sh -o install.sh
 chmod +x install.sh
-./install.sh --release-tag v0.1.34
+./install.sh --release-tag v0.1.35
 ```
 
 ## Start
