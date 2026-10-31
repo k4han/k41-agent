@@ -28,7 +28,7 @@ async function check() {
       assert.ok(ids.includes(reference.slice(1)), `Missing anchor: ${reference}`);
       continue;
     }
-    assert.ok(reference.startsWith("./"), `Use relative asset URLs for GitHub project Pages: ${reference}`);
+    assert.ok(reference.startsWith("./"), `Use relative asset URLs for the website: ${reference}`);
     const relative = reference.slice(2).split("#")[0];
     if (relative.startsWith("docs/")) {
       const page = relative.slice("docs/".length);
@@ -63,6 +63,7 @@ async function build() {
   await mkdir(output, { recursive: true });
   await cp(source, output, { recursive: true });
   for (const installer of installers) await cp(path.join(root, installer), path.join(output, installer));
+  await cp(path.join(root, "CNAME"), path.join(output, "CNAME"));
   await cp(docsOutput, path.join(output, "docs"), { recursive: true });
   await cp(path.join(docsOutput, "404.html"), path.join(output, "404.html"));
   console.log(`Static site built at ${path.relative(root, output)} (including VitePress docs and the original installers).`);
@@ -70,15 +71,11 @@ async function build() {
 
 async function serve() {
   await build();
-  const base = "/k41-agent/";
+  const base = "/";
   const mime = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".json": "application/json", ".xml": "application/xml", ".svg": "image/svg+xml", ".png": "image/png", ".woff2": "font/woff2", ".ps1": "text/plain; charset=utf-8", ".sh": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8" };
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, "http://localhost");
-      if (url.pathname === "/" || url.pathname === base.slice(0, -1)) {
-        response.writeHead(302, { Location: base }).end();
-        return;
-      }
       if (!url.pathname.startsWith(base)) {
         response.writeHead(404).end("Not found");
         return;
@@ -134,6 +131,7 @@ async function serve() {
     watch(path.join(docsRoot, ".vitepress", "theme"), { recursive: true }, schedule),
     watch(path.join(docsRoot, ".vitepress"), (_event, filename) => { if (filename === "config.mts") schedule(); }),
     ...installers.map((file) => watch(path.join(root, file), schedule)),
+    watch(path.join(root, "CNAME"), schedule),
     ...sharedDocs.map((file) => watch(path.join(docsRoot, file), schedule)),
   ];
   function close() {

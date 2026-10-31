@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitepress";
 
-const base = "/k41-agent/docs/";
+const base = "/docs/";
 
 export default defineConfig({
   title: "K41 Agent",
@@ -18,10 +18,10 @@ export default defineConfig({
     ["link", { rel: "icon", type: "image/svg+xml", href: `${base}favicon.svg` }],
     ["meta", { name: "theme-color", content: "#f7f8f2" }],
   ],
-  sitemap: { hostname: "https://k4han.github.io/k41-agent/docs/" },
+  sitemap: { hostname: "https://k41.bot.cd/docs/" },
   transformHead({ pageData }) {
     const page = pageData.relativePath.replace(/(?:^|\/)index\.md$/, "/").replace(/\.md$/, ".html");
-    const url = `https://k4han.github.io${base}${page === "/" ? "" : page}`;
+    const url = `https://k41.bot.cd${base}${page === "/" ? "" : page}`;
     return [
       ["link", { rel: "canonical", href: url }],
       ["meta", { property: "og:type", content: "website" }],

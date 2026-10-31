@@ -4,6 +4,8 @@ K41 Agent is a local AI workspace assistant with a web dashboard. It can chat, w
 
 Use it when you want a private agent runtime on your own machine instead of a hosted workspace.
 
+[Website](https://k41.bot.cd/) · [Documentation](https://k41.bot.cd/docs/)
+
 ## Highlights
 
 - Web dashboard for chat, workspace selection, settings, and runtime monitoring.
@@ -22,14 +24,14 @@ The installer downloads the latest release package and prepares everything neede
 Open PowerShell and run:
 
 ```powershell
-irm https://k4han.github.io/k41-agent/install.ps1 | iex
+irm https://k41.bot.cd/install.ps1 | iex
 ```
 
 To install a specific release:
 
 ```powershell
-Invoke-WebRequest -Uri "https://k4han.github.io/k41-agent/install.ps1" -OutFile ".\install.ps1"
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.35
+Invoke-WebRequest -Uri "https://k41.bot.cd/install.ps1" -OutFile ".\install.ps1"
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.36
 ```
 
 ### macOS or Linux
@@ -37,21 +39,21 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.35
 Open a terminal and run:
 
 ```sh
-curl -fsSL https://k4han.github.io/k41-agent/install.sh | bash
+curl -fsSL https://k41.bot.cd/install.sh | bash
 ```
 
 If `curl` is not available:
 
 ```sh
-wget -qO- https://k4han.github.io/k41-agent/install.sh | bash
+wget -qO- https://k41.bot.cd/install.sh | bash
 ```
 
 To install a specific release:
 
 ```sh
-curl -fsSL https://k4han.github.io/k41-agent/install.sh -o install.sh
+curl -fsSL https://k41.bot.cd/install.sh -o install.sh
 chmod +x install.sh
-./install.sh --release-tag v0.1.35
+./install.sh --release-tag v0.1.36
 ```
 
 ## Start
@@ -164,13 +166,13 @@ Installer options: `--python-version`, `--uv-version` (pinned by default via `K4
 Windows:
 
 ```powershell
-irm https://k4han.github.io/k41-agent/install.ps1 | iex
+irm https://k41.bot.cd/install.ps1 | iex
 ```
 
 macOS or Linux:
 
 ```sh
-curl -fsSL https://k4han.github.io/k41-agent/install.sh | bash
+curl -fsSL https://k41.bot.cd/install.sh | bash
 ```
 
 ## Uninstall
@@ -290,7 +292,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ## Documentation
 
-- [User documentation](https://k4han.github.io/k41-agent/docs/)
+- [User documentation](https://k41.bot.cd/docs/)
 - [Landing page and GitHub Pages](docs/github-pages.md)
 - `docs/configuration.md`
 - [Priority model pools](docs/model-pools.md)

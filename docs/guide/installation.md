@@ -12,7 +12,7 @@ with uv. Choose the command for your operating system.
 Open **PowerShell** and run:
 
 ```powershell
-irm https://k4han.github.io/k41-agent/install.ps1 | iex
+irm https://k41.bot.cd/install.ps1 | iex
 ```
 
 You can [read the PowerShell installer](https://github.com/k4han/k41-agent/blob/main/install.ps1)
@@ -23,13 +23,13 @@ before running it.
 Open a terminal and run:
 
 ```sh
-curl -fsSL https://k4han.github.io/k41-agent/install.sh | bash
+curl -fsSL https://k41.bot.cd/install.sh | bash
 ```
 
 If `curl` is not available:
 
 ```sh
-wget -qO- https://k4han.github.io/k41-agent/install.sh | bash
+wget -qO- https://k41.bot.cd/install.sh | bash
 ```
 
 You can [read the shell installer](https://github.com/k4han/k41-agent/blob/main/install.sh)
@@ -56,19 +56,19 @@ Next, [connect a model and start a conversation](./getting-started).
 
 ## Install a specific release
 
-For example, to install `v0.1.35` on Windows:
+For example, to install `v0.1.36` on Windows:
 
 ```powershell
-Invoke-WebRequest -Uri "https://k4han.github.io/k41-agent/install.ps1" -OutFile ".\install.ps1"
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.35
+Invoke-WebRequest -Uri "https://k41.bot.cd/install.ps1" -OutFile ".\install.ps1"
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.36
 ```
 
 On macOS or Linux:
 
 ```sh
-curl -fsSL https://k4han.github.io/k41-agent/install.sh -o install.sh
+curl -fsSL https://k41.bot.cd/install.sh -o install.sh
 chmod +x install.sh
-./install.sh --release-tag v0.1.35
+./install.sh --release-tag v0.1.36
 ```
 
 ## Optional browser support
@@ -92,7 +92,7 @@ cached sudo credentials (`sudo -v`). It does not require a desktop session.
 To include this step in the shell installer:
 
 ```sh
-curl -fsSL https://k4han.github.io/k41-agent/install.sh | bash -s -- --with-browser
+curl -fsSL https://k41.bot.cd/install.sh | bash -s -- --with-browser
 ```
 
 `K41_AGENT_WITH_BROWSER=true` also enables this step. Browser setup failures stop

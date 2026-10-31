@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - "CNAME"
       - "website/**"
       - "docs/**"
       - "package.json"
@@ -16,6 +17,7 @@ on:
       - ".github/workflows/pages.yml"
   pull_request:
     paths:
+      - "CNAME"
       - "website/**"
       - "docs/**"
       - "package.json"

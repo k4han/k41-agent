@@ -15,8 +15,8 @@ pnpm install
 pnpm site:dev
 ```
 
-Open `http://127.0.0.1:4173/k41-agent/` for the landing page, or
-`http://127.0.0.1:4173/k41-agent/docs/` for documentation. This server previews the
+Open `http://127.0.0.1:4173/` for the landing page, or
+`http://127.0.0.1:4173/docs/` for documentation. This server previews the
 complete production build under the same paths used by GitHub Pages. Changes to
 the landing page, documentation, theme, shared sources, or installers rebuild the
 output; refresh the browser after the build completes. Set `PORT` to use a
@@ -28,7 +28,7 @@ For documentation-only editing with VitePress hot reload:
 pnpm docs:dev
 ```
 
-Open `http://127.0.0.1:5174/k41-agent/docs/`. This server only serves the docs;
+Open `http://127.0.0.1:5174/docs/`. This server only serves the docs;
 use `pnpm site:dev` to preview navigation between the docs and landing page.
 
 Validate and build without starting a server:
@@ -51,30 +51,31 @@ pnpm docs:preview
 ```
 
 Its output is `dist/docs/`; preview it at
-`http://127.0.0.1:4174/k41-agent/docs/`.
+`http://127.0.0.1:4174/docs/`.
 
 The combined build copies the documentation into `dist/site/docs/`, along with a
 root `404.html` for GitHub Pages. It also copies the
-original root `install.ps1`, `install.sh`, and `uninstall.ps1` into the output.
-This preserves the existing public installer URLs and keeps published scripts in
-sync with the repository. Do not maintain separate installer copies in `website/`.
+original root `install.ps1`, `install.sh`, `uninstall.ps1`, and `CNAME` into the output.
+This publishes the installer endpoints on the custom domain and keeps published
+scripts in sync with the repository. Do not maintain separate installer copies in `website/`.
 
 ## Deployment
 
-The existing repository uses branch-based Pages publishing. Switch it to the
-workflow-based source before deploying this landing page:
+The repository publishes the combined website through GitHub Actions.
+Configure Pages before the first deployment:
 
 1. Open the repository's **Settings > Pages**.
 2. Under **Build and deployment > Source**, select **GitHub Actions**.
 3. Push the website changes to `main`, or run **Deploy website and docs** from
    the **Actions** tab after the workflow exists on `main`.
-4. Wait for both the `build` and `deploy` jobs to succeed.
+4. Set the custom domain to `k41.bot.cd` and enable **Enforce HTTPS**.
+5. Wait for both the `build` and `deploy` jobs to succeed.
 
 The production URL is:
 
 ```text
-https://k4han.github.io/k41-agent/
-https://k4han.github.io/k41-agent/docs/
+https://k41.bot.cd/
+https://k41.bot.cd/docs/
 ```
 
 `.github/workflows/pages.yml` installs dependencies with the frozen pnpm lockfile
@@ -84,12 +85,12 @@ needs no repository secrets. GitHub may
 require a deployment approval if protection rules exist on the `github-pages`
 environment.
 
-The public installer endpoints remain:
+The public installer endpoints are:
 
 ```text
-https://k4han.github.io/k41-agent/install.ps1
-https://k4han.github.io/k41-agent/install.sh
-https://k4han.github.io/k41-agent/uninstall.ps1
+https://k41.bot.cd/install.ps1
+https://k41.bot.cd/install.sh
+https://k41.bot.cd/uninstall.ps1
 ```
 
 This deployment follows GitHub's
@@ -124,7 +125,7 @@ execute tasks. Installation commands are only copied, never executed by the site
 The FAQ and installer commands remain usable without JavaScript.
 All page assets are self-hosted; no third-party font service or CDN is required.
 
-Use relative asset paths to support the `/k41-agent/` project prefix. When forking
+Use relative asset paths for the landing page and `/docs/` for documentation. When forking
 or changing the public URL, also update the repository links, canonical URL,
 Open Graph URL, installer commands, the local server's base path, and VitePress's
 `base` and sitemap settings. VitePress deployment details are described in its
