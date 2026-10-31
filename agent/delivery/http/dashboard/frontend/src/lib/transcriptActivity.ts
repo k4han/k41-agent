@@ -83,6 +83,27 @@ export function findTranscriptAnswerId<T extends TranscriptActivitySource>(
   return null;
 }
 
+/** Find the final visible answer in each completed conversation turn. */
+export function findTranscriptCompletedAnswerIds<T extends TranscriptActivitySource>(
+  items: readonly T[],
+): Set<number> {
+  const answers = new Set<number>();
+  let candidate: number | null = null;
+  for (const item of items) {
+    if (isEmptyAssistantMessage(item)) continue;
+    if (item.type === "message" && item.role === "user") {
+      if (candidate !== null) answers.add(candidate);
+      candidate = null;
+    } else if (item.type === "message" && item.role === "assistant") {
+      candidate = item.id;
+    } else {
+      candidate = null;
+    }
+  }
+  if (candidate !== null) answers.add(candidate);
+  return answers;
+}
+
 /** Only the failed run at the end of the transcript can resume its checkpoint. */
 export function findTranscriptResumeId<T extends TranscriptActivitySource>(
   items: readonly T[],

@@ -522,6 +522,32 @@ def _branch_metadata_by_index(
     return branches
 
 
+def forkable_message_indices(messages: list[Any]) -> set[int]:
+    """Return completed answers, excluding tool commentary and partial turns."""
+    answers: set[int] = set()
+    last_index: int | None = None
+
+    def finish_turn() -> None:
+        if last_index is None:
+            return
+        message = messages[last_index]
+        if (
+            isinstance(message, AIMessage)
+            and not message.tool_calls
+            and extract_final_text_content(message.content).strip()
+            and not message.additional_kwargs.get("is_compact_summary")
+        ):
+            answers.add(last_index)
+
+    for index, message in enumerate(messages):
+        if isinstance(message, HumanMessage):
+            finish_turn()
+        if isinstance(message, (HumanMessage, AIMessage, ToolMessage)):
+            last_index = index
+    finish_turn()
+    return answers
+
+
 def _serialize_thread_messages(
     messages: list[Any],
     *,
@@ -530,6 +556,7 @@ def _serialize_thread_messages(
 ) -> list[dict[str, Any]]:
     sources = sources or {}
     branches = branches or {}
+    forkable = forkable_message_indices(messages)
 
     result = []
     for message_index, msg in enumerate(messages):
@@ -557,6 +584,9 @@ def _serialize_thread_messages(
             content = extract_final_text_content(getattr(msg, "content", None))
             entry["role"] = "assistant"
             entry["content"] = content or ""
+            if message_index in forkable and message_index in sources:
+                entry["message_index"] = message_index
+                entry["source_checkpoint_id"] = sources[message_index][0]
             tool_calls = getattr(msg, "tool_calls", None)
             if tool_calls:
                 entry["tool_calls"] = [

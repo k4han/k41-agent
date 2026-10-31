@@ -8,8 +8,10 @@ import {
   ExternalLink,
   Eye,
   FileText,
+  GitBranch,
   GripHorizontal,
   Image as ImageIcon,
+  Loader2,
   Maximize2,
   Monitor,
   Pencil,
@@ -97,6 +99,12 @@ export type TranscriptBranch = {
   current: number;
   total: number;
   options: TranscriptBranchOption[];
+};
+
+export type ForkMessagePayload = {
+  itemId?: number;
+  messageIndex: number;
+  sourceCheckpointId: string;
 };
 
 export type TranscriptMessage = {
@@ -347,8 +355,11 @@ export function TranscriptMessageView(props: {
   deferHighlight?: boolean;
   itemId?: number;
   actionsDisabled?: boolean;
-  /** Show the answer actions (copy, regenerate); hidden while the run streams. */
+  /** Show answer actions only for completed turns. */
   showAssistantActions?: boolean;
+  showRegenerateAction?: boolean;
+  forking?: boolean;
+  onForkMessage?: (payload: ForkMessagePayload) => void;
   onResume?: () => void;
   onEdit?: (payload: {
     itemId?: number;
@@ -655,22 +666,46 @@ export function TranscriptMessageView(props: {
                 successMessage="Response copied."
                 iconSize={15}
               />
-              <button
-                class="message-action-btn"
-                type="button"
-                onClick={() => {
-                  props.onRegenerateMessage?.({
-                    itemId: props.itemId,
-                    messageIndex: props.messageIndex,
-                    sourceCheckpointId: props.sourceCheckpointId,
-                  });
-                }}
-                disabled={props.actionsDisabled}
-                title="Regenerate response"
-                aria-label="Regenerate response"
-              >
-                <RotateCcw size={15} />
-              </button>
+              <Show when={props.onForkMessage}>
+                <button
+                  class="message-action-btn"
+                  type="button"
+                  disabled={props.actionsDisabled || props.forking || props.messageIndex === undefined || !props.sourceCheckpointId}
+                  title={props.forking ? "Creating branch..." : "Branch conversation"}
+                  aria-label="Branch conversation"
+                  aria-busy={props.forking || undefined}
+                  onClick={() => {
+                    if (props.messageIndex === undefined || !props.sourceCheckpointId) return;
+                    props.onForkMessage?.({
+                      itemId: props.itemId,
+                      messageIndex: props.messageIndex,
+                      sourceCheckpointId: props.sourceCheckpointId,
+                    });
+                  }}
+                >
+                  <Show when={props.forking} fallback={<GitBranch size={15} />}>
+                    <Loader2 size={15} class="spin" />
+                  </Show>
+                </button>
+              </Show>
+              <Show when={props.showRegenerateAction ?? true}>
+                <button
+                  class="message-action-btn"
+                  type="button"
+                  onClick={() => {
+                    props.onRegenerateMessage?.({
+                      itemId: props.itemId,
+                      messageIndex: props.messageIndex,
+                      sourceCheckpointId: props.sourceCheckpointId,
+                    });
+                  }}
+                  disabled={props.actionsDisabled}
+                  title="Regenerate response"
+                  aria-label="Regenerate response"
+                >
+                  <RotateCcw size={15} />
+                </button>
+              </Show>
             </div>
           </Show>
         </Show>
@@ -1645,8 +1680,11 @@ export interface TranscriptItemViewProps {
   agents?: AgentCard[];
   activeAgentName?: string;
   actionsDisabled?: boolean;
-  /** Show the answer actions (copy, regenerate); hidden while the run streams. */
+  /** Show answer actions only for completed turns. */
   showAssistantActions?: boolean;
+  showRegenerateAction?: boolean;
+  forking?: boolean;
+  onForkMessage?: (payload: ForkMessagePayload) => void;
   onResume?: () => void;
   onEditMessage?: (payload: {
     itemId?: number;
@@ -1693,6 +1731,9 @@ export function TranscriptItemView(props: TranscriptItemViewProps) {
       itemId={props.itemId}
       actionsDisabled={props.actionsDisabled}
       showAssistantActions={props.showAssistantActions}
+      showRegenerateAction={props.showRegenerateAction}
+      forking={props.forking}
+      onForkMessage={props.onForkMessage}
       onResume={props.onResume}
       onEdit={props.onEditMessage}
       onRegenerateMessage={props.onRegenerateMessage}

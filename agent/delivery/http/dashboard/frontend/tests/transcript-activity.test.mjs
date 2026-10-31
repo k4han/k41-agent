@@ -21,7 +21,7 @@ function loadModule(path, dependencies = {}) {
 }
 
 const toolCallStatus = loadModule('../src/lib/toolCallStatus.ts');
-const { buildTranscriptActivityView, findTranscriptAnswerId, findTranscriptResumeId, isTranscriptActivityBoundary, isTranscriptWaitingForModel } = loadModule(
+const { buildTranscriptActivityView, findTranscriptAnswerId, findTranscriptCompletedAnswerIds, findTranscriptResumeId, isTranscriptActivityBoundary, isTranscriptWaitingForModel } = loadModule(
   '../src/lib/transcriptActivity.ts',
   {
     '@/lib/htmlPreview': { HTML_PREVIEW_TOOL_NAME: 'html_preview' },
@@ -262,6 +262,19 @@ test('the answer id points at the last assistant message only', () => {
     assistantMessage(5, 'final answer'),
   ]);
   assert.equal(answerId, 5);
+});
+
+test('completed turns keep actions on their final answers without exposing tool commentary', () => {
+  const items = [
+    userMessage(1), assistantMessage(2, 'First answer'),
+    userMessage(3), assistantMessage(4, 'Checking'), toolCall(5),
+    assistantMessage(6, 'Second answer'), assistantMessage(7, ''),
+  ];
+  assert.deepEqual(Array.from(findTranscriptCompletedAnswerIds(items)), [2, 6]);
+  assert.equal(findTranscriptAnswerId(items), 6, 'regeneration still belongs to the latest answer');
+  assert.deepEqual(Array.from(findTranscriptCompletedAnswerIds([...items, userMessage(8), toolCall(9)])), [2, 6]);
+  assert.deepEqual(Array.from(findTranscriptCompletedAnswerIds([userMessage(1), assistantMessage(2), toolCall(3)])), []);
+  assert.deepEqual(Array.from(findTranscriptCompletedAnswerIds([userMessage(1), assistantMessage(2), planReview(3)])), []);
 });
 
 test('empty assistant messages do not take answer actions from the visible answer', () => {

@@ -3,9 +3,9 @@ import { createMemo, For, Show } from "solid-js";
 
 import { TranscriptActivityGroup } from "@/components/TranscriptActivityGroup";
 import { StatusIndicator } from "@/components/StatusIndicator";
-import { TranscriptItemView, type TranscriptAttachment, type TranscriptRole } from "@/components/Transcript";
+import { TranscriptItemView, type ForkMessagePayload, type TranscriptAttachment, type TranscriptRole } from "@/components/Transcript";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
-import { findTranscriptAnswerId, findTranscriptResumeId, isTranscriptWaitingForModel } from "@/lib/transcriptActivity";
+import { findTranscriptAnswerId, findTranscriptCompletedAnswerIds, findTranscriptResumeId, isTranscriptWaitingForModel } from "@/lib/transcriptActivity";
 import { THINKING_TEXT } from "@/lib/chatStatus";
 import { useStreamingTranscriptItem } from "@/lib/useStreamingTranscriptItem";
 import { useTranscriptActivityView } from "@/lib/useTranscriptActivityView";
@@ -38,6 +38,8 @@ export interface ChatTranscriptProps {
   streaming: boolean;
   backgroundLive: boolean;
   compacting?: boolean;
+  forkingItemId?: number | null;
+  onForkMessage?: (payload: ForkMessagePayload) => void;
   showScrollToBottom: boolean;
   turnAnchorSpacerHeight: number;
   onScrollToBottomClick: () => void;
@@ -85,13 +87,13 @@ export function ChatTranscript(props: ChatTranscriptProps) {
     streamActive,
   );
   const answerItemId = createMemo(() => findTranscriptAnswerId(props.filteredItems));
+  const completedAnswerIds = createMemo(() => streamActive() ? new Set<number>() : findTranscriptCompletedAnswerIds(props.items));
   const resumeItemId = createMemo(() => findTranscriptResumeId(props.items));
   const waitingForModel = createMemo(() => !props.compacting
     && isTranscriptWaitingForModel(props.items, streamActive()));
-  // Answer actions stay hidden while the agent runs and then belong only to
-  // the final answer of the thread.
+  // Each completed turn can be copied or forked; regeneration stays on the latest answer.
   const showAssistantActions = (itemId: number) =>
-    !streamActive() && answerItemId() === itemId;
+    !streamActive() && (completedAnswerIds().has(itemId) || answerItemId() === itemId);
 
   return (
     <div class="transcript-container">
@@ -195,6 +197,9 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                       itemId={row().id}
                       deferHighlight={isStreamingItem(row().id)}
                       showAssistantActions={showAssistantActions(row().id)}
+                      showRegenerateAction={answerItemId() === row().id}
+                      forking={props.forkingItemId === row().id}
+                      onForkMessage={completedAnswerIds().has(row().id) ? props.onForkMessage : undefined}
                       onResume={props.currentThreadId && resumeItemId() === row().id ? props.onResume : undefined}
                       agents={props.agents}
                       activeAgentName={props.activeAgentName}

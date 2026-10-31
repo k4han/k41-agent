@@ -49,6 +49,7 @@ const sentMessages = [];
 const reconnects = [];
 const writes = [];
 const backgroundSnapshots = [];
+const pendingForks = [];
 let delayedHistory;
 let holdHistory = false;
 let workspaceResolution;
@@ -56,6 +57,12 @@ let holdSessions = false;
 const delayedSessions = [];
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (req.method === 'POST' && url.pathname.endsWith('/fork')) {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    pendingForks.push({ res, payload: JSON.parse(body), path: url.pathname });
+    return;
+  }
   if (url.pathname === '/dashboard-api/sessions/events') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     res.write('event: snapshot\ndata: {"sessions":[]}\n\n');
@@ -614,13 +621,74 @@ try {
   finish('legacy', 'storage failure completed');
   await completed();
   assert.equal(writes.length, 0, 'remembering dashboard models must not write settings or conversation metadata');
+
+  history.first.messages = [
+    { id: 'u1', role: 'user', content: 'First prompt', message_index: 0, source_checkpoint_id: 'input-1' },
+    { id: 'a1', role: 'assistant', content: 'First answer', message_index: 1, source_checkpoint_id: 'answer-1' },
+    { id: 'u2', role: 'user', content: 'Second prompt', message_index: 2, source_checkpoint_id: 'input-2' },
+    { id: 'a2', role: 'assistant', content: 'Second answer', message_index: 3, source_checkpoint_id: 'answer-2' },
+  ];
+  await navigate('/c/first');
+  await loaded();
+  await until(() => js(`document.querySelectorAll('button[aria-label="Branch conversation"]').length === 2`), 'branch actions on old and latest answers');
+  assert.equal(await js(`document.querySelectorAll('button[aria-label="Copy response"]').length`), 2);
+  assert.equal(await js(`document.querySelectorAll('button[aria-label="Regenerate response"]').length`), 1);
+  await js(`(() => {
+    window.forkEvents = 0;
+    window.addEventListener('k41:threads-changed', () => window.forkEvents++);
+    const button = document.querySelector('button[aria-label="Branch conversation"]');
+    button.click(); button.click();
+  })()`);
+  await until(() => pendingForks.length === 1, 'one fork request despite repeated clicks');
+  assert.deepEqual(pendingForks[0].payload, { source_checkpoint_id: 'answer-1', message_index: 1 });
+  assert.equal(await js(`document.querySelector('button[aria-label="Branch conversation"]').disabled`), true);
+  assert.equal(await js(`document.querySelector('button[aria-label="Branch conversation"]').getAttribute('aria-busy')`), 'true');
+  history.fork = { ...history.first, thread_id: 'fork', title: 'first conversation (2)', messages: history.first.messages.slice(0, 2) };
+  pendingForks.shift().res.writeHead(201, { 'Content-Type': 'application/json' }).end(JSON.stringify(history.fork));
+  await until(() => js('location.pathname === "/c/fork"'), 'open created branch');
+  await loaded();
+  assert.equal(await js('document.querySelectorAll(".assistant-actions").length'), 1);
+  assert.equal(await js('window.forkEvents'), 1, 'refresh navigation when the fork is created');
+
+  await navigate('/c/first');
+  await loaded();
+  await js(`document.querySelector('button[aria-label="Branch conversation"]').click()`);
+  await until(() => pendingForks.length === 1, 'start delayed fork');
+  await navigate('/c/second');
+  await loaded();
+  const eventsBeforeLateFork = await js('window.forkEvents');
+  pendingForks.shift().res.writeHead(201, { 'Content-Type': 'application/json' }).end(JSON.stringify(history.fork));
+  await until(async () => (await js('window.forkEvents')) > eventsBeforeLateFork, 'publish late fork result');
+  assert.equal(await js('location.pathname'), '/c/second', 'a delayed fork must not replace the current conversation');
+
+  await navigate('/c/first');
+  await loaded();
+  await js(`document.querySelector('button[aria-label="Branch conversation"]').click()`);
+  await until(() => pendingForks.length === 1, 'start rejected fork');
+  pendingForks.shift().res.writeHead(409, { 'Content-Type': 'application/json' }).end(JSON.stringify({ detail: 'Conversation is busy.' }));
+  await until(() => js(`document.querySelector('button[aria-label="Branch conversation"]')?.disabled === false`), 'restore actions after fork failure');
+  assert.equal(await js('location.pathname'), '/c/first');
+  assert.equal(await js('document.querySelectorAll(".assistant-actions").length'), 2, 'failed fork keeps the transcript');
+  const sentBeforeRegenerate = sentMessages.length;
+  await js(`document.querySelector('button[aria-label="Regenerate response"]').click()`);
+  await until(() => sentMessages.length === sentBeforeRegenerate + 1, 'regenerate the latest response');
+  assert.equal(sentMessages.at(-1).source_checkpoint_id, 'input-2', 'regeneration still uses the preceding user checkpoint');
+  assert.equal(sentMessages.at(-1).message_index, 2);
+  assert.equal(sentMessages.at(-1).message, 'Second prompt');
+  finish('first', 'Regenerated after branching');
+  await completed();
+  await send('Continue after branching');
+  await until(() => js(`document.querySelectorAll('button[aria-label="Branch conversation"]').length === 0`), 'hide branch actions during streaming');
+  finish('first', 'Continued after branching');
+  await completed();
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
-  console.log('PASS: remembered agents and models, custom models, reloads, unsent selections, agent defaults, model pools, automated snapshots, legacy and invalid preferences, concurrent streams, delayed history and sessions, workspace snapshots, and effort preservation.');
+  console.log('PASS: model preferences, concurrent streams, delayed navigation, workspace snapshots, and conversation branching with old answers, repeated clicks, failures, and streaming.');
 } finally {
   for (const response of responses.values()) response.end();
   workspaceResolution?.end();
   delayedHistory?.res.end();
   for (const response of delayedSessions) response.end();
+  for (const fork of pendingForks) fork.res.end();
   if (call && ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
   ws?.close();
   browser.kill();

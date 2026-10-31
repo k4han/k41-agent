@@ -34,8 +34,10 @@ from agent.modules.conversations import (
     CompactionConflictError,
     CompactionSummaryError,
     ConversationHistoryUnavailableError,
+    ConversationForkConflictError,
     THREAD_KIND_BACKGROUND,
     compact_conversation_thread,
+    fork_conversation_thread,
     get_checkpoint_stats,
     get_conversation_thread,
     get_thread_messages,
@@ -80,6 +82,13 @@ class CompactThreadBody(BaseModel):
         le=50,
         description="Number of recent messages to keep intact (default: configured value or 6).",
     )
+
+
+class ForkThreadBody(BaseModel):
+    """Identify a persisted assistant answer to copy into a new conversation."""
+
+    source_checkpoint_id: str = Field(min_length=1, max_length=255)
+    message_index: int = Field(ge=0)
 
 
 def _parse_thread_id_safe(thread_id: str) -> dict[str, str]:
@@ -297,6 +306,34 @@ async def delete_chat_thread(thread_id: str) -> dict[str, str]:
     await mark_conversation_thread_deleted(thread_id)
     await delete_workflow_thread_tree(thread_id)
     return {"status": "deleted", "thread_id": thread_id}
+
+
+@router.post("/dashboard-api/chat-history/{thread_id:path}/fork", status_code=201)
+async def fork_chat_thread(thread_id: str, body: ForkThreadBody) -> dict[str, Any]:
+    """Create an independent conversation ending at a saved assistant answer."""
+    try:
+        return await fork_conversation_thread(
+            thread_id, source_checkpoint_id=body.source_checkpoint_id, message_index=body.message_index,
+        )
+    except CheckpointNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ConversationForkConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ConversationHistoryUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except OSError as exc:
+        logger.exception("Failed to copy files while forking conversation %s", thread_id)
+        raise HTTPException(status_code=503, detail="Conversation files could not be copied. Please try again.") from exc
+    except Exception as exc:
+        from agent.modules.projects import ProjectWorkspaceError
+        from agent.delivery.http.dashboard.routes.helpers.workspace import workspace_http_error
+
+        if isinstance(exc, ProjectWorkspaceError):
+            raise workspace_http_error(exc) from exc
+        logger.exception("Failed to fork conversation %s", thread_id)
+        raise HTTPException(status_code=503, detail="The conversation could not be forked. Please try again.") from exc
 
 
 @router.post("/dashboard-api/chat-history/{thread_id:path}/compact")

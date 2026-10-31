@@ -3,6 +3,7 @@ from agent.modules.conversations.navigation import list_conversation_projects, l
 from agent.modules.conversations.navigation import _project_previews_statement as project_previews_statement, _serialize_project_thread as serialize_project_thread
 from agent.modules.conversations.migrations import migrate_conversation_ids, migrate_conversation_tables
 from agent.modules.conversations import history
+from agent.modules.conversations.forking import ConversationForkConflictError, fork_conversation_thread
 from agent.modules.conversations.history import (
     CheckpointNotFoundError,
     ConversationHistoryUnavailableError,
@@ -59,6 +60,7 @@ from agent.modules.conversations.service import (
 )
 
 __all__ = [
+    "ConversationForkConflictError", "fork_conversation_thread",
     "project_previews_statement", "serialize_project_thread",
     "CONVERSATION_TITLE_AGENT_NAME",
     "CONVERSATION_TITLE_MAX_CHARS",

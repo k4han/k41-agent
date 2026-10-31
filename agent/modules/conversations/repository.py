@@ -5,7 +5,7 @@ from typing import Any
 
 from agent.shared.thread_ids import resolve_thread_id
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 
 from agent.modules.conversations.models import ConversationRunError, ConversationThread
 from agent.shared.infrastructure.db.base import utcnow
@@ -53,6 +53,31 @@ def _normalize_kind_filters(
 
 
 class ConversationThreadRepository:
+    async def list_workspace_titles(self, workspace_key: str) -> list[str]:
+        """Read titles using the same grouping rules as conversation navigation."""
+        from agent.modules.conversations.navigation import _ranked_project_threads
+
+        async with await get_async_session() as session:
+            ranked = _ranked_project_threads(
+                dialect=session.bind.dialect.name,
+                active_thread_id="",
+                project_key_filter=workspace_key,
+            )
+            result = await session.execute(
+                select(ConversationThread.title).join(
+                    ranked, ranked.c.conversation_id == ConversationThread.id,
+                )
+            )
+            return list(result.scalars())
+
+    async def delete(self, thread_id: str) -> None:
+        """Remove an unpublished conversation after failed initialization."""
+        async with await get_async_session() as session:
+            await session.execute(delete(ConversationThread).where(
+                ConversationThread.thread_id == resolve_thread_id(thread_id),
+            ))
+            await session.commit()
+
     async def record_run_error(
         self, *, thread_id: str, checkpoint_id: str, code: str, content: str, message: str = "",
     ) -> None:

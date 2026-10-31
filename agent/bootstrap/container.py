@@ -184,6 +184,7 @@ class AppContainer:
     _agent_catalog_service: Any = field(default=None, repr=False)
     _agent_repository: Any = field(default=None, repr=False)
     _conversation_repository: Any = field(default=None, repr=False)
+    _conversation_fork_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     _workspace_repository: Any = field(default=None, repr=False)
     _workspace_backend_registry: Any = field(default=None, repr=False)
     _workspace_backends_registered: bool = field(default=False, repr=False)

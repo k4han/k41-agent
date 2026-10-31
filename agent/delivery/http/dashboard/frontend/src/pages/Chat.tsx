@@ -14,7 +14,7 @@ import { Dialog } from "@/components/Dialog";
 import { Markdown } from "@/components/Markdown";
 import { ChatThreadBadges } from "@/components/ChatThreadBadges";
 import { ChatTranscript } from "@/components/ChatTranscript";
-import { PLAN_MODE_TOOL_NAME, createTranscriptUserInputRequest, type TranscriptAttachment, type TranscriptRole, type TranscriptUserInputRequest } from "@/components/Transcript";
+import { PLAN_MODE_TOOL_NAME, createTranscriptUserInputRequest, type ForkMessagePayload, type TranscriptAttachment, type TranscriptRole, type TranscriptUserInputRequest } from "@/components/Transcript";
 import type { UserInputRequestSubmitPayload } from "@/components/UserInputRequestCard";
 import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import { DataGate } from "@/components/State";
@@ -188,6 +188,8 @@ export function ChatPage() {
   const [threadError, setThreadError] = createSignal("");
   const [threadLoading, setThreadLoading] = createSignal(false);
   const [currentThreadId, setCurrentThreadId] = createSignal("");
+  const [forkRequest, setForkRequest] = createSignal<{ threadId: string; itemId?: number } | null>(null);
+  const forking = () => forkRequest()?.threadId === currentThreadId();
   const [activeCheckpointId, setActiveCheckpointId] = createSignal("");
   const [threadTitleOverride, setThreadTitleOverride] = createSignal("");
   const isDrawerActive = createMediaQuery(DRAWER_MEDIA_QUERY);
@@ -823,7 +825,7 @@ export function ChatPage() {
     return Boolean(task && ACTIVE_TASK_STATUSES.has(task.status));
   });
   const conversationBusy = createMemo(() => (
-    streaming() || threadLoading() || backgroundTaskActive() || backgroundLive() || Boolean(activeSession())
+    streaming() || threadLoading() || backgroundTaskActive() || backgroundLive() || Boolean(activeSession()) || forking()
   ));
   const stopActive = createMemo(() => (
     streaming() || backgroundTaskActive() || backgroundLive() || Boolean(activeSession())
@@ -1069,6 +1071,10 @@ export function ChatPage() {
   ) => {
     isUnmounting = false;
     cleanupStaleStreams();
+    if (forking()) {
+      showToast("Wait for the conversation branch to finish creating.", "warning");
+      return;
+    }
     if (streaming()) {
       showToast("Wait for the current response to finish.", "warning");
       return;
@@ -1503,6 +1509,27 @@ export function ChatPage() {
       void sendMessage(true, { action: "permission", request_id: permission.id.slice("permission:".length), decision });
     } else {
       void sendMessage(true, { action: "answer", answers: payload.answers, summary: payload.summary });
+    }
+  };
+
+  const handleForkMessage = async (payload: ForkMessagePayload) => {
+    const threadId = currentThreadId();
+    if (!threadId || forkRequest() || conversationBusy() || compacting() || workspaceRuntime.busy()) return;
+    const loadRevision = threadLoadRequestId;
+    setForkRequest({ threadId, itemId: payload.itemId });
+    try {
+      const fork = await postJson<ThreadMessagesPayload>(`${threadApiPath(threadId)}/fork`, {
+        source_checkpoint_id: payload.sourceCheckpointId,
+        message_index: payload.messageIndex,
+      });
+      window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
+      if (!isUnmounting && currentThreadId() === threadId && threadLoadRequestId === loadRevision) {
+        navigate(chatThreadHref(fork.thread_id));
+      }
+    } catch (err) {
+      if (!isUnmounting) showToast(err instanceof Error ? err.message : "Failed to branch conversation.", "error");
+    } finally {
+      setForkRequest(null);
     }
   };
 
@@ -2039,6 +2066,8 @@ export function ChatPage() {
                 streaming={streaming()}
                 backgroundLive={backgroundLive()}
                 compacting={compacting()}
+                forkingItemId={forking() ? forkRequest()?.itemId : null}
+                onForkMessage={(payload) => void handleForkMessage(payload)}
                 showScrollToBottom={showScrollToBottom()}
                 turnAnchorSpacerHeight={turnAnchorSpacerHeight()}
                 onScrollToBottomClick={handleScrollToBottomClick}
