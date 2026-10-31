@@ -1,0 +1,40 @@
+# Browser automation
+
+K41 runs local Chrome through Stagehand v4. Enable the Browser tools for the desired agent in Settings > Agents > Tools. The default agent's tools are unchanged.
+
+Install dependencies with `uv sync`. Chrome or Chromium must be installed separately. Configure `browser.executable_path` in Settings > Configuration if automatic discovery fails. Browser libraries do not require a second model or a Browserbase account.
+
+## Using the browser
+
+Ask the agent to open a JavaScript website, interact with its forms, or test a web app. The tools are `browser_snapshot`, `browser_run`, `browser_screenshot`, `browser_handoff`, and `browser_close`. Use browser tools sequentially. A run accepts either JavaScript over Stagehand's Playwright-style facade or snapshot-ID actions. Take a new snapshot after navigation, stale IDs, or a human handoff.
+
+Open Browser from the chat header to watch the active browser. When the agent requests a login, CAPTCHA, or two-factor authentication, the panel opens automatically and the workflow pauses. Enter credentials directly into the streamed browser, then choose Return control to agent. The agent inspects a fresh snapshot and continues. Closing the panel or disconnecting the viewer does not return control. Cancel browser task ends the handoff and closes that browser.
+
+Each conversation has its own persistent login profile by default. Create and select a named profile in the browser panel to reuse a login across conversations. Close the browser before changing profiles. A named profile can be open in only one conversation at a time. Profiles belong to the authenticated dashboard account, independently of the chat request's user ID.
+
+Browser tools require the authenticated account identity supplied by dashboard/API runs. Channel and scheduler runs do not supply this identity, so browser tools, including human handoff, fail before creating a browser session or ownership binding. Open the conversation in the dashboard to perform browser tasks.
+
+Delegated sub-agents inherit the parent run's authenticated browser owner. They can use browser tools, and their browsers can be inspected and closed through the dashboard API using the sub-thread ID. Human handoff is unavailable inside delegated sub-agents because delegation does not relay workflow interrupts. A sub-agent must report login, CAPTCHA, or 2FA requirements to its parent agent.
+
+## Configuration and storage
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| `browser.executable_path` | Empty | Discover Chrome automatically; applies to new sessions. |
+| `browser.storage_root` | `~/.k41-agent/browser` | Database-scoped profiles and images outside project workspaces; restart after changing. |
+| `browser.idle_ttl_seconds` | `600` | Close inactive sessions and limit the lifetime of a pending handoff. Viewing frames does not reset the timer. |
+| `browser.operation_timeout_seconds` | `60` | Close a browser when an operation times out. |
+
+Tool permissions use each browser tool's name as the action and `*` as the resource, for example `{action: browser_run, resource: '*', effect: ask}` in an agent's `tool_permissions`. This reviews the complete invocation; it is not a per-domain network policy.
+
+Completed browser mutations are journaled by tool call ID. Replaying a completed call returns its receipt. If an action loses its response or the process stops during execution, its result is unknown; inspect the page before issuing a new action rather than retrying the same call. Browser process state is separate from LangGraph checkpoints. After a browser is lost during handoff, continue or cancel the expired handoff before starting a new browser task. Pending handoffs are automatically cancelled after `browser.idle_ttl_seconds`; expiry closes any matching browser and retains a cancellation receipt for safe workflow replay. Legacy pending handoffs without an expiry are cancelled when next accessed or swept.
+
+Deleting a conversation closes its browsers and all delegated sub-thread browsers, revokes viewer tickets, and removes bindings, invocation receipts, screenshots, run artifacts, and default login directories. Explicitly named login profiles remain available to other conversations. Run artifacts are stored per conversation, independently of the selected login profile.
+
+Viewer tickets are single-use, expire after 60 seconds, and are issued through authenticated, CSRF-protected requests. The viewer checks its Origin and accepts input only during a handoff, from one controlling connection. Streaming frames and human input are not recorded in chat or tool logs. Explicit agent screenshots are saved as access-controlled artifacts.
+
+The browser runs on the K41 host, including for remote workspaces. `localhost` refers to that host. Use a reachable preview URL for Daytona/Modal applications. This version supports one K41 runtime process; cloud browsers, private sandbox port bridges, and file transfer are outside its scope.
+
+## Validation
+
+Run Python browser and API tests with `uv run pytest tests/test_browser_sessions.py tests/test_browser_dashboard.py`. Set `K41_TEST_BROWSER=1` to include `tests/test_browser_live.py`, which exercises installed Chrome using a local fixture without model calls or external accounts. Run `pnpm dashboard:check`, `pnpm dashboard:build`, and the frontend `test:browser-ui` script to validate dashboard interaction and reconnection.

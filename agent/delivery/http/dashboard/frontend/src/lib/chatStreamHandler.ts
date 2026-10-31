@@ -30,6 +30,7 @@ export interface StreamCallbacks {
   onThreadCreated: (threadId: string, streamThreadIdRef: StreamThreadIdRef) => void;
   onThreadTitle?: (threadId: string, title: string) => void;
   onContextUsage?: (usage: ContextUsage, threadId: string) => void;
+  onBrowserHandoffChange?: (pending: boolean, threadId: string) => void;
 }
 
 // ── Mutable refs shared across event handling ──
@@ -215,8 +216,19 @@ export function handleStreamEvent(
     return;
   }
 
+  if (event.type === "browser_handoff_request") {
+    callbacks.onBrowserHandoffChange?.(true, streamThreadIdRef.id);
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("k41-browser-handoff", {
+      detail: { threadId: streamThreadIdRef.id },
+    }));
+    return;
+  }
+
   if (event.type === STREAM_EVENTS.TOOL_RESULT) {
     const toolName = String(event.name || "unknown");
+    if (toolName === "browser_handoff") {
+      callbacks.onBrowserHandoffChange?.(false, streamThreadIdRef.id);
+    }
     if (toolName === PLAN_MODE_TOOL_NAME || toolName === "plan_mode_respond") {
       callbacks.updatePlanReviewResult(
         String(event.tool_call_id || ""),

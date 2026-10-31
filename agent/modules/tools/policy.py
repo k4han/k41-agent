@@ -15,6 +15,7 @@ mirrors :class:`AgentConfig`:
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -89,4 +90,13 @@ class ToolPolicy:
         return [d for d in descriptors if self.is_allowed(d)]
 
 
-__all__ = ["ToolPolicy"]
+def browser_batch_error(calls: Sequence[Mapping[str, object]]) -> str | None:
+    from agent.modules.tools.builtin.browser import BROWSER_TOOLS
+
+    selected = [call for call in calls if call.get("name") in BROWSER_TOOLS]
+    if len(selected) > 1 or (any(call.get("name") == "browser_handoff" for call in selected) and len(calls) > 1):
+        return "Call browser tools sequentially, one per turn. Call browser_handoff alone. No tools in this batch were executed."
+    return None
+
+
+__all__ = ["ToolPolicy", "browser_batch_error"]

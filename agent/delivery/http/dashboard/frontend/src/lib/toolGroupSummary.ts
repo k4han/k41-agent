@@ -103,6 +103,7 @@ export function isToolFailed(tool: ToolGroupItem): boolean {
 
 export function getToolCategory(name: string | null | undefined): ToolCategoryInfo {
   const raw = (name || "").toLowerCase().trim();
+  if (raw.startsWith("browser_")) return { key: "browser", labelSingular: "browser", labelPlural: "browser" };
   if (raw.startsWith("mcp__")) {
     const parts = raw.split("__");
     const action = parts[parts.length - 1] || "mcp";

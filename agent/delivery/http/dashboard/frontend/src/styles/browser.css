@@ -1,0 +1,15 @@
+.browser-panel { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.browser-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.browser-actions label { display: flex; gap: 8px; align-items: center; }
+.browser-actions input, .browser-actions select { padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text); max-width: 100%; }
+.browser-address { display: flex; gap: 8px; flex: 1; min-width: 180px; }
+.browser-address input { flex: 1; min-width: 0; }
+.browser-handoff { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.browser-screen { position: relative; width: min(100%, 1280px); margin-inline: auto; background: #fff; border: 1px solid var(--border); }
+.browser-screen img { display: block; width: 100%; height: auto; user-select: none; }
+.browser-screen-interactive img { cursor: crosshair; touch-action: none; }
+.browser-keyboard { position: absolute; width: 1px; height: 1px; top: 0; left: 0; padding: 0; border: 0; opacity: 0; resize: none; }
+.browser-empty { padding: 48px 16px; text-align: center; color: var(--muted); }
+.browser-images { display: flex; gap: 8px; overflow-x: auto; }
+.browser-images img { height: 100px; width: auto; border: 1px solid var(--border); border-radius: 6px; }
+@media (max-width: 640px) { .browser-actions > input, .browser-actions > label { width: 100%; } .browser-actions select { min-width: 0; } }

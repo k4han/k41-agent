@@ -134,6 +134,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^tools\.(permissions|shell|storage_root)$",
     r"^(host|port|enable_web|enable_api|enable_dashboard|tray\.enabled|tray\.autostart)$",
     r"^chat\.stream_thinking$",
+    r"^browser\.(executable_path|storage_root|idle_ttl_seconds|operation_timeout_seconds)$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
@@ -171,6 +172,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^web\.defaults\.(google|tavily|firecrawl|brave|bing)$",
     r"^tools\.(permissions|shell|storage_root)$",
     r"^chat\.stream_thinking$",
+    r"^browser\.(executable_path|storage_root|idle_ttl_seconds|operation_timeout_seconds)$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
@@ -328,6 +330,7 @@ def _expand_runtime_keys() -> set[str]:
     keys.add("recursion_limit")
     keys.update({"tools.permissions", "tools.shell", "tools.storage_root"})
     keys.add("chat.stream_thinking")
+    keys.update({"browser.executable_path", "browser.storage_root", "browser.idle_ttl_seconds", "browser.operation_timeout_seconds"})
     keys.add("google_calendar.enabled")
     keys.add("decision.router.mode")
     keys.add("decision.router.threshold")
@@ -345,6 +348,10 @@ KNOWN_RUNTIME_KEYS: set[str] = _expand_runtime_keys()
 
 # Default configuration values
 DEFAULT_CONFIG: dict[str, Any] = {
+    "browser.executable_path": "",
+    "browser.storage_root": "",
+    "browser.idle_ttl_seconds": 600,
+    "browser.operation_timeout_seconds": 60,
     "tools.permissions": [],
     "tools.shell": None,
     "tools.storage_root": None,
@@ -450,6 +457,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 # Metadata for settings - used by dashboard to render appropriate input types
 SETTING_METADATA: dict[str, dict[str, Any]] = {
+    "browser.executable_path": {
+        "type": "text", "category": "browser", "label": "Chrome executable",
+        "description": "Optional Chrome or Chromium executable. Empty uses automatic discovery; applies to new sessions.",
+    },
+    "browser.storage_root": {
+        "type": "text", "category": "browser", "label": "Browser storage root",
+        "description": "Private browser profiles and images, outside project workspaces. Empty uses ~/.k41-agent/browser.",
+        "restart_required": True,
+    },
+    "browser.idle_ttl_seconds": {
+        "type": "number", "category": "browser", "label": "Browser idle timeout (seconds)",
+        "description": "Close inactive browsers while preserving login profiles. Viewing frames does not reset the timer.",
+        "min": 1, "step": 1,
+    },
+    "browser.operation_timeout_seconds": {
+        "type": "number", "category": "browser", "label": "Browser operation timeout (seconds)",
+        "description": "Close a browser if an operation exceeds this limit. Inspect the page before retrying an interrupted action.",
+        "min": 1, "max": 300, "step": 1,
+    },
     "channels.zalo.context_trim_threshold": {
         "type": "number", "category": "channels", "label": "Context Trim Threshold (tokens)",
         "description": "Channel history token budget applied once per turn, after compaction.",

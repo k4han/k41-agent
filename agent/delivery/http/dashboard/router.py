@@ -6,6 +6,7 @@ from agent.modules.admin_auth import get_current_admin
 
 from agent.delivery.http.dashboard.routes import (
     agents as agents_routes,
+    browser as browser_routes,
     catalog as catalog_routes,
     channels as channels_routes,
     conversations as conversations_routes,
@@ -49,6 +50,7 @@ for child_router in (
     projects_routes.router,
     project_secrets_routes.router,
     agents_routes.router,
+    browser_routes.router,
     channels_routes.router,
     settings_routes.router,
     scheduler_routes.router,

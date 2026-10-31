@@ -195,6 +195,7 @@ class AppContainer:
     _prompt_variable_service: Any = field(default=None, repr=False)
     _pairing_service: Any = field(default=None, repr=False)
     _admin_auth_service: Any = field(default=None, repr=False)
+    _browser_service: Any = field(default=None, repr=False)
     _google_calendar_service: Any = field(default=None, repr=False)
     _google_calendar_client: Any = field(default=None, repr=False)
     _google_calendar_store: Any = field(default=None, repr=False)
@@ -235,6 +236,20 @@ class AppContainer:
     def runtime_settings(self) -> Any:
         """Live RuntimeSettings derived on each access, never snapshotted."""
         return self.config_service.get_runtime_settings()
+
+    @property
+    def persistence_ready(self) -> bool:
+        """Whether database and checkpoint resources have been initialized."""
+        return self._persistence_ready
+
+    @property
+    @_locked_lazy
+    def browser_service(self) -> Any:
+        if self._browser_service is None:
+            from agent.modules.browser import BrowserService
+
+            self._browser_service = BrowserService(self)
+        return self._browser_service
 
     @property
     @_locked_lazy
@@ -691,6 +706,9 @@ class AppContainer:
         from agent.modules.workflows import close_checkpointer
         from agent.shared.config.service import detach_database_config_source
         from agent.shared.infrastructure.db.engine import close_async_engine
+
+        if self._browser_service is not None:
+            await self._browser_service.shutdown()
 
         if self._chatgpt_auth_manager is not None:
             await asyncio.to_thread(self._chatgpt_auth_manager.close)

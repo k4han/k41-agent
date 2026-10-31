@@ -33,6 +33,7 @@ enable_dashboard: true
 #   Google OAuth App is platform-managed via server environment, never dashboard:
 #   GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET, GOOGLE_CALENDAR_REDIRECT_URI.
 # - tools.* (global tool config, e.g. web_search / generate_image credentials)
+# - browser.* (local Chrome executable, private storage root, idle and operation timeouts)
 # - display.timezone (IANA timezone used to render dashboard timestamps)
 # - recursion_limit
 

@@ -89,6 +89,7 @@ async def delegate_task(
             workspace=workspace_ref,
             provider=inherited_provider,
             model=inherited_model,
+            browser_owner_id=get_context_value(runtime.context, "browser_owner_id", None),
             allowed_skill_names=inherited_allowed_skills,
             usage_context=usage_context_from_config(runtime.config).to_dict(),
         )

@@ -7,9 +7,10 @@ from typing import Any
 
 from agent.shared.thread_ids import resolve_thread_id
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from agent.modules.admin_auth import get_current_admin
 
 from agent.delivery.http.dashboard.routes.helpers.sse import (
     SSE_HEARTBEAT_SECONDS,
@@ -241,6 +242,7 @@ async def get_chat_history(
 async def get_chat_thread_messages(
     thread_id: str,
     checkpoint_id: str | None = Query(default=None, min_length=1, description="Specific checkpoint ID to load."),
+    admin: str = Depends(get_current_admin),
 ) -> dict[str, Any]:
     """Get all messages and metadata for a specific conversation thread."""
     thread_id = resolve_thread_id(thread_id)
@@ -260,6 +262,12 @@ async def get_chat_thread_messages(
     workspace = await workspace_ref_for_thread(thread_id, include_default=False)
     from agent.modules.tools import pending_permission_requests
     pending_requests = await pending_permission_requests(thread_id, checkpoint_id=active_checkpoint_id)
+    from agent.bootstrap.container import require_active_container
+    container = require_active_container()
+    handoff = None
+    if container.persistence_ready:
+        # Browser control belongs to the live thread, even when viewing an older checkpoint.
+        handoff = await container.browser_service.repository.owned_handoff(thread_id, f"admin:{admin}")
     resume_error = await get_thread_resume_error(
         thread_id,
         agent_name=str(parsed.get("agent_name") or "default"),
@@ -269,6 +277,7 @@ async def get_chat_thread_messages(
         "thread_id": thread_id,
         "active_checkpoint_id": active_checkpoint_id,
         "pending_requests": pending_requests,
+        **({"pending_browser_handoffs": [handoff]} if handoff else {}),
         "resume_error": resume_error,
         "messages": messages,
         "workspace": workspace.model_dump() if workspace else None,

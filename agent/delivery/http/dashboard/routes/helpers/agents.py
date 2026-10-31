@@ -59,6 +59,7 @@ _TOOL_CATEGORY_ORDER = (
     "file",
     "shell",
     "web",
+    "browser",
     "image",
     "schedule",
     "agent",

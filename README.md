@@ -10,6 +10,7 @@ Use it when you want a private agent runtime on your own machine instead of a ho
 - Local runtime data under your user profile.
 - Provider settings for OpenAI-compatible and other supported LLM services.
 - Optional channel integrations for Telegram, Discord, and GitHub.
+- Optional [browser automation](docs/browser-use.md) with local Chrome, saved login profiles, and dashboard handoff.
 - One-command install, update, and uninstall on Windows, macOS, and Linux.
 
 ## Install

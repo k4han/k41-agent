@@ -602,6 +602,8 @@ def _serialize_thread_messages(
             entry["name"] = getattr(msg, "name", None)
             entry["tool_call_id"] = getattr(msg, "tool_call_id", None)
             entry["content"] = extract_tool_display_content(msg) or ""
+            if isinstance(msg.artifact, dict) and msg.artifact.get("browser"):
+                entry["browser_artifact"] = msg.artifact["browser"]
         else:
             entry["role"] = "system"
             entry["content"] = str(getattr(msg, "content", ""))

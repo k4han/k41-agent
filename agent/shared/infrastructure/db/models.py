@@ -6,6 +6,7 @@ from __future__ import annotations
 def load_orm_models() -> tuple[type[object], ...]:
     """Import ORM models so they are attached to ``Base.metadata``."""
     from agent.modules.admin_auth import AdminCredential
+    from agent.modules.browser import BrowserArtifact, BrowserBinding, BrowserInvocation, BrowserProfile
     from agent.modules.agent_runtime import BackgroundTaskRecord
     from agent.modules.channels import BotSettings
     from agent.modules.conversations import ConversationRunError, ConversationThread
@@ -31,6 +32,10 @@ def load_orm_models() -> tuple[type[object], ...]:
 
     return (
         AdminCredential,
+        BrowserProfile,
+        BrowserBinding,
+        BrowserInvocation,
+        BrowserArtifact,
         BackgroundTaskRecord,
         ConversationThread,
         ConversationRunError,

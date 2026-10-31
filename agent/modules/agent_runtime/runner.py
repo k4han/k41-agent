@@ -76,6 +76,7 @@ def build_run_params(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    browser_owner_id: str | None = None,
     allowed_skill_names: list[str] | None = None,
     attachments: list[Any] | None = None,
     resume: bool = False,
@@ -128,6 +129,8 @@ def build_run_params(
             "channel_id": str(channel_id or ""),
         },
     }
+    if browser_owner_id is not None:
+        params["browser_owner_id"] = browser_owner_id
     if reasoning_effort is not None:
         params["reasoning_effort"] = reasoning_effort
     if checkpoint_id:
@@ -708,6 +711,14 @@ def _config_with_checkpoint(config: dict[str, Any], checkpoint_id: str | None) -
     return next_config
 
 
+def _tool_result_event(message: ToolMessage) -> dict[str, Any]:
+    event = {"type": "tool_result", "tool_call_id": message.tool_call_id,
+             "name": message.name, "content": extract_tool_display_content(message)}
+    if isinstance(message.artifact, dict) and message.artifact.get("browser"):
+        event["browser_artifact"] = message.artifact["browser"]
+    return event
+
+
 def _normalize_plan_resume_payload(
     resume_payload: dict[str, Any] | None,
 ) -> PlanModeResumePayload | None:
@@ -722,6 +733,9 @@ def _normalize_human_resume_payload(
     if resume_payload is None:
         return None
     action = str(resume_payload.get("action") or "").strip()
+    if action == "browser_handoff":
+        from agent.modules.browser import BrowserHandoffResume
+        return BrowserHandoffResume.model_validate(resume_payload)
     if action == "permission":
         from agent.modules.tools import PermissionResume
         return PermissionResume.model_validate(resume_payload)
@@ -786,7 +800,7 @@ def _validate_human_resume_payload(
 ) -> None:
     if resume_payload is None:
         return
-    if resume_payload.action in {"answer", "permission"}:
+    if resume_payload.action in {"answer", "permission", "browser_handoff"}:
         return
     _validate_plan_resume_payload(resume_payload)
 
@@ -910,6 +924,9 @@ def _user_input_request_events_from_value_event(
     for interrupt_obj in raw_interrupts:
         value = _interrupt_value(interrupt_obj)
         if not isinstance(value, dict):
+            continue
+        if value.get("type") == "browser_handoff_request":
+            out.append({**value, "interrupt_id": _interrupt_id(interrupt_obj)})
             continue
         if value.get("type") == "permission_request":
             from agent.modules.tools import permission_request_event
@@ -1056,6 +1073,7 @@ async def run_agent(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    browser_owner_id: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
     resume: bool = False,
@@ -1131,6 +1149,7 @@ async def run_agent(
         provider=provider,
         model=model,
         reasoning_effort=reasoning_effort,
+        browser_owner_id=browser_owner_id,
     )
     if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
         await _update_thread_agent(thread_id, agent_name)
@@ -1194,6 +1213,7 @@ async def run_agent_stream(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    browser_owner_id: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
     resume: bool = False,
@@ -1276,6 +1296,7 @@ async def run_agent_stream(
         provider=provider,
         model=model,
         reasoning_effort=reasoning_effort,
+        browser_owner_id=browser_owner_id,
     )
     conversation_title_task: asyncio.Task[dict[str, Any] | None] | None = None
     if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
@@ -1470,12 +1491,7 @@ async def run_agent_stream(
                                     "args": tc.get("args"),
                                 }
                     elif isinstance(message, ToolMessage):
-                        yield {
-                            "type": "tool_result",
-                            "tool_call_id": getattr(message, "tool_call_id", None),
-                            "name": getattr(message, "name", None),
-                            "content": extract_tool_display_content(message),
-                        }
+                        yield _tool_result_event(message)
 
             # The graph finished but the generated title may still be in
             # flight; give it a bounded window so a late rename still
@@ -1517,6 +1533,7 @@ async def run_agent_edit_stream(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    browser_owner_id: str | None = None,
     usage_context: dict[str, Any] | None = None,
     resume: bool = False,
     emit_thinking: bool = False,
@@ -1569,6 +1586,7 @@ async def run_agent_edit_stream(
         provider=provider,
         model=model,
         reasoning_effort=reasoning_effort,
+        browser_owner_id=browser_owner_id,
     )
 
     seen_ids: set[str] = set()
@@ -1708,12 +1726,7 @@ async def run_agent_edit_stream(
                                 "args": tc.get("args"),
                             }
                 elif isinstance(message, ToolMessage):
-                    yield {
-                        "type": "tool_result",
-                        "tool_call_id": getattr(message, "tool_call_id", None),
-                        "name": getattr(message, "name", None),
-                        "content": extract_tool_display_content(message),
-                    }
+                    yield _tool_result_event(message)
 
 async def run_agent_full(
     user_input: str,
@@ -1730,6 +1743,7 @@ async def run_agent_full(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    browser_owner_id: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
     resume: bool = False,
@@ -1771,6 +1785,7 @@ async def run_agent_full(
         provider=provider,
         model=model,
         reasoning_effort=reasoning_effort,
+        browser_owner_id=browser_owner_id,
         attachments=attachments,
         usage_context=usage_context,
         resume=resume,

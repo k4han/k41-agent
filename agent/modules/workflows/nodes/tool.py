@@ -98,6 +98,30 @@ def _include_pending_control_tools(state, tools: list[BaseTool]) -> list[BaseToo
     return next_tools
 
 
+async def _include_resumed_browser_handoff(state, tools, config):
+    """Only restore a browser control tool that previously entered a handoff."""
+    if any(tool.name == "browser_handoff" for tool in tools):
+        return tools
+    calls = getattr(state.get("messages", [])[-1], "tool_calls", []) if state.get("messages") else []
+    calls = [call for call in calls if call.get("name") == "browser_handoff"]
+    if not calls:
+        return tools
+    from agent.bootstrap.container import require_active_container
+
+    container = require_active_container()
+    thread_id = config.get("configurable", {}).get("thread_id")
+    if not container.persistence_ready or not thread_id:
+        return tools
+    browser = container.browser_service
+    for call in calls:
+        prior = await browser.repository.invocation(browser.canonical(thread_id), call["id"])
+        if prior is not None and prior.status in {"handoff", "completed"}:
+            pending_tool = get_tool_by_name("browser_handoff")
+            if pending_tool is not None:
+                return [*tools, pending_tool]
+    return tools
+
+
 async def tool_node(
     state,
     config: RunnableConfig,
@@ -110,6 +134,13 @@ async def tool_node(
     control_error = _parallel_control_tool_error(state)
     if control_error is not None:
         return control_error
+
+    from agent.modules.tools import browser_batch_error
+    pending = getattr(state.get("messages", [])[-1], "tool_calls", []) if state.get("messages") else []
+    browser_error = browser_batch_error(pending)
+    if browser_error:
+        return {"messages": [ToolMessage(content=browser_error, tool_call_id=call["id"],
+                                         name=call["name"], status="error") for call in pending]}
 
     allowed_tool_names = get_runtime_context_value(
         runtime.context,
@@ -142,6 +173,7 @@ async def tool_node(
     if workspace is not None:
         tools = ToolResolver().for_workspace(tools, workspace)
     tools = _include_pending_control_tools(state, tools)
+    tools = await _include_resumed_browser_handoff(state, tools, config)
     calls = getattr(state.get("messages", [])[-1], "tool_calls", []) if state.get("messages") else []
     original_active = state.get("active_skills", {})
     state = {**state, "active_skills": dict(original_active)}

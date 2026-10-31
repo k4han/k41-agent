@@ -116,9 +116,11 @@ async def delete_workflow_thread_tree(thread_id: str) -> None:
 
 async def _delete_workflow_thread_tree_reserved(thread_id: str) -> None:
     from agent.modules.agent_runtime import get_active_session_registry
+    from agent.modules.browser import delete_thread_browsers
     from agent.modules.tools import clear_conversation_storage
     from agent.modules.workflows.checkpoint.store import get_checkpointer
 
+    await delete_thread_browsers(thread_id)
     await clear_conversation_storage(thread_id)
     checkpointer = get_checkpointer()
     thread_ids = {thread_id}

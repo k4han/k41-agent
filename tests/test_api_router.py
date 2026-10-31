@@ -126,6 +126,7 @@ def test_chat_sync_returns_response_payload(monkeypatch):
     requested_workspace = _workspace_payload("D:/workspace/sample")
     resolved_workspace = _resolved_workspace("D:/workspace/sample")
     built_params = {
+        "browser_owner_id": "admin:test_admin",
         "user_input": "List files",
         "thread_id": "api_alice",
         "agent_name": "default",
@@ -179,6 +180,7 @@ def test_chat_sync_returns_response_payload(monkeypatch):
 
 def test_chat_sync_prefers_agent_name_over_workflow(monkeypatch):
     built_params = {
+        "browser_owner_id": "admin:test_admin",
         "user_input": "Deep research",
         "thread_id": "api_bob",
         "agent_name": "research-agent",
@@ -231,6 +233,7 @@ def test_chat_sync_prefers_agent_name_over_workflow(monkeypatch):
 
 def test_chat_sync_passes_model_override(monkeypatch):
     built_params = {
+        "browser_owner_id": "admin:test_admin",
         "user_input": "Use a faster model",
         "thread_id": "api_cara",
         "agent_name": "default",
@@ -301,6 +304,7 @@ def test_chat_events_passes_attachments(monkeypatch):
         },
     ]
     built_params = {
+        "browser_owner_id": "admin:test_admin",
         "user_input": "Review these",
         "thread_id": "api_alice",
         "agent_name": "default",
@@ -366,6 +370,7 @@ def test_chat_events_passes_attachments(monkeypatch):
 
 def test_chat_events_can_resume_existing_thread(monkeypatch):
     built_params = {
+        "browser_owner_id": "admin:test_admin",
         "user_input": "Continue",
         "thread_id": "telegram_123_456",
         "agent_name": "default",
@@ -418,6 +423,7 @@ def test_chat_events_can_create_new_thread(monkeypatch, tmp_path):
     resolved_workspace = _resolved_workspace(tmp_path)
     remembered: list[tuple[str, dict]] = []
     built_params = {
+        "browser_owner_id": "admin:test_admin",
         "user_input": "Start",
         "thread_id": "91c23fc6b24a48ef9b804405e1809bde",
         "agent_name": "default",
@@ -492,6 +498,7 @@ def test_chat_events_creates_temp_workspace_for_dashboard_new_thread_without_wor
         }
     )
     built_params = {
+        "browser_owner_id": "admin:test_admin",
         "user_input": "Start",
         "thread_id": "91c23fc6b24a48ef9b804405e1809bde",
         "agent_name": "default",
@@ -547,6 +554,7 @@ def test_chat_events_resolves_and_remembers_workspace(monkeypatch, tmp_path):
     resolved_workspace = _resolved_workspace(tmp_path)
     remembered: list[tuple[str, dict]] = []
     built_params = {
+        "browser_owner_id": "admin:test_admin",
         "user_input": "Work here",
         "thread_id": "api_dashboard_workspace",
         "agent_name": "default",
@@ -607,6 +615,7 @@ def test_chat_events_keeps_stored_sandbox_dormant_before_stream(monkeypatch, exp
     )
     remembered: list[tuple[str, dict]] = []
     built_params = {
+        "browser_owner_id": "admin:test_admin",
         "user_input": "Continue",
         "thread_id": "api_dashboard_old_thread",
         "agent_name": "default",
@@ -659,6 +668,7 @@ def test_chat_events_keeps_stored_sandbox_dormant_before_stream(monkeypatch, exp
 
 def test_chat_events_streams_tool_calls_as_ndjson(monkeypatch):
     built_params = {
+        "browser_owner_id": "admin:test_admin",
         "user_input": "Use a tool",
         "thread_id": "api_alice",
         "agent_name": "default",
@@ -701,6 +711,7 @@ def test_chat_events_streams_tool_calls_as_ndjson(monkeypatch):
 
 def test_chat_events_streams_classified_agent_errors(monkeypatch):
     built_params = {
+        "browser_owner_id": "admin:test_admin",
         "user_input": "Use a busy model",
         "thread_id": "api_alice",
         "agent_name": "default",

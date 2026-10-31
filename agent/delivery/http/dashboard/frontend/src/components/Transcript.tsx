@@ -37,6 +37,7 @@ import { Portal } from "solid-js/web";
 
 import { AgentPicker } from "@/components/AgentPicker";
 import { CopyButton } from "@/components/CopyButton";
+import { browserImageUrl } from "@/lib/browserViewer";
 import { Markdown } from "@/components/Markdown";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { useToast } from "@/components/Toast";
@@ -993,6 +994,11 @@ export function ToolCallDetail(props: {
                     <img src={image().url} alt={image().filename} />
                   </a>
                 )}
+              </Show>
+              <Show when={props.name === "browser_screenshot" && browserImageUrl(props.result)}>
+                {(url) => <a class="tool-generated-image" href={url()} target="_blank" rel="noreferrer">
+                  <img src={url()} alt="Browser screenshot" />
+                </a>}
               </Show>
               <Show when={shellResult()} fallback={
                 <pre>{!hasToolCallResult(props) ? (props.name === "skill" ? "Preparing skill resources and runtimes in the workspace..." : "Waiting for tool result...") : formatValue(props.result)}</pre>

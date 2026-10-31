@@ -72,6 +72,7 @@ async def test_delegate_task_inherits_parent_runtime_context(monkeypatch):
             "working_dir": "D:/repo",
             "provider": "openai-main",
             "model": "parent-model",
+            "browser_owner_id": "admin:1",
             "allowed_skill_names": ["repo-docs"],
         },
         config={
@@ -95,6 +96,7 @@ async def test_delegate_task_inherits_parent_runtime_context(monkeypatch):
     assert run_kwargs["workspace"] == "D:/repo"
     assert run_kwargs["provider"] == "openai-main"
     assert run_kwargs["model"] == "parent-model"
+    assert run_kwargs["browser_owner_id"] == "admin:1"
     assert run_kwargs["allowed_skill_names"] == ["repo-docs"]
     assert run_kwargs["thread_id"].startswith("parent-thread:sub:child-agent:")
 

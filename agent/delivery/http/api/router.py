@@ -218,12 +218,14 @@ def _ensure_chat_agent_available(agent_name: str | None) -> None:
         raise HTTPException(status_code=403, detail="Internal agents can only be used by the system.")
 
 
-async def prepare_run_params(request: ChatRequest) -> dict[str, object]:
+async def prepare_run_params(request: ChatRequest, browser_owner_id: str | None = None) -> dict[str, object]:
     _ensure_chat_agent_available(request.agent_name)
     _validate_pool_request(request)
     if request.thread_id:
         request = request.model_copy(update={"thread_id": resolve_thread_id(request.thread_id)})
     params = _request_to_run_params(request)
+    if browser_owner_id is not None:
+        params["browser_owner_id"] = browser_owner_id
     try:
         await _apply_workspace_to_run_params(request, params)
     except (KeyError, RuntimeError) as exc:
@@ -251,9 +253,9 @@ def _validate_pool_request(request: ChatRequest | EditChatRequest) -> None:
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_sync(request: ChatRequest):
+async def chat_sync(request: ChatRequest, admin: str = Depends(get_current_admin)):
     """Send a chat message and return the full agent response synchronously."""
-    params = await prepare_run_params(request)
+    params = await prepare_run_params(request, browser_owner_id=f"admin:{admin}")
     from agent.modules.providers import ModelPoolExhausted
 
     try:
@@ -269,9 +271,9 @@ async def chat_sync(request: ChatRequest):
 
 
 @router.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest, admin: str = Depends(get_current_admin)):
     """Stream the agent response as plain text chunks."""
-    params = await prepare_run_params(request)
+    params = await prepare_run_params(request, browser_owner_id=f"admin:{admin}")
 
     return StreamingResponse(
         _stream_agent_chunks(params),
@@ -281,9 +283,9 @@ async def chat_stream(request: ChatRequest):
 
 
 @router.post("/chat/events")
-async def chat_events(request: ChatRequest):
+async def chat_events(request: ChatRequest, admin: str = Depends(get_current_admin)):
     """Stream UI events (thread created, message deltas, tool calls, etc.) as newline-delimited JSON."""
-    params = await prepare_run_params(request)
+    params = await prepare_run_params(request, browser_owner_id=f"admin:{admin}")
     created_thread = bool(request.new_thread and not request.thread_id)
     thread_id = str(params["thread_id"])
     params["emit_thinking"] = _is_thinking_stream_enabled()
@@ -308,7 +310,7 @@ async def chat_events(request: ChatRequest):
 
 
 @router.post("/chat/events/edit")
-async def chat_events_edit(request: EditChatRequest):
+async def chat_events_edit(request: EditChatRequest, admin: str = Depends(get_current_admin)):
     """Fork a thread from an edited user message and stream UI events as newline-delimited JSON."""
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="Edited message cannot be empty.")
@@ -330,6 +332,7 @@ async def chat_events_edit(request: EditChatRequest):
     )
 
     params["message_index"] = request.message_index
+    params["browser_owner_id"] = f"admin:{admin}"
     params["source_checkpoint_id"] = request.source_checkpoint_id
     params["emit_thinking"] = _is_thinking_stream_enabled()
     try:

@@ -7,6 +7,7 @@ import type {
 } from "@/types";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
 import type { UserAnswerResumePayload } from "@/lib/userInputRequest";
+import type { BrowserHandoffResume } from "@/lib/browserViewer";
 
 // ── Attachment types ──
 
@@ -53,7 +54,7 @@ export type PlanResumePayload =
   | { action: "approve"; target_agent: string }
   | { action: "revise"; feedback: string };
 
-export type ChatResumePayload = PlanResumePayload | UserAnswerResumePayload | { action: "permission"; request_id: string; decision: "allow_once" | "allow_thread" | "deny" };
+export type ChatResumePayload = PlanResumePayload | UserAnswerResumePayload | BrowserHandoffResume | { action: "permission"; request_id: string; decision: "allow_once" | "allow_thread" | "deny" };
 
 // ── Scroll & streaming ──
 

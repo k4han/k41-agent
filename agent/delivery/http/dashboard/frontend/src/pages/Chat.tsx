@@ -1,5 +1,6 @@
 import { useLocation, useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import {
+  Globe,
   Menu,
   PanelRightClose,
   PanelRightOpen,
@@ -9,6 +10,7 @@ import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMo
 
 import { AppShell } from "@/components/AppShell";
 import { ChatComposer } from "@/components/ChatComposer";
+import { BrowserPanel } from "@/components/BrowserPanel";
 import { ComposerWorkspacePicker } from "@/components/ComposerWorkspacePicker";
 import { Dialog } from "@/components/Dialog";
 import { Markdown } from "@/components/Markdown";
@@ -188,6 +190,16 @@ export function ChatPage() {
   const [threadError, setThreadError] = createSignal("");
   const [threadLoading, setThreadLoading] = createSignal(false);
   const [currentThreadId, setCurrentThreadId] = createSignal("");
+  const [browserHandoffThreads, setBrowserHandoffThreads] = createSignal(new Set<string>());
+  const updateBrowserHandoff = (pending: boolean, threadId: string) => {
+    setBrowserHandoffThreads((current) => {
+      if (current.has(threadId) === pending) return current;
+      const next = new Set(current);
+      if (pending) next.add(threadId);
+      else next.delete(threadId);
+      return next;
+    });
+  };
   const [forkRequest, setForkRequest] = createSignal<{ threadId: string; itemId?: number } | null>(null);
   const forking = () => forkRequest()?.threadId === currentThreadId();
   const [activeCheckpointId, setActiveCheckpointId] = createSignal("");
@@ -493,6 +505,7 @@ export function ChatPage() {
 
   const hasPendingInterrupt = createMemo(() => (
     Boolean(pendingUserInputRequest()) || Boolean(pendingPlanReview())
+    || browserHandoffThreads().has(currentThreadId())
   ));
 
   const currentTodos = createMemo(() => {
@@ -694,6 +707,7 @@ export function ChatPage() {
     setActiveCheckpointId(payload.active_checkpoint_id || "");
     setWorkspace(payload.workspace || null);
     if (!persistedStreams.has(payload.thread_id)) {
+      updateBrowserHandoff(Boolean(payload.pending_browser_handoffs?.length), payload.thread_id);
       const historyItems = [
         ...toThreadTranscript(payload.messages, payload.thread_id),
         ...(payload.pending_requests || []).map((value) => {
@@ -772,6 +786,7 @@ export function ChatPage() {
     },
     onThreadCreated,
     onContextUsage: updateContextUsage,
+    onBrowserHandoffChange: updateBrowserHandoff,
     onThreadTitle: (threadId, title) => {
       if (threadId === currentThreadId()) {
         setThreadTitleOverride(title);
@@ -1077,6 +1092,10 @@ export function ChatPage() {
     }
     if (streaming()) {
       showToast("Wait for the current response to finish.", "warning");
+      return;
+    }
+    if (!resume && hasPendingInterrupt()) {
+      showToast("Complete the pending request before sending a new message.", "warning");
       return;
     }
     if (compacting()) {
@@ -1391,6 +1410,7 @@ export function ChatPage() {
       );
     }
   };
+  const [browserOpen, setBrowserOpen] = createSignal(false);
   const handleResume = () => {
     if (!currentThreadId() || conversationBusy() || compacting()) {
       return;
@@ -2004,6 +2024,8 @@ export function ChatPage() {
                     onAbandonBackend={workspaceRuntime.abandon}
                     onSelectionChange={setWorkspaceDraft}
                   />
+                  <button class="chat-header-workspace-btn" type="button" disabled={!currentThreadId()}
+                    onClick={() => setBrowserOpen(true)} title="Open browser" aria-label="Open browser"><Globe size={19} /></button>
                   <Show when={!explorer.open()}>
                     <button
                       class="chat-header-workspace-btn"
@@ -2165,6 +2187,10 @@ export function ChatPage() {
         )}
       </DataGate>
     </AppShell>
+    <BrowserPanel threadId={currentThreadId() || null} open={browserOpen()} busy={conversationBusy()}
+      onOpen={() => setBrowserOpen(true)} onClose={() => setBrowserOpen(false)}
+      onHandoffChange={updateBrowserHandoff}
+      onResume={(payload) => { if (!conversationBusy()) void sendMessage(true, payload); }} />
     <Dialog
       open={viewingMessage() !== null}
       title={`${viewingMessage()?.role || "Message"} Message`}

@@ -28,7 +28,7 @@ from agent.modules.tools.config import (
     serialize_tool_config_schemas,
     ToolConfigService,
 )
-from agent.modules.tools.policy import ToolPolicy
+from agent.modules.tools.policy import ToolPolicy, browser_batch_error
 from agent.modules.tools.coding.names import TOOL_ALIASES, canonical_tool_names
 from agent.modules.tools.sources.builtin import BuiltinToolSource
 from agent.modules.tools.registry_service import (
@@ -218,6 +218,7 @@ __all__ = [
     "ToolError",
     "ToolErrorCode",
     "ToolPolicy",
+    "browser_batch_error",
     "ToolRegistryService",
     "ToolResolver",
     "ToolSource",
