@@ -10,7 +10,6 @@ import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMo
 
 import { AppShell } from "@/components/AppShell";
 import { ChatComposer } from "@/components/ChatComposer";
-import { BrowserPanel } from "@/components/BrowserPanel";
 import { ComposerWorkspacePicker } from "@/components/ComposerWorkspacePicker";
 import { Dialog } from "@/components/Dialog";
 import { Markdown } from "@/components/Markdown";
@@ -1410,7 +1409,15 @@ export function ChatPage() {
       );
     }
   };
-  const [browserOpen, setBrowserOpen] = createSignal(false);
+  const [browserRequest, setBrowserRequest] = createSignal(0);
+  const [browserSessionThreadId, setBrowserSessionThreadId] = createSignal<string | null>(null);
+  const showBrowserWorkspace = () => {
+    if (!explorer.open()) explorer.toggle();
+  };
+  const openBrowserWorkspace = () => {
+    showBrowserWorkspace();
+    setBrowserRequest((value) => value + 1);
+  };
   const handleResume = () => {
     if (!currentThreadId() || conversationBusy() || compacting()) {
       return;
@@ -2024,8 +2031,10 @@ export function ChatPage() {
                     onAbandonBackend={workspaceRuntime.abandon}
                     onSelectionChange={setWorkspaceDraft}
                   />
-                  <button class="chat-header-workspace-btn" type="button" disabled={!currentThreadId()}
-                    onClick={() => setBrowserOpen(true)} title="Open browser" aria-label="Open browser"><Globe size={19} /></button>
+                  <Show when={currentThreadId() && browserSessionThreadId() === currentThreadId()}>
+                    <button class="chat-header-workspace-btn" type="button"
+                      onClick={openBrowserWorkspace} title="Open browser workspace tab" aria-label="Open browser"><Globe size={19} /></button>
+                  </Show>
                   <Show when={!explorer.open()}>
                     <button
                       class="chat-header-workspace-btn"
@@ -2163,6 +2172,11 @@ export function ChatPage() {
                 />
               </Show>
               <WorkspaceExplorer
+                browserRequest={browserRequest()}
+                onBrowserOpen={showBrowserWorkspace}
+                onBrowserHandoffChange={updateBrowserHandoff}
+                onBrowserSessionChange={(active, threadId) => setBrowserSessionThreadId(active ? threadId : null)}
+                onBrowserResume={(payload) => { if (!conversationBusy()) void sendMessage(true, payload); }}
                 binding={workspaceBinding()}
                 visible={explorer.open()}
                 fullscreen={explorer.fullscreen()}
@@ -2187,10 +2201,6 @@ export function ChatPage() {
         )}
       </DataGate>
     </AppShell>
-    <BrowserPanel threadId={currentThreadId() || null} open={browserOpen()} busy={conversationBusy()}
-      onOpen={() => setBrowserOpen(true)} onClose={() => setBrowserOpen(false)}
-      onHandoffChange={updateBrowserHandoff}
-      onResume={(payload) => { if (!conversationBusy()) void sendMessage(true, payload); }} />
     <Dialog
       open={viewingMessage() !== null}
       title={`${viewingMessage()?.role || "Message"} Message`}

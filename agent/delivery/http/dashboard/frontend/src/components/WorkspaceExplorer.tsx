@@ -9,6 +9,7 @@ import {
   Folder,
   FolderPlus,
   GitCompare,
+  Globe,
   Maximize2,
   Minimize2,
   MoreHorizontal,
@@ -25,9 +26,11 @@ import { createStore, reconcile } from "solid-js/store";
 import { Portal } from "solid-js/web";
 
 import { Dialog } from "@/components/Dialog";
+import { BrowserPanel } from "@/components/BrowserPanel";
 import { WorkspaceFilePreview } from "@/components/WorkspaceFilePreview";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
+import type { BrowserHandoffResume } from "@/lib/browserViewer";
 import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
 import { renderUnifiedDiffHtml } from "@/lib/diffView";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
@@ -99,7 +102,7 @@ type WorkspaceResolvePayload = {
   workspace: WorkspaceRef;
 };
 
-type WorkspaceTab = "changes" | "files" | `file:${string}`;
+type WorkspaceTab = "changes" | "files" | "browser" | `file:${string}`;
 
 const WORKSPACE_POLL_INTERVAL_MS = 15_000;
 // Fallback polling during active tool runs (10-15s).
@@ -228,6 +231,11 @@ export function WorkspaceExplorer(props: {
   onToggleFullscreen?: () => void;
   onWorkingDirChange: (value: WorkspaceRef | string | null) => void;
   onCollapse?: () => void;
+  browserRequest?: number;
+  onBrowserOpen?: () => void;
+  onBrowserResume?: (payload: BrowserHandoffResume) => void;
+  onBrowserHandoffChange?: (pending: boolean, threadId: string) => void;
+  onBrowserSessionChange?: (active: boolean, threadId: string | null) => void;
 }) {
   const workspaceQuery = (thread: string, workspace: WorkspaceRef | null, extra?: Record<string, string>) =>
     buildWorkspaceQuery(thread, workspace, extra, props.binding);
@@ -250,11 +258,13 @@ export function WorkspaceExplorer(props: {
   const [diffPayload, setDiffPayload] = createSignal<WorkspaceDiffPayload | null>(null);
   const [diffLoading, setDiffLoading] = createSignal(false);
   const [diffError, setDiffError] = createSignal("");
-  const [openTabs, setOpenTabs] = createSignal<WorkspaceTab[]>(["files"]);
+  const defaultTabs = (): WorkspaceTab[] => props.onBrowserResume ? ["files", "browser"] : ["files"];
+  const [openTabs, setOpenTabs] = createSignal<WorkspaceTab[]>(defaultTabs());
   const [activeTab, setActiveTab] = createSignal<WorkspaceTab>("files");
   const [lastPrimaryTab, setLastPrimaryTab] = createSignal<WorkspaceTab>("files");
   const primaryTabs = createMemo(() => openTabs().filter((tab) => !tab.startsWith("file:")));
   const fileTabs = createMemo(() => openTabs().filter((tab) => tab.startsWith("file:")));
+  const browserActive = () => lastPrimaryTab() === "browser" && openTabs().includes("browser");
   let explorerRef: HTMLElement | undefined;
   const [containerWidth, setContainerWidth] = createSignal(
     typeof window !== "undefined" ? window.innerWidth : 560
@@ -267,6 +277,7 @@ export function WorkspaceExplorer(props: {
   const [innerResizing, setInnerResizing] = createSignal(false);
   const isCompact = () => !props.fullscreen && containerWidth() < 480;
   const isSplit = createMemo(() => {
+    if (browserActive()) return false;
     if (isCompact()) return false;
     if (props.fullscreen) return true;
     if (!props.splitView) return false;
@@ -673,8 +684,10 @@ export function WorkspaceExplorer(props: {
       setDiffPayload(null);
       setDiffLoading(false);
       setDiffError("");
-      setOpenTabs(["files"]);
-      setActiveTab("files");
+      const keepBrowser = untrack(browserActive);
+      setOpenTabs(defaultTabs());
+      setActiveTab(keepBrowser ? "browser" : "files");
+      setLastPrimaryTab(keepBrowser ? "browser" : "files");
       setActionMenuPath(null);
       setPlusMenuOpen(false);
       setFilePayloads(reconcile({}));
@@ -822,9 +835,12 @@ export function WorkspaceExplorer(props: {
 
   const openTab = (tab: WorkspaceTab) => {
     setOpenTabs((current) => (current.includes(tab) ? current : [...current, tab]));
-    setActiveTab(tab);
+    if (tab !== "browser" || !activeTab().startsWith("file:")) setActiveTab(tab);
     if (!tab.startsWith("file:")) {
       setLastPrimaryTab(tab);
+    } else if (browserActive()) {
+      setOpenTabs((current) => current.includes("files") ? current : ["files", ...current]);
+      setLastPrimaryTab("files");
     }
   };
 
@@ -833,6 +849,10 @@ export function WorkspaceExplorer(props: {
     const current = openTabs();
     const nextTabs = current.filter((t) => t !== tab);
     setOpenTabs(nextTabs);
+
+    if (lastPrimaryTab() === tab) {
+      setLastPrimaryTab(nextTabs.find((value) => !value.startsWith("file:")) || "files");
+    }
 
     if (activeTab() === tab) {
       if (nextTabs.length > 0) {
@@ -847,6 +867,15 @@ export function WorkspaceExplorer(props: {
         setActiveTab("" as WorkspaceTab);
       }
     }
+  };
+
+  createEffect(on(() => props.browserRequest, (request) => {
+    if (request) openTab("browser");
+  }));
+
+  const openBrowser = () => {
+    openTab("browser");
+    props.onBrowserOpen?.();
   };
 
   const openFile = (path: string) => {
@@ -1264,7 +1293,7 @@ export function WorkspaceExplorer(props: {
   return (
     <aside
       ref={explorerRef}
-      class={`workspace-explorer ${isCompact() ? "is-compact" : ""} ${isSplit() ? "is-split" : ""} ${props.fullscreen ? "is-fullscreen" : ""} ${activeTab().startsWith("file:") ? "has-file-open" : ""}`}
+      class={`workspace-explorer ${isCompact() ? "is-compact" : ""} ${isSplit() ? "is-split" : ""} ${props.fullscreen ? "is-fullscreen" : ""} ${activeTab().startsWith("file:") && !browserActive() ? "has-file-open" : ""}`}
       style={`--workspace-split-sidebar-width: ${sidebarWidth()}px; --workspace-compact-tree-height: ${treeHeight()}px;`}
     >
       <div class="workspace-tabs-bar workspace-primary-tabs-bar">
@@ -1286,12 +1315,22 @@ export function WorkspaceExplorer(props: {
             {(tab) => {
               const isFiles = tab === "files";
               const isChanges = tab === "changes";
+              const label = isFiles ? "Files" : isChanges ? "Changes" : "Browser";
 
               return (
                 <div
                   class={`workspace-tab ${lastPrimaryTab() === tab ? "active" : ""}`}
                   role="tab"
+                  tabIndex={0}
                   aria-selected={lastPrimaryTab() === tab}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setLastPrimaryTab(tab);
+                      if (!activeTab().startsWith("file:")) setActiveTab(tab);
+                    }
+                  }}
                   onClick={() => {
                     setLastPrimaryTab(tab);
                     if (!activeTab().startsWith("file:")) {
@@ -1304,7 +1343,7 @@ export function WorkspaceExplorer(props: {
                       closeTab(tab, event);
                     }
                   }}
-                  title={isFiles ? "Files Explorer" : "Git Changes"}
+                  title={isFiles ? "Files Explorer" : isChanges ? "Git Changes" : "Browser"}
                 >
                   <div class="workspace-tab-icon-slot">
                     <span class="workspace-tab-icon" aria-hidden="true">
@@ -1314,12 +1353,13 @@ export function WorkspaceExplorer(props: {
                       <Show when={isChanges}>
                         <GitCompare size={14} />
                       </Show>
+                      <Show when={tab === "browser"}><Globe size={14} /></Show>
                     </span>
                     <button
                       class="workspace-tab-close"
                       type="button"
-                      title={`Close ${isFiles ? "Files" : "Changes"}`}
-                      aria-label={`Close ${isFiles ? "Files" : "Changes"}`}
+                      title={`Close ${label}`}
+                      aria-label={`Close ${label}`}
                       onClick={(event) => closeTab(tab, event)}
                     >
                       <X size={13} />
@@ -1327,7 +1367,7 @@ export function WorkspaceExplorer(props: {
                   </div>
 
                   <span class="workspace-tab-label">
-                    {isFiles ? "Files" : "Changes"}
+                    {label}
                   </span>
 
                   <Show when={isChanges && changes().length > 0}>
@@ -1406,6 +1446,13 @@ export function WorkspaceExplorer(props: {
                       <span class="workspace-menu-pill">Open</span>
                     </Show>
                   </button>
+                  <Show when={props.onBrowserResume}>
+                    <button class={`workspace-plus-menu-item ${openTabs().includes("browser") ? "is-open" : ""}`}
+                      type="button" role="menuitem" onClick={() => { openBrowser(); setPlusMenuOpen(false); }}>
+                      <Globe size={15} /><span>Browser</span>
+                      <Show when={openTabs().includes("browser")}><span class="workspace-menu-pill">Open</span></Show>
+                    </button>
+                  </Show>
                   <div class="workspace-menu-divider" />
                   <div
                     class="workspace-plus-menu-item is-disabled"
@@ -1461,7 +1508,7 @@ export function WorkspaceExplorer(props: {
         </div>
       </div>
 
-      <Show when={fileTabs().length > 0}>
+      <Show when={fileTabs().length > 0 && !browserActive()}>
         <div class="workspace-file-tabs-bar">
           <div
             class="workspace-tabs workspace-file-tabs"
@@ -1528,7 +1575,7 @@ export function WorkspaceExplorer(props: {
             </div>
             <div class="workspace-empty-title">No open tabs</div>
             <div class="workspace-empty-desc">
-              Open the file explorer or view git changes to get started.
+              Open a workspace tab to get started.
             </div>
             <div class="workspace-empty-actions">
               <button
@@ -1550,8 +1597,20 @@ export function WorkspaceExplorer(props: {
                   <span class="workspace-tab-count">{changes().length}</span>
                 </Show>
               </button>
+              <Show when={props.onBrowserResume}>
+                <button class="btn btn-sm" type="button" onClick={openBrowser}><Globe size={14} /><span>Browser</span></button>
+              </Show>
             </div>
           </div>
+        </Show>
+
+        <Show when={props.onBrowserResume}>
+          <section class="workspace-browser-panel workspace-tab-panel" role="tabpanel" aria-label="Browser" hidden={!browserActive()}>
+            <BrowserPanel threadId={props.threadId || null} open={props.visible !== false && browserActive()} busy={Boolean(props.running)}
+              onOpen={openBrowser} onResume={(payload) => props.onBrowserResume?.(payload)}
+              onSessionChange={props.onBrowserSessionChange}
+              onHandoffChange={(pending, threadId) => props.onBrowserHandoffChange?.(pending, threadId)} />
+          </section>
         </Show>
         <Show when={openTabs().includes("changes")}>
           <section
@@ -1763,7 +1822,7 @@ export function WorkspaceExplorer(props: {
         </Show>
 
         <Show when={activeTab().startsWith("file:")}>
-          <section class="workspace-section workspace-file-panel workspace-tab-panel" role="tabpanel">
+          <section class="workspace-section workspace-file-panel workspace-tab-panel" role="tabpanel" hidden={browserActive()}>
             <Show
               when={!fileLoadingByPath[activeFilePath()] || Boolean(activeFilePayload())}
               fallback={<div class="empty compact">Loading file...</div>}
@@ -1808,7 +1867,7 @@ export function WorkspaceExplorer(props: {
           </section>
         </Show>
 
-        <Show when={(isSplit() && !isCompact()) || (isCompact() && activeTab().startsWith("file:") && !treeCollapsed())}>
+        <Show when={!browserActive() && ((isSplit() && !isCompact()) || (isCompact() && activeTab().startsWith("file:") && !treeCollapsed()))}>
           <div
             class="workspace-inner-resizer"
             onPointerDown={startInnerResize}

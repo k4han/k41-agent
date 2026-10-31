@@ -584,7 +584,8 @@ body.workspace-resizing * {
   flex: 0 0 var(--workspace-split-sidebar-width);
   max-width: var(--workspace-split-sidebar-width);
   min-width: 160px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .workspace-explorer.is-split:not(.is-compact) .workspace-file-tabs-bar {
