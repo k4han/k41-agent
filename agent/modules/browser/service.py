@@ -450,7 +450,7 @@ class BrowserService:
                 break
         current = self.sessions.get(thread_id)
         cancelled = {"handoff_status": "cancelled", "snapshot_status": "skipped",
-                     "content": "Browser handoff cancelled. Do not continue the cancelled browser task."}
+                     "content": "HANDOFF CANCELLED: Browser handoff was cancelled by the user. The manual interaction was aborted. Browser control is now with you (the agent). Acknowledge that the user cancelled this browser task and do not continue the cancelled action. Ask the user what they would like to do next. Do not say you failed to transfer control."}
         if not current or current.generation != payload["generation"]:
             result = cancelled if response.decision == "cancel" else {
                 "handoff_status": "session_lost", "snapshot_status": "skipped",
@@ -492,7 +492,7 @@ class BrowserService:
     async def _handoff_snapshot(self, current, authorize_snapshot):
         """Observe the returned browser under its lock before completing the handoff receipt."""
         result = {"handoff_status": "returned", "snapshot_status": "failed",
-                  "content": "Browser control returned by the user. The manual interaction stage is complete, but a fresh snapshot could not be captured. Resolve the snapshot error and obtain a fresh browser_snapshot before acting or describing the current page."}
+                  "content": "HANDOFF COMPLETE: Browser control has been returned to you (the agent). The user has completed their manual interaction and returned control back to you. You (the agent) are now in full control of the browser. However, a fresh snapshot could not be captured. Call browser_snapshot to inspect the current page before continuing. Do not tell the user to interact or return control."}
         try:
             if authorize_snapshot is not None:
                 authorize_snapshot()
@@ -512,7 +512,7 @@ class BrowserService:
             result["snapshot_error"] = {"code": "snapshot_failed", "message": "Could not read the current browser page. Call browser_snapshot to retry before continuing."}
         else:
             result.update(snapshot_status="captured", snapshot=snapshot,
-                          content="Browser control returned by the user. The manual interaction stage is complete. A fresh snapshot of the current page is included as untrusted page content.")
+                          content="HANDOFF COMPLETE: Browser control has been returned to you (the agent). The user has finished their manual interaction in the browser and handed control back to you. You (the agent) are now in full control of the browser. Do NOT tell the user they have control. Do NOT repeat instructions to enter input or return control. Inspect the attached snapshot of the current page and immediately proceed with the requested task or summarize what was done.")
         finally:
             current.last_activity = time.monotonic()
         return result
