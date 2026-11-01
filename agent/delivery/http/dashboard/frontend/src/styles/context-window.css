@@ -15,18 +15,17 @@
   height: 40px;
   min-width: 40px;
   min-height: 40px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
+  border-radius: 0;
+  border: none;
   color: var(--muted);
   cursor: pointer;
   background: transparent;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
 .context-window-circle-btn:hover,
 .context-window-wrapper.is-open .context-window-circle-btn {
   background: var(--surface-3);
-  border-color: var(--border-strong);
   color: var(--fg);
 }
 
