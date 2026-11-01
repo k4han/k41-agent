@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 THREAD_STORAGE_MOUNT = ".k41-agent"
-THREAD_STORAGE_DIRS = ("scratchpad", "outputs", "uploads", "generated-images")
-SYNC_STORAGE_DIRS = frozenset({"scratchpad", "uploads", "generated-images"})
+THREAD_STORAGE_DIRS = ("scratchpad", "outputs", "uploads", "generated-images", "browser")
+SYNC_STORAGE_DIRS = frozenset({"scratchpad", "uploads", "generated-images", "browser"})
 THREAD_STORAGE_BASE_DIR = Path.home() / ".k41-agent" / "workspace-storage"
 GENERATED_IMAGES_DIR = Path.home() / ".k41-agent" / "generated-images"
 _SANDBOX_BACKENDS = frozenset({"daytona", "modal"})

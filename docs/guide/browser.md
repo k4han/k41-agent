@@ -61,6 +61,10 @@ For example:
 Open the workspace's **Browser** tab to watch the session. An active browser
 session also exposes a shortcut in the chat header.
 
+Screenshots taken with `browser_screenshot` are saved in the active workspace
+under `.k41-agent/browser/screenshots/`. The tool returns the image's path within
+that workspace, and the image remains visible in the conversation.
+
 ## Take control when needed
 
 When you need to sign in, enter a verification code, or interact directly, ask

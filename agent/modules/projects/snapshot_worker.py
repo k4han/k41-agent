@@ -15,7 +15,7 @@ from uuid import uuid4
 
 CHUNK_BYTES = 4 * 1024 * 1024
 EXCLUDED = frozenset({"node_modules", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".pnpm-store"})
-INTERNAL = frozenset({"scratchpad", "uploads", "generated-images"})
+INTERNAL = frozenset({"scratchpad", "uploads", "generated-images", "browser"})
 
 
 class WorkspaceRootUnavailableError(FileNotFoundError):

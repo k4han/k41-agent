@@ -18,6 +18,7 @@ All storage uses real files, available to file tools and shell scripts:
 | `outputs/` | Project-shared retained tool text and process logs | Seven days |
 | `uploads/` | User attachments | Existing workspace retention |
 | `generated-images/` | Generated images rendered by the UI | Existing workspace retention |
+| `browser/screenshots/` | Browser screenshots captured by the agent | Existing workspace retention |
 
 Directories are created when writing, not during workspace initialization.
 `assets/` and `memory/` are no longer created or suggested. Existing files in
@@ -42,8 +43,8 @@ Existing files under legacy conversation-key directories remain readable by all
 conversations in the workspace and are not moved or deleted automatically. Legacy
 output references are copied lazily to the shared output directory when recovered.
 
-Host hydration and synchronization cover `scratchpad/`, `uploads/`, and
-`generated-images/` only, excluding symlinks. Output logs stay in their owning
+Host hydration and synchronization cover `scratchpad/`, `uploads/`,
+`generated-images/`, and `browser/` only, excluding symlinks. Output logs stay in their owning
 workspace; arbitrary directories and legacy categories are not copied.
 
 Long results return a preview plus `output_paths`. Read those files using

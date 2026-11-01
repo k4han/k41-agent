@@ -1,5 +1,6 @@
 """Native K41 tools over one runtime-selected Stagehand browser."""
 
+import base64
 import json
 from typing import Annotated, Any, Literal
 
@@ -100,7 +101,30 @@ async def invoke(runtime, name, values):
         raise ToolError(ToolErrorCode.PERMISSION_DENIED, "This browser belongs to another authenticated account.") from None
     except TimeoutError:
         raise ToolError(ToolErrorCode.TIMEOUT, "Browser timed out and was closed. The action may have partially completed; inspect the page before trying a new action.") from None
+    if name == "browser_screenshot":
+        result = await save_workspace_screenshot(runtime, thread_id, result)
     return message(runtime, name, result)
+
+
+async def save_workspace_screenshot(runtime, thread_id, result):
+    from agent.modules.tools.builtin.workspace import get_workspace
+    from agent.modules.tools.runtime.thread_storage import ensure_physical_workspace_storage
+    from agent.modules.workspaces import get_workspace_file_io
+
+    workspace = get_workspace(runtime)
+    image = result["image"]
+    artifact = result["artifact"]
+    extension = "png" if image["mimeType"] == "image/png" else "jpeg"
+    path = f".k41-agent/browser/screenshots/{artifact['artifact_id']}.{extension}"
+    try:
+        file_io = await get_workspace_file_io(workspace, thread_id=thread_id)
+        if workspace.backend == "local":
+            ensure_physical_workspace_storage(workspace.locator)
+        await file_io.write_bytes(path, base64.b64decode(image["data"], validate=True))
+    except Exception as exc:
+        raise ToolError(ToolErrorCode.EXECUTION_ERROR, f"Failed to save browser screenshot to the active workspace: {exc}") from exc
+    return {**result, "content": f"Browser screenshot captured.\nSaved to workspace: {path}",
+            "artifact": {**artifact, "workspace_path": path}}
 
 
 async def _snapshot(runtime: Runtime, include_iframes: bool = True):
@@ -163,7 +187,7 @@ browser_run = registered("browser_run", _run,
     "When the user asks to open a page and then interact themselves, complete the requested setup and call browser_handoff next, alone in a separate tool call. For example, 'Open Google so I can enter my search and give control back' requires opening Google and then handing over control. Opening the page, announcing it is ready, or ending your reply does not transfer control. Use browser_handoff for any requested manual interaction, including searches, forms, selections, login, CAPTCHA or 2FA. When the user asks you to perform the search or interaction, do it yourself unless human input is required. After handoff, inspect its handoff_status and use its automatically captured snapshot. If snapshot_status is failed, resolve the error and obtain a fresh browser_snapshot before continuing. "
     "Use browser_close to release the browser. Use direct APIs or web_fetch when sufficient. localhost refers to the K41 host; sandbox apps need a reachable preview URL.", True)
 browser_screenshot = registered("browser_screenshot", _screenshot,
-    "Capture the active browser page as an image visible to the model and dashboard. Use full_page for the whole page. quality is available only for JPEG.")
+    "Capture the active browser page as an image visible to the model and dashboard, and save it under .k41-agent/browser/screenshots/ in the active workspace. Returns the workspace-relative image path for file tools and shell commands. Use full_page for the whole page. quality is available only for JPEG.")
 browser_handoff = registered("browser_handoff", _handoff,
     "Hand the browser to the authenticated dashboard user whenever they request direct browser interaction or human input is required. This includes entering a search, filling a form, selecting content, login, CAPTCHA or 2FA. If the user asks to open a page and then use it themselves, open the page first and call this tool next; a chat reply alone does not grant browser control. Put instructions for the user's manual interaction and choosing Return control to agent in reason; they are displayed while the run is paused. All agent browser tools are locked meanwhile. "
     "When this tool completes, inspect handoff_status: returned means the user has already returned control and the manual interaction stage is over. The runtime captures a fresh snapshot before returning, subject to browser_snapshot permissions. If snapshot_status is captured, use the included snapshot to acknowledge the current state and continue the task already requested. If no further task was specified, ask what the user wants to do next. Do not repeat instructions to enter input or return control after a returned result. If snapshot_status is failed, resolve snapshot_error and call browser_snapshot before acting or describing the current page. Cancelled means stop the cancelled browser task; expired or session_lost means the prior browser state is unavailable. Unavailable in delegated sub-agents: report the need for user interaction to the parent agent instead. Call this tool alone. Never put credentials in chat or tool inputs.", True)

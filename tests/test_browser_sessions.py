@@ -34,7 +34,7 @@ class FakeFacade:
         return self.snapshot_text
 
     async def screenshot(self, **values):
-        return {"data": base64.b64encode(b"image").decode(), "mimeType": "image/jpeg"}
+        return {"data": base64.b64encode(b"image").decode(), "mimeType": f"image/{values.get('type', 'jpeg')}"}
 
 
 class FakeDriver:
@@ -820,7 +820,8 @@ def test_batch_guard_uses_browser_registration(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_tool_node_injects_trusted_owner_and_keeps_model_images(browser, monkeypatch):
+@pytest.mark.parametrize("image_type", ["jpeg", "png"])
+async def test_tool_node_injects_trusted_owner_and_keeps_model_images(browser, monkeypatch, tmp_path, image_type):
     from langchain_core.messages import AIMessage
     from langgraph.prebuilt import ToolNode
     from langgraph.runtime import Runtime
@@ -829,7 +830,10 @@ async def test_tool_node_injects_trusted_owner_and_keeps_model_images(browser, m
 
     authorized = []
     monkeypatch.setattr(tools, "authorize", lambda runtime, name, values: authorized.append(name))
-    runtime = Runtime(context=WorkflowContext(browser_owner_id="admin:1"))
+    workspace = tmp_path / "active-workspace"
+    workspace.mkdir()
+    (workspace / ".git").mkdir()
+    runtime = Runtime(context=WorkflowContext(browser_owner_id="admin:1", working_dir=str(workspace)))
     config = {"configurable": {"thread_id": "chat"}}
     node = ToolNode([tools.browser_run, tools.browser_screenshot])
     result = await node.ainvoke({"messages": [AIMessage(content="", tool_calls=[{
@@ -837,12 +841,65 @@ async def test_tool_node_injects_trusted_owner_and_keeps_model_images(browser, m
     assert result["messages"][0].status == "success"
     assert next(iter(browser.sessions.values())).owner_id == "admin:1"
     result = await node.ainvoke({"messages": [AIMessage(content="", tool_calls=[{
-        "id": "image", "name": "browser_screenshot", "args": {}}])]}, config=config, runtime=runtime)
+        "id": "image", "name": "browser_screenshot", "args": {"type": image_type}}])]}, config=config, runtime=runtime)
     message = result["messages"][0]
     assert message.content[1]["type"] == "image"
+    assert message.content[1]["mime_type"] == f"image/{image_type}"
     assert message.artifact["browser"]["image_url"].startswith("/dashboard-api/browser/artifacts/")
+    artifact = message.artifact["browser"]
+    path = f".k41-agent/browser/screenshots/{artifact['artifact_id']}.{image_type}"
+    assert artifact["workspace_path"] == path
+    assert (workspace / path).read_bytes() == b"image"
+    assert path in message.content[0]["text"]
+    assert message.artifact["display_content"] == message.content[0]["text"]
+    assert "/dashboard-api/" not in message.content[0]["text"]
+    assert ".k41-agent/" in (workspace / ".git/info/exclude").read_text()
     assert authorized == ["browser_run", "browser_screenshot"]
     assert "runtime" not in tools.browser_run.tool_call_schema.model_json_schema()["properties"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["daytona", "modal"])
+async def test_screenshot_writes_to_active_remote_workspace(browser, monkeypatch, backend):
+    from unittest.mock import AsyncMock
+
+    from agent.modules.tools.builtin import browser as tools
+    from agent.modules.workspaces import WorkspaceRef
+
+    workspace = WorkspaceRef(backend=backend, locator="active-sandbox", label="Active sandbox",
+                             metadata={"root": "/workspace/repo"})
+    file_io = SimpleNamespace(write_bytes=AsyncMock())
+    get_file_io = AsyncMock(return_value=file_io)
+    monkeypatch.setattr("agent.modules.workspaces.get_workspace_file_io", get_file_io)
+    monkeypatch.setattr(tools, "authorize", lambda *args: None)
+    runtime = SimpleNamespace(context={"workspace": workspace, "browser_owner_id": "admin:1"},
+                              config={"configurable": {"thread_id": "chat:sub:helper:1"}}, tool_call_id="capture")
+
+    result = await tools._screenshot(runtime, type="png", full_page=True)
+
+    get_file_io.assert_awaited_once_with(workspace, thread_id="chat:sub:helper:1")
+    path = result.artifact["browser"]["workspace_path"]
+    file_io.write_bytes.assert_awaited_once_with(path, b"image")
+    assert path.startswith(".k41-agent/browser/screenshots/") and path.endswith(".png")
+    assert path in result.content[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_screenshot_workspace_write_failure_is_explicit(browser, monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+
+    from agent.modules.tools.builtin import browser as tools
+    from agent.modules.tools.result import ToolError, ToolErrorCode
+
+    file_io = SimpleNamespace(write_bytes=AsyncMock(side_effect=OSError("disk full")))
+    monkeypatch.setattr("agent.modules.workspaces.get_workspace_file_io", AsyncMock(return_value=file_io))
+    monkeypatch.setattr(tools, "authorize", lambda *args: None)
+    runtime = SimpleNamespace(context={"working_dir": str(tmp_path), "browser_owner_id": "admin:1"},
+                              config={"configurable": {"thread_id": "chat"}}, tool_call_id="capture")
+
+    with pytest.raises(ToolError, match="Failed to save browser screenshot to the active workspace: disk full") as caught:
+        await tools._screenshot(runtime)
+    assert caught.value.code == ToolErrorCode.EXECUTION_ERROR
 
 
 @pytest.mark.asyncio

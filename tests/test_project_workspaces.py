@@ -3040,6 +3040,9 @@ async def test_runtime_switch_preserves_shared_identity_and_all_files(switch_ser
     (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     (root / ".k41-agent" / "uploads").mkdir(parents=True)
     (root / ".k41-agent" / "uploads" / "input.dat").write_bytes(b"attachment")
+    screenshot = ".k41-agent/browser/screenshots/capture.png"
+    (root / screenshot).parent.mkdir(parents=True)
+    (root / screenshot).write_bytes(b"screenshot")
     (root / "node_modules").mkdir()
     (root / "node_modules" / "cached").write_text("excluded")
     repository_metadata = {"source": "github", "repository_id": 123, "repository_full_name": "owner/repo",
@@ -3077,6 +3080,7 @@ async def test_runtime_switch_preserves_shared_identity_and_all_files(switch_ser
     assert (destination / "binary.dat").read_bytes() == (root / "binary.dat").read_bytes()
     assert (destination / ".git" / "HEAD").read_bytes() == (root / ".git" / "HEAD").read_bytes()
     assert (destination / ".k41-agent" / "uploads" / "input.dat").read_bytes() == b"attachment"
+    assert (destination / screenshot).read_bytes() == b"screenshot"
     assert (destination / "node_modules").exists() is (target == "local")
     assert (root / "file.txt").read_text() == "original"
     assert await service.resolve_thread("first") == await service.resolve_thread("second") == after
