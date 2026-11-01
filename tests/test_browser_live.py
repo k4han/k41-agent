@@ -24,6 +24,11 @@ pytestmark = [
 ]
 
 
+def frame_image(frame):
+    data = frame["data"]
+    return Image.open(io.BytesIO(data if isinstance(data, bytes) else base64.b64decode(data, validate=True)))
+
+
 class PageHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -132,7 +137,7 @@ async def test_live_stream_keeps_latest_frames_and_final_static_paint(tmp_path):
             deadline = time.monotonic() + 3
             while True:
                 frame = await asyncio.wait_for(viewer.frames.get(), max(0.01, deadline - time.monotonic()))
-                pixel = Image.open(io.BytesIO(base64.b64decode(frame["data"]))).convert("RGB").getpixel((100, 100))
+                pixel = frame_image(frame).convert("RGB").getpixel((100, 100))
                 if pixel[0] < 10 and pixel[1] > 240 and pixel[2] < 10:
                     break
             # Capturing a final paint must not turn a static page into polling.
@@ -167,7 +172,7 @@ async def test_live_capture_pause_resume_scaling_and_target_notifications(tmp_pa
                 await asyncio.wait_for(viewer.frames.get(), 0.3)
             await viewer.configure(visible=True, width=640, quality=45, every_nth_frame=2)
             frame = await asyncio.wait_for(viewer.frames.get(), 5)
-            image = Image.open(io.BytesIO(base64.b64decode(frame["data"]))).convert("RGB")
+            image = frame_image(frame).convert("RGB")
             viewport = await viewer.call("Runtime.evaluate", {
                 "expression": "({width: innerWidth, height: innerHeight})", "returnByValue": True})
             dimensions = viewport["result"]["value"]
@@ -191,7 +196,7 @@ async def test_live_capture_pause_resume_scaling_and_target_notifications(tmp_pa
             """})
             await viewer.configure(visible=True, width=640)
             frame = await asyncio.wait_for(viewer.frames.get(), 5)
-            pixel = Image.open(io.BytesIO(base64.b64decode(frame["data"]))).convert("RGB").getpixel((10, 10))
+            pixel = frame_image(frame).convert("RGB").getpixel((10, 10))
             assert pixel[0] < 15 and pixel[1] > 240 and pixel[2] < 15
     finally:
         observer.cancel()
@@ -214,7 +219,7 @@ async def test_live_capture_independent_limits_keep_layout_and_pointer_coordinat
                                            (1600, 900, 80), (1920, 1080, 90), (1000, 200, 95)]:
                 await viewer.configure(width=width, height=height, quality=quality, refresh=True)
                 frame = await asyncio.wait_for(viewer.frames.get(), 5)
-                image = Image.open(io.BytesIO(base64.b64decode(frame["data"])))
+                image = frame_image(frame)
                 assert image.width <= min(width, dimensions["width"])
                 assert image.height <= min(height, dimensions["height"])
                 assert abs(image.width / image.height - dimensions["width"] / dimensions["height"]) < 0.02

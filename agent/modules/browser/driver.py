@@ -233,6 +233,7 @@ class CDPViewer:
         self.capture_revision = 0
         self.source_sequence = 0
         self.last_snapshot_sequence = -1
+        self.last_snapshot_revision = -1
         self.source_frames = 0
         self.source_frames_dropped = 0
         self.snapshots = 0
@@ -335,9 +336,18 @@ class CDPViewer:
                     future.set_exception(ConnectionError("Browser connection closed."))
 
     def _publish_frame(self, frame):
-        if self.frames.full():
-            self.frames.get_nowait()
+        # A completed snapshot supersedes unchanged source feedback, including
+        # while that snapshot is already waiting for network delivery.
+        if (not frame.get("priority") and self.source_sequence == self.last_snapshot_sequence
+                and self.capture_revision == self.last_snapshot_revision):
             self.source_frames_dropped += 1
+            return
+        if self.frames.full():
+            previous = self.frames.get_nowait()
+            if previous.get("priority"):
+                self.snapshots_dropped += 1
+            else:
+                self.source_frames_dropped += 1
         self.frames.put_nowait({**frame, "capture_revision": self.capture_revision,
                                "captured_at": frame.get("captured_at", time.monotonic())})
 
@@ -398,22 +408,25 @@ class CDPViewer:
         metadata.update(deviceWidth=width, deviceHeight=height, scrollOffsetX=x, scrollOffsetY=y)
         if self.visible and revision == self.capture_revision and sequence == self.source_sequence:
             self.last_snapshot_sequence = sequence
+            self.last_snapshot_revision = revision
             self._publish_frame({"metadata": metadata, "data": data, "captured_at": started, "priority": True})
         else:
             self.snapshots_dropped += 1
 
     @staticmethod
-    def _resize_capture(data, options):
+    def _resize_capture(data: str, options) -> tuple[bytes, int, int]:
+        """Return JPEG bytes and the original viewport dimensions."""
         from PIL import Image
 
-        with Image.open(io.BytesIO(base64.b64decode(data, validate=True))) as image:
+        raw = base64.b64decode(data, validate=True)
+        with Image.open(io.BytesIO(raw)) as image:
             width, height = image.size
             if width <= options["maxWidth"] and height <= options["maxHeight"]:
-                return data, width, height
+                return raw, width, height
             image.thumbnail((options["maxWidth"], options["maxHeight"]), Image.Resampling.LANCZOS)
             output = io.BytesIO()
             image.save(output, format="JPEG", quality=options["quality"])
-            return base64.b64encode(output.getvalue()).decode(), width, height
+            return output.getvalue(), width, height
 
     async def _capture_idle_frame(self):
         try:

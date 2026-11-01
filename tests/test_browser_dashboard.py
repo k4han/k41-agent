@@ -344,6 +344,21 @@ def stream_frame():
 
 
 @pytest.mark.asyncio
+async def test_stream_preserves_jpeg_bytes_when_switching_frame_sources(monkeypatch):
+    current, viewer, socket = stream_fixture(monkeypatch)
+    task = asyncio.create_task(routes.view_tab(socket, None, current, "first", "viewer", False))
+    try:
+        for frame_id, data in enumerate((b"jpeg", base64.b64encode(b"source").decode(), b"\xff\xd8\xff\xd9"), 1):
+            viewer.frames.put_nowait({**stream_frame(), "data": data})
+            payload = await asyncio.wait_for(socket.frames.get(), 1)
+            assert struct.unpack("!III", payload[:12]) == (frame_id, 1280, 800)
+            assert payload[12:] == (data if isinstance(data, bytes) else b"source")
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_frame_window_is_bounded_and_late_acks_cannot_release_another_tab(monkeypatch):
     current, viewer, socket = stream_fixture(monkeypatch)
     frame_ids = count()

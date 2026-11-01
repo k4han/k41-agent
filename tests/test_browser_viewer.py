@@ -20,7 +20,8 @@ class Socket:
         self.layout = {}
         image = io.BytesIO()
         Image.new("RGB", (1280, 800), "green").save(image, format="JPEG")
-        self.snapshot_data = base64.b64encode(image.getvalue()).decode()
+        self.snapshot_bytes = image.getvalue()
+        self.snapshot_data = base64.b64encode(self.snapshot_bytes).decode()
 
     def __aiter__(self):
         return self
@@ -117,18 +118,121 @@ async def test_idle_source_flushes_final_paint_once_without_restarting_static_ca
     async with viewer:
         socket.frame(1)
         assert (await asyncio.wait_for(viewer.frames.get(), 1))["data"] == "1"
-        assert (await asyncio.wait_for(viewer.frames.get(), 1))["data"] == socket.snapshot_data
+        assert (await asyncio.wait_for(viewer.frames.get(), 1))["data"] == socket.snapshot_bytes
         # A screenshot can itself cause a screencast event. Its unchanged image
         # must not schedule another trailing screenshot, even if the screenshot
         # encoder produced different JPEG bytes.
         socket.incoming.put_nowait({"method": "Page.screencastFrame", "params": {
             "sessionId": 2, "data": "1", "metadata": {},
         }})
-        await asyncio.wait_for(viewer.frames.get(), 1)
         await asyncio.wait_for(socket.acks.get(), 1)
         await asyncio.wait_for(socket.acks.get(), 1)
         await asyncio.sleep(0.25)
+        assert viewer.frames.empty()
         assert sum(command["method"] == "Page.captureScreenshot" for command in socket.commands) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot_consumed", [False, True])
+async def test_unchanged_feedback_cannot_replace_completed_snapshot(viewer_socket, snapshot_consumed):
+    viewer, socket = viewer_socket
+    async with viewer:
+        socket.frame(1)
+        assert (await asyncio.wait_for(viewer.frames.get(), 1))["data"] == "1"
+        await viewer.capture_frame()
+        if snapshot_consumed:
+            frame = await asyncio.wait_for(viewer.frames.get(), 1)
+            assert frame["data"] == socket.snapshot_bytes and frame["priority"]
+
+        socket.incoming.put_nowait({"method": "Page.screencastFrame", "params": {
+            "sessionId": 2, "data": "1", "metadata": {},
+        }})
+        acknowledgements = [await asyncio.wait_for(socket.acks.get(), 1) for _ in range(2)]
+        assert [ack[0] for ack in acknowledgements] == [1, 2]
+        if snapshot_consumed:
+            assert viewer.frames.empty()
+        else:
+            assert viewer.frames.qsize() == 1
+            frame = viewer.frames.get_nowait()
+            assert frame["data"] == socket.snapshot_bytes and frame["priority"]
+        assert viewer.metrics()["source_frames_dropped"] == 1
+        assert viewer.metrics()["snapshots_dropped"] == 0
+
+
+@pytest.mark.asyncio
+async def test_new_screencast_supersedes_completed_snapshot(viewer_socket):
+    viewer, socket = viewer_socket
+    async with viewer:
+        socket.frame(1)
+        await asyncio.wait_for(viewer.frames.get(), 1)
+        await viewer.capture_frame()
+
+        socket.frame(2)
+        acknowledgements = [await asyncio.wait_for(socket.acks.get(), 1) for _ in range(2)]
+        assert [ack[0] for ack in acknowledgements] == [1, 2]
+        frame = await asyncio.wait_for(viewer.frames.get(), 1)
+        assert frame["data"] == "2" and not frame.get("priority")
+        assert viewer.metrics()["snapshots_dropped"] == 1
+        assert viewer.metrics()["source_frames_dropped"] == 0
+
+        await viewer.capture_frame()
+        frame = await asyncio.wait_for(viewer.frames.get(), 1)
+        assert frame["data"] == socket.snapshot_bytes and frame["priority"]
+        assert viewer.metrics()["snapshots"] == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_replaces_queued_snapshot_and_counts_snapshot_drop(viewer_socket):
+    viewer, _ = viewer_socket
+    async with viewer:
+        await viewer.capture_frame()
+        await viewer.capture_frame()
+        assert viewer.frames.qsize() == 1
+        assert viewer.frames.get_nowait()["priority"]
+        assert viewer.metrics()["snapshots"] == 2
+        assert viewer.metrics()["snapshots_dropped"] == 1
+        assert viewer.metrics()["source_frames_dropped"] == 0
+
+
+@pytest.mark.asyncio
+async def test_refresh_allows_unchanged_source_until_current_snapshot_is_ready(viewer_socket, monkeypatch):
+    viewer, socket = viewer_socket
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def resize(*args):
+        entered.set()
+        await release.wait()
+        return socket.snapshot_bytes, 1280, 800
+
+    async with viewer:
+        socket.frame(1)
+        await asyncio.wait_for(viewer.frames.get(), 1)
+        await viewer.capture_frame()
+        previous = await asyncio.wait_for(viewer.frames.get(), 1)
+        monkeypatch.setattr(transport.asyncio, "to_thread", resize)
+        refresh = asyncio.create_task(viewer.configure(refresh=True))
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            socket.incoming.put_nowait({"method": "Page.screencastFrame", "params": {
+                "sessionId": 2, "data": "1", "metadata": {},
+            }})
+            acknowledgements = [await asyncio.wait_for(socket.acks.get(), 1) for _ in range(2)]
+            assert [ack[0] for ack in acknowledgements] == [1, 2]
+            frame = await asyncio.wait_for(viewer.frames.get(), 1)
+            assert frame["data"] == "1"
+            assert frame["capture_revision"] > previous["capture_revision"]
+
+            release.set()
+            await asyncio.wait_for(refresh, 1)
+            snapshot = await asyncio.wait_for(viewer.frames.get(), 1)
+            assert snapshot["priority"] and snapshot["data"] == socket.snapshot_bytes
+            assert snapshot["capture_revision"] == frame["capture_revision"]
+            assert viewer.metrics()["source_frames_dropped"] == 0
+            assert viewer.metrics()["snapshots_dropped"] == 0
+        finally:
+            release.set()
+            refresh.cancel()
+            await asyncio.gather(refresh, return_exceptions=True)
 
 
 @pytest.mark.asyncio
@@ -145,7 +249,7 @@ async def test_hidden_viewer_stops_capture_and_resume_captures_scaled_fresh_imag
         assert not any(command["method"] == "Page.captureScreenshot" for command in socket.commands[commands:])
         await viewer.configure(visible=True, width=640, quality=45)
         frame = await asyncio.wait_for(viewer.frames.get(), 1)
-        assert Image.open(io.BytesIO(base64.b64decode(frame["data"]))).size == (640, 400)
+        assert Image.open(io.BytesIO(frame["data"])).size == (640, 400)
         assert frame["metadata"]["deviceWidth"] == 1280
         start = next(command for command in reversed(socket.commands) if command["method"] == "Page.startScreencast")
         assert start["params"]["maxWidth"] == 640
@@ -179,7 +283,7 @@ async def test_capture_respects_independent_caps_and_preserves_input_dimensions(
     async with viewer:
         await viewer.configure(width=width, height=height, quality=quality, refresh=True)
         frame = await asyncio.wait_for(viewer.frames.get(), 1)
-        image = Image.open(io.BytesIO(base64.b64decode(frame["data"])))
+        image = Image.open(io.BytesIO(frame["data"]))
         assert image.size == expected
         assert image.width <= width and image.height <= height
         assert (frame["metadata"]["deviceWidth"], frame["metadata"]["deviceHeight"]) == (1280, 800)
@@ -253,7 +357,7 @@ async def test_delayed_snapshot_cannot_replace_a_newer_screencast_frame(viewer_s
     async def resize(*args):
         entered.set()
         await release.wait()
-        return socket.snapshot_data, 1280, 800
+        return socket.snapshot_bytes, 1280, 800
 
     monkeypatch.setattr(transport.asyncio, "to_thread", resize)
     async with viewer:
@@ -292,7 +396,7 @@ async def test_unchanged_screencast_feedback_does_not_discard_final_snapshot(vie
     async def resize(*args):
         socket.frame(1)
         await viewer.call("Input.insertText", {"text": "barrier"})
-        return socket.snapshot_data, 1280, 800
+        return socket.snapshot_bytes, 1280, 800
 
     monkeypatch.setattr(transport.asyncio, "to_thread", resize)
     async with viewer:
@@ -300,7 +404,7 @@ async def test_unchanged_screencast_feedback_does_not_discard_final_snapshot(vie
         await viewer.call("Input.insertText", {"text": "barrier"})
         await viewer.capture_frame()
         frame = await asyncio.wait_for(viewer.frames.get(), 1)
-        assert frame["data"] == socket.snapshot_data and frame["priority"]
+        assert frame["data"] == socket.snapshot_bytes and frame["priority"]
         await asyncio.sleep(0.2)
         assert viewer.metrics()["snapshots"] == 1
         assert viewer.metrics()["snapshots_dropped"] == 0

@@ -312,7 +312,8 @@ async def stream_tab(websocket, browser, current, target_id, viewer_id, viewer_f
                             or revision != state.visibility_revision):
                         break
                     if frame is not decoded_frame:
-                        jpeg = base64.b64decode(frame["data"], validate=True)
+                        data = frame["data"]
+                        jpeg = data if isinstance(data, bytes) else base64.b64decode(data, validate=True)
                         decoded_frame = frame
                     frame_bytes = 12 + len(jpeg)
                     if frame_bytes > FRAME_BYTE_WINDOW:
