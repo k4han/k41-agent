@@ -40,6 +40,14 @@ run the check as the same user that runs the agent. See
 [installation](./installation#optional-browser-support) to include browser setup
 in the shell installer.
 
+Both CLI and dashboard installation complete pending `dpkg` configuration before
+downloading Chrome. Package setup runs without prompts and preserves existing
+configuration files when no default answer is available. If this step fails,
+run `sudo dpkg --configure -a` in a terminal on the host, resolve the reported
+package errors, and retry installation. The dashboard server still needs its own
+root or passwordless sudo access; `sudo -v` in a terminal does not grant that
+access to a background server process.
+
 A source installation needs its normal `uv sync` dependencies. No Browserbase
 account or separately configured browser model is required.
 

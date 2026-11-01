@@ -51,20 +51,22 @@ def test_job_returns_immediately_rejects_duplicates_and_runs_custom_path_without
     assert "Browser is ready" in result["output"]
 
 
-def test_repair_verifies_configured_override_and_does_not_hide_failed_check(monkeypatch):
+@pytest.mark.parametrize("action,suffix", [("install", ["install"]), ("repair", ["install", "--force"])])
+def test_install_and_repair_verify_configured_override_and_do_not_hide_failed_check(monkeypatch, action, suffix):
     commands = []
 
     def run(command, **kwargs):
         commands.append(command)
-        if "--force" in command:
+        if "install" in command:
             return SimpleNamespace(returncode=0, stdout="Installed system Chrome\n")
         return SimpleNamespace(returncode=1, stdout="Configured executable does not exist\n")
 
     monkeypatch.setattr(browser_setup.subprocess, "run", run)
     manager = browser_setup.BrowserSetupManager()
-    manager.start("repair", "/wrong/chrome")
+    manager.start(action, "/wrong/chrome")
     result = finished(manager)
-    assert commands[0][-2:] == ["install", "--force"]
+    assert commands[0][-len(suffix):] == suffix
+    assert commands[0][-len(suffix) - 1] == "browser"
     assert commands[1][-3:] == ["check", "--executable-path", "/wrong/chrome"]
     assert result["state"] == "failed"
     assert "Installed system Chrome" in result["output"]

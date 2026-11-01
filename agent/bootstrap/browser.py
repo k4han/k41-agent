@@ -91,9 +91,24 @@ def install_browser(*, force: bool = False) -> str:
         if not shutil.which("sudo"):
             raise BrowserSetupError("Installing Chrome requires root or sudo. Ask an administrator to install Chrome.")
         prefix = ["sudo", "-n"]
+    # Set this after sudo so its environment filtering cannot restore prompts.
+    prefix.extend(["env", "DEBIAN_FRONTEND=noninteractive"])
     # Check package-manager access before downloading a large browser package.
     typer.echo("Updating package metadata (requires root or cached sudo credentials)...")
     _run_package_command([*prefix, "apt-get", "update"])
+    typer.echo("Completing pending system package configuration...")
+    try:
+        # Interrupted dpkg transactions block apt installs. Keep existing config
+        # files when there is no default answer, including in dashboard jobs.
+        _run_package_command([
+            *prefix, "dpkg", "--force-confdef", "--force-confold", "--configure", "-a",
+        ])
+    except BrowserSetupError as exc:
+        raise BrowserSetupError(
+            f"Could not complete pending system package configuration. {exc} "
+            "Run 'sudo dpkg --configure -a' in a terminal on the agent host, "
+            "resolve the reported package errors, then retry browser installation."
+        ) from exc
 
     import httpx
 

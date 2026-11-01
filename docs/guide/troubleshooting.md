@@ -66,6 +66,11 @@ For a custom binary, pass `--executable-path /path/to/chrome` to the check and
 configure `browser.executable_path` in Settings. Startup failures retain the
 original exception in the server logs.
 
+If browser installation reports `dpkg was interrupted`, run
+`sudo dpkg --configure -a` on the K41 host, resolve any reported package errors,
+then retry `k41 browser install`. Newer installers complete this configuration
+step automatically before downloading Chrome, including from the dashboard.
+
 Run the task in a dashboard conversation. Channel and scheduler runs do not
 provide the account identity required for browser sessions. See
 [browser automation](./browser).

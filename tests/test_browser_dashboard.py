@@ -43,9 +43,11 @@ def test_browser_setup_reports_configured_binary_and_rejects_unsupported_install
     assert all(key.startswith("browser.") for key in configuration["settings"])
 
 
-def test_browser_setup_returns_background_job_and_surfaces_conflicts(browser_client, monkeypatch):
+@pytest.mark.parametrize("action", ["install", "repair", "check"])
+def test_browser_setup_returns_background_job_and_surfaces_conflicts(browser_client, monkeypatch, action):
     client, browser = browser_client
     captured = []
+    monkeypatch.setattr(routes, "installation_unavailable_reason", lambda: None)
     monkeypatch.setattr(browser.container.config_service, "get_str", lambda *args: "/custom/chrome")
 
     class Manager:
@@ -56,13 +58,13 @@ def test_browser_setup_returns_background_job_and_surfaces_conflicts(browser_cli
             return self.status()
 
         def status(self):
-            return {"id": "job", "state": "running", "action": "check"}
+            return {"id": "job", "state": "running", "action": action}
 
     monkeypatch.setattr(routes, "setup_manager", lambda request: Manager())
-    response = client.post("/dashboard-api/browser/setup", json={"action": "check"})
+    response = client.post("/dashboard-api/browser/setup", json={"action": action})
     assert response.status_code == 202
     assert response.json()["state"] == "running"
-    assert captured == [("check", "/custom/chrome")]
+    assert captured == [(action, "/custom/chrome")]
     assert client.get("/dashboard-api/browser/setup").json()["job"]["id"] == "job"
     assert client.post("/dashboard-api/browser/setup", json={"action": "check"}).status_code == 409
 
