@@ -86,6 +86,45 @@ async def test_launch_failure_reports_setup_command_and_logs_original_error(brow
 
 
 @pytest.mark.asyncio
+async def test_session_observer_pushes_revisions_and_stops_with_session(browser):
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    class ObservedDriver(FakeDriver):
+        async def watch_tabs(self, notify):
+            try:
+                notify()
+                started.set()
+                await asyncio.Event().wait()
+            finally:
+                stopped.set()
+
+    async def launch(*args):
+        return ObservedDriver()
+
+    browser.launcher = launch
+    current = await browser.ensure("observed", "admin:1")
+    await asyncio.wait_for(started.wait(), 1)
+    changed = asyncio.Event()
+    current.subscribers.add(changed)
+    previous = current.revision
+    await browser.execute("observed", "admin:1", "snapshot", "browser_snapshot", {})
+    assert changed.is_set() and current.revision > previous
+    status = await browser.status("observed", "admin:1")
+    assert status["revision"] == current.revision
+    await browser.close("observed", "admin:1")
+    assert stopped.is_set() and current.observer is None
+
+
+@pytest.mark.asyncio
+async def test_viewer_status_remains_available_during_an_agent_operation(browser):
+    current = await browser.ensure("busy-viewer", "admin:1")
+    async with browser.thread_scope(current.thread_id), current.lock:
+        status = await asyncio.wait_for(browser.viewer_status(current), 0.5)
+    assert status["open"] and status["generation"] == current.generation
+
+
+@pytest.mark.asyncio
 async def test_isolation_profile_leases_and_ownership(browser):
     first = await browser.ensure("first", "admin:1")
     second = await browser.ensure("second", "admin:1")

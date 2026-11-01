@@ -60,6 +60,7 @@ const inputs = [], resumes = [], viewers = new Set();
 const profiles = [], checkpointLoads = [], invalidThreadRequests = [];
 const sessionMutations = [];
 const frameAcknowledgements = [], frameSequences = new WeakMap();
+const viewerOptions = new WeakMap(), visibilityEvents = [];
 let connections = 0;
 let ticketRequests = 0;
 let holdBrowserStatus = false;
@@ -74,11 +75,19 @@ function send(socket, value) {
   socket.write(Buffer.concat([header, data]));
 }
 function sendFrame(socket) {
+  if (viewerOptions.get(socket)?.visible === false) return;
   const id = (frameSequences.get(socket) || 0) + 1;
   frameSequences.set(socket, id);
   const header = Buffer.alloc(12);
   header.writeUInt32BE(id); header.writeUInt32BE(1280, 4); header.writeUInt32BE(800, 8);
   send(socket, Buffer.concat([header, image]));
+}
+function sendStatus(socket, reset = false) {
+  const options = viewerOptions.get(socket) || {};
+  send(socket, { ...status, type: 'status', tab_id: options.follow_agent === false ? options.tab_id : status.tabs[0]?.id,
+    follow_agent: options.follow_agent !== false, reset, paused: options.visible === false,
+    visibility_revision: options.visibility_revision || 0,
+    controller: status.mode === 'human' ? 'available' : 'agent', can_control: status.mode === 'human' });
 }
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -98,7 +107,7 @@ const server = http.createServer(async (req, res) => {
     status.handoff = null; status.mode = 'agent';
     if (request.resume_payload.decision === 'cancel') { status.open = false; status.generation = null; }
     history.pending_browser_handoffs = [];
-    for (const socket of viewers) send(socket, { type: 'status', tabs: status.tabs, mode: 'agent', can_control: false });
+    for (const socket of viewers) sendStatus(socket);
     history.messages.push({ id: 'answer', role: 'assistant', content: 'Browser task resumed' });
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
     res.end(JSON.stringify({ type: 'final', content: 'Browser task resumed' }) + '\n'); return;
@@ -179,22 +188,32 @@ server.on('upgrade', (req, socket) => {
       const message = JSON.parse(payload.toString());
       if (message.ticket) {
         assert.equal(message.ticket, 'ticket');
-        send(socket, { type: 'status', tabs: status.tabs, tab_id: status.tabs[0].id, follow_agent: true,
-          reset: true, mode: status.mode, can_control: status.mode === 'human' });
+        viewerOptions.set(socket, { ...message });
+        sendStatus(socket, true);
         sendFrame(socket);
       } else if (message.type === 'frame_ack') {
-        assert.equal(message.frame_id, frameSequences.get(socket));
+        assert.ok(message.frame_id > 0 && message.frame_id <= frameSequences.get(socket));
         frameAcknowledgements.push(message.frame_id);
+      } else if (message.type === 'ping') {
+        send(socket, { type: 'pong', id: message.id, metrics: { ack_ms: 30, quality: 65 } });
+      } else if (message.type === 'visibility') {
+        visibilityEvents.push(message.visible);
+        Object.assign(viewerOptions.get(socket), { visible: message.visible, visibility_revision: message.revision });
+        sendStatus(socket);
+        if (message.visible) sendFrame(socket);
+      } else if (message.type === 'resize') {
+        sendFrame(socket);
       } else if (message.type === 'select_tab' || message.type === 'follow_agent') {
         inputs.push(message);
-        send(socket, { type: 'status', tabs: status.tabs,
-          tab_id: message.type === 'select_tab' ? message.tab_id : status.tabs[0].id,
-          follow_agent: message.type === 'follow_agent', reset: true,
-          mode: status.mode, can_control: status.mode === 'human' });
+        Object.assign(viewerOptions.get(socket), { tab_id: message.tab_id, follow_agent: message.type === 'follow_agent' });
+        sendStatus(socket, true);
         setTimeout(() => {
           if (!socket.destroyed) sendFrame(socket);
         }, 200);
-      } else inputs.push(message);
+      } else {
+        inputs.push(message);
+        if (message.input_id) send(socket, { type: 'input_ack', input_id: message.input_id });
+      }
     }
   });
 });
@@ -232,6 +251,22 @@ try {
   assert.equal(await js('document.querySelector(".workspace-browser-panel").hidden'), false);
   assert.equal(await js('document.querySelector(".browser-panel").closest("[role=dialog]")'), null, 'browser belongs to the workspace');
   assert.equal(await js(`document.querySelector('[aria-label="Browser address"]').value`), status.tabs[0].url, 'address displays the active page URL');
+  const backgroundTarget = await call('Target.createTarget', { url: 'about:blank' });
+  await until(() => visibilityEvents.at(-1) === false, 'background dashboard pauses image delivery');
+  assert.equal(await js('document.querySelector(".browser-keyboard").disabled'), true, 'a hidden dashboard cannot send input');
+  const pausedAcknowledgements = frameAcknowledgements.length;
+  for (const socket of viewers) sendFrame(socket);
+  await delay(150);
+  assert.equal(frameAcknowledgements.length, pausedAcknowledgements, 'paused viewers receive no images');
+  await call('Page.bringToFront');
+  await until(() => visibilityEvents.at(-1) === true, 'foreground dashboard requests fresh capture');
+  await until(() => js('document.querySelector(".browser-keyboard")?.disabled === false'), 'fresh image restores control after visibility resume');
+  await call('Target.closeTarget', { targetId: backgroundTarget.targetId });
+  for (const socket of viewers) send(socket, { ...status, type: 'status', tab_id: 'tab', controller: 'other', can_control: false });
+  await until(() => js('document.querySelector(".browser-connection").textContent.includes("Another window")'), 'another controller has a distinct label');
+  assert.equal(await js('document.querySelector(".browser-keyboard").disabled'), true);
+  for (const socket of viewers) sendStatus(socket);
+  await until(() => js('document.querySelector(".browser-keyboard")?.disabled === false'), 'released controller becomes available');
   await js('[...document.querySelectorAll(".workspace-primary-tabs [role=tab]")].find(tab => tab.title === "Files Explorer").click()');
   await until(() => js('document.querySelector(".workspace-browser-panel").hidden'), 'switch to Files');
   assert.equal(await js('document.querySelector(".chat-prompt-input").disabled'), true, 'switching tabs preserves handoff');
@@ -251,6 +286,8 @@ try {
   await delay(2500);
   assert.equal(connections, 2, 'status polling must preserve the viewer connection');
   for (const socket of viewers) socket.destroy();
+  await until(() => js('document.querySelector(".browser-screen-stale:not([hidden])") !== null'), 'disconnect keeps the last image visible');
+  assert.equal(await js('document.querySelector(".browser-keyboard").disabled'), true, 'reconnecting disables stale image input');
   await until(() => connections === 3, 'viewer reconnects after transport loss');
   await until(() => js('document.querySelector(".browser-screen:not([hidden]) canvas")?.width === 1280'), 'canvas restored after transport loss');
   await js(`document.querySelector('[aria-label="Close Browser"]').click()`);
@@ -304,11 +341,16 @@ try {
   await until(() => js('!document.querySelector(".browser-screen:not([hidden]) canvas")'), 'switching tabs clears the previous canvas');
   await until(() => js('document.querySelector(".browser-screen:not([hidden]) canvas")?.width === 1280'), 'pinned tab canvas');
   assert.equal(await js(`document.querySelector('[aria-label="Follow agent"]').getAttribute('aria-pressed')`), 'false');
+  for (const socket of viewers) socket.destroy();
+  await until(() => js('document.querySelector(".browser-screen-stale:not([hidden])") !== null'), 'pinned image remains during reconnect');
+  await until(() => js('document.querySelector(".browser-screen:not(.browser-screen-stale):not([hidden])") !== null'), 'pinned tab reconnects with a fresh image');
+  assert.equal(await js('document.querySelector(".browser-page-tab[aria-selected=true]").title'), status.tabs[1].url, 'reconnect preserves the pinned tab');
   await js(`document.querySelector('[aria-label="Follow agent"]').click()`);
   await until(() => js(`document.querySelector('[aria-label="Follow agent"]').getAttribute('aria-pressed') === 'true'`), 'resume following agent');
   await until(() => js('document.querySelector(".browser-screen:not([hidden]) canvas")?.width === 1280'), 'agent tab canvas');
   assert.equal(await js('document.querySelector(".browser-page-tab[aria-selected=true]").title'), status.tabs[0].url);
   holdBrowserStatus = true;
+  await js('window.dispatchEvent(new CustomEvent("k41:thread-stop-running", { detail: { threadId: "browser-test" } }))');
   await until(() => typeof releaseBrowserStatus === 'function', 'capture a status poll before the next handoff');
   await js(`document.querySelector('[aria-label="Close workspace explorer"]').click()`);
   await js('document.querySelector(".chat-prompt-input").focus()');

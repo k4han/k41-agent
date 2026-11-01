@@ -1,10 +1,13 @@
 """CDP stream lifecycle and client backpressure regression checks."""
 
 import asyncio
+import base64
+import io
 import json
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
 from agent.modules.browser import driver as transport
 
@@ -14,6 +17,10 @@ class Socket:
         self.incoming = asyncio.Queue()
         self.acks = asyncio.Queue()
         self.commands = []
+        self.layout = {}
+        image = io.BytesIO()
+        Image.new("RGB", (1280, 800), "green").save(image, format="JPEG")
+        self.snapshot_data = base64.b64encode(image.getvalue()).decode()
 
     def __aiter__(self):
         return self
@@ -29,7 +36,8 @@ class Socket:
         self.commands.append(message)
         if message["method"] == "Page.screencastFrameAck":
             self.acks.put_nowait((message["params"]["sessionId"], asyncio.get_running_loop().time()))
-        result = {"data": "final"} if message["method"] == "Page.captureScreenshot" else {}
+        result = ({"data": self.snapshot_data} if message["method"] == "Page.captureScreenshot"
+                  else self.layout if message["method"] == "Page.getLayoutMetrics" else {})
         self.incoming.put_nowait({"id": message["id"], "result": result})
 
     async def close(self):
@@ -56,25 +64,22 @@ def viewer_socket(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_client_ack_releases_source_credits_and_keeps_commands_responsive(viewer_socket):
+async def test_latest_frame_slot_releases_source_credits_without_waiting_for_network(viewer_socket):
     viewer, socket = viewer_socket
     async with viewer:
         socket.frame(1)
         socket.frame(2)
         await asyncio.wait_for(viewer.call("Input.insertText", {"text": "hello"}), 0.1)
-        assert socket.acks.empty()
+        assert viewer.frames.qsize() == 1
         assert (await viewer.frames.get())["data"] == "2"
-        viewer.acknowledge_frame()
         first, second = [await asyncio.wait_for(socket.acks.get(), 1) for _ in range(2)]
         assert [first[0], second[0]] == [1, 2]
         socket.frame(3)
         await viewer.call("Input.insertText", {"text": "still responsive"})
-        assert socket.acks.empty()
-        assert (await viewer.frames.get())["data"] == "3"
-        viewer.acknowledge_frame()
         assert (await asyncio.wait_for(socket.acks.get(), 1))[0] == 3
+        assert (await viewer.frames.get())["data"] == "3"
     assert viewer.reader.done()
-    assert viewer.acknowledger.done()
+    assert viewer.snapshotter.done()
 
 
 @pytest.mark.asyncio
@@ -102,9 +107,8 @@ async def test_ack_failure_notifies_viewer(viewer_socket):
         socket.send = send
         socket.frame(1)
         await asyncio.wait_for(viewer.frames.get(), 1)
-        viewer.acknowledge_frame()
         await asyncio.wait_for(viewer.wait_closed(), 1)
-    assert isinstance(viewer.acknowledger.exception(), ConnectionError)
+    assert isinstance(viewer.reader.exception(), ConnectionError)
 
 
 @pytest.mark.asyncio
@@ -113,8 +117,7 @@ async def test_idle_source_flushes_final_paint_once_without_restarting_static_ca
     async with viewer:
         socket.frame(1)
         assert (await asyncio.wait_for(viewer.frames.get(), 1))["data"] == "1"
-        viewer.acknowledge_frame()
-        assert (await asyncio.wait_for(viewer.frames.get(), 1))["data"] == "final"
+        assert (await asyncio.wait_for(viewer.frames.get(), 1))["data"] == socket.snapshot_data
         # A screenshot can itself cause a screencast event. Its unchanged image
         # must not schedule another trailing screenshot, even if the screenshot
         # encoder produced different JPEG bytes.
@@ -122,8 +125,43 @@ async def test_idle_source_flushes_final_paint_once_without_restarting_static_ca
             "sessionId": 2, "data": "1", "metadata": {},
         }})
         await asyncio.wait_for(viewer.frames.get(), 1)
-        viewer.acknowledge_frame()
         await asyncio.wait_for(socket.acks.get(), 1)
         await asyncio.wait_for(socket.acks.get(), 1)
         await asyncio.sleep(0.25)
         assert sum(command["method"] == "Page.captureScreenshot" for command in socket.commands) == 1
+
+
+@pytest.mark.asyncio
+async def test_hidden_viewer_stops_capture_and_resume_captures_scaled_fresh_image(viewer_socket):
+    viewer, socket = viewer_socket
+    async with viewer:
+        socket.frame(1)
+        await asyncio.wait_for(viewer.frames.get(), 1)
+        await viewer.configure(visible=False, width=640, quality=45)
+        commands = len(socket.commands)
+        socket.frame(2)
+        await asyncio.sleep(0.15)
+        assert viewer.frames.empty()
+        assert not any(command["method"] == "Page.captureScreenshot" for command in socket.commands[commands:])
+        await viewer.configure(visible=True, width=640, quality=45)
+        frame = await asyncio.wait_for(viewer.frames.get(), 1)
+        assert Image.open(io.BytesIO(base64.b64decode(frame["data"]))).size == (640, 400)
+        assert frame["metadata"]["deviceWidth"] == 1280
+        start = next(command for command in reversed(socket.commands) if command["method"] == "Page.startScreencast")
+        assert start["params"]["maxWidth"] == 640
+        assert start["params"]["quality"] == 45
+        snapshot = next(command for command in reversed(socket.commands) if command["method"] == "Page.captureScreenshot")
+        assert "clip" not in snapshot["params"]
+
+
+@pytest.mark.asyncio
+async def test_fresh_capture_uses_current_scroll_position_instead_of_old_source_metadata(viewer_socket):
+    viewer, socket = viewer_socket
+    async with viewer:
+        await viewer.configure(visible=False, width=640)
+        socket.layout = {"cssVisualViewport": {"pageX": 0, "pageY": 1200, "clientWidth": 1280, "clientHeight": 800}}
+        await viewer.configure(visible=True, width=640)
+        frame = await asyncio.wait_for(viewer.frames.get(), 1)
+        assert frame["metadata"]["scrollOffsetY"] == 1200
+        snapshot = next(command for command in reversed(socket.commands) if command["method"] == "Page.captureScreenshot")
+        assert "clip" not in snapshot["params"]

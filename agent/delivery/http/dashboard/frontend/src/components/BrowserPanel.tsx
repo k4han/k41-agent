@@ -1,7 +1,8 @@
 import { ArrowRight, Camera, ChevronDown, Globe, LoaderCircle, Power, RefreshCw, Settings2, ShieldCheck } from "lucide-solid";
-import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack } from "solid-js";
 import { apiFetch, postJson } from "@/lib/api";
-import { browserModifiers, browserPointer, connectBrowserViewer, createBrowserFrameRenderer, createBrowserInputSender, type BrowserHandoffResume } from "@/lib/browserViewer";
+import { browserModifiers, browserPointer, connectBrowserViewer, createBrowserFrameRenderer, createBrowserInputSender,
+  type BrowserConnectionState, type BrowserHandoffResume, type BrowserStreamMetrics, type BrowserViewerConnection } from "@/lib/browserViewer";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import "@/styles/browser.css";
 
@@ -10,6 +11,7 @@ type BrowserStatus = {
   open: boolean;
   profile_id: string | null;
   generation: string | null;
+  revision?: number;
   mode: "agent" | "human";
   tabs: { id: string; title: string; url: string }[];
   handoff: { handoff_id: string; reason: string } | null;
@@ -33,7 +35,12 @@ export function BrowserPanel(props: {
   const [working, setWorking] = createSignal(false);
   const [hasFrame, setHasFrame] = createSignal(false);
   const [connected, setConnected] = createSignal(false);
-  const [canControl, setCanControl] = createSignal(false);
+  const [controlAllowed, setControlAllowed] = createSignal(false);
+  const [frameFresh, setFrameFresh] = createSignal(false);
+  const [connectionState, setConnectionState] = createSignal<BrowserConnectionState>("connecting");
+  const [controller, setController] = createSignal("agent");
+  const [metrics, setMetrics] = createSignal<BrowserStreamMetrics>();
+  const canControl = createMemo(() => connected() && controlAllowed() && frameFresh() && connectionState() !== "paused");
   const [followAgent, setFollowAgent] = createSignal(true);
   const [attempt, setAttempt] = createSignal(0);
   const [selectedTab, setSelectedTab] = createSignal("");
@@ -43,20 +50,40 @@ export function BrowserPanel(props: {
   const sessionActive = createMemo(() => Boolean(status()?.open));
   const currentPageUrl = createMemo(() => status()?.tabs.find((tab) => tab.id === selectedTab())?.url || "");
   const connectionLabel = () => !status()?.open ? "No active session"
-    : connected() ? canControl() ? "You have control" : "Agent has control" : "Connecting";
-  let socket: WebSocket | undefined;
+    : connectionState() === "paused" ? "Stream paused"
+    : !connected() ? hasFrame() ? "Reconnecting" : "Connecting"
+    : !frameFresh() ? "Updating browser image"
+    : canControl() ? controller() === "you" ? "You have control" : "Ready for your input"
+    : status()?.mode === "human" ? "Another window has control" : "Agent has control";
+  let connection: BrowserViewerConnection | undefined;
   let screen: HTMLCanvasElement | undefined;
+  let viewport: HTMLDivElement | undefined;
   let keyboard: HTMLTextAreaElement | undefined;
   let width = 1280;
   let height = 800;
   let announcedHandoff = "";
+  let statusRevision = 0;
+  let viewerSession = "";
   const endpoint = () => `/dashboard-api/browser/threads/${encodeURIComponent(props.threadId || "")}`;
   const renderer = createBrowserFrameRenderer(() => screen);
   const input = createBrowserInputSender((event) => {
-    if (socket?.readyState === WebSocket.OPEN && canControl()) socket.send(JSON.stringify(event));
+    if (canControl()) connection?.sendInput(event);
   });
   const send = input.send;
-  const resetFrame = () => { renderer.reset(); input.reset(); setHasFrame(false); };
+  const resetFrame = () => { renderer.reset(); input.reset(); setHasFrame(false); setFrameFresh(false); };
+  const staleFrame = () => { renderer.reset(); input.reset(); setFrameFresh(false); };
+  const applyStatus = (next: BrowserStatus, thread: string) => {
+    if (props.threadId !== thread) return;
+    const previous = untrack(status);
+    if (previous?.generation === next.generation && (next.revision ?? 0) < (previous?.revision ?? 0)) return;
+    statusRevision++;
+    setStatus(next);
+    if (next.handoff || !props.busy) props.onHandoffChange(Boolean(next.handoff), thread);
+    if (next.handoff && next.handoff.handoff_id !== announcedHandoff) {
+      announcedHandoff = next.handoff.handoff_id;
+      props.onOpen();
+    }
+  };
   onCleanup(resetFrame);
   createEffect(() => { if (!canControl()) input.reset(); });
 
@@ -64,6 +91,7 @@ export function BrowserPanel(props: {
 
   createEffect(() => {
     const thread = props.threadId;
+    statusRevision++;
     setStatus(null);
     resetFrame();
     setError("");
@@ -74,21 +102,15 @@ export function BrowserPanel(props: {
     let disposed = false;
     let polling = false;
     let refreshQueued = false;
-    let handoffRevision = 0;
     const refresh = async () => {
       if (polling) { refreshQueued = true; return; }
       polling = true;
-      const requestRevision = handoffRevision;
+      const requestRevision = statusRevision;
       try {
         const next = await apiFetch<BrowserStatus>(`/dashboard-api/browser/threads/${encodeURIComponent(thread)}`);
         // Discard status captured before a newly streamed handoff.
-        if (disposed || requestRevision !== handoffRevision) return;
-        setStatus(next);
-        if (next.handoff || !props.busy) props.onHandoffChange(Boolean(next.handoff), thread);
-        if (next.handoff && next.handoff.handoff_id !== announcedHandoff) {
-          announcedHandoff = next.handoff.handoff_id;
-          props.onOpen();
-        }
+        if (disposed || requestRevision !== statusRevision) return;
+        applyStatus(next, thread);
       } catch (cause) {
         if (!disposed) setError(cause instanceof Error ? cause.message : "Could not load browser status.");
       } finally {
@@ -100,23 +122,29 @@ export function BrowserPanel(props: {
       }
     };
     void refresh();
+    let lastRefresh = Date.now();
     const timer = window.setInterval(() => {
-      if (props.open || props.busy || status()?.open || status()?.handoff) void refresh();
-    }, 2000);
+      if (document.visibilityState === "hidden") return;
+      if (connected() && Date.now() - lastRefresh < 30000) return;
+      if (props.open || props.busy || status()?.open || status()?.handoff) { lastRefresh = Date.now(); void refresh(); }
+    }, 5000);
     const handoff = (event: Event) => {
       if ((event as CustomEvent).detail?.threadId === thread) {
-        handoffRevision += 1;
+        statusRevision += 1;
         void refresh();
       }
     };
     const runStopped = (event: Event) => {
       if ((event as CustomEvent).detail?.threadId === thread) void refresh();
     };
+    const visibilityChanged = () => { if (document.visibilityState !== "hidden") void refresh(); };
+    document.addEventListener("visibilitychange", visibilityChanged);
     window.addEventListener("k41-browser-handoff", handoff);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, runStopped);
     onCleanup(() => {
       disposed = true;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", visibilityChanged);
       window.removeEventListener("k41-browser-handoff", handoff);
       window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, runStopped);
     });
@@ -139,34 +167,68 @@ export function BrowserPanel(props: {
     const generation = sessionGeneration();
     attempt();
     setConnected(false);
-    setCanControl(false);
-    resetFrame();
-    setFollowAgent(true);
+    setControlAllowed(false);
+    const session = `${thread || ""}:${generation || ""}`;
+    if (viewerSession !== session) {
+      resetFrame(); setSelectedTab(""); setFollowAgent(true); setMetrics(undefined);
+      viewerSession = session;
+    } else staleFrame();
     if (!visible || !thread || !generation) return;
-    onCleanup(connectBrowserViewer({
+    const activeConnection = connectBrowserViewer({
       requestTicket: (signal) => apiFetch<{ ticket: string }>(`/dashboard-api/browser/threads/${encodeURIComponent(thread)}/viewer-ticket`,
         { method: "POST", json: {}, signal }),
-      onSocket: (value) => { socket = value; },
-      onDisconnect: () => { setConnected(false); setCanControl(false); resetFrame(); },
+      selection: untrack(() => ({ tabId: selectedTab(), followAgent: followAgent() })),
+      onDisconnect: () => { setConnected(false); setControlAllowed(false); staleFrame(); },
+      onStateChange: (value) => { setConnectionState(value); setConnected(value === "connected" || value === "paused"); },
+      onPause: () => staleFrame(),
+      onMetrics: setMetrics,
+      frameTiming: () => renderer.timing,
       onError: (cause) => setError(cause instanceof Error ? cause.message : String(cause)),
       onFrame: async (frame) => {
-        if (!await renderer.draw(frame)) return;
+        if (!await renderer.draw(frame)) return false;
         width = frame.width;
         height = frame.height;
         setHasFrame(true);
+        setFrameFresh(true);
         setError("");
         setConnected(true);
+        return true;
       },
       onMessage: (data) => {
         if (data.type === "status") {
-          if (data.reset) { resetFrame(); setConnected(false); }
-          setCanControl(Boolean(data.can_control));
+          statusRevision++;
+          if (data.generation && data.generation !== generation) return;
+          const nextTab = data.tab_id || data.tabs[0]?.id || "";
+          if (nextTab !== selectedTab()) resetFrame();
+          else if (data.reset) staleFrame();
+          setControlAllowed(Boolean(data.can_control));
+          setController(data.controller || (data.mode === "agent" ? "agent" : data.can_control ? "available" : "other"));
           setFollowAgent(data.follow_agent ?? true);
-          setStatus((previous) => previous ? { ...previous, tabs: data.tabs, mode: data.mode } : previous);
-          setSelectedTab(data.tab_id || data.tabs[0]?.id || "");
+          const previous = status();
+          if (previous) applyStatus({ ...previous, ...data }, thread);
+          setSelectedTab(nextTab);
+        } else if (data.type === "session_closed") {
+          statusRevision++;
+          resetFrame(); setControlAllowed(false);
+          setStatus((previous) => previous ? { ...previous, open: false, generation: null } : previous);
+          const revision = statusRevision;
+          void apiFetch<BrowserStatus>(`/dashboard-api/browser/threads/${encodeURIComponent(thread)}`)
+            .then((next) => { if (props.threadId === thread && revision === statusRevision) applyStatus(next, thread); })
+            .catch((cause) => { if (props.threadId === thread) setError(String(cause)); });
         } else if (data.type === "error") setError(data.message);
       },
-    }));
+    });
+    connection = activeConnection;
+    onCleanup(() => { if (connection === activeConnection) connection = undefined; activeConnection.dispose(); });
+  });
+
+  createEffect(() => {
+    if (!props.open || !connected() || !viewport) return;
+    const update = () => connection?.resize(Math.max(320, (viewport!.clientWidth - 24) * window.devicePixelRatio));
+    const observer = new ResizeObserver(update);
+    observer.observe(viewport);
+    update();
+    onCleanup(() => observer.disconnect());
   });
 
   const action = async (operation: () => Promise<unknown>, refreshThread = true) => {
@@ -176,8 +238,9 @@ export function BrowserPanel(props: {
     try {
       await operation();
       if (refreshThread && thread && props.threadId === thread) {
+        const revision = statusRevision;
         const next = await apiFetch<BrowserStatus>(`/dashboard-api/browser/threads/${encodeURIComponent(thread)}`);
-        if (props.threadId === thread) setStatus(next);
+        if (revision === statusRevision) applyStatus(next, thread);
       }
     }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Browser operation failed."); }
@@ -214,7 +277,7 @@ export function BrowserPanel(props: {
           <Show when={status()?.open && status()?.mode === "agent"}>
             <button class="btn btn-sm" type="button" aria-label="Follow agent" aria-pressed={followAgent()}
               title="Follow the agent's active browser tab" disabled={!connected() || followAgent()}
-              onClick={() => socket?.send(JSON.stringify({ type: "follow_agent" }))}>{followAgent() ? "Following agent" : "Follow agent"}</button>
+              onClick={() => connection?.followAgent()}>{followAgent() ? "Following agent" : "Follow agent"}</button>
           </Show>
           <button class="workspace-icon-btn" type="button" title="Login profiles" aria-label="Login profiles"
             aria-expanded={profilesOpen()} aria-controls="browser-profiles" onClick={() => setProfilesOpen((value) => !value)}><Settings2 size={16} /></button>
@@ -264,13 +327,12 @@ export function BrowserPanel(props: {
           <For each={status()?.tabs}>{(tab) => <button type="button" class="browser-page-tab" role="tab"
             aria-selected={selectedTab() === tab.id} title={tab.url} disabled={!connected()}
             onClick={() => {
-              if (socket?.readyState !== WebSocket.OPEN) return;
+              if (!connected() || !connection) return;
               resetFrame();
-              setConnected(false);
-              setCanControl(false);
+              setControlAllowed(false);
               setFollowAgent(false);
               setSelectedTab(tab.id);
-              socket.send(JSON.stringify({ type: "select_tab", tab_id: tab.id }));
+              connection.selectTab(tab.id);
             }}><Globe size={13} /><span>{tab.title || tab.url || "New tab"}</span></button>}</For>
         </div></Show>
         <form class="browser-address" onSubmit={(event) => { event.preventDefault(); if (url().trim()) send({ type: "navigate", url: url().trim() }); }}>
@@ -280,13 +342,14 @@ export function BrowserPanel(props: {
           <button class="workspace-icon-btn" type="submit" title="Navigate" aria-label="Navigate" disabled={!canControl() || !url().trim()}><ArrowRight size={16} /></button>
         </form>
       </div>
-      <div class="browser-viewport" aria-label="Live browser viewport" aria-busy={Boolean(status()?.open && !hasFrame())}>
+      <div ref={viewport} class="browser-viewport" aria-label="Live browser viewport" aria-busy={Boolean(status()?.open && !frameFresh())}>
       <Show when={!hasFrame()}><div class="browser-empty">
         <div class="browser-empty-icon"><Show when={status()?.open} fallback={<Globe size={28} />}><LoaderCircle size={28} class="browser-spinner" /></Show></div>
         <strong>{!props.threadId ? "Start a conversation to browse" : status()?.open ? "Connecting to your browser" : "A browser for your agent"}</strong>
         <p>{!props.threadId ? "Your browser session will stay with this conversation." : status()?.open ? "The live page will appear here. You can keep chatting while it connects." : "Open a session or ask your agent to browse. Follow its work here and take control when it needs you."}</p>
       </div></Show>
-        <div class="browser-screen" hidden={!hasFrame()} classList={{ "browser-screen-interactive": canControl() }}>
+        <div class="browser-screen" hidden={!hasFrame()} classList={{ "browser-screen-interactive": canControl(), "browser-screen-stale": !frameFresh() }}>
+          <Show when={!frameFresh()}><div class="browser-stream-overlay" role="status">{connectionLabel()}</div></Show>
           <canvas ref={screen} role="img" aria-label="Live browser page"
             onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); mouse(event, "mousePressed"); }}
             onPointerUp={(event) => mouse(event, "mouseReleased")}
@@ -302,6 +365,21 @@ export function BrowserPanel(props: {
         </div>
       </div>
       <footer class="browser-footer"><ShieldCheck size={14} /><span>{canControl() ? "Enter credentials directly in the browser, then return control to your agent." : "Ask your agent to hand over control when you need to sign in."}</span></footer>
+      <Show when={metrics() && status()?.open}><details class="browser-stream-details">
+        <summary>Connection details</summary>
+        <dl>
+          <dt>First image</dt><dd>{Math.round(metrics()!.firstFrameMs)} ms</dd>
+          <dt>Network round trip</dt><dd>{Math.round(metrics()!.heartbeatMs)} ms</dd>
+          <dt>Frame acknowledgement</dt><dd>{Math.round(metrics()!.ackMs)} ms</dd>
+          <dt>Decode / render</dt><dd>{Math.round(metrics()!.decodeMs)} / {Math.round(metrics()!.renderMs)} ms</dd>
+          <dt>Transfer</dt><dd>{(metrics()!.bytesPerSecond / 1024).toFixed(1)} KB/s</dd>
+          <dt>Frame rate</dt><dd>{metrics()!.framesPerSecond.toFixed(1)} fps</dd>
+          <dt>Input acknowledgement</dt><dd>{Math.round(metrics()!.inputAckMs)} ms</dd>
+          <dt>Input to next image</dt><dd>{Math.round(metrics()!.inputToFrameMs)} ms</dd>
+          <dt>Image quality</dt><dd>{metrics()!.quality}%</dd>
+          <dt>Reconnections / skipped images</dt><dd>{metrics()!.reconnects} / {metrics()!.droppedFrames}</dd>
+        </dl>
+      </details></Show>
       <Show when={status()?.images?.length}><details class="browser-captures"><summary><Camera size={14} />Screenshots <span>{status()?.images.length}</span><ChevronDown size={14} /></summary><div class="browser-images"><For each={status()?.images}>{(image) =>
         <a href={image.image_url} target="_blank" rel="noreferrer"><img src={image.image_url} alt="Agent browser screenshot" /></a>
       }</For></div></details></Show>

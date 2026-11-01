@@ -37,41 +37,65 @@ async function flushPromises() {
   for (let index = 0; index < 5; index++) await Promise.resolve();
 }
 
-function connectionFixture(requestTicket, onFrame = async () => {}) {
-  const timers = new Map(), sockets = [], messages = [], errors = [], frames = [];
-  let sequence = 0, now = 0, disconnected = 0;
+function connectionFixture(requestTicket, onFrame = async () => true, hidden = false) {
+  const timers = new Map(), sockets = [], messages = [], errors = [], frames = [], states = [], samples = [], listeners = new Map();
+  let sequence = 0, now = 0, disconnected = 0, replyPings = true;
+  const page = {
+    visibilityState: hidden ? 'hidden' : 'visible',
+    addEventListener(name, callback) { listeners.set(name, callback); },
+    removeEventListener(name) { listeners.delete(name); },
+  };
   class FakeSocket {
     static OPEN = 1;
     constructor(address) { this.address = String(address); this.sent = []; this.readyState = 1; sockets.push(this); }
-    send(raw) { this.sent.push(JSON.parse(raw)); }
-    close() { this.closed = true; this.onclose?.(); }
+    send(raw) {
+      const payload = JSON.parse(raw); this.sent.push(payload);
+      if (payload.type === 'ping' && replyPings) this.message({ type: 'pong', id: payload.id, metrics: { ack_ms: 100, quality: 55 } });
+    }
+    close() { this.closed = true; this.readyState = 3; this.onclose?.(); }
     message(value) { this.onmessage?.({ data: JSON.stringify(value) }); }
     frame(data = binaryFrame()) { this.onmessage?.({ data }); }
   }
   const module = {};
   runInNewContext(outputText, {
-    exports: module, AbortController, URL, Blob, WebSocket: FakeSocket, Math: Object.assign(Object.create(Math), { random: () => 0 }),
+    exports: module, AbortController, URL, Blob, document: page, performance: { now: () => now },
+    WebSocket: FakeSocket, Math: Object.assign(Object.create(Math), { random: () => 0 }),
     window: {
       location: { href: 'https://dashboard.test/chat', protocol: 'https:' },
       setTimeout(callback, delay) { const id = ++sequence; timers.set(id, { callback, at: now + delay, delay }); return id; },
       clearTimeout(id) { timers.delete(id); },
     },
   });
-  const dispose = module.connectBrowserViewer({
-    requestTicket, onSocket: () => {}, onMessage: value => messages.push(value),
+  const connection = module.connectBrowserViewer({
+    requestTicket, onMessage: value => messages.push(value),
     onFrame: value => { frames.push(value); return onFrame(value); },
     onDisconnect: () => disconnected++, onError: error => errors.push(error),
+    onStateChange: value => states.push(value), onMetrics: value => samples.push(value),
   });
   return {
-    sockets, messages, errors, frames, timers, dispose, get disconnected() { return disconnected; },
-    async nextTimer() {
-      const [id, timer] = [...timers].sort((left, right) => left[1].at - right[1].at)[0];
-      timers.delete(id); now = timer.at; timer.callback(); await flushPromises(); return timer.delay;
+    sockets, messages, errors, frames, timers, states, samples, connection, listeners,
+    dispose: () => connection.dispose(), get disconnected() { return disconnected; },
+    set replyPings(value) { replyPings = value; },
+    open(index = sockets.length - 1) {
+      const socket = sockets[index]; socket.onopen();
+      socket.message({ type: 'status', tabs: [{ id: 'first' }, { id: 'second' }], tab_id: 'first', mode: 'agent', can_control: false, sequence: 1 });
+      return socket;
+    },
+    visibility(value) { page.visibilityState = value; listeners.get('visibilitychange')?.(); },
+    async advance(duration) {
+      const target = now + duration;
+      while (true) {
+        const next = [...timers].sort((left, right) => left[1].at - right[1].at)[0];
+        if (!next || next[1].at > target) break;
+        const [id, timer] = next; timers.delete(id); now = timer.at;
+        timer.callback(); await flushPromises();
+      }
+      now = target; await flushPromises();
     },
   };
 }
 
-test('viewer retries failed ticket requests and authenticates the replacement socket', async () => {
+test('viewer retries ticket failures and authenticates a replacement socket', async () => {
   let requests = 0;
   const fixture = connectionFixture(async () => {
     if (++requests === 1) throw new Error('Temporary ticket failure');
@@ -79,31 +103,32 @@ test('viewer retries failed ticket requests and authenticates the replacement so
   });
   await flushPromises();
   assert.equal(fixture.errors.length, 1);
-  assert.equal(await fixture.nextTimer(), 1000);
+  await fixture.advance(1000);
   assert.equal(requests, 2);
-  const socket = fixture.sockets[0];
+  const socket = fixture.open();
   assert.equal(socket.address, 'wss://dashboard.test/dashboard-api/browser/viewer');
-  socket.onopen();
   assert.equal(socket.sent[0].ticket, 'fresh-ticket');
+  assert.equal(socket.sent[0].visible, true);
   assert.equal(socket.binaryType, 'arraybuffer');
-  socket.frame();
-  assert.equal(fixture.timers.size, 0);
+  socket.frame(); await flushPromises();
   fixture.dispose();
   assert.equal(fixture.timers.size, 0);
+  assert.equal(fixture.listeners.size, 0);
 });
 
-test('viewer uses bounded backoff, deduplicates socket failures and resets after a frame', async () => {
+test('viewer uses bounded backoff and deduplicates socket failures', async () => {
   const fixture = connectionFixture(async () => ({ ticket: 'ticket' }));
   await flushPromises();
   for (const expected of [1000, 2000, 4000, 8000, 15000, 15000]) {
     const socket = fixture.sockets.at(-1);
     socket.onerror(); socket.onclose();
     assert.equal(fixture.timers.size, 1);
-    assert.equal(await fixture.nextTimer(), expected);
+    assert.equal([...fixture.timers.values()][0].delay, expected);
+    await fixture.advance(expected);
   }
-  fixture.sockets.at(-1).frame();
-  fixture.sockets.at(-1).close();
-  assert.equal(await fixture.nextTimer(), 1000);
+  const socket = fixture.open(); socket.frame(); await flushPromises();
+  socket.close();
+  assert.equal([...fixture.timers.values()][0].delay, 1000);
   fixture.dispose();
 });
 
@@ -113,91 +138,166 @@ test('viewer times out stalled tickets and ignores their late results', async ()
     signal = value;
     return new Promise(resolve => { resolveTicket = resolve; });
   });
-  assert.equal(await fixture.nextTimer(), 10000);
+  await fixture.advance(10000);
   assert.equal(signal.aborted, true);
-  resolveTicket({ ticket: 'expired' });
-  await flushPromises();
+  resolveTicket({ ticket: 'expired' }); await flushPromises();
   assert.equal(fixture.sockets.length, 0);
   assert.equal(fixture.timers.size, 1);
   fixture.dispose();
-  assert.equal(fixture.timers.size, 0);
 });
 
-test('viewer requires a first frame but keeps static pages connected afterwards', async () => {
+test('a visible viewer requires an image but static pages stay connected with heartbeats', async () => {
   const fixture = connectionFixture(async () => ({ ticket: 'ticket' }));
-  await flushPromises();
-  fixture.sockets[0].onopen();
-  fixture.sockets[0].message({ type: 'status' });
-  assert.equal(await fixture.nextTimer(), 10000);
-  assert.equal(fixture.sockets[0].closed, true);
-  assert.equal(await fixture.nextTimer(), 1000);
-  fixture.sockets[1].frame();
-  assert.equal(fixture.timers.size, 0);
-  assert.equal(fixture.sockets[1].closed, undefined);
+  await flushPromises(); const first = fixture.open();
+  await fixture.advance(15000);
+  assert.equal(first.closed, true);
+  await fixture.advance(1000);
+  const second = fixture.open(); second.frame(); await flushPromises();
+  await fixture.advance(60000);
+  assert.equal(second.closed, undefined);
+  assert.equal(fixture.sockets.length, 2);
+  assert.equal(fixture.samples.at(-1).ackMs, 100);
   fixture.dispose();
 });
 
-test('viewer disposal aborts pending requests without creating sockets or retries', async () => {
+test('missing pongs reconnect a socket even after its first image', async () => {
+  const fixture = connectionFixture(async () => ({ ticket: 'ticket' }));
+  await flushPromises(); const socket = fixture.open();
+  socket.frame(); await flushPromises(); fixture.replyPings = false;
+  await fixture.advance(20000);
+  assert.equal(socket.closed, true);
+  assert.match(fixture.errors.at(-1).message, /stopped responding/);
+  fixture.dispose();
+});
+
+test('viewer disposal aborts pending requests and removes all timers and listeners', async () => {
   let resolveTicket, signal;
   const fixture = connectionFixture(value => {
-    signal = value;
-    return new Promise(resolve => { resolveTicket = resolve; });
+    signal = value; return new Promise(resolve => { resolveTicket = resolve; });
   });
-  fixture.dispose();
-  resolveTicket({ ticket: 'unused' });
-  await flushPromises();
+  fixture.dispose(); resolveTicket({ ticket: 'unused' }); await flushPromises();
   assert.equal(signal.aborted, true);
   assert.equal(fixture.sockets.length, 0);
   assert.equal(fixture.timers.size, 0);
+  assert.equal(fixture.listeners.size, 0);
 });
 
-test('binary frame headers preserve viewport dimensions and JPEG bytes', async () => {
+test('binary frame headers preserve logical viewport dimensions and JPEG bytes', async () => {
   const frame = decodeBrowserFrame(binaryFrame(42, 1024, 768));
-  assert.equal(frame.id, 42);
-  assert.equal(frame.width, 1024);
-  assert.equal(frame.height, 768);
+  assert.equal(frame.id, 42); assert.equal(frame.width, 1024); assert.equal(frame.height, 768);
   assert.equal(frame.image.type, 'image/jpeg');
   assert.deepEqual([...new Uint8Array(await frame.image.arrayBuffer())], [0xff, 0xd8, 0xff, 0xd9]);
   assert.throws(() => decodeBrowserFrame(new ArrayBuffer(12)), /Invalid browser frame/);
   assert.throws(() => decodeBrowserFrame(binaryFrame(0)), /Invalid browser frame header/);
   assert.throws(() => decodeBrowserFrame(binaryFrame(1, 0)), /Invalid browser frame header/);
+  assert.throws(() => decodeBrowserFrame(binaryFrame(1, 100000)), /Invalid browser frame header/);
 });
 
-test('viewer acknowledges only after drawing and ignores late draws from an old connection', async () => {
+test('drawing uses one active image and one latest slot, acknowledging skipped images', async () => {
   const drawings = [];
   const fixture = connectionFixture(async () => ({ ticket: 'ticket' }), () => new Promise(resolve => drawings.push(resolve)));
-  await flushPromises();
-  const first = fixture.sockets[0];
-  first.frame(binaryFrame(7));
-  assert.equal(first.sent.length, 0);
-  drawings.shift()();
-  await flushPromises();
-  assert.deepEqual(first.sent[0], { type: 'frame_ack', frame_id: 7 });
-  first.frame(binaryFrame(8));
-  first.close();
-  await fixture.nextTimer();
-  const replacement = fixture.sockets[1];
-  drawings.shift()();
-  await flushPromises();
-  assert.equal(first.sent.length, 1);
-  assert.equal(replacement.sent.length, 0);
-  replacement.frame(binaryFrame(9));
+  await flushPromises(); const socket = fixture.open();
+  socket.frame(binaryFrame(1)); socket.frame(binaryFrame(2)); socket.frame(binaryFrame(3));
+  assert.deepEqual(fixture.frames.map(frame => frame.id), [1]);
+  assert.deepEqual(socket.sent.filter(item => item.type === 'frame_ack').map(item => [item.frame_id, item.drawn]), [[2, false]]);
+  drawings.shift()(true); await flushPromises();
+  assert.deepEqual(fixture.frames.map(frame => frame.id), [1, 3]);
+  drawings.shift()(true); await flushPromises();
+  assert.deepEqual(socket.sent.filter(item => item.type === 'frame_ack').map(item => item.frame_id), [2, 1, 3]);
   fixture.dispose();
-  drawings.shift()();
-  await flushPromises();
-  assert.equal(replacement.sent.length, 0);
 });
 
-test('a decode failure reconnects without acknowledging the failed frame', async () => {
-  const fixture = connectionFixture(async () => ({ ticket: 'ticket' }), async () => { throw new Error('Invalid JPEG'); });
-  await flushPromises();
-  fixture.sockets[0].frame();
-  await flushPromises();
-  assert.equal(fixture.errors[0].message, 'Invalid JPEG');
-  assert.equal(fixture.sockets[0].sent.length, 0);
-  assert.equal(fixture.sockets[0].closed, true);
-  assert.equal(await fixture.nextTimer(), 1000);
+test('late draws from disconnected sockets cannot acknowledge replacement frames', async () => {
+  const drawings = [];
+  const fixture = connectionFixture(async () => ({ ticket: 'ticket' }), () => new Promise(resolve => drawings.push(resolve)));
+  await flushPromises(); const first = fixture.open(); first.frame(binaryFrame(7)); first.close();
+  await fixture.advance(1000); const replacement = fixture.open();
+  drawings.shift()(true); await flushPromises();
+  assert.equal(first.sent.filter(item => item.type === 'frame_ack').length, 0);
+  assert.equal(replacement.sent.filter(item => item.type === 'frame_ack').length, 0);
   fixture.dispose();
+});
+
+test('hidden tabs pause streaming and resume requests a fresh image without a new ticket', async () => {
+  const drawings = [];
+  const fixture = connectionFixture(async () => ({ ticket: 'ticket' }), () => new Promise(resolve => drawings.push(resolve)));
+  await flushPromises(); const socket = fixture.open(); socket.frame(binaryFrame(1));
+  fixture.visibility('hidden');
+  assert.equal(socket.sent.find(item => item.type === 'visibility').visible, false);
+  socket.frame(binaryFrame(2));
+  assert.equal(fixture.frames.length, 1);
+  assert.equal(socket.sent.find(item => item.frame_id === 2).drawn, false);
+  fixture.replyPings = false; await fixture.advance(30000);
+  assert.equal(socket.closed, undefined);
+  drawings.shift()(true); await flushPromises();
+  assert.equal(socket.sent.some(item => item.frame_id === 1), false);
+  fixture.visibility('visible');
+  assert.equal(socket.sent.filter(item => item.type === 'visibility').at(-1).visible, true);
+  socket.message({ type: 'status', paused: false, visibility_revision: 0, sequence: 2 });
+  socket.frame(binaryFrame(9));
+  assert.equal(socket.sent.find(item => item.frame_id === 9).drawn, false);
+  socket.message({ type: 'status', paused: false, visibility_revision: 2, sequence: 3 });
+  socket.frame(binaryFrame(3)); drawings.shift()(true); await flushPromises();
+  assert.equal(socket.sent.find(item => item.frame_id === 3).drawn, true);
+  assert.equal(fixture.sockets.length, 1);
+  fixture.dispose();
+});
+
+test('reconnecting preserves a pinned tab and viewport size', async () => {
+  const fixture = connectionFixture(async () => ({ ticket: 'ticket' }));
+  await flushPromises(); const first = fixture.open(); first.frame(); await flushPromises();
+  fixture.connection.selectTab('second'); fixture.connection.resize(650);
+  first.message({ type: 'status', tab_id: 'second', follow_agent: false, sequence: 2 });
+  first.close(); await fixture.advance(1000); fixture.open();
+  const auth = fixture.sockets[1].sent[0];
+  assert.equal(auth.tab_id, 'second'); assert.equal(auth.follow_agent, false); assert.equal(auth.width, 640);
+  fixture.dispose();
+});
+
+test('a viewer opened in the background waits for visibility before requiring an image', async () => {
+  const fixture = connectionFixture(async () => ({ ticket: 'ticket' }), async () => true, true);
+  await flushPromises(); const socket = fixture.open();
+  assert.equal(socket.sent[0].visible, false);
+  await fixture.advance(30000);
+  assert.equal(socket.closed, undefined);
+  fixture.visibility('visible');
+  socket.message({ type: 'status', paused: false, visibility_revision: 1, sequence: 2 });
+  socket.frame(); await flushPromises();
+  assert.equal(fixture.frames.length, 1);
+  fixture.dispose();
+});
+
+test('outdated status messages cannot overwrite newer control state', async () => {
+  const fixture = connectionFixture(async () => ({ ticket: 'ticket' }));
+  await flushPromises(); const socket = fixture.open();
+  socket.message({ type: 'status', sequence: 3, mode: 'human', controller: 'other' });
+  socket.message({ type: 'status', sequence: 2, mode: 'agent' });
+  assert.equal(fixture.messages.at(-1).controller, 'other');
+  fixture.dispose();
+});
+
+test('input telemetry measures acknowledgement and the next received image', async () => {
+  const fixture = connectionFixture(async () => ({ ticket: 'ticket' }));
+  await flushPromises(); const socket = fixture.open(); socket.frame(); await flushPromises();
+  fixture.connection.sendInput({ type: 'text', text: 'hello' });
+  const input = socket.sent.find(item => item.type === 'text');
+  await fixture.advance(40); socket.message({ type: 'input_ack', input_id: input.input_id });
+  await fixture.advance(30); socket.frame(binaryFrame(2)); await flushPromises();
+  assert.equal(fixture.samples.at(-1).inputAckMs, 40);
+  assert.equal(fixture.samples.at(-1).inputToFrameMs, 70);
+  fixture.dispose();
+});
+
+test('decode failure and a stuck render reconnect without claiming a successful draw', async () => {
+  const invalid = connectionFixture(async () => ({ ticket: 'ticket' }), async () => { throw new Error('Invalid JPEG'); });
+  await flushPromises(); const socket = invalid.open(); socket.frame(); await flushPromises();
+  assert.match(invalid.errors.at(-1).message, /Invalid JPEG/);
+  assert.equal(socket.sent.some(item => item.type === 'frame_ack'), false);
+  invalid.dispose();
+  const stuck = connectionFixture(async () => ({ ticket: 'ticket' }), () => new Promise(() => {}));
+  await flushPromises(); const hung = stuck.open(); hung.frame(); await stuck.advance(10000);
+  assert.equal(hung.closed, true); assert.match(stuck.errors.at(-1).message, /rendering timed out/);
+  stuck.dispose();
 });
 
 function rendererFixture() {
@@ -207,6 +307,7 @@ function rendererFixture() {
   const module = {};
   runInNewContext(outputText, {
     exports: module,
+    performance,
     createImageBitmap: () => new Promise(resolve => decodes.push(resolve)),
     window: {
       requestAnimationFrame(callback) { const id = ++sequence; paints.set(id, callback); return id; },

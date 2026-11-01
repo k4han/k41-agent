@@ -37,6 +37,12 @@
 .browser-screen { position: relative; width: min(100%, 1280px); margin-inline: auto; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: #fff; box-shadow: 0 2px 8px rgb(0 0 0 / 4%); }
 .browser-screen canvas { display: block; width: 100%; height: auto; user-select: none; }
 .browser-screen-interactive canvas { cursor: crosshair; touch-action: none; }
+.browser-screen-stale canvas { opacity: .65; }
+.browser-stream-overlay { position: absolute; z-index: 1; inset: 0; display: grid; place-items: center; color: var(--fg); background: color-mix(in srgb, var(--surface) 35%, transparent); font-size: 12px; pointer-events: none; }
+.browser-stream-details { flex: 0 0 auto; padding: 8px 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
+.browser-stream-details summary { cursor: pointer; }
+.browser-stream-details dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; margin: 10px 0 2px; }
+.browser-stream-details dt, .browser-stream-details dd { margin: 0; overflow-wrap: anywhere; }
 .browser-keyboard { position: absolute; width: 1px; height: 1px; top: 0; left: 0; padding: 0; border: 0; opacity: 0; resize: none; }
 .browser-empty { display: flex; flex: 1; flex-direction: column; align-items: center; align-self: center; gap: 12px; max-width: 340px; margin: 32px auto; text-align: center; }
 .browser-empty-icon { display: grid; place-items: center; width: 60px; height: 60px; margin-bottom: 4px; border: 1px solid var(--border); border-radius: 16px; color: var(--muted); background: var(--surface); }

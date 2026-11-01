@@ -40,6 +40,14 @@ class BrowserSession:
     controller: str | None = None
     active_tab_id: str | None = None
     closed: bool = False
+    revision: int = 0
+    subscribers: set[asyncio.Event] = field(default_factory=set)
+    observer: asyncio.Task | None = None
+
+    def notify(self):
+        self.revision += 1
+        for event in self.subscribers:
+            event.set()
 
 
 class BrowserService:
@@ -113,7 +121,20 @@ class BrowserService:
                 raise BrowserError("browser_unavailable", "Could not start Chrome. Run 'k41 browser install' on the agent host to install and check Chrome, or 'k41 browser check' to diagnose an existing installation. Check browser.executable_path, profile locks, and server logs for the original error.") from exc
             current = BrowserSession(thread_id, owner_id, profile_key, driver)
             self.sessions[thread_id] = current
+            if hasattr(driver, "watch_tabs"):
+                current.observer = asyncio.create_task(self._observe_tabs(current))
             return current
+
+    async def _observe_tabs(self, current):
+        while not current.closed:
+            try:
+                await current.driver.watch_tabs(current.notify)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Status reconciliation also checks browser health after observer loss.
+                current.notify()
+                await asyncio.sleep(5)
 
     async def status(self, thread_id, owner_id):
         thread_id = self.canonical(thread_id)
@@ -135,9 +156,22 @@ class BrowserService:
                 if not current.lock.locked():
                     await self._close(thread_id, owner_id)
                     current = None
+        return await self._status_snapshot(thread_id, owner_id, binding, current, tabs)
+
+    async def viewer_status(self, current):
+        """Read viewer state without waiting behind an agent's browser operation."""
+        binding = await self.repository.binding(current.thread_id)
+        if not binding or binding["owner_id"] != current.owner_id:
+            raise PermissionError("This browser belongs to another authenticated account.")
+        tabs = await current.driver.tabs() if not current.closed else []
+        return await self._status_snapshot(current.thread_id, current.owner_id, binding,
+                                          None if current.closed else current, tabs)
+
+    async def _status_snapshot(self, thread_id, owner_id, binding, current, tabs):
         pending = await self.repository.pending_handoff(thread_id)
         return {**binding, "open": current is not None,
                 "generation": current.generation if current else None,
+                "revision": current.revision if current else 0,
                 "mode": "human" if current and current.handoff_id else "agent",
                 "tabs": tabs, "handoff": pending,
                 "handoff_expired": bool(pending and (not current or pending["generation"] != current.generation)),
@@ -179,6 +213,11 @@ class BrowserService:
     async def _dispose(self, current):
         current.closed = True
         current.controller = None
+        current.notify()
+        if current.observer:
+            current.observer.cancel()
+            await asyncio.gather(current.observer, return_exceptions=True)
+            current.observer = None
         try:
             await asyncio.wait_for(current.driver.close(), 15)
         except Exception:
@@ -331,6 +370,7 @@ class BrowserService:
                     raise
                 finally:
                     current.last_activity = time.monotonic()
+                    current.notify()
                 if journaled:
                     await self.repository.record(thread_id, call_id, fingerprint, "completed", result)
                 return result
@@ -397,6 +437,8 @@ class BrowserService:
                     current.handoff_id = None
                     current.handoff_expires_at = None
                     raise
+                finally:
+                    current.notify()
         while True:
             raw_response = interrupt(payload)
             # An earlier permission interrupt may disappear on replay because
@@ -418,6 +460,7 @@ class BrowserService:
                 current.handoff_id = None
                 current.handoff_expires_at = None
                 current.controller = None
+                current.notify()
                 current.last_activity = time.monotonic()
                 if response.decision == "cancel":
                     await self._dispose(current)
@@ -442,6 +485,8 @@ class BrowserService:
                 else:
                     result = await self._handoff_snapshot(current, authorize_snapshot)
         await self.repository.record(thread_id, call_id, fingerprint, "completed", result)
+        if current:
+            current.notify()
         return result
 
     async def _handoff_snapshot(self, current, authorize_snapshot):

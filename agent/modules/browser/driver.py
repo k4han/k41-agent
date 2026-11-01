@@ -1,7 +1,9 @@
 """Stagehand lifecycle and a private, allow-listed CDP viewer transport."""
 
 import asyncio
+import base64
 import contextlib
+import io
 import json
 import math
 import socket
@@ -88,6 +90,19 @@ class StagehandDriver:
         page = await self.browser.context.active_page()
         return page.page_id if page else None
 
+    async def watch_tabs(self, notify):
+        async with httpx.AsyncClient(trust_env=False, timeout=5) as client:
+            response = await client.get(f"http://127.0.0.1:{self.port}/json/version")
+            response.raise_for_status()
+        async with connect(response.json()["webSocketDebuggerUrl"]) as connection:
+            await connection.send(json.dumps({"id": 1, "method": "Target.setDiscoverTargets",
+                                              "params": {"discover": True}}))
+            async for raw in connection:
+                message = json.loads(raw)
+                if message.get("method") in {"Target.targetCreated", "Target.targetInfoChanged", "Target.targetDestroyed"}:
+                    notify()
+        raise ConnectionError("Browser target observer disconnected.")
+
     async def reset_facade(self, artifacts: Path, active_tab_id: str | None = None):
         from stagehand_middleware.facade import StagehandFacadeTools
 
@@ -171,6 +186,9 @@ class ThreadedDriver:
     async def active_tab_id(self):
         return await self.submit(self.inner.active_tab_id())
 
+    async def watch_tabs(self, notify):
+        await StagehandDriver.watch_tabs(self, notify)
+
     async def reset_facade(self, artifacts, active_tab_id=None):
         await self.submit(self.inner.reset_facade(artifacts, active_tab_id))
 
@@ -200,32 +218,35 @@ class CDPViewer:
         self.target_id = target_id
         self.socket = None
         self.reader = None
-        self.acknowledger = None
+        self.snapshotter = None
         self.closed = asyncio.Event()
         self.next_id = 0
         self.pending = {}
         self.frames = asyncio.Queue(maxsize=1)
-        self.acknowledgements = asyncio.Queue()
-        self.frame_consumed = asyncio.Event()
         self.frame_received = asyncio.Event()
         self.latest_frame = None
+        self.previous_data = None
+        self.visible = True
+        self.capture_revision = 0
+        self.stream_options = {"format": "jpeg", "quality": 65, "maxWidth": 1280,
+                               "maxHeight": 800, "everyNthFrame": 1}
+        self.configure_lock = asyncio.Lock()
 
     async def __aenter__(self):
         self.socket = await connect(await self.driver.target_url(self.target_id), max_size=16 * 1024 * 1024)
         self.reader = asyncio.create_task(self._read())
-        self.acknowledger = asyncio.create_task(self._acknowledge_frames())
+        self.snapshotter = asyncio.create_task(self._capture_idle_frame())
         try:
             await self.call("Page.enable")
-            await self.call("Page.startScreencast", {"format": "jpeg", "quality": 65,
-                                                   "maxWidth": 1280, "maxHeight": 800})
+            await self.call("Page.startScreencast", self.stream_options)
         except BaseException:
             await self.__aexit__(None, None, None)
             raise
         return self
 
     async def __aexit__(self, *args):
-        if self.acknowledger:
-            self.acknowledger.cancel()
+        if self.snapshotter:
+            self.snapshotter.cancel()
         try:
             if self.socket:
                 if not self.closed.is_set():
@@ -235,7 +256,7 @@ class CDPViewer:
         finally:
             if self.reader:
                 self.reader.cancel()
-            await asyncio.gather(*(task for task in (self.reader, self.acknowledger) if task), return_exceptions=True)
+            await asyncio.gather(*(task for task in (self.reader, self.snapshotter) if task), return_exceptions=True)
 
     async def wait_closed(self):
         await self.closed.wait()
@@ -267,9 +288,16 @@ class CDPViewer:
                 elif message.get("method") == "Page.screencastFrame":
                     frame = message["params"]
                     self.latest_frame = frame
-                    self.acknowledgements.put_nowait((frame["sessionId"], frame["data"]))
-                    self._publish_frame(frame)
-                    self.frame_received.set()
+                    if self.visible:
+                        self._publish_frame(frame)
+                        if frame["data"] != self.previous_data:
+                            self.frame_received.set()
+                        self.previous_data = frame["data"]
+                    # The bounded latest-frame slot owns source backpressure. Network
+                    # credits are managed separately so capture does not wait a full RTT.
+                    self.next_id += 1
+                    await self.socket.send(json.dumps({"id": self.next_id, "method": "Page.screencastFrameAck",
+                                                       "params": {"sessionId": frame["sessionId"]}}))
         finally:
             self.closed.set()
             for future in self.pending.values():
@@ -281,38 +309,73 @@ class CDPViewer:
             self.frames.get_nowait()
         self.frames.put_nowait(frame)
 
-    def acknowledge_frame(self):
-        """Release source credits only after the viewer has drawn its frame."""
-        self.frame_consumed.set()
+    async def configure(self, *, visible=True, width=1280, quality=65, every_nth_frame=1, refresh=False):
+        width = max(320, min(1280, int(width)))
+        options = {"format": "jpeg", "quality": max(35, min(85, int(quality))),
+                   "maxWidth": width, "maxHeight": round(width * 800 / 1280),
+                   "everyNthFrame": max(1, min(4, int(every_nth_frame)))}
+        async with self.configure_lock:
+            if visible == self.visible and options == self.stream_options:
+                if visible and refresh:
+                    self.capture_revision += 1
+                    await self.capture_frame()
+                return
+            was_visible = self.visible
+            self.capture_revision += 1
+            self.visible = False
+            self.frame_received.clear()
+            if was_visible:
+                await self.call("Page.stopScreencast")
+            while not self.frames.empty():
+                self.frames.get_nowait()
+            self.stream_options = options
+            self.visible = visible
+            if visible:
+                self.previous_data = None
+                await self.call("Page.startScreencast", options)
+                await self.capture_frame()
 
-    async def _acknowledge_frames(self):
-        needs_snapshot = False
-        previous_data = None
+    async def capture_frame(self):
+        revision = self.capture_revision
+        metadata = dict((self.latest_frame or {}).get("metadata", {}))
+        layout = await self.call("Page.getLayoutMetrics")
+        viewport = layout.get("cssVisualViewport") or layout.get("cssLayoutViewport") or {}
+        x, y = viewport.get("pageX", metadata.get("scrollOffsetX", 0)), viewport.get("pageY", metadata.get("scrollOffsetY", 0))
+        snapshot = await self.call("Page.captureScreenshot", {
+            "format": "jpeg", "quality": self.stream_options["quality"], "captureBeyondViewport": False,
+        })
+        # CDP screenshot clips can resize the viewport and trigger another paint.
+        # Resize the captured pixels off the event loop instead.
+        data, width, height = await asyncio.to_thread(self._resize_capture, snapshot["data"], self.stream_options)
+        metadata.update(deviceWidth=width, deviceHeight=height, scrollOffsetX=x, scrollOffsetY=y)
+        if self.visible and revision == self.capture_revision:
+            self._publish_frame({"metadata": metadata, "data": data})
+
+    @staticmethod
+    def _resize_capture(data, options):
+        from PIL import Image
+
+        with Image.open(io.BytesIO(base64.b64decode(data, validate=True))) as image:
+            width, height = image.size
+            if width <= options["maxWidth"] and height <= options["maxHeight"]:
+                return data, width, height
+            image.thumbnail((options["maxWidth"], options["maxHeight"]), Image.Resampling.LANCZOS)
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=options["quality"])
+            return base64.b64encode(output.getvalue()).decode(), width, height
+
+    async def _capture_idle_frame(self):
         try:
             while True:
-                await self.frame_consumed.wait()
-                self.frame_consumed.clear()
-                self.frame_received.clear()
-                # A single latest-frame slot may replace several source frames.
-                # Release their credits together, bounded by Chrome's in-flight limit.
-                for _ in range(self.acknowledgements.qsize()):
-                    session_id, data = self.acknowledgements.get_nowait()
-                    # Compare source images, since captureScreenshot may encode
-                    # unchanged pixels differently and produce another paint.
-                    needs_snapshot = needs_snapshot or data != previous_data
-                    previous_data = data
-                    self.next_id += 1
-                    await self.socket.send(json.dumps({"id": self.next_id, "method": "Page.screencastFrameAck",
-                                                       "params": {"sessionId": session_id}}))
-                try:
-                    await asyncio.wait_for(self.frame_received.wait(), self.IDLE_SNAPSHOT_DELAY)
-                except TimeoutError:
-                    if needs_snapshot and self.latest_frame and self.frames.empty():
-                        # Chrome may drop the final paint while all frame credits
-                        # are in flight. Recover it once the source becomes idle.
-                        snapshot = await self.call("Page.captureScreenshot", {"format": "jpeg", "quality": 65})
-                        self._publish_frame({**self.latest_frame, "data": snapshot["data"]})
-                        needs_snapshot = False
+                await self.frame_received.wait()
+                while True:
+                    self.frame_received.clear()
+                    try:
+                        await asyncio.wait_for(self.frame_received.wait(), self.IDLE_SNAPSHOT_DELAY)
+                    except TimeoutError:
+                        break
+                if self.visible and self.latest_frame:
+                    await self.capture_frame()
         finally:
             self.closed.set()
 
