@@ -1,7 +1,7 @@
 import { ArrowRight, Camera, ChevronDown, Globe, LoaderCircle, Power, RefreshCw, Settings2, ShieldCheck } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
 import { apiFetch, postJson } from "@/lib/api";
-import { browserModifiers, browserPointer, connectBrowserViewer, type BrowserHandoffResume } from "@/lib/browserViewer";
+import { browserModifiers, browserPointer, connectBrowserViewer, createBrowserFrameRenderer, createBrowserInputSender, type BrowserHandoffResume } from "@/lib/browserViewer";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import "@/styles/browser.css";
 
@@ -31,7 +31,7 @@ export function BrowserPanel(props: {
   const [profileName, setProfileName] = createSignal("");
   const [error, setError] = createSignal("");
   const [working, setWorking] = createSignal(false);
-  const [frame, setFrame] = createSignal("");
+  const [hasFrame, setHasFrame] = createSignal(false);
   const [connected, setConnected] = createSignal(false);
   const [canControl, setCanControl] = createSignal(false);
   const [followAgent, setFollowAgent] = createSignal(true);
@@ -45,19 +45,27 @@ export function BrowserPanel(props: {
   const connectionLabel = () => !status()?.open ? "No active session"
     : connected() ? canControl() ? "You have control" : "Agent has control" : "Connecting";
   let socket: WebSocket | undefined;
-  let screen: HTMLImageElement | undefined;
+  let screen: HTMLCanvasElement | undefined;
   let keyboard: HTMLTextAreaElement | undefined;
   let width = 1280;
   let height = 800;
   let announcedHandoff = "";
   const endpoint = () => `/dashboard-api/browser/threads/${encodeURIComponent(props.threadId || "")}`;
+  const renderer = createBrowserFrameRenderer(() => screen);
+  const input = createBrowserInputSender((event) => {
+    if (socket?.readyState === WebSocket.OPEN && canControl()) socket.send(JSON.stringify(event));
+  });
+  const send = input.send;
+  const resetFrame = () => { renderer.reset(); input.reset(); setHasFrame(false); };
+  onCleanup(resetFrame);
+  createEffect(() => { if (!canControl()) input.reset(); });
 
   createEffect(on(currentPageUrl, (value) => setUrl(value)));
 
   createEffect(() => {
     const thread = props.threadId;
     setStatus(null);
-    setFrame("");
+    resetFrame();
     setError("");
     setSelectedTab("");
     setUrl("");
@@ -132,24 +140,26 @@ export function BrowserPanel(props: {
     attempt();
     setConnected(false);
     setCanControl(false);
-    setFrame("");
+    resetFrame();
     setFollowAgent(true);
     if (!visible || !thread || !generation) return;
     onCleanup(connectBrowserViewer({
       requestTicket: (signal) => apiFetch<{ ticket: string }>(`/dashboard-api/browser/threads/${encodeURIComponent(thread)}/viewer-ticket`,
         { method: "POST", json: {}, signal }),
       onSocket: (value) => { socket = value; },
-      onDisconnect: () => { setConnected(false); setCanControl(false); setFrame(""); },
+      onDisconnect: () => { setConnected(false); setCanControl(false); resetFrame(); },
       onError: (cause) => setError(cause instanceof Error ? cause.message : String(cause)),
+      onFrame: async (frame) => {
+        if (!await renderer.draw(frame)) return;
+        width = frame.width;
+        height = frame.height;
+        setHasFrame(true);
+        setError("");
+        setConnected(true);
+      },
       onMessage: (data) => {
-        if (data.type === "frame") {
-          width = data.metadata.deviceWidth || 1280;
-          height = data.metadata.deviceHeight || 800;
-          setFrame(`data:image/jpeg;base64,${data.data}`);
-          if (!connected()) setError("");
-          setConnected(true);
-        } else if (data.type === "status") {
-          if (data.reset) { setFrame(""); setConnected(false); }
+        if (data.type === "status") {
+          if (data.reset) { resetFrame(); setConnected(false); }
           setCanControl(Boolean(data.can_control));
           setFollowAgent(data.follow_agent ?? true);
           setStatus((previous) => previous ? { ...previous, tabs: data.tabs, mode: data.mode } : previous);
@@ -159,9 +169,6 @@ export function BrowserPanel(props: {
     }));
   });
 
-  const send = (event: Record<string, unknown>) => {
-    if (socket?.readyState === WebSocket.OPEN && canControl()) socket.send(JSON.stringify(event));
-  };
   const action = async (operation: () => Promise<unknown>, refreshThread = true) => {
     const thread = props.threadId;
     setWorking(true);
@@ -258,7 +265,7 @@ export function BrowserPanel(props: {
             aria-selected={selectedTab() === tab.id} title={tab.url} disabled={!connected()}
             onClick={() => {
               if (socket?.readyState !== WebSocket.OPEN) return;
-              setFrame("");
+              resetFrame();
               setConnected(false);
               setCanControl(false);
               setFollowAgent(false);
@@ -273,14 +280,14 @@ export function BrowserPanel(props: {
           <button class="workspace-icon-btn" type="submit" title="Navigate" aria-label="Navigate" disabled={!canControl() || !url().trim()}><ArrowRight size={16} /></button>
         </form>
       </div>
-      <div class="browser-viewport" aria-label="Live browser viewport" aria-busy={Boolean(status()?.open && !frame())}>
-      <Show when={frame()} fallback={<div class="browser-empty">
+      <div class="browser-viewport" aria-label="Live browser viewport" aria-busy={Boolean(status()?.open && !hasFrame())}>
+      <Show when={!hasFrame()}><div class="browser-empty">
         <div class="browser-empty-icon"><Show when={status()?.open} fallback={<Globe size={28} />}><LoaderCircle size={28} class="browser-spinner" /></Show></div>
         <strong>{!props.threadId ? "Start a conversation to browse" : status()?.open ? "Connecting to your browser" : "A browser for your agent"}</strong>
         <p>{!props.threadId ? "Your browser session will stay with this conversation." : status()?.open ? "The live page will appear here. You can keep chatting while it connects." : "Open a session or ask your agent to browse. Follow its work here and take control when it needs you."}</p>
-      </div>}>
-        <div class="browser-screen" classList={{ "browser-screen-interactive": canControl() }}>
-          <img ref={screen} src={frame()} alt="Live browser page" draggable={false}
+      </div></Show>
+        <div class="browser-screen" hidden={!hasFrame()} classList={{ "browser-screen-interactive": canControl() }}>
+          <canvas ref={screen} role="img" aria-label="Live browser page"
             onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); mouse(event, "mousePressed"); }}
             onPointerUp={(event) => mouse(event, "mouseReleased")}
             onPointerMove={(event) => mouse(event, "mouseMoved")}
@@ -293,7 +300,6 @@ export function BrowserPanel(props: {
               const text = event.currentTarget.value; if (text) send({ type: "text", text }); event.currentTarget.value = "";
             }} onPaste={(event) => { event.preventDefault(); const text = event.clipboardData?.getData("text/plain"); if (text) send({ type: "text", text }); }} />
         </div>
-      </Show>
       </div>
       <footer class="browser-footer"><ShieldCheck size={14} /><span>{canControl() ? "Enter credentials directly in the browser, then return control to your agent." : "Ask your agent to hand over control when you need to sign in."}</span></footer>
       <Show when={status()?.images?.length}><details class="browser-captures"><summary><Camera size={14} />Screenshots <span>{status()?.images.length}</span><ChevronDown size={14} /></summary><div class="browser-images"><For each={status()?.images}>{(image) =>

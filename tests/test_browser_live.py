@@ -94,7 +94,7 @@ def test_windows_server_selector_loop_can_drive_chrome(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_live_stream_paces_animation_and_keeps_final_static_paint(tmp_path):
+async def test_live_stream_follows_client_acks_and_keeps_final_static_paint(tmp_path):
     driver = await StagehandDriver.launch(tmp_path / "profile", tmp_path / "artifacts")
     try:
         tab = (await driver.tabs())[0]["id"]
@@ -119,9 +119,10 @@ async def test_live_stream_paces_animation_and_keeps_final_static_paint(tmp_path
                 try:
                     await asyncio.wait_for(viewer.frames.get(), 0.3)
                     count += 1
+                    viewer.acknowledge_frame()
                 except TimeoutError:
                     pass
-            assert 2 <= count <= 2 / viewer.FRAME_INTERVAL + 5
+            assert count >= 2
             await viewer.call("Runtime.evaluate", {"expression": """
                 window.streamAnimating = false;
                 streamContext.fillStyle = 'rgb(0, 255, 0)';
@@ -130,6 +131,7 @@ async def test_live_stream_paces_animation_and_keeps_final_static_paint(tmp_path
             deadline = time.monotonic() + 3
             while True:
                 frame = await asyncio.wait_for(viewer.frames.get(), max(0.01, deadline - time.monotonic()))
+                viewer.acknowledge_frame()
                 pixel = Image.open(io.BytesIO(base64.b64decode(frame["data"]))).convert("RGB").getpixel((100, 100))
                 if pixel[0] < 10 and pixel[1] > 240 and pixel[2] < 10:
                     break

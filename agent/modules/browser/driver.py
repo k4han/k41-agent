@@ -193,7 +193,7 @@ class ThreadedDriver:
 class CDPViewer:
     """One viewer connection; input contains no arbitrary CDP method names."""
 
-    FRAME_INTERVAL = 0.1
+    IDLE_SNAPSHOT_DELAY = 0.1
 
     def __init__(self, driver, target_id: str):
         self.driver = driver
@@ -206,6 +206,8 @@ class CDPViewer:
         self.pending = {}
         self.frames = asyncio.Queue(maxsize=1)
         self.acknowledgements = asyncio.Queue()
+        self.frame_consumed = asyncio.Event()
+        self.frame_received = asyncio.Event()
         self.latest_frame = None
 
     async def __aenter__(self):
@@ -267,6 +269,7 @@ class CDPViewer:
                     self.latest_frame = frame
                     self.acknowledgements.put_nowait((frame["sessionId"], frame["data"]))
                     self._publish_frame(frame)
+                    self.frame_received.set()
         finally:
             self.closed.set()
             for future in self.pending.values():
@@ -278,34 +281,38 @@ class CDPViewer:
             self.frames.get_nowait()
         self.frames.put_nowait(frame)
 
+    def acknowledge_frame(self):
+        """Release source credits only after the viewer has drawn its frame."""
+        self.frame_consumed.set()
+
     async def _acknowledge_frames(self):
-        # Chrome bounds in-flight screencast frames. Pace acknowledgements to
-        # reduce capture work without delaying command responses in the reader.
-        loop = asyncio.get_running_loop()
-        next_ack = loop.time() + self.FRAME_INTERVAL
         needs_snapshot = False
         previous_data = None
         try:
             while True:
+                await self.frame_consumed.wait()
+                self.frame_consumed.clear()
+                self.frame_received.clear()
+                # A single latest-frame slot may replace several source frames.
+                # Release their credits together, bounded by Chrome's in-flight limit.
+                for _ in range(self.acknowledgements.qsize()):
+                    session_id, data = self.acknowledgements.get_nowait()
+                    # Compare source images, since captureScreenshot may encode
+                    # unchanged pixels differently and produce another paint.
+                    needs_snapshot = needs_snapshot or data != previous_data
+                    previous_data = data
+                    self.next_id += 1
+                    await self.socket.send(json.dumps({"id": self.next_id, "method": "Page.screencastFrameAck",
+                                                       "params": {"sessionId": session_id}}))
                 try:
-                    session_id, data = await asyncio.wait_for(self.acknowledgements.get(), self.FRAME_INTERVAL)
+                    await asyncio.wait_for(self.frame_received.wait(), self.IDLE_SNAPSHOT_DELAY)
                 except TimeoutError:
-                    if needs_snapshot and self.latest_frame:
+                    if needs_snapshot and self.latest_frame and self.frames.empty():
                         # Chrome may drop the final paint while all frame credits
                         # are in flight. Recover it once the source becomes idle.
                         snapshot = await self.call("Page.captureScreenshot", {"format": "jpeg", "quality": 65})
                         self._publish_frame({**self.latest_frame, "data": snapshot["data"]})
                         needs_snapshot = False
-                    continue
-                # Compare screencast images with each other: captureScreenshot
-                # can encode the same pixels differently and cause another paint.
-                needs_snapshot = needs_snapshot or data != previous_data
-                previous_data = data
-                await asyncio.sleep(max(0, next_ack - loop.time()))
-                self.next_id += 1
-                await self.socket.send(json.dumps({"id": self.next_id, "method": "Page.screencastFrameAck",
-                                                   "params": {"sessionId": session_id}}))
-                next_ack = loop.time() + self.FRAME_INTERVAL
         finally:
             self.closed.set()
 

@@ -30,7 +30,7 @@ const ihdr = Buffer.alloc(13);
 ihdr.writeUInt32BE(1280); ihdr.writeUInt32BE(800, 4); ihdr[8] = 8; ihdr[9] = 2;
 const pixels = Buffer.alloc((1280 * 3 + 1) * 800, 255);
 for (let row = 0; row < 800; row++) pixels[row * (1280 * 3 + 1)] = 0;
-const image = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(pixels)), chunk('IEND', Buffer.alloc(0))]).toString('base64');
+const image = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(pixels)), chunk('IEND', Buffer.alloc(0))]);
 const status = { open: true, generation: 'session', profile_id: null, mode: 'human',
   tabs: [{ id: 'tab', title: 'Sign in', url: 'http://fixture.test/login' }],
   handoff: { handoff_id: 'handoff', reason: 'Sign in directly in the browser' }, handoff_expired: false, images: [] };
@@ -59,17 +59,26 @@ const fixtures = {
 const inputs = [], resumes = [], viewers = new Set();
 const profiles = [], checkpointLoads = [], invalidThreadRequests = [];
 const sessionMutations = [];
+const frameAcknowledgements = [], frameSequences = new WeakMap();
 let connections = 0;
 let ticketRequests = 0;
 let holdBrowserStatus = false;
 let releaseBrowserStatus;
 function send(socket, value) {
-  const data = Buffer.from(JSON.stringify(value));
+  const binary = Buffer.isBuffer(value);
+  const data = binary ? value : Buffer.from(JSON.stringify(value));
   const header = Buffer.alloc(data.length < 126 ? 2 : 4);
-  header[0] = 0x81;
+  header[0] = binary ? 0x82 : 0x81;
   if (data.length < 126) header[1] = data.length;
   else { header[1] = 126; header.writeUInt16BE(data.length, 2); }
   socket.write(Buffer.concat([header, data]));
+}
+function sendFrame(socket) {
+  const id = (frameSequences.get(socket) || 0) + 1;
+  frameSequences.set(socket, id);
+  const header = Buffer.alloc(12);
+  header.writeUInt32BE(id); header.writeUInt32BE(1280, 4); header.writeUInt32BE(800, 8);
+  send(socket, Buffer.concat([header, image]));
 }
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -172,7 +181,10 @@ server.on('upgrade', (req, socket) => {
         assert.equal(message.ticket, 'ticket');
         send(socket, { type: 'status', tabs: status.tabs, tab_id: status.tabs[0].id, follow_agent: true,
           reset: true, mode: status.mode, can_control: status.mode === 'human' });
-        send(socket, { type: 'frame', data: image, metadata: { deviceWidth: 1280, deviceHeight: 800 } });
+        sendFrame(socket);
+      } else if (message.type === 'frame_ack') {
+        assert.equal(message.frame_id, frameSequences.get(socket));
+        frameAcknowledgements.push(message.frame_id);
       } else if (message.type === 'select_tab' || message.type === 'follow_agent') {
         inputs.push(message);
         send(socket, { type: 'status', tabs: status.tabs,
@@ -180,7 +192,7 @@ server.on('upgrade', (req, socket) => {
           follow_agent: message.type === 'follow_agent', reset: true,
           mode: status.mode, can_control: status.mode === 'human' });
         setTimeout(() => {
-          if (!socket.destroyed) send(socket, { type: 'frame', data: image, metadata: { deviceWidth: 1280, deviceHeight: 800 } });
+          if (!socket.destroyed) sendFrame(socket);
         }, 200);
       } else inputs.push(message);
     }
@@ -211,7 +223,9 @@ try {
   await call('Runtime.enable');
   await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
   await call('Page.navigate', { url: `${base}/c/browser-test` });
-  await until(() => js('document.querySelector(".browser-screen img")?.naturalWidth === 1280'), 'live browser image');
+  await until(() => js('document.querySelector(".browser-screen:not([hidden]) canvas")?.width === 1280'), 'live browser canvas');
+  await until(() => frameAcknowledgements.length > 0, 'canvas acknowledges its first paint');
+  assert.deepEqual(await js('[...document.querySelector(".browser-screen canvas").getContext("2d").getImageData(0, 0, 1, 1).data]'), [255, 255, 255, 255]);
   assert.equal(ticketRequests, 2, 'failed viewer tickets are retried automatically');
   assert.equal(await js('document.querySelector(".browser-panel [role=alert]")?.textContent || ""'), '', 'a recovered stream clears the connection error');
   assert.equal(await js(`!!document.querySelector('.chat-header-right [aria-label="Open browser"]')`), true, 'active browser session shows the chat header shortcut');
@@ -238,7 +252,7 @@ try {
   assert.equal(connections, 2, 'status polling must preserve the viewer connection');
   for (const socket of viewers) socket.destroy();
   await until(() => connections === 3, 'viewer reconnects after transport loss');
-  await until(() => js('document.querySelector(".browser-screen img")?.naturalWidth === 1280'), 'image restored after transport loss');
+  await until(() => js('document.querySelector(".browser-screen:not([hidden]) canvas")?.width === 1280'), 'canvas restored after transport loss');
   await js(`document.querySelector('[aria-label="Close Browser"]').click()`);
   assert.equal(await js('document.querySelector(".workspace-file-panel") === filePreview && !filePreview.hidden'), true, 'closing Browser restores the same file preview');
   assert.deepEqual(sessionMutations, [], 'switching and closing tabs must not close the browser session');
@@ -248,7 +262,7 @@ try {
   await js(`document.querySelector('[aria-label="Close workspace explorer"]').click()`);
   assert.equal(await js('document.querySelector(".chat-prompt-input").disabled'), true, 'closing the browser panel must keep the pending handoff locked');
   await call('Page.reload');
-  await until(() => js('document.querySelector(".browser-screen img")?.naturalWidth === 1280'), 'pending handoff restored after reload');
+  await until(() => js('document.querySelector(".browser-screen:not([hidden]) canvas")?.width === 1280'), 'pending handoff restored after reload');
   assert.equal(await js('document.querySelector(".chat-prompt-input").disabled'), true, 'history must restore the pending handoff lock');
   assert.equal(resumes.length, 0);
   await js(`document.querySelector('[aria-label="Close Browser"]').click()`);
@@ -270,7 +284,7 @@ try {
   }
   await call('Emulation.setDeviceMetricsOverride', { width: 420, height: 820, deviceScaleFactor: 1, mobile: false });
   await delay(250);
-  assert.ok(await js('document.querySelector(".browser-screen img").getBoundingClientRect().width > 100 && document.querySelector(".browser-screen img").getBoundingClientRect().width <= innerWidth'));
+  assert.ok(await js('document.querySelector(".browser-screen canvas").getBoundingClientRect().width > 100 && document.querySelector(".browser-screen canvas").getBoundingClientRect().width <= innerWidth'));
   assert.equal(await js('document.querySelector(".browser-panel").scrollWidth <= document.querySelector(".browser-panel").clientWidth'), true, 'mobile browser has no horizontal overflow');
   if (process.env.BROWSER_UI_SCREENSHOT_DIR) {
     const capture = await call('Page.captureScreenshot', { format: 'png' });
@@ -287,12 +301,12 @@ try {
     mode: 'agent', can_control: false, follow_agent: true });
   await until(() => js('document.querySelectorAll(".browser-page-tab").length === 2'), 'multiple browser tabs');
   await js('document.querySelectorAll(".browser-page-tab")[1].click()');
-  await until(() => js('!document.querySelector(".browser-screen img")'), 'switching tabs clears the previous image');
-  await until(() => js('document.querySelector(".browser-screen img")?.naturalWidth === 1280'), 'pinned tab image');
+  await until(() => js('!document.querySelector(".browser-screen:not([hidden]) canvas")'), 'switching tabs clears the previous canvas');
+  await until(() => js('document.querySelector(".browser-screen:not([hidden]) canvas")?.width === 1280'), 'pinned tab canvas');
   assert.equal(await js(`document.querySelector('[aria-label="Follow agent"]').getAttribute('aria-pressed')`), 'false');
   await js(`document.querySelector('[aria-label="Follow agent"]').click()`);
   await until(() => js(`document.querySelector('[aria-label="Follow agent"]').getAttribute('aria-pressed') === 'true'`), 'resume following agent');
-  await until(() => js('document.querySelector(".browser-screen img")?.naturalWidth === 1280'), 'agent tab image');
+  await until(() => js('document.querySelector(".browser-screen:not([hidden]) canvas")?.width === 1280'), 'agent tab canvas');
   assert.equal(await js('document.querySelector(".browser-page-tab[aria-selected=true]").title'), status.tabs[0].url);
   holdBrowserStatus = true;
   await until(() => typeof releaseBrowserStatus === 'function', 'capture a status poll before the next handoff');

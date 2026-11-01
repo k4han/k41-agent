@@ -35,8 +35,8 @@
 .browser-address input:disabled { color: var(--muted); opacity: 1; }
 .browser-viewport { display: flex; flex: 1 0 auto; align-items: flex-start; min-height: 220px; padding: 12px; background: var(--surface-1); }
 .browser-screen { position: relative; width: min(100%, 1280px); margin-inline: auto; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: #fff; box-shadow: 0 2px 8px rgb(0 0 0 / 4%); }
-.browser-screen img { display: block; width: 100%; height: auto; user-select: none; }
-.browser-screen-interactive img { cursor: crosshair; touch-action: none; }
+.browser-screen canvas { display: block; width: 100%; height: auto; user-select: none; }
+.browser-screen-interactive canvas { cursor: crosshair; touch-action: none; }
 .browser-keyboard { position: absolute; width: 1px; height: 1px; top: 0; left: 0; padding: 0; border: 0; opacity: 0; resize: none; }
 .browser-empty { display: flex; flex: 1; flex-direction: column; align-items: center; align-self: center; gap: 12px; max-width: 340px; margin: 32px auto; text-align: center; }
 .browser-empty-icon { display: grid; place-items: center; width: 60px; height: 60px; margin-bottom: 4px; border: 1px solid var(--border); border-radius: 16px; color: var(--muted); background: var(--surface); }

@@ -1,10 +1,13 @@
 """Authenticated browser management and ticket-authenticated viewer sockets."""
 
 import asyncio
+import base64
 import contextlib
 import json
 import os
+import struct
 import time
+from itertools import count
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -177,9 +180,13 @@ async def viewer_target(current, tabs, fallback=None):
     return next((tab_id for tab_id in (current.active_tab_id, active_tab, fallback) if tab_id in tab_ids), tabs[0]["id"])
 
 
-async def view_tab(websocket, browser, current, target_id, viewer_id, follow_agent=True):
+async def view_tab(websocket, browser, current, target_id, viewer_id, follow_agent=True, frame_ids=None):
+    frame_ids = frame_ids if frame_ids is not None else count()
+    pending_frame = None
+    frame_drawn = asyncio.Event()
     async with CDPViewer(current.driver, target_id) as viewer:
         async def frames():
+            nonlocal pending_frame
             last_status = 0
             while not current.closed:
                 if time.monotonic() - last_status > 1.5:
@@ -196,9 +203,18 @@ async def view_tab(websocket, browser, current, target_id, viewer_id, follow_age
                         "can_control": bool(current.handoff_id and current.controller in {None, viewer_id})})
                     last_status = time.monotonic()
                 try:
+                    if pending_frame is not None:
+                        await asyncio.wait_for(frame_drawn.wait(), 1)
+                        pending_frame = None
+                        viewer.acknowledge_frame()
                     frame = await asyncio.wait_for(viewer.frames.get(), 1)
-                    await websocket.send_json({"type": "frame", "data": frame["data"], "metadata": frame["metadata"]})
-                    await asyncio.sleep(CDPViewer.FRAME_INTERVAL)
+                    pending_frame = next(frame_ids) % 0xFFFFFFFF + 1
+                    frame_drawn.clear()
+                    metadata = frame["metadata"]
+                    # Network byte order: frame ID, viewport width, viewport height, JPEG.
+                    header = struct.pack("!III", pending_frame, int(metadata.get("deviceWidth", 1280)),
+                                         int(metadata.get("deviceHeight", 800)))
+                    await websocket.send_bytes(header + base64.b64decode(frame["data"], validate=True))
                 except TimeoutError:
                     pass
             raise ConnectionError("Browser session closed.")
@@ -211,6 +227,11 @@ async def view_tab(websocket, browser, current, target_id, viewer_id, follow_age
                 event = json.loads(raw)
                 if not isinstance(event, dict):
                     raise ValueError("Invalid viewer input.")
+                if event.get("type") == "frame_ack":
+                    frame_id = event.get("frame_id")
+                    if type(frame_id) is int and frame_id == pending_frame:
+                        frame_drawn.set()
+                    continue
                 if event.get("type") == "select_tab":
                     tab_id = event.get("tab_id")
                     if tab_id not in {tab["id"] for tab in await current.driver.tabs()}:
@@ -273,8 +294,10 @@ async def browser_viewer(websocket: WebSocket):
             raise ValueError("The browser has no visible tabs.")
         target_id = await viewer_target(current, tabs)
         follow_agent = True
+        frame_ids = count()
         while not current.closed:
-            target_id, follow_agent = await view_tab(websocket, container.browser_service, current, target_id, viewer_id, follow_agent)
+            target_id, follow_agent = await view_tab(websocket, container.browser_service, current, target_id,
+                                                    viewer_id, follow_agent, frame_ids)
     except (WebSocketDisconnect, ConnectionError):
         pass
     except Exception:

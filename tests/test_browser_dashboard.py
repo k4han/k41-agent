@@ -1,5 +1,9 @@
 import asyncio
+import base64
+import json
+import struct
 from contextlib import asynccontextmanager
+from itertools import count
 from types import SimpleNamespace
 
 import pytest
@@ -126,11 +130,11 @@ def test_browser_profile_api_enforces_authentication_csrf_and_ownership(browser_
 
 class FakeViewer:
     inputs = []
-    FRAME_INTERVAL = 0.1
 
     def __init__(self, *args):
         self.frames = asyncio.Queue()
         self.closed = asyncio.Event()
+        self.acknowledged = asyncio.Queue()
 
     async def __aenter__(self):
         return self
@@ -146,6 +150,9 @@ class FakeViewer:
 
     async def input(self, event):
         self.inputs.append(event)
+
+    def acknowledge_frame(self):
+        self.acknowledged.put_nowait(True)
 
 
 def test_viewer_tickets_origins_and_agent_control(browser_client, monkeypatch):
@@ -279,6 +286,84 @@ async def test_static_viewer_does_not_disconnect_without_new_frames(monkeypatch)
         await asyncio.wait_for(status_sent.wait(), 1)
         await asyncio.sleep(1.1)
         assert not task.done()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_binary_frames_wait_for_matching_ack_without_claiming_control(monkeypatch):
+    viewer = FakeViewer()
+    monkeypatch.setattr(routes, "CDPViewer", lambda *args: viewer)
+    image = b"\xff\xd8jpeg\xff\xd9"
+
+    def frame():
+        return {"data": base64.b64encode(image).decode(), "metadata": {"deviceWidth": 1280, "deviceHeight": 800}}
+
+    class Driver:
+        async def tabs(self):
+            return [{"id": "first"}, {"id": "second"}]
+
+    class Socket:
+        def __init__(self):
+            self.events = asyncio.Queue()
+            self.frames = asyncio.Queue()
+            self.statuses = []
+
+        async def receive_text(self):
+            return json.dumps(await self.events.get())
+
+        async def send_json(self, value):
+            self.statuses.append(value)
+
+        async def send_bytes(self, value):
+            self.frames.put_nowait(value)
+
+    current = SimpleNamespace(driver=Driver(), closed=False, handoff_id="handoff", active_tab_id=None,
+                              controller=None, lock=asyncio.Lock())
+    socket = Socket()
+    frame_ids = count()
+    task = asyncio.create_task(routes.view_tab(socket, None, current, "first", "viewer", False, frame_ids))
+    try:
+        viewer.frames.put_nowait(frame())
+        first = await asyncio.wait_for(socket.frames.get(), 1)
+        assert struct.unpack("!III", first[:12]) == (1, 1280, 800)
+        assert first[12:] == image
+        viewer.frames.put_nowait(frame())
+        for frame_id in [True, 0, 2]:
+            socket.events.put_nowait({"type": "frame_ack", "frame_id": frame_id})
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(socket.frames.get(), 0.05)
+        assert viewer.acknowledged.empty()
+        socket.events.put_nowait({"type": "frame_ack", "frame_id": 1})
+        second = await asyncio.wait_for(socket.frames.get(), 1)
+        assert struct.unpack("!III", second[:12]) == (2, 1280, 800)
+        assert await viewer.acknowledged.get()
+        assert current.controller is None
+        assert not any(status["type"] == "error" for status in socket.statuses)
+        # A tab switch must remain responsive while its last frame awaits ACK.
+        socket.events.put_nowait({"type": "select_tab", "tab_id": "second"})
+        assert await asyncio.wait_for(task, 1) == ("second", False)
+        # Frame IDs span tab streams, so a delayed ACK cannot grant a new credit.
+        viewer = FakeViewer()
+        current.handoff_id = None
+        current.controller = None
+        current.last_activity = 42
+        task = asyncio.create_task(routes.view_tab(socket, None, current, "second", "viewer", False, frame_ids))
+        viewer.frames.put_nowait(frame())
+        third = await asyncio.wait_for(socket.frames.get(), 1)
+        assert struct.unpack("!III", third[:12])[0] == 3
+        viewer.frames.put_nowait(frame())
+        socket.events.put_nowait({"type": "frame_ack", "frame_id": 2})
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(socket.frames.get(), 0.05)
+        assert viewer.acknowledged.empty()
+        socket.events.put_nowait({"type": "frame_ack", "frame_id": 3})
+        fourth = await asyncio.wait_for(socket.frames.get(), 1)
+        assert struct.unpack("!III", fourth[:12])[0] == 4
+        assert current.controller is None
+        assert current.last_activity == 42
+        assert not any(status["type"] == "error" for status in socket.statuses)
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)

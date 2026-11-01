@@ -1,4 +1,4 @@
-"""CDP stream lifecycle and source pacing regression checks."""
+"""CDP stream lifecycle and client backpressure regression checks."""
 
 import asyncio
 import json
@@ -56,18 +56,23 @@ def viewer_socket(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_frame_ack_pacing_keeps_commands_responsive_and_frames_latest(viewer_socket):
+async def test_client_ack_releases_source_credits_and_keeps_commands_responsive(viewer_socket):
     viewer, socket = viewer_socket
-    viewer.FRAME_INTERVAL = 0.2
     async with viewer:
         socket.frame(1)
         socket.frame(2)
         await asyncio.wait_for(viewer.call("Input.insertText", {"text": "hello"}), 0.1)
         assert socket.acks.empty()
         assert (await viewer.frames.get())["data"] == "2"
+        viewer.acknowledge_frame()
         first, second = [await asyncio.wait_for(socket.acks.get(), 1) for _ in range(2)]
         assert [first[0], second[0]] == [1, 2]
-        assert second[1] - first[1] >= viewer.FRAME_INTERVAL * 0.9
+        socket.frame(3)
+        await viewer.call("Input.insertText", {"text": "still responsive"})
+        assert socket.acks.empty()
+        assert (await viewer.frames.get())["data"] == "3"
+        viewer.acknowledge_frame()
+        assert (await asyncio.wait_for(socket.acks.get(), 1))[0] == 3
     assert viewer.reader.done()
     assert viewer.acknowledger.done()
 
@@ -96,6 +101,8 @@ async def test_ack_failure_notifies_viewer(viewer_socket):
 
         socket.send = send
         socket.frame(1)
+        await asyncio.wait_for(viewer.frames.get(), 1)
+        viewer.acknowledge_frame()
         await asyncio.wait_for(viewer.wait_closed(), 1)
     assert isinstance(viewer.acknowledger.exception(), ConnectionError)
 
@@ -106,6 +113,7 @@ async def test_idle_source_flushes_final_paint_once_without_restarting_static_ca
     async with viewer:
         socket.frame(1)
         assert (await asyncio.wait_for(viewer.frames.get(), 1))["data"] == "1"
+        viewer.acknowledge_frame()
         assert (await asyncio.wait_for(viewer.frames.get(), 1))["data"] == "final"
         # A screenshot can itself cause a screencast event. Its unchanged image
         # must not schedule another trailing screenshot, even if the screenshot
@@ -113,6 +121,8 @@ async def test_idle_source_flushes_final_paint_once_without_restarting_static_ca
         socket.incoming.put_nowait({"method": "Page.screencastFrame", "params": {
             "sessionId": 2, "data": "1", "metadata": {},
         }})
+        await asyncio.wait_for(viewer.frames.get(), 1)
+        viewer.acknowledge_frame()
         await asyncio.wait_for(socket.acks.get(), 1)
         await asyncio.wait_for(socket.acks.get(), 1)
         await asyncio.sleep(0.25)
