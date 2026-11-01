@@ -1,7 +1,7 @@
 import { ArrowRight, Camera, ChevronDown, Globe, LoaderCircle, Power, RefreshCw, Settings2, ShieldCheck } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js";
 import { apiFetch, postJson } from "@/lib/api";
-import { browserModifiers, browserPointer, type BrowserHandoffResume } from "@/lib/browserViewer";
+import { browserModifiers, browserPointer, connectBrowserViewer, type BrowserHandoffResume } from "@/lib/browserViewer";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import "@/styles/browser.css";
 
@@ -34,6 +34,7 @@ export function BrowserPanel(props: {
   const [frame, setFrame] = createSignal("");
   const [connected, setConnected] = createSignal(false);
   const [canControl, setCanControl] = createSignal(false);
+  const [followAgent, setFollowAgent] = createSignal(true);
   const [attempt, setAttempt] = createSignal(0);
   const [selectedTab, setSelectedTab] = createSignal("");
   const [url, setUrl] = createSignal("");
@@ -131,46 +132,31 @@ export function BrowserPanel(props: {
     attempt();
     setConnected(false);
     setCanControl(false);
-    if (!visible || !thread || !generation) { setFrame(""); return; }
-    let disposed = false;
-    let ownSocket: WebSocket | undefined;
-    let retry: number | undefined;
-    void postJson<{ ticket: string }>(`/dashboard-api/browser/threads/${encodeURIComponent(thread)}/viewer-ticket`, {})
-      .then(({ ticket }) => {
-        if (disposed) return;
-        const address = new URL("/dashboard-api/browser/viewer", window.location.href);
-        address.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        ownSocket = new WebSocket(address);
-        socket = ownSocket;
-        ownSocket.onopen = () => ownSocket?.send(JSON.stringify({ ticket }));
-        ownSocket.onmessage = (event) => {
-          if (disposed) return;
-          const data = JSON.parse(event.data);
-          if (data.type === "frame") {
-            width = data.metadata.deviceWidth || 1280;
-            height = data.metadata.deviceHeight || 800;
-            setFrame(`data:image/jpeg;base64,${data.data}`);
-            setConnected(true);
-          } else if (data.type === "status") {
-            setCanControl(Boolean(data.can_control));
-            setStatus((previous) => previous ? { ...previous, tabs: data.tabs, mode: data.mode } : previous);
-            setSelectedTab(data.tab_id || data.tabs[0]?.id || "");
-          } else if (data.type === "error") setError(data.message);
-        };
-        ownSocket.onclose = () => {
-          if (!disposed) {
-            setConnected(false);
-            setCanControl(false);
-            retry = window.setTimeout(() => setAttempt((value) => value + 1), 2000);
-          }
-        };
-      }).catch((cause) => { if (!disposed) setError(String(cause)); });
-    onCleanup(() => {
-      disposed = true;
-      if (retry !== undefined) window.clearTimeout(retry);
-      ownSocket?.close();
-      if (socket === ownSocket) socket = undefined;
-    });
+    setFrame("");
+    setFollowAgent(true);
+    if (!visible || !thread || !generation) return;
+    onCleanup(connectBrowserViewer({
+      requestTicket: (signal) => apiFetch<{ ticket: string }>(`/dashboard-api/browser/threads/${encodeURIComponent(thread)}/viewer-ticket`,
+        { method: "POST", json: {}, signal }),
+      onSocket: (value) => { socket = value; },
+      onDisconnect: () => { setConnected(false); setCanControl(false); setFrame(""); },
+      onError: (cause) => setError(cause instanceof Error ? cause.message : String(cause)),
+      onMessage: (data) => {
+        if (data.type === "frame") {
+          width = data.metadata.deviceWidth || 1280;
+          height = data.metadata.deviceHeight || 800;
+          setFrame(`data:image/jpeg;base64,${data.data}`);
+          if (!connected()) setError("");
+          setConnected(true);
+        } else if (data.type === "status") {
+          if (data.reset) { setFrame(""); setConnected(false); }
+          setCanControl(Boolean(data.can_control));
+          setFollowAgent(data.follow_agent ?? true);
+          setStatus((previous) => previous ? { ...previous, tabs: data.tabs, mode: data.mode } : previous);
+          setSelectedTab(data.tab_id || data.tabs[0]?.id || "");
+        } else if (data.type === "error") setError(data.message);
+      },
+    }));
   });
 
   const send = (event: Record<string, unknown>) => {
@@ -218,6 +204,11 @@ export function BrowserPanel(props: {
           </span>
         </div>
         <div class="browser-actions">
+          <Show when={status()?.open && status()?.mode === "agent"}>
+            <button class="btn btn-sm" type="button" aria-label="Follow agent" aria-pressed={followAgent()}
+              title="Follow the agent's active browser tab" disabled={!connected() || followAgent()}
+              onClick={() => socket?.send(JSON.stringify({ type: "follow_agent" }))}>{followAgent() ? "Following agent" : "Follow agent"}</button>
+          </Show>
           <button class="workspace-icon-btn" type="button" title="Login profiles" aria-label="Login profiles"
             aria-expanded={profilesOpen()} aria-controls="browser-profiles" onClick={() => setProfilesOpen((value) => !value)}><Settings2 size={16} /></button>
           <button class="workspace-icon-btn" type="button" title="Reconnect viewer" aria-label="Reconnect viewer" disabled={!status()?.open}
@@ -267,6 +258,10 @@ export function BrowserPanel(props: {
             aria-selected={selectedTab() === tab.id} title={tab.url} disabled={!connected()}
             onClick={() => {
               if (socket?.readyState !== WebSocket.OPEN) return;
+              setFrame("");
+              setConnected(false);
+              setCanControl(false);
+              setFollowAgent(false);
               setSelectedTab(tab.id);
               socket.send(JSON.stringify({ type: "select_tab", tab_id: tab.id }));
             }}><Globe size={13} /><span>{tab.title || tab.url || "New tab"}</span></button>}</For>

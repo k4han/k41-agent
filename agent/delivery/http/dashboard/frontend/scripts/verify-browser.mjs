@@ -60,6 +60,7 @@ const inputs = [], resumes = [], viewers = new Set();
 const profiles = [], checkpointLoads = [], invalidThreadRequests = [];
 const sessionMutations = [];
 let connections = 0;
+let ticketRequests = 0;
 let holdBrowserStatus = false;
 let releaseBrowserStatus;
 function send(socket, value) {
@@ -95,6 +96,9 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname.startsWith('/dashboard-api/') || url.pathname === '/health') {
     res.setHeader('Content-Type', 'application/json'); res.setHeader('X-CSRF-Token', 'browser-csrf');
+    if (url.pathname === '/dashboard-api/browser/threads/browser-test/viewer-ticket' && ++ticketRequests === 1) {
+      res.writeHead(503); res.end(JSON.stringify({ detail: 'Temporary viewer ticket failure' })); return;
+    }
     if (url.pathname === '/dashboard-api/chat-history/browser-test') {
       const checkpoint = url.searchParams.get('checkpoint_id');
       if (checkpoint) checkpointLoads.push(checkpoint);
@@ -166,8 +170,18 @@ server.on('upgrade', (req, socket) => {
       const message = JSON.parse(payload.toString());
       if (message.ticket) {
         assert.equal(message.ticket, 'ticket');
-        send(socket, { type: 'status', tabs: status.tabs, mode: status.mode, can_control: status.mode === 'human' });
+        send(socket, { type: 'status', tabs: status.tabs, tab_id: status.tabs[0].id, follow_agent: true,
+          reset: true, mode: status.mode, can_control: status.mode === 'human' });
         send(socket, { type: 'frame', data: image, metadata: { deviceWidth: 1280, deviceHeight: 800 } });
+      } else if (message.type === 'select_tab' || message.type === 'follow_agent') {
+        inputs.push(message);
+        send(socket, { type: 'status', tabs: status.tabs,
+          tab_id: message.type === 'select_tab' ? message.tab_id : status.tabs[0].id,
+          follow_agent: message.type === 'follow_agent', reset: true,
+          mode: status.mode, can_control: status.mode === 'human' });
+        setTimeout(() => {
+          if (!socket.destroyed) send(socket, { type: 'frame', data: image, metadata: { deviceWidth: 1280, deviceHeight: 800 } });
+        }, 200);
       } else inputs.push(message);
     }
   });
@@ -198,6 +212,8 @@ try {
   await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
   await call('Page.navigate', { url: `${base}/c/browser-test` });
   await until(() => js('document.querySelector(".browser-screen img")?.naturalWidth === 1280'), 'live browser image');
+  assert.equal(ticketRequests, 2, 'failed viewer tickets are retried automatically');
+  assert.equal(await js('document.querySelector(".browser-panel [role=alert]")?.textContent || ""'), '', 'a recovered stream clears the connection error');
   assert.equal(await js(`!!document.querySelector('.chat-header-right [aria-label="Open browser"]')`), true, 'active browser session shows the chat header shortcut');
   assert.equal(await js('document.querySelector(".workspace-browser-panel").hidden'), false);
   assert.equal(await js('document.querySelector(".browser-panel").closest("[role=dialog]")'), null, 'browser belongs to the workspace');
@@ -220,6 +236,9 @@ try {
   assert.equal(inputs.find(input => input.type === 'text').text, 'Fixture \u03bb \u65e5\u672c\u8a9e');
   await delay(2500);
   assert.equal(connections, 2, 'status polling must preserve the viewer connection');
+  for (const socket of viewers) socket.destroy();
+  await until(() => connections === 3, 'viewer reconnects after transport loss');
+  await until(() => js('document.querySelector(".browser-screen img")?.naturalWidth === 1280'), 'image restored after transport loss');
   await js(`document.querySelector('[aria-label="Close Browser"]').click()`);
   assert.equal(await js('document.querySelector(".workspace-file-panel") === filePreview && !filePreview.hidden'), true, 'closing Browser restores the same file preview');
   assert.deepEqual(sessionMutations, [], 'switching and closing tabs must not close the browser session');
@@ -263,6 +282,18 @@ try {
   assert.equal(resumes[0].message, '');
   await until(() => js('document.querySelector(".browser-keyboard")?.disabled'), 'viewer becomes read only');
   await until(() => js('document.querySelector(".chat-prompt-input")?.disabled === false'), 'returning control unlocks the composer');
+  status.tabs.push({ id: 'second-tab', title: 'Other page', url: 'http://fixture.test/other' });
+  for (const socket of viewers) send(socket, { type: 'status', tabs: status.tabs, tab_id: 'tab',
+    mode: 'agent', can_control: false, follow_agent: true });
+  await until(() => js('document.querySelectorAll(".browser-page-tab").length === 2'), 'multiple browser tabs');
+  await js('document.querySelectorAll(".browser-page-tab")[1].click()');
+  await until(() => js('!document.querySelector(".browser-screen img")'), 'switching tabs clears the previous image');
+  await until(() => js('document.querySelector(".browser-screen img")?.naturalWidth === 1280'), 'pinned tab image');
+  assert.equal(await js(`document.querySelector('[aria-label="Follow agent"]').getAttribute('aria-pressed')`), 'false');
+  await js(`document.querySelector('[aria-label="Follow agent"]').click()`);
+  await until(() => js(`document.querySelector('[aria-label="Follow agent"]').getAttribute('aria-pressed') === 'true'`), 'resume following agent');
+  await until(() => js('document.querySelector(".browser-screen img")?.naturalWidth === 1280'), 'agent tab image');
+  assert.equal(await js('document.querySelector(".browser-page-tab[aria-selected=true]").title'), status.tabs[0].url);
   holdBrowserStatus = true;
   await until(() => typeof releaseBrowserStatus === 'function', 'capture a status poll before the next handoff');
   await js(`document.querySelector('[aria-label="Close workspace explorer"]').click()`);
@@ -285,10 +316,10 @@ try {
   assert.deepEqual(resumes[1].resume_payload, { action: 'browser_handoff', handoff_id: 'live-handoff', decision: 'cancel' });
   await until(() => js('document.querySelector(".chat-prompt-input")?.disabled === false'), 'cancelling unlocks the composer');
   await until(() => js(`!document.querySelector('.chat-header-right [aria-label="Open browser"]')`), 'closing the browser hides the chat header shortcut');
-  await js('document.querySelector(".browser-session-header .btn").click()');
+  await js('[...document.querySelectorAll(".browser-session-header button")].find(button => button.textContent.includes("Open browser")).click()');
   await until(() => js(`!!document.querySelector('.chat-header-right [aria-label="Open browser"]')`), 'opening a browser from the workspace restores the shortcut');
-  await until(() => js('!document.querySelector(".browser-session-header .btn").disabled'), 'browser session opened');
-  await js('document.querySelector(".browser-session-header .btn").click()');
+  await until(() => js('[...document.querySelectorAll(".browser-session-header button")].some(button => button.textContent.includes("Close browser") && !button.disabled)'), 'browser session opened');
+  await js('[...document.querySelectorAll(".browser-session-header button")].find(button => button.textContent.includes("Close browser")).click()');
   await until(() => js(`!document.querySelector('.chat-header-right [aria-label="Open browser"]')`), 'explicit browser close hides the shortcut');
   await js(`document.querySelector('[aria-label="Login profiles"]').click()`);
   await until(() => js('!document.querySelector(".browser-panel select").disabled'), 'closed browser allows profile selection');
@@ -312,7 +343,7 @@ try {
   assert.deepEqual(invalidThreadRequests, [], 'profile operations must not fetch an empty thread endpoint');
   assert.equal(await js('document.querySelector(".browser-panel [role=alert]")?.textContent || ""'), '');
   assert.deepEqual(exceptions, []);
-  console.log('Browser dashboard: workspace tabs, retained file previews, live view, Unicode input, reconnect, checkpoint handoff recovery, fullscreen, mobile layout, handback and profile operations passed.');
+  console.log('Browser dashboard: ticket retry, transport recovery, tab pinning, follow agent, workspace tabs, live view, Unicode input, checkpoint handoff recovery, fullscreen, mobile layout, handback and profile operations passed.');
 } finally {
   if (ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
   ws?.close();

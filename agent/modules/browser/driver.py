@@ -193,18 +193,25 @@ class ThreadedDriver:
 class CDPViewer:
     """One viewer connection; input contains no arbitrary CDP method names."""
 
+    FRAME_INTERVAL = 0.1
+
     def __init__(self, driver, target_id: str):
         self.driver = driver
         self.target_id = target_id
         self.socket = None
         self.reader = None
+        self.acknowledger = None
+        self.closed = asyncio.Event()
         self.next_id = 0
         self.pending = {}
         self.frames = asyncio.Queue(maxsize=1)
+        self.acknowledgements = asyncio.Queue()
+        self.latest_frame = None
 
     async def __aenter__(self):
         self.socket = await connect(await self.driver.target_url(self.target_id), max_size=16 * 1024 * 1024)
         self.reader = asyncio.create_task(self._read())
+        self.acknowledger = asyncio.create_task(self._acknowledge_frames())
         try:
             await self.call("Page.enable")
             await self.call("Page.startScreencast", {"format": "jpeg", "quality": 65,
@@ -215,15 +222,25 @@ class CDPViewer:
         return self
 
     async def __aexit__(self, *args):
-        if self.socket:
-            with contextlib.suppress(Exception):
-                await self.call("Page.stopScreencast")
-            await self.socket.close()
-        if self.reader:
-            self.reader.cancel()
-            await asyncio.gather(self.reader, return_exceptions=True)
+        if self.acknowledger:
+            self.acknowledger.cancel()
+        try:
+            if self.socket:
+                if not self.closed.is_set():
+                    with contextlib.suppress(Exception):
+                        await self.call("Page.stopScreencast")
+                await self.socket.close()
+        finally:
+            if self.reader:
+                self.reader.cancel()
+            await asyncio.gather(*(task for task in (self.reader, self.acknowledger) if task), return_exceptions=True)
+
+    async def wait_closed(self):
+        await self.closed.wait()
 
     async def call(self, method: str, params=None):
+        if self.closed.is_set():
+            raise ConnectionError("Browser connection closed.")
         self.next_id += 1
         call_id = self.next_id
         future = asyncio.get_running_loop().create_future()
@@ -247,17 +264,50 @@ class CDPViewer:
                             future.set_result(message.get("result", {}))
                 elif message.get("method") == "Page.screencastFrame":
                     frame = message["params"]
-                    # Acknowledge without waiting on this same reader task.
-                    self.next_id += 1
-                    await self.socket.send(json.dumps({"id": self.next_id, "method": "Page.screencastFrameAck",
-                                                       "params": {"sessionId": frame["sessionId"]}}))
-                    if self.frames.full():
-                        self.frames.get_nowait()
-                    self.frames.put_nowait(frame)
+                    self.latest_frame = frame
+                    self.acknowledgements.put_nowait((frame["sessionId"], frame["data"]))
+                    self._publish_frame(frame)
         finally:
+            self.closed.set()
             for future in self.pending.values():
                 if not future.done():
                     future.set_exception(ConnectionError("Browser connection closed."))
+
+    def _publish_frame(self, frame):
+        if self.frames.full():
+            self.frames.get_nowait()
+        self.frames.put_nowait(frame)
+
+    async def _acknowledge_frames(self):
+        # Chrome bounds in-flight screencast frames. Pace acknowledgements to
+        # reduce capture work without delaying command responses in the reader.
+        loop = asyncio.get_running_loop()
+        next_ack = loop.time() + self.FRAME_INTERVAL
+        needs_snapshot = False
+        previous_data = None
+        try:
+            while True:
+                try:
+                    session_id, data = await asyncio.wait_for(self.acknowledgements.get(), self.FRAME_INTERVAL)
+                except TimeoutError:
+                    if needs_snapshot and self.latest_frame:
+                        # Chrome may drop the final paint while all frame credits
+                        # are in flight. Recover it once the source becomes idle.
+                        snapshot = await self.call("Page.captureScreenshot", {"format": "jpeg", "quality": 65})
+                        self._publish_frame({**self.latest_frame, "data": snapshot["data"]})
+                        needs_snapshot = False
+                    continue
+                # Compare screencast images with each other: captureScreenshot
+                # can encode the same pixels differently and cause another paint.
+                needs_snapshot = needs_snapshot or data != previous_data
+                previous_data = data
+                await asyncio.sleep(max(0, next_ack - loop.time()))
+                self.next_id += 1
+                await self.socket.send(json.dumps({"id": self.next_id, "method": "Page.screencastFrameAck",
+                                                   "params": {"sessionId": session_id}}))
+                next_ack = loop.time() + self.FRAME_INTERVAL
+        finally:
+            self.closed.set()
 
     async def activate(self):
         await self.call("Page.bringToFront")

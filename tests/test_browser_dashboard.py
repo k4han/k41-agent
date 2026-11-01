@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException, Request
@@ -125,9 +126,11 @@ def test_browser_profile_api_enforces_authentication_csrf_and_ownership(browser_
 
 class FakeViewer:
     inputs = []
+    FRAME_INTERVAL = 0.1
 
     def __init__(self, *args):
         self.frames = asyncio.Queue()
+        self.closed = asyncio.Event()
 
     async def __aenter__(self):
         return self
@@ -137,6 +140,9 @@ class FakeViewer:
 
     async def activate(self):
         pass
+
+    async def wait_closed(self):
+        await self.closed.wait()
 
     async def input(self, event):
         self.inputs.append(event)
@@ -185,3 +191,94 @@ def test_only_one_human_controller_and_disconnect_preserves_handoff(browser_clie
             assert second.receive_json()["type"] == "error"
     assert session.handoff_id == "pending"
     assert FakeViewer.inputs == [{"type": "text", "text": "login"}]
+
+
+def test_viewer_closes_socket_when_cdp_reader_stops(browser_client, monkeypatch):
+    client, _ = browser_client
+
+    class DisconnectedViewer(FakeViewer):
+        async def __aenter__(self):
+            self.closed.set()
+            return self
+
+    monkeypatch.setattr(routes, "CDPViewer", DisconnectedViewer)
+    client.post("/dashboard-api/browser/threads/chat")
+    ticket = client.post("/dashboard-api/browser/threads/chat/viewer-ticket").json()["ticket"]
+    with client.websocket_connect("/dashboard-api/browser/viewer", headers={"Origin": "http://testserver"}) as ws:
+        ws.send_json({"ticket": ticket})
+        with pytest.raises(WebSocketDisconnect):
+            while True:
+                ws.receive_json()
+
+
+@pytest.mark.asyncio
+async def test_viewer_follows_agent_and_preserves_manually_pinned_tabs(monkeypatch):
+    monkeypatch.setattr(routes, "CDPViewer", FakeViewer)
+    tabs = [{"id": "first"}, {"id": "second"}]
+
+    class Driver:
+        active = "second"
+
+        async def tabs(self):
+            return tabs
+
+        async def active_tab_id(self):
+            return self.active
+
+    current = SimpleNamespace(driver=Driver(), closed=False, handoff_id=None, active_tab_id=None,
+                              controller=None, lock=asyncio.Lock())
+
+    class Socket:
+        def __init__(self, event):
+            self.event = event
+            self.statuses = []
+
+        async def receive_text(self):
+            # Let the initial status run before a user changes the selection.
+            while not self.statuses:
+                await asyncio.sleep(0)
+            return self.event
+
+        async def send_json(self, value):
+            self.statuses.append(value)
+
+    # The sender, rather than user input, changes the watched target.
+    assert await asyncio.wait_for(routes.view_tab(Socket('{}'), None, current, "first", "viewer"), 1) == ("second", True)
+    pinned = Socket('{"type":"select_tab","tab_id":"first"}')
+    assert await routes.view_tab(pinned, None, current, "second", "viewer") == ("first", False)
+    pinned = Socket('{"type":"follow_agent"}')
+    assert await routes.view_tab(pinned, None, current, "first", "viewer", False) == ("second", True)
+    assert pinned.statuses[0]["tab_id"] == "first"
+    assert not pinned.statuses[0]["follow_agent"]
+    assert pinned.statuses[0]["reset"]
+
+    # A pin cannot leave the stream attached to a target that no longer exists.
+    tabs.pop(0)
+    assert await asyncio.wait_for(routes.view_tab(Socket('{}'), None, current, "first", "viewer", False), 1) == ("second", False)
+
+
+@pytest.mark.asyncio
+async def test_static_viewer_does_not_disconnect_without_new_frames(monkeypatch):
+    monkeypatch.setattr(routes, "CDPViewer", FakeViewer)
+    status_sent = asyncio.Event()
+
+    class Driver:
+        async def tabs(self):
+            return [{"id": "first"}]
+
+    class Socket:
+        async def receive_text(self):
+            await asyncio.Event().wait()
+
+        async def send_json(self, value):
+            status_sent.set()
+
+    current = SimpleNamespace(driver=Driver(), closed=False, handoff_id=None, active_tab_id=None, controller=None)
+    task = asyncio.create_task(routes.view_tab(Socket(), None, current, "first", "viewer"))
+    try:
+        await asyncio.wait_for(status_sent.wait(), 1)
+        await asyncio.sleep(1.1)
+        assert not task.done()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

@@ -171,21 +171,34 @@ def origin_allowed(websocket: WebSocket, config) -> bool:
     return bool(origin) and origin in {own_origin, *allowed}
 
 
-async def view_tab(websocket, browser, current, target_id, viewer_id):
+async def viewer_target(current, tabs, fallback=None):
+    tab_ids = {tab["id"] for tab in tabs}
+    active_tab = await current.driver.active_tab_id() if hasattr(current.driver, "active_tab_id") else None
+    return next((tab_id for tab_id in (current.active_tab_id, active_tab, fallback) if tab_id in tab_ids), tabs[0]["id"])
+
+
+async def view_tab(websocket, browser, current, target_id, viewer_id, follow_agent=True):
     async with CDPViewer(current.driver, target_id) as viewer:
         async def frames():
             last_status = 0
             while not current.closed:
                 if time.monotonic() - last_status > 1.5:
-                    await websocket.send_json({"type": "status", "tabs": await current.driver.tabs(),
-                        "tab_id": target_id,
+                    tabs = await current.driver.tabs()
+                    if not tabs:
+                        raise ConnectionError("The browser has no visible tabs.")
+                    if target_id not in {tab["id"] for tab in tabs} or (follow_agent and not current.handoff_id):
+                        next_target = await viewer_target(current, tabs, target_id)
+                        if next_target != target_id:
+                            return next_target, follow_agent
+                    await websocket.send_json({"type": "status", "tabs": tabs,
+                        "tab_id": target_id, "follow_agent": follow_agent, "reset": last_status == 0,
                         "mode": "human" if current.handoff_id else "agent",
                         "can_control": bool(current.handoff_id and current.controller in {None, viewer_id})})
                     last_status = time.monotonic()
                 try:
                     frame = await asyncio.wait_for(viewer.frames.get(), 1)
                     await websocket.send_json({"type": "frame", "data": frame["data"], "metadata": frame["metadata"]})
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(CDPViewer.FRAME_INTERVAL)
                 except TimeoutError:
                     pass
             raise ConnectionError("Browser session closed.")
@@ -207,7 +220,12 @@ async def view_tab(websocket, browser, current, target_id, viewer_id):
                             current.controller = viewer_id
                             current.active_tab_id = tab_id
                             current.last_activity = time.monotonic()
-                    return tab_id
+                    return tab_id, False
+                if event.get("type") == "follow_agent":
+                    tabs = await current.driver.tabs()
+                    if not tabs:
+                        raise ConnectionError("The browser has no visible tabs.")
+                    return await viewer_target(current, tabs, target_id), True
                 async with current.lock:
                     if current.closed or not current.handoff_id or current.controller not in {None, viewer_id}:
                         await websocket.send_json({"type": "error", "message": "Browser input is available only during your handoff."})
@@ -220,15 +238,19 @@ async def view_tab(websocket, browser, current, target_id, viewer_id):
 
         sending = asyncio.create_task(frames())
         receiving = asyncio.create_task(inputs())
+        disconnected = asyncio.create_task(viewer.wait_closed())
         try:
-            done, _ = await asyncio.wait([sending, receiving], return_when=asyncio.FIRST_COMPLETED)
+            done, _ = await asyncio.wait([sending, receiving, disconnected], return_when=asyncio.FIRST_COMPLETED)
+            if disconnected in done:
+                raise ConnectionError("Browser stream connection closed.")
             for task in done:
                 task.result()
-            return receiving.result()
+            return receiving.result() if receiving in done else sending.result()
         finally:
             sending.cancel()
             receiving.cancel()
-            await asyncio.gather(sending, receiving, return_exceptions=True)
+            disconnected.cancel()
+            await asyncio.gather(sending, receiving, disconnected, return_exceptions=True)
 
 
 @viewer_router.websocket("/dashboard-api/browser/viewer")
@@ -249,12 +271,10 @@ async def browser_viewer(websocket: WebSocket):
         tabs = await current.driver.tabs()
         if not tabs:
             raise ValueError("The browser has no visible tabs.")
-        active_tab = await current.driver.active_tab_id() if hasattr(current.driver, "active_tab_id") else None
-        target_id = current.active_tab_id or active_tab
-        if target_id not in {tab["id"] for tab in tabs}:
-            target_id = tabs[0]["id"]
+        target_id = await viewer_target(current, tabs)
+        follow_agent = True
         while not current.closed:
-            target_id = await view_tab(websocket, container.browser_service, current, target_id, viewer_id)
+            target_id, follow_agent = await view_tab(websocket, container.browser_service, current, target_id, viewer_id, follow_agent)
     except (WebSocketDisconnect, ConnectionError):
         pass
     except Exception:
