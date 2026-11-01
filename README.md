@@ -31,7 +31,7 @@ To install a specific release:
 
 ```powershell
 Invoke-WebRequest -Uri "https://k41.bot.cd/install.ps1" -OutFile ".\install.ps1"
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.36
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.37
 ```
 
 ### macOS or Linux
@@ -53,7 +53,7 @@ To install a specific release:
 ```sh
 curl -fsSL https://k41.bot.cd/install.sh -o install.sh
 chmod +x install.sh
-./install.sh --release-tag v0.1.36
+./install.sh --release-tag v0.1.37
 ```
 
 ## Start
