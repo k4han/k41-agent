@@ -8,6 +8,7 @@ import json
 import math
 import socket
 import sys
+import time
 from concurrent.futures import Future
 from pathlib import Path
 from threading import Thread
@@ -213,7 +214,8 @@ class CDPViewer:
 
     IDLE_SNAPSHOT_DELAY = 0.1
 
-    def __init__(self, driver, target_id: str):
+    def __init__(self, driver, target_id: str, *, visible=True, width=1280, height=None,
+                 quality=65, every_nth_frame=1):
         self.driver = driver
         self.target_id = target_id
         self.socket = None
@@ -226,11 +228,33 @@ class CDPViewer:
         self.frame_received = asyncio.Event()
         self.latest_frame = None
         self.previous_data = None
-        self.visible = True
+        self.visible = visible
+        self.screencast_active = False
         self.capture_revision = 0
-        self.stream_options = {"format": "jpeg", "quality": 65, "maxWidth": 1280,
-                               "maxHeight": 800, "everyNthFrame": 1}
+        self.source_sequence = 0
+        self.last_snapshot_sequence = -1
+        self.source_frames = 0
+        self.source_frames_dropped = 0
+        self.snapshots = 0
+        self.snapshots_dropped = 0
+        self.capture_ms = 0
+        self.resize_ms = 0
+        self.stream_options = self._options(width, height, quality, every_nth_frame)
         self.configure_lock = asyncio.Lock()
+        self.capture_lock = asyncio.Lock()
+
+    @staticmethod
+    def _options(width, height, quality, every_nth_frame):
+        width = max(1, min(8192, int(width)))
+        height = max(1, min(8192, int(height if height is not None else width * 800 / 1280)))
+        return {"format": "jpeg", "quality": max(1, min(100, int(quality))),
+                "maxWidth": width, "maxHeight": height,
+                "everyNthFrame": max(1, min(4, int(every_nth_frame)))}
+
+    def metrics(self):
+        return {"source_frames": self.source_frames, "source_frames_dropped": self.source_frames_dropped,
+                "snapshots": self.snapshots, "snapshots_dropped": self.snapshots_dropped,
+                "capture_ms": round(self.capture_ms, 1), "resize_ms": round(self.resize_ms, 1)}
 
     async def __aenter__(self):
         self.socket = await connect(await self.driver.target_url(self.target_id), max_size=16 * 1024 * 1024)
@@ -238,7 +262,10 @@ class CDPViewer:
         self.snapshotter = asyncio.create_task(self._capture_idle_frame())
         try:
             await self.call("Page.enable")
-            await self.call("Page.startScreencast", self.stream_options)
+            if self.visible:
+                # Capture may start even if its command response is interrupted.
+                self.screencast_active = True
+                await self.call("Page.startScreencast", self.stream_options)
         except BaseException:
             await self.__aexit__(None, None, None)
             raise
@@ -249,9 +276,10 @@ class CDPViewer:
             self.snapshotter.cancel()
         try:
             if self.socket:
-                if not self.closed.is_set():
+                if self.screencast_active and not self.closed.is_set():
                     with contextlib.suppress(Exception):
                         await self.call("Page.stopScreencast")
+                        self.screencast_active = False
                 await self.socket.close()
         finally:
             if self.reader:
@@ -288,10 +316,12 @@ class CDPViewer:
                 elif message.get("method") == "Page.screencastFrame":
                     frame = message["params"]
                     self.latest_frame = frame
+                    self.source_frames += 1
                     if self.visible:
-                        self._publish_frame(frame)
                         if frame["data"] != self.previous_data:
+                            self.source_sequence += 1
                             self.frame_received.set()
+                        self._publish_frame(frame)
                         self.previous_data = frame["data"]
                     # The bounded latest-frame slot owns source backpressure. Network
                     # credits are managed separately so capture does not wait a full RTT.
@@ -307,50 +337,70 @@ class CDPViewer:
     def _publish_frame(self, frame):
         if self.frames.full():
             self.frames.get_nowait()
-        self.frames.put_nowait(frame)
+            self.source_frames_dropped += 1
+        self.frames.put_nowait({**frame, "capture_revision": self.capture_revision,
+                               "captured_at": frame.get("captured_at", time.monotonic())})
 
     async def configure(self, *, visible=True, width=1280, height=None, quality=65, every_nth_frame=1, refresh=False):
-        width = max(1, min(8192, int(width)))
-        height = max(1, min(8192, int(height if height is not None else width * 800 / 1280)))
-        options = {"format": "jpeg", "quality": max(1, min(100, int(quality))),
-                   "maxWidth": width, "maxHeight": height,
-                   "everyNthFrame": max(1, min(4, int(every_nth_frame)))}
+        options = self._options(width, height, quality, every_nth_frame)
         async with self.configure_lock:
             if visible == self.visible and options == self.stream_options:
                 if visible and refresh:
                     self.capture_revision += 1
                     await self.capture_frame()
                 return
-            was_visible = self.visible
             self.capture_revision += 1
             self.visible = False
             self.frame_received.clear()
-            if was_visible:
+            if self.screencast_active:
                 await self.call("Page.stopScreencast")
+                self.screencast_active = False
             while not self.frames.empty():
                 self.frames.get_nowait()
             self.stream_options = options
             self.visible = visible
             if visible:
                 self.previous_data = None
+                self.screencast_active = True
                 await self.call("Page.startScreencast", options)
                 await self.capture_frame()
 
-    async def capture_frame(self):
+    async def capture_frame(self, *, sequence=None):
+        async with self.capture_lock:
+            if not self.visible:
+                return
+            if sequence is not None and (sequence != self.source_sequence or sequence <= self.last_snapshot_sequence):
+                return
+            await self._capture_frame()
+
+    async def _capture_frame(self):
         revision = self.capture_revision
+        sequence = self.source_sequence
+        options = self.stream_options
+        started = time.monotonic()
         metadata = dict((self.latest_frame or {}).get("metadata", {}))
         layout = await self.call("Page.getLayoutMetrics")
         viewport = layout.get("cssVisualViewport") or layout.get("cssLayoutViewport") or {}
         x, y = viewport.get("pageX", metadata.get("scrollOffsetX", 0)), viewport.get("pageY", metadata.get("scrollOffsetY", 0))
         snapshot = await self.call("Page.captureScreenshot", {
-            "format": "jpeg", "quality": self.stream_options["quality"], "captureBeyondViewport": False,
+            "format": "jpeg", "quality": options["quality"], "captureBeyondViewport": False,
         })
+        captured = time.monotonic()
+        self.snapshots += 1
+        self.capture_ms = (captured - started) * 1000
+        if not self.visible or revision != self.capture_revision or sequence != self.source_sequence:
+            self.snapshots_dropped += 1
+            return
         # CDP screenshot clips can resize the viewport and trigger another paint.
         # Resize the captured pixels off the event loop instead.
-        data, width, height = await asyncio.to_thread(self._resize_capture, snapshot["data"], self.stream_options)
+        data, width, height = await asyncio.to_thread(self._resize_capture, snapshot["data"], options)
+        self.resize_ms = (time.monotonic() - captured) * 1000
         metadata.update(deviceWidth=width, deviceHeight=height, scrollOffsetX=x, scrollOffsetY=y)
-        if self.visible and revision == self.capture_revision:
-            self._publish_frame({"metadata": metadata, "data": data})
+        if self.visible and revision == self.capture_revision and sequence == self.source_sequence:
+            self.last_snapshot_sequence = sequence
+            self._publish_frame({"metadata": metadata, "data": data, "captured_at": started, "priority": True})
+        else:
+            self.snapshots_dropped += 1
 
     @staticmethod
     def _resize_capture(data, options):
@@ -376,7 +426,7 @@ class CDPViewer:
                     except TimeoutError:
                         break
                 if self.visible and self.latest_frame:
-                    await self.capture_frame()
+                    await self.capture_frame(sequence=self.source_sequence)
         finally:
             self.closed.set()
 

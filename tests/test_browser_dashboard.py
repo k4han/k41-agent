@@ -131,7 +131,7 @@ def test_browser_profile_api_enforces_authentication_csrf_and_ownership(browser_
 class FakeViewer:
     inputs = []
 
-    def __init__(self, *args):
+    def __init__(self, *args, **kwargs):
         self.frames = asyncio.Queue()
         self.closed = asyncio.Event()
 
@@ -328,7 +328,7 @@ def stream_fixture(monkeypatch, viewer=None):
     from agent.modules.browser.service import BrowserSession
 
     viewer = viewer or FakeViewer()
-    monkeypatch.setattr(routes, "CDPViewer", lambda *args: viewer)
+    monkeypatch.setattr(routes, "CDPViewer", lambda *args, **kwargs: viewer)
 
     class Driver:
         async def tabs(self):
@@ -515,6 +515,12 @@ def test_stream_frame_rate_adapts_without_changing_quality_or_size(monkeypatch):
     assert (state.max_width, state.max_height) == (1800, 1000)
 
 
+def test_stream_metrics_support_fourth_source_sampling_interval():
+    state = routes.BrowserStreamState(every_nth_frame=4)
+    assert state.target_fps == 10
+    assert state.metrics()["target_fps"] == 10
+
+
 @pytest.mark.asyncio
 async def test_stream_ignores_viewer_dimensions_and_updates_saved_settings_on_ping(monkeypatch):
     class ConfigurableViewer(FakeViewer):
@@ -560,3 +566,320 @@ async def test_stream_ignores_viewer_dimensions_and_updates_saved_settings_on_pi
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def stream_message(socket, kind, **fields):
+    while True:
+        message = await asyncio.wait_for(socket.messages.get(), 1)
+        if message.get("type") == kind and all(message.get(key) == value for key, value in fields.items()):
+            return message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rapid", [False, True])
+async def test_visible_static_stream_delivers_sole_fresh_image_after_resume(monkeypatch, rapid):
+    class EpochViewer(FakeViewer):
+        def __init__(self):
+            super().__init__()
+            self.capture_revision = 0
+
+        async def configure(self, **values):
+            self.capture_revision += 1
+            while not self.frames.empty():
+                self.frames.get_nowait()
+            if values["visible"]:
+                self.frames.put_nowait({**stream_frame(), "capture_revision": self.capture_revision})
+
+    current, viewer, socket = stream_fixture(monkeypatch, EpochViewer())
+    task = asyncio.create_task(routes.view_tab(socket, None, current, "first", "viewer", False))
+    try:
+        initial = await asyncio.wait_for(socket.frames.get(), 1)
+        socket.events.put_nowait({"type": "frame_ack", "frame_id": struct.unpack("!I", initial[:4])[0]})
+        # Let the sender wait on an empty source before the visibility transition.
+        await asyncio.sleep(0.01)
+        for revision in (1, 3, 5):
+            socket.events.put_nowait({"type": "visibility", "visible": False, "revision": revision})
+            if not rapid:
+                await stream_message(socket, "status", visibility_revision=revision, paused=True)
+            socket.events.put_nowait({"type": "visibility", "visible": True, "revision": revision + 1})
+            await stream_message(socket, "status", visibility_revision=revision + 1, paused=False)
+            payload = await asyncio.wait_for(socket.frames.get(), 0.5)
+            socket.events.put_nowait({"type": "frame_ack", "frame_id": struct.unpack("!I", payload[:4])[0]})
+        assert not task.done()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_stalled_image_send_keeps_receiver_and_session_lock_available(monkeypatch):
+    entered, release, applied = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    class Viewer(FakeViewer):
+        async def input(self, event):
+            applied.set()
+
+    class Socket(StreamSocket):
+        async def send_bytes(self, value):
+            entered.set()
+            await release.wait()
+            await super().send_bytes(value)
+
+    current, viewer, _ = stream_fixture(monkeypatch, Viewer())
+    current.handoff_id = "handoff"
+    socket = Socket()
+    state = routes.BrowserStreamState()
+    task = asyncio.create_task(routes.view_tab(socket, None, current, "first", "viewer", False, state=state))
+    try:
+        await stream_message(socket, "status", paused=False)
+        viewer.frames.put_nowait(stream_frame())
+        await asyncio.wait_for(entered.wait(), 1)
+        socket.events.put_nowait({"type": "text", "text": "hello", "input_id": 1})
+        await asyncio.wait_for(applied.wait(), 0.5)
+        async with asyncio.timeout(0.5):
+            async with current.lock:
+                pass
+        socket.events.put_nowait({"type": "ping", "id": 9})
+        socket.events.put_nowait({"type": "frame_ack", "frame_id": 1})
+        socket.events.put_nowait({"type": "visibility", "visible": False, "revision": 1})
+        async with asyncio.timeout(0.5):
+            while state.visible:
+                await asyncio.sleep(0)
+        assert not state.pending and state.pending_bytes == 0
+        release.set()
+        await stream_message(socket, "pong", id=9)
+        await stream_message(socket, "status", visibility_revision=1, paused=True)
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("binary", [False, True])
+async def test_stalled_websocket_sends_have_a_deadline(monkeypatch, binary):
+    from agent.delivery.http.dashboard.routes.helpers import browser_stream
+
+    monkeypatch.setattr(browser_stream, "SEND_TIMEOUT", 0.05)
+
+    class Socket(StreamSocket):
+        async def send_json(self, value):
+            if not binary:
+                await asyncio.Event().wait()
+            await super().send_json(value)
+
+        async def send_bytes(self, value):
+            await asyncio.Event().wait()
+
+    current, viewer, _ = stream_fixture(monkeypatch)
+    socket = Socket()
+    task = asyncio.create_task(routes.view_tab(socket, None, current, "first", "viewer", False))
+    try:
+        if binary:
+            await stream_message(socket, "status", paused=False)
+            viewer.frames.put_nowait(stream_frame())
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(task), 0.5)
+        assert task.done()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert not current.subscribers
+
+
+@pytest.mark.asyncio
+async def test_frame_bytes_are_bounded_independently_of_frame_count(monkeypatch):
+    from agent.delivery.http.dashboard.routes.helpers import browser_stream
+
+    monkeypatch.setattr(browser_stream, "FRAME_BYTE_WINDOW", 32)
+    current, viewer, socket = stream_fixture(monkeypatch)
+    state = routes.BrowserStreamState()
+    task = asyncio.create_task(routes.view_tab(socket, None, current, "first", "viewer", False, state=state))
+    try:
+        for _ in range(2):
+            viewer.frames.put_nowait(stream_frame())
+            await asyncio.wait_for(socket.frames.get(), 1)
+        viewer.frames.put_nowait(stream_frame())
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(socket.frames.get(), 0.06)
+        assert len(state.pending) == 2 and state.pending_bytes == 32
+        socket.events.put_nowait({"type": "frame_ack", "frame_id": 1, "decode_ms": 5, "queue_ms": 7})
+        await asyncio.wait_for(socket.frames.get(), 1)
+        assert state.pending_bytes == 32
+        metrics = state.metrics()
+        assert metrics["frame_bytes"] == 16 and metrics["decode_ms"] == 5
+        assert metrics["client_queue_ms"] == 7 and metrics["capture_ack_ms"] >= 0
+        assert state.quality == 65
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("signal,value", [("send_ms", 140), ("decode_ms", 70),
+                                          ("client_queue_ms", 140), ("queue_ms", 180)])
+def test_stream_adapts_to_network_decode_and_queue_pressure(monkeypatch, signal, value):
+    from agent.delivery.http.dashboard.routes.helpers import browser_stream
+
+    monkeypatch.setattr(browser_stream.time, "monotonic", lambda: 10)
+    state = routes.BrowserStreamState(quality=95, max_width=1800, max_height=1000)
+    setattr(state, signal, value)
+    state.pending[1] = 9.99
+    state.acknowledge({"frame_id": 1, "decode_ms": state.decode_ms, "queue_ms": state.client_queue_ms})
+    assert state.target_fps == 10 and state.every_nth_frame == 3
+    assert (state.quality, state.max_width, state.max_height) == (95, 1800, 1000)
+
+
+def test_intentional_pacing_and_skipped_images_do_not_mask_render_pressure(monkeypatch):
+    from agent.delivery.http.dashboard.routes.helpers import browser_stream
+
+    monkeypatch.setattr(browser_stream.time, "monotonic", lambda: 10)
+    state = routes.BrowserStreamState(every_nth_frame=3, queue_ms=95)
+    state.pending[1] = 9.99
+    state.acknowledge({"frame_id": 1, "drawn": True, "render_ms": 5})
+    assert state.every_nth_frame == 1
+    state.decode_ms = 80
+    state.pending[2] = 9.99
+    state.acknowledge({"frame_id": 2, "drawn": False})
+    assert state.decode_ms == 80
+
+
+@pytest.mark.asyncio
+async def test_output_prioritizes_controls_and_rejects_unbounded_backlog():
+    from agent.delivery.http.dashboard.routes.helpers.browser_stream import BrowserOutputQueue
+
+    output = BrowserOutputQueue()
+    sending = asyncio.create_task(output.send_frame("image"))
+    try:
+        await asyncio.sleep(0)
+        for number in range(64):
+            output.put_json({"type": "pong", "id": number})
+        with pytest.raises(ConnectionError, match="queue is full"):
+            output.put_json({"type": "pong", "id": 64})
+        for number in range(64):
+            binary, (payload, receipt) = output.take()
+            assert not binary and payload["id"] == number and receipt is None
+        binary, (payload, receipt) = output.take()
+        assert binary and payload == "image"
+        receipt.set_result(True)
+        await sending
+        assert not output.ready.is_set()
+    finally:
+        sending.cancel()
+        await asyncio.gather(sending, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_delayed_old_status_cannot_release_resume_image_before_new_status(monkeypatch):
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Viewer(FakeViewer):
+        def __init__(self):
+            super().__init__()
+            self.capture_revision = 0
+            self.configurations = asyncio.Queue()
+
+        async def configure(self, **values):
+            self.capture_revision += 1
+            while not self.frames.empty():
+                self.frames.get_nowait()
+            if values["visible"]:
+                self.frames.put_nowait({**stream_frame(), "capture_revision": self.capture_revision})
+            self.configurations.put_nowait(values)
+
+    class Socket(StreamSocket):
+        def __init__(self):
+            super().__init__()
+            self.sent = []
+
+        async def send_json(self, value):
+            if value.get("type") == "status" and not value["paused"] and value["visibility_revision"] == 0:
+                entered.set()
+                await release.wait()
+            self.sent.append(value)
+            await super().send_json(value)
+
+        async def send_bytes(self, value):
+            self.sent.append("image")
+            await super().send_bytes(value)
+
+    current, viewer, _ = stream_fixture(monkeypatch, Viewer())
+    socket = Socket()
+    state = routes.BrowserStreamState()
+    task = asyncio.create_task(routes.view_tab(socket, None, current, "first", "viewer", False, state=state))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        await viewer.configurations.get()
+        socket.events.put_nowait({"type": "visibility", "visible": False, "revision": 1})
+        assert not (await asyncio.wait_for(viewer.configurations.get(), 1))["visible"]
+        socket.events.put_nowait({"type": "visibility", "visible": True, "revision": 2})
+        assert (await asyncio.wait_for(viewer.configurations.get(), 1))["visible"]
+        release.set()
+        await asyncio.wait_for(socket.frames.get(), 1)
+        image_index = socket.sent.index("image")
+        assert any(isinstance(message, dict) and message.get("visibility_revision") == 2
+                   and message.get("paused") is False for message in socket.sent[:image_index])
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_pacing_coalesces_frames_and_priority_snapshot_bypasses_delay(monkeypatch):
+    current, viewer, socket = stream_fixture(monkeypatch)
+    state = routes.BrowserStreamState(every_nth_frame=3)
+    task = asyncio.create_task(routes.view_tab(socket, None, current, "first", "viewer", False, state=state))
+    try:
+        viewer.frames.put_nowait(stream_frame())
+        await asyncio.wait_for(socket.frames.get(), 1)
+        viewer.frames.put_nowait({**stream_frame(), "priority": True})
+        await asyncio.wait_for(socket.frames.get(), 0.08)
+        viewer.frames.put_nowait(stream_frame())
+        # Allow pacing to take the first candidate, then replace it during the delay.
+        await asyncio.sleep(0.01)
+        viewer.frames.put_nowait({**stream_frame(), "data": base64.b64encode(b"latest").decode()})
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(socket.frames.get(), 0.03)
+        payload = await asyncio.wait_for(socket.frames.get(), 0.5)
+        assert payload[12:] == b"latest" and state.pacing_dropped >= 1
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_viewer_send_timeout_skips_error_send_and_bounds_socket_cleanup(monkeypatch):
+    current, _, _ = stream_fixture(monkeypatch)
+    current.controller = "viewer"
+    socket_closed, close_cancelled = asyncio.Event(), asyncio.Event()
+    error_messages = []
+
+    class Socket:
+        async def accept(self):
+            pass
+
+        async def receive_text(self):
+            return json.dumps({"ticket": "ticket"})
+
+        async def send_json(self, value):
+            error_messages.append(value)
+
+        async def close(self):
+            socket_closed.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                close_cancelled.set()
+
+    async def timed_out(*args, **kwargs):
+        raise TimeoutError("Send deadline expired")
+
+    container = SimpleNamespace(browser_service=SimpleNamespace(consume_ticket=lambda token: current), config_service=None)
+    monkeypatch.setattr(routes, "get_container", lambda socket: container)
+    monkeypatch.setattr(routes, "origin_allowed", lambda *args: True)
+    monkeypatch.setattr(routes, "uuid4", lambda: SimpleNamespace(hex="viewer"))
+    monkeypatch.setattr(routes, "view_tab", timed_out)
+    monkeypatch.setattr(routes, "SEND_TIMEOUT", 0.02)
+    await asyncio.wait_for(routes.browser_viewer(Socket()), 0.5)
+    assert socket_closed.is_set() and close_cancelled.is_set()
+    assert not error_messages and current.controller is None

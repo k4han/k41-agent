@@ -188,3 +188,119 @@ async def test_capture_respects_independent_caps_and_preserves_input_dimensions(
         snapshot = next(command for command in reversed(socket.commands) if command["method"] == "Page.captureScreenshot")
         assert snapshot["params"]["quality"] == quality
         assert not any(command["method"].startswith("Emulation.") for command in socket.commands)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("visible", [False, True])
+async def test_viewer_starts_with_final_settings_without_restarting_capture(viewer_socket, visible):
+    original, socket = viewer_socket
+    viewer = transport.CDPViewer(original.driver, "target", visible=visible, width=640, height=400,
+                                 quality=90, every_nth_frame=2)
+    async with viewer:
+        await viewer.configure(visible=visible, width=640, height=400, quality=90, every_nth_frame=2, refresh=True)
+        starts = [command for command in socket.commands if command["method"] == "Page.startScreencast"]
+        assert len(starts) == int(visible)
+        if visible:
+            assert starts[0]["params"] == {"format": "jpeg", "quality": 90, "maxWidth": 640,
+                                           "maxHeight": 400, "everyNthFrame": 2}
+            frame = await asyncio.wait_for(viewer.frames.get(), 1)
+            assert frame["capture_revision"] == viewer.capture_revision
+            assert frame["priority"] and frame["captured_at"] > 0
+        else:
+            assert viewer.frames.empty()
+            assert not any(command["method"] == "Page.captureScreenshot" for command in socket.commands)
+        assert not any(command["method"] == "Page.stopScreencast" for command in socket.commands)
+    assert sum(command["method"] == "Page.stopScreencast" for command in socket.commands) == int(visible)
+
+
+@pytest.mark.asyncio
+async def test_closing_paused_viewer_does_not_stop_screencast_twice(viewer_socket):
+    viewer, socket = viewer_socket
+    async with viewer:
+        await viewer.configure(visible=False)
+    assert sum(command["method"] == "Page.stopScreencast" for command in socket.commands) == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_pause_still_stops_screencast_during_cleanup(viewer_socket, monkeypatch):
+    viewer, socket = viewer_socket
+    original_call = viewer.call
+    stop_attempts = 0
+
+    async def call(method, params=None):
+        nonlocal stop_attempts
+        if method == "Page.stopScreencast":
+            stop_attempts += 1
+            if stop_attempts == 1:
+                raise RuntimeError("Pause interrupted")
+        return await original_call(method, params)
+
+    monkeypatch.setattr(viewer, "call", call)
+    async with viewer:
+        with pytest.raises(RuntimeError, match="Pause interrupted"):
+            await viewer.configure(visible=False)
+        assert not viewer.visible and viewer.screencast_active
+    assert stop_attempts == 2
+    assert sum(command["method"] == "Page.stopScreencast" for command in socket.commands) == 1
+
+
+@pytest.mark.asyncio
+async def test_delayed_snapshot_cannot_replace_a_newer_screencast_frame(viewer_socket, monkeypatch):
+    viewer, socket = viewer_socket
+    monkeypatch.setattr(viewer, "IDLE_SNAPSHOT_DELAY", 1)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def resize(*args):
+        entered.set()
+        await release.wait()
+        return socket.snapshot_data, 1280, 800
+
+    monkeypatch.setattr(transport.asyncio, "to_thread", resize)
+    async with viewer:
+        capture = asyncio.create_task(viewer.capture_frame())
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            socket.frame(2)
+            await viewer.call("Input.insertText", {"text": "barrier"})
+            release.set()
+            await asyncio.wait_for(capture, 1)
+            assert (await viewer.frames.get())["data"] == "2"
+            assert viewer.metrics()["snapshots_dropped"] == 1
+        finally:
+            release.set()
+            capture.cancel()
+            await asyncio.gather(capture, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_explicit_refresh_coalesces_pending_idle_snapshot(viewer_socket):
+    viewer, socket = viewer_socket
+    async with viewer:
+        socket.frame(1)
+        await viewer.call("Input.insertText", {"text": "barrier"})
+        await viewer.capture_frame()
+        await asyncio.sleep(0.2)
+        assert sum(command["method"] == "Page.captureScreenshot" for command in socket.commands) == 1
+        assert viewer.metrics()["source_frames"] == 1
+        assert viewer.metrics()["source_frames_dropped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_unchanged_screencast_feedback_does_not_discard_final_snapshot(viewer_socket, monkeypatch):
+    viewer, socket = viewer_socket
+
+    async def resize(*args):
+        socket.frame(1)
+        await viewer.call("Input.insertText", {"text": "barrier"})
+        return socket.snapshot_data, 1280, 800
+
+    monkeypatch.setattr(transport.asyncio, "to_thread", resize)
+    async with viewer:
+        socket.frame(1)
+        await viewer.call("Input.insertText", {"text": "barrier"})
+        await viewer.capture_frame()
+        frame = await asyncio.wait_for(viewer.frames.get(), 1)
+        assert frame["data"] == socket.snapshot_data and frame["priority"]
+        await asyncio.sleep(0.2)
+        assert viewer.metrics()["snapshots"] == 1
+        assert viewer.metrics()["snapshots_dropped"] == 0

@@ -40,7 +40,7 @@ async function flushPromises() {
   for (let index = 0; index < 5; index++) await Promise.resolve();
 }
 
-function connectionFixture(requestTicket, onFrame = async () => true, hidden = false) {
+function connectionFixture(requestTicket, onFrame = async () => true, hidden = false, frameTiming) {
   const timers = new Map(), sockets = [], messages = [], errors = [], frames = [], states = [], samples = [], listeners = new Map();
   let sequence = 0, now = 0, disconnected = 0, replyPings = true;
   const page = {
@@ -74,6 +74,7 @@ function connectionFixture(requestTicket, onFrame = async () => true, hidden = f
     onFrame: value => { frames.push(value); return onFrame(value); },
     onDisconnect: () => disconnected++, onError: error => errors.push(error),
     onStateChange: value => states.push(value), onMetrics: value => samples.push(value),
+    frameTiming,
   });
   return {
     sockets, messages, errors, frames, timers, states, samples, connection, listeners,
@@ -402,4 +403,97 @@ test('mouse movement keeps only the latest position and flushes before discrete 
   input.reset();
   assert.equal(timers.size, 0);
   assert.equal(events.length, 4);
+});
+
+test('congested input keeps the latest motion and flushes before discrete boundaries', async () => {
+  const fixture = connectionFixture(async () => ({ ticket: 'ticket' }));
+  await flushPromises(); const socket = fixture.open();
+  socket.bufferedAmount = 70 * 1024;
+  for (let x = 0; x < 100; x++) fixture.connection.sendInput({ type: 'mouseMoved', x, buttons: 1 });
+  assert.equal(socket.sent.some(event => event.type === 'mouseMoved'), false);
+  await fixture.advance(80);
+  assert.equal(socket.sent.some(event => event.type === 'mouseMoved'), false);
+  fixture.connection.sendInput({ type: 'mouseReleased', x: 100, buttons: 0 });
+  assert.deepEqual(socket.sent.filter(event => event.input_id).map(event => [event.type, event.x]), [
+    ['mouseMoved', 99], ['mouseReleased', 100],
+  ]);
+  fixture.connection.sendInput({ type: 'mouseMoved', x: 101 });
+  fixture.connection.sendInput({ type: 'mouseMoved', x: 102 });
+  socket.bufferedAmount = 0;
+  await fixture.advance(40);
+  assert.equal(socket.sent.at(-1).x, 102);
+  assert.equal(socket.sent.at(-1).input_id, 3);
+  fixture.dispose();
+  assert.equal(fixture.timers.size, 0);
+});
+
+test('wheel deltas accumulate through congestion and preserve modifier boundaries', async () => {
+  const fixture = connectionFixture(async () => ({ ticket: 'ticket' }));
+  await flushPromises(); const socket = fixture.open();
+  socket.bufferedAmount = 70 * 1024;
+  fixture.connection.sendInput({ type: 'mouseWheel', deltaY: 10, modifiers: 0 });
+  fixture.connection.sendInput({ type: 'mouseWheel', deltaY: 20, modifiers: 0 });
+  fixture.connection.sendInput({ type: 'mouseWheel', deltaY: -5, modifiers: 2 });
+  assert.equal(socket.sent.at(-1).deltaY, 30);
+  assert.equal(socket.sent.at(-1).modifiers, 0);
+  socket.bufferedAmount = 0;
+  fixture.connection.sendInput({ type: 'mouseWheel', deltaY: -10, modifiers: 2 });
+  assert.equal(socket.sent.at(-1).deltaY, -15);
+  assert.equal(socket.sent.at(-1).modifiers, 2);
+  fixture.dispose();
+});
+
+test('visibility, selection, handoff changes and disconnects discard queued motion', async () => {
+  for (const reset of [
+    fixture => fixture.visibility('hidden'),
+    fixture => fixture.connection.selectTab('second'),
+    fixture => fixture.connection.followAgent(),
+    (fixture, socket) => socket.message({ type: 'status', sequence: 2, handoff: { handoff_id: 'new' } }),
+    (fixture, socket) => socket.close(),
+  ]) {
+    const fixture = connectionFixture(async () => ({ ticket: 'ticket' }));
+    await flushPromises(); const socket = fixture.open();
+    socket.bufferedAmount = 70 * 1024;
+    fixture.connection.sendInput({ type: 'mouseMoved', x: 100 });
+    reset(fixture, socket);
+    socket.bufferedAmount = 0;
+    await fixture.advance(80);
+    assert.equal(socket.sent.some(event => event.type === 'mouseMoved'), false);
+    fixture.dispose();
+    assert.equal(fixture.timers.size, 0);
+  }
+});
+
+test('excessive input buffering reconnects without silently dropping a discrete input', async () => {
+  const fixture = connectionFixture(async () => ({ ticket: 'ticket' }));
+  await flushPromises(); const socket = fixture.open();
+  socket.bufferedAmount = 300 * 1024;
+  fixture.connection.sendInput({ type: 'keyDown', key: 'Enter' });
+  assert.equal(socket.closed, true);
+  assert.match(fixture.errors.at(-1).message, /congested/);
+  assert.equal(socket.sent.some(event => event.type === 'keyDown'), false);
+  fixture.dispose();
+});
+
+test('frame acknowledgements report decode and client queue time separately', async () => {
+  const drawings = [];
+  const fixture = connectionFixture(async () => ({ ticket: 'ticket' }),
+    () => new Promise(resolve => drawings.push(resolve)), false, () => ({ decodeMs: 4, renderMs: 2 }));
+  await flushPromises(); const socket = fixture.open();
+  socket.frame(binaryFrame(1));
+  await fixture.advance(10); socket.frame(binaryFrame(2));
+  await fixture.advance(30); drawings.shift()(true); await flushPromises();
+  await fixture.advance(6); drawings.shift()(true); await flushPromises();
+  const ack = socket.sent.find(event => event.type === 'frame_ack' && event.frame_id === 2);
+  assert.equal(ack.queue_ms, 30);
+  assert.equal(ack.decode_ms, 4);
+  assert.equal(ack.render_ms, 6);
+  socket.message({ type: 'pong', metrics: { send_ms: 12, queue_ms: 15, capture_ack_ms: 80,
+    capture_ms: 9, resize_ms: 3, pending_bytes: 1024, frame_bytes: 512, target_fps: 20,
+    source_frames_dropped: 5, pacing_dropped: 2 } });
+  assert.equal(fixture.samples.at(-1).serverQueueMs, 15);
+  assert.equal(fixture.samples.at(-1).targetFps, 20);
+  assert.equal(fixture.samples.at(-1).sourceDroppedFrames, 5);
+  assert.equal(fixture.samples.at(-1).pendingBytes, 1024);
+  fixture.dispose();
 });

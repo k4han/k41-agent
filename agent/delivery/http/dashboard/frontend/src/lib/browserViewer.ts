@@ -20,6 +20,8 @@ export type BrowserStreamMetrics = {
   firstFrameMs: number; decodeMs: number; renderMs: number; ackMs: number; heartbeatMs: number;
   bytesPerSecond: number; framesPerSecond: number; reconnects: number; droppedFrames: number;
   inputAckMs: number; inputToFrameMs: number; quality: number;
+  sendMs: number; serverQueueMs: number; captureAckMs: number; captureMs: number; resizeMs: number;
+  pendingBytes: number; frameBytes: number; targetFps: number; sourceDroppedFrames: number; pacingDroppedFrames: number;
 };
 
 export type BrowserFrame = { id: number; width: number; height: number; image: Blob };
@@ -108,6 +110,7 @@ export function connectBrowserViewer(options: {
   let socket: WebSocket | undefined, request: AbortController | undefined;
   let retry: number | undefined, timeout: number | undefined, frameTimeout: number | undefined;
   let heartbeat: number | undefined, paintTimeout: number | undefined;
+  let motionTimer: number | undefined, pendingMotion: Record<string, unknown> | undefined;
   let failures = 0, revision = 0, messageSequence = 0, inputSequence = 0, pingSequence = 0;
   let selection = options.selection || { tabId: "", followAgent: true };
   let selectionPending = false, awaitingResume = false, visibilityRevision = 0;
@@ -120,7 +123,9 @@ export function connectBrowserViewer(options: {
   let appliedInput: { sent: number; acknowledged: number } | undefined;
   const metrics: BrowserStreamMetrics = { firstFrameMs: 0, decodeMs: 0, renderMs: 0, ackMs: 0,
     heartbeatMs: 0, bytesPerSecond: 0, framesPerSecond: 0, reconnects: 0, droppedFrames: 0,
-    inputAckMs: 0, inputToFrameMs: 0, quality: 65 };
+    inputAckMs: 0, inputToFrameMs: 0, quality: 65, sendMs: 0, serverQueueMs: 0,
+    captureAckMs: 0, captureMs: 0, resizeMs: 0, pendingBytes: 0, frameBytes: 0,
+    targetFps: 30, sourceDroppedFrames: 0, pacingDroppedFrames: 0 };
   const publishMetrics = () => {
     const elapsed = (performance.now() - sampleAt) / 1000;
     if (elapsed >= 1) {
@@ -138,11 +143,35 @@ export function connectBrowserViewer(options: {
     clearFrameTimeout();
     if (visible) frameTimeout = window.setTimeout(() => failed(new Error("Browser image timed out. Reconnecting.")), 15000);
   };
-  const acknowledge = (frame: BrowserFrame, drawn: boolean, renderMs = 0) => {
+  const acknowledge = (frame: BrowserFrame, drawn: boolean, renderMs = 0, decodeMs = 0, queueMs = 0) => {
     if (!drawn) metrics.droppedFrames++;
-    send({ type: "frame_ack", frame_id: frame.id, drawn, render_ms: renderMs });
+    send({ type: "frame_ack", frame_id: frame.id, drawn, render_ms: renderMs, decode_ms: decodeMs, queue_ms: queueMs });
+  };
+  const resetMotion = () => {
+    window.clearTimeout(motionTimer); motionTimer = undefined; pendingMotion = undefined;
+  };
+  const transmitInput = (event: Record<string, unknown>) => {
+    if (!visible || !authenticated || socket?.readyState !== WebSocket.OPEN) return;
+    if (socket.bufferedAmount > 256 * 1024) {
+      failed(new Error("Browser input connection is congested. Reconnecting.")); return;
+    }
+    const id = ++inputSequence % 0xFFFFFFFF || ++inputSequence % 0xFFFFFFFF;
+    if (inputs.size >= 64) inputs.delete(inputs.keys().next().value!);
+    inputs.set(id, performance.now());
+    send({ ...event, input_id: id, ...(handoffId ? { handoff_id: handoffId } : {}) });
+  };
+  const flushMotion = (force = false) => {
+    window.clearTimeout(motionTimer); motionTimer = undefined;
+    if (!pendingMotion) return;
+    if (!force && socket && socket.bufferedAmount > 64 * 1024) {
+      motionTimer = window.setTimeout(() => flushMotion(), 40); return;
+    }
+    const event = pendingMotion;
+    pendingMotion = undefined;
+    transmitInput(event);
   };
   const disconnect = () => {
+    resetMotion();
     window.clearTimeout(timeout); timeout = undefined;
     window.clearTimeout(heartbeat); heartbeat = undefined;
     window.clearTimeout(paintTimeout); paintTimeout = undefined;
@@ -175,12 +204,12 @@ export function connectBrowserViewer(options: {
       const drawn = await options.onFrame(item.frame) !== false;
       if (disposed || socket !== current || version !== revision) return;
       window.clearTimeout(paintTimeout); paintTimeout = undefined;
-      acknowledge(item.frame, drawn, performance.now() - began);
+      const timing = drawn ? options.frameTiming?.() : undefined;
+      acknowledge(item.frame, drawn, performance.now() - began, timing?.decodeMs || 0, began - item.received);
       if (drawn) {
         clearFrameTimeout();
         failures = 0;
         paintedFrames++;
-        const timing = options.frameTiming?.();
         metrics.decodeMs = timing?.decodeMs || 0;
         metrics.renderMs = timing?.renderMs ?? performance.now() - began;
         if (firstFrame) { metrics.firstFrameMs = performance.now() - started; firstFrame = false; }
@@ -250,6 +279,16 @@ export function connectBrowserViewer(options: {
             if (outstanding && outstanding.id === message.id) { metrics.heartbeatMs = performance.now() - outstanding.sent; ping = undefined; }
             metrics.ackMs = message.metrics?.ack_ms || 0;
             metrics.quality = message.metrics?.quality || 65;
+            metrics.sendMs = message.metrics?.send_ms || 0;
+            metrics.serverQueueMs = message.metrics?.queue_ms || 0;
+            metrics.captureAckMs = message.metrics?.capture_ack_ms || 0;
+            metrics.captureMs = message.metrics?.capture_ms || 0;
+            metrics.resizeMs = message.metrics?.resize_ms || 0;
+            metrics.pendingBytes = message.metrics?.pending_bytes || 0;
+            metrics.frameBytes = message.metrics?.frame_bytes || 0;
+            metrics.targetFps = message.metrics?.target_fps || 30;
+            metrics.sourceDroppedFrames = message.metrics?.source_frames_dropped || 0;
+            metrics.pacingDroppedFrames = message.metrics?.pacing_dropped || 0;
             publishMetrics(); return;
           }
           if (message.type === "input_ack") {
@@ -270,6 +309,7 @@ export function connectBrowserViewer(options: {
               window.clearTimeout(timeout); timeout = undefined;
               expectFrame();
             }
+            if (handoffId !== message.handoff?.handoff_id) resetMotion();
             handoffId = message.handoff?.handoff_id;
             if (firstStatus || !selectionPending || (message.tab_id === selection.tabId && message.follow_agent === selection.followAgent)) {
               selection = { tabId: message.tab_id || "", followAgent: message.follow_agent ?? true };
@@ -277,6 +317,7 @@ export function connectBrowserViewer(options: {
             }
             if (message.paused === false && (message.visibility_revision ?? 0) >= visibilityRevision) awaitingResume = false;
             if (message.reset) {
+              resetMotion();
               revision++; drawing = false;
               if (pending) acknowledge(pending.frame, false);
               pending = undefined;
@@ -305,6 +346,7 @@ export function connectBrowserViewer(options: {
     visible = next;
     visibilityRevision++;
     awaitingResume = visible;
+    resetMotion();
     revision++; drawing = false;
     if (pending) acknowledge(pending.frame, false);
     pending = undefined; appliedInput = undefined; inputs.clear();
@@ -332,17 +374,32 @@ export function connectBrowserViewer(options: {
     },
     sendInput(event: Record<string, unknown>) {
       if (!visible || !authenticated) return;
-      const id = ++inputSequence % 0xFFFFFFFF || ++inputSequence % 0xFFFFFFFF;
-      if (inputs.size >= 64) inputs.delete(inputs.keys().next().value!);
-      inputs.set(id, performance.now());
-      send({ ...event, input_id: id, ...(handoffId ? { handoff_id: handoffId } : {}) });
+      const motion = event.type === "mouseMoved" || event.type === "mouseWheel";
+      const compatible = pendingMotion && pendingMotion.type === event.type
+        && pendingMotion.modifiers === event.modifiers && pendingMotion.buttons === event.buttons;
+      if (pendingMotion && (!motion || !compatible)) flushMotion(true);
+      if (!visible || !authenticated) return;
+      if (event.type === "mouseWheel" && compatible) {
+        event = { ...event,
+          deltaX: Math.max(-2000, Math.min(2000, Number(pendingMotion!.deltaX || 0) + Number(event.deltaX || 0))),
+          deltaY: Math.max(-2000, Math.min(2000, Number(pendingMotion!.deltaY || 0) + Number(event.deltaY || 0))) };
+      }
+      if (motion && socket && socket.bufferedAmount > 64 * 1024) {
+        pendingMotion = event;
+        motionTimer ??= window.setTimeout(() => flushMotion(), 40);
+      } else {
+        // A newer position supersedes the queued one once the connection drains.
+        if (motion && compatible) resetMotion();
+        transmitInput(event);
+      }
     },
     selectTab(tabId: string) {
+      resetMotion();
       selection = { tabId, followAgent: false };
       selectionPending = true;
       send({ type: "select_tab", tab_id: tabId });
     },
-    followAgent() { selection.followAgent = true; selectionPending = true; send({ type: "follow_agent" }); },
+    followAgent() { resetMotion(); selection.followAgent = true; selectionPending = true; send({ type: "follow_agent" }); },
   };
 }
 

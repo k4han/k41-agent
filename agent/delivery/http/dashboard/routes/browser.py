@@ -19,7 +19,7 @@ from agent.bootstrap.browser_setup import BrowserSetupBusyError, BrowserSetupMan
 from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
 from agent.modules.admin_auth import get_current_admin
 from agent.modules.browser import BrowserError, CDPViewer
-from agent.delivery.http.dashboard.routes.helpers.browser_stream import BrowserStreamState, stream_tab
+from agent.delivery.http.dashboard.routes.helpers.browser_stream import SEND_TIMEOUT, BrowserStreamState, stream_tab
 
 router = APIRouter(prefix="/dashboard-api/browser")
 viewer_router = APIRouter()
@@ -213,15 +213,16 @@ async def browser_viewer(websocket: WebSocket):
         while not current.closed:
             target_id, follow_agent = await view_tab(websocket, container.browser_service, current, target_id,
                                                     viewer_id, follow_agent, state=state)
-    except (WebSocketDisconnect, ConnectionError):
+    except (WebSocketDisconnect, ConnectionError, TimeoutError):
         pass
     except Exception:
         # Do not log input events: they may contain login credentials.
         with contextlib.suppress(Exception):
-            await websocket.send_json({"type": "error", "message": "Browser connection ended. Refresh the viewer to reconnect."})
+            await asyncio.wait_for(websocket.send_json({"type": "error", "message":
+                "Browser connection ended. Refresh the viewer to reconnect."}), SEND_TIMEOUT)
     finally:
         if current and current.controller == viewer_id:
             current.controller = None
             current.notify()
         with contextlib.suppress(Exception):
-            await websocket.close()
+            await asyncio.wait_for(websocket.close(), SEND_TIMEOUT)
