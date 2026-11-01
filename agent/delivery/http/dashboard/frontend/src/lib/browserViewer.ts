@@ -101,7 +101,6 @@ export function connectBrowserViewer(options: {
   onMetrics?: (metrics: BrowserStreamMetrics) => void;
   frameTiming?: () => { decodeMs: number; renderMs: number };
   selection?: { tabId: string; followAgent: boolean };
-  width?: number;
 }) {
   const page = typeof document === "undefined" ? undefined : document;
   let visible = page?.visibilityState !== "hidden";
@@ -112,7 +111,7 @@ export function connectBrowserViewer(options: {
   let failures = 0, revision = 0, messageSequence = 0, inputSequence = 0, pingSequence = 0;
   let selection = options.selection || { tabId: "", followAgent: true };
   let selectionPending = false, awaitingResume = false, visibilityRevision = 0;
-  let width = options.width || 1280, handoffId: string | undefined;
+  let handoffId: string | undefined;
   let pending: { frame: BrowserFrame; received: number } | undefined;
   let drawing = false, firstFrame = true, started = performance.now();
   let sampleAt = started, receivedBytes = 0, paintedFrames = 0;
@@ -229,7 +228,7 @@ export function connectBrowserViewer(options: {
       options.onSocket?.(current);
       current.onopen = () => {
         if (socket !== current) return;
-        send({ ticket, visible, width, tab_id: selection.tabId, follow_agent: selection.followAgent,
+        send({ ticket, visible, tab_id: selection.tabId, follow_agent: selection.followAgent,
           visibility_revision: visibilityRevision });
         scheduleHeartbeat();
       };
@@ -312,7 +311,7 @@ export function connectBrowserViewer(options: {
     window.clearTimeout(paintTimeout); paintTimeout = undefined;
     clearFrameTimeout(); ping = undefined;
     options.onPause?.(!visible);
-    send({ type: "visibility", visible, width, revision: visibilityRevision });
+    send({ type: "visibility", visible, revision: visibilityRevision });
     options.onStateChange?.(!visible ? "paused" : authenticated ? "connected" : "reconnecting");
     if (visible) {
       if (authenticated) expectFrame();
@@ -344,12 +343,6 @@ export function connectBrowserViewer(options: {
       send({ type: "select_tab", tab_id: tabId });
     },
     followAgent() { selection.followAgent = true; selectionPending = true; send({ type: "follow_agent" }); },
-    resize(value: number) {
-      const next = Math.max(320, Math.min(1280, Math.round(value / 80) * 80));
-      if (width === next || !Number.isFinite(next)) return;
-      width = next;
-      send({ type: "resize", width });
-    },
   };
 }
 

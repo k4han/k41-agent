@@ -2,7 +2,7 @@ import { ArrowRight, Camera, ChevronDown, Globe, LoaderCircle, Power, RefreshCw,
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack } from "solid-js";
 import { apiFetch, postJson } from "@/lib/api";
 import { browserModifiers, browserPointer, connectBrowserViewer, createBrowserFrameRenderer, createBrowserInputSender,
-  type BrowserConnectionState, type BrowserHandoffResume, type BrowserStreamMetrics, type BrowserViewerConnection } from "@/lib/browserViewer";
+  type BrowserConnectionState, type BrowserHandoffResume, type BrowserViewerConnection } from "@/lib/browserViewer";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import "@/styles/browser.css";
 
@@ -39,7 +39,12 @@ export function BrowserPanel(props: {
   const [frameFresh, setFrameFresh] = createSignal(false);
   const [connectionState, setConnectionState] = createSignal<BrowserConnectionState>("connecting");
   const [controller, setController] = createSignal("agent");
-  const [metrics, setMetrics] = createSignal<BrowserStreamMetrics>();
+  const [viewportSize, setViewportSize] = createSignal({ width: 0, height: 0 });
+  const [frameAspect, setFrameAspect] = createSignal(1280 / 800);
+  const screenWidth = createMemo(() => {
+    const size = viewportSize();
+    return Math.max(0, Math.min(size.width, Math.max(0, size.height - 2) * frameAspect() + 2));
+  });
   const canControl = createMemo(() => connected() && controlAllowed() && frameFresh() && connectionState() !== "paused");
   const [followAgent, setFollowAgent] = createSignal(true);
   const [attempt, setAttempt] = createSignal(0);
@@ -170,7 +175,7 @@ export function BrowserPanel(props: {
     setControlAllowed(false);
     const session = `${thread || ""}:${generation || ""}`;
     if (viewerSession !== session) {
-      resetFrame(); setSelectedTab(""); setFollowAgent(true); setMetrics(undefined);
+      resetFrame(); setSelectedTab(""); setFollowAgent(true);
       viewerSession = session;
     } else staleFrame();
     if (!visible || !thread || !generation) return;
@@ -181,13 +186,13 @@ export function BrowserPanel(props: {
       onDisconnect: () => { setConnected(false); setControlAllowed(false); staleFrame(); },
       onStateChange: (value) => { setConnectionState(value); setConnected(value === "connected" || value === "paused"); },
       onPause: () => staleFrame(),
-      onMetrics: setMetrics,
       frameTiming: () => renderer.timing,
       onError: (cause) => setError(cause instanceof Error ? cause.message : String(cause)),
       onFrame: async (frame) => {
         if (!await renderer.draw(frame)) return false;
         width = frame.width;
         height = frame.height;
+        setFrameAspect(frame.width / frame.height);
         setHasFrame(true);
         setFrameFresh(true);
         setError("");
@@ -223,11 +228,19 @@ export function BrowserPanel(props: {
   });
 
   createEffect(() => {
-    if (!props.open || !connected() || !viewport) return;
-    const update = () => connection?.resize(Math.max(320, (viewport!.clientWidth - 24) * window.devicePixelRatio));
-    const observer = new ResizeObserver(update);
+    if (!props.open || !viewport) return;
+    const update = (width: number, height: number) => {
+      if (width <= 0 || height <= 0) return;
+      setViewportSize(previous => previous.width === width && previous.height === height ? previous : { width, height });
+    };
+    const observer = new ResizeObserver(entries => {
+      const rect = entries[0]?.contentRect;
+      if (rect) update(rect.width, rect.height);
+    });
     observer.observe(viewport);
-    update();
+    const style = getComputedStyle(viewport);
+    update(viewport.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+      viewport.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom));
     onCleanup(() => observer.disconnect());
   });
 
@@ -268,11 +281,18 @@ export function BrowserPanel(props: {
 
   return <div class="browser-panel">
       <header class="browser-session-header">
-        <div class="browser-session-title"><Globe size={17} /><strong>Browser</strong>
-          <span class="browser-connection" classList={{ "is-connected": connected(), "is-interactive": canControl() }} role="status">
-            <span class="browser-status-dot" />{connectionLabel()}
-          </span>
-        </div>
+        <Show when={status()?.tabs.length}><div class="browser-page-tabs" role="tablist" aria-label="Browser pages">
+          <For each={status()?.tabs}>{(tab) => <button type="button" class="browser-page-tab" role="tab"
+            aria-selected={selectedTab() === tab.id} title={tab.url} disabled={!connected()}
+            onClick={() => {
+              if (!connected() || !connection) return;
+              resetFrame();
+              setControlAllowed(false);
+              setFollowAgent(false);
+              setSelectedTab(tab.id);
+              connection.selectTab(tab.id);
+            }}><Globe size={13} /><span>{tab.title || tab.url || "New tab"}</span></button>}</For>
+        </div></Show>
         <div class="browser-actions">
           <Show when={status()?.open && status()?.mode === "agent"}>
             <button class="btn btn-sm" type="button" aria-label="Follow agent" aria-pressed={followAgent()}
@@ -323,18 +343,6 @@ export function BrowserPanel(props: {
         <p class="browser-profile-hint">Close the browser before changing or deleting its profile.</p>
       </section></Show>
       <div class="browser-chrome">
-        <Show when={status()?.tabs.length}><div class="browser-page-tabs" role="tablist" aria-label="Browser pages">
-          <For each={status()?.tabs}>{(tab) => <button type="button" class="browser-page-tab" role="tab"
-            aria-selected={selectedTab() === tab.id} title={tab.url} disabled={!connected()}
-            onClick={() => {
-              if (!connected() || !connection) return;
-              resetFrame();
-              setControlAllowed(false);
-              setFollowAgent(false);
-              setSelectedTab(tab.id);
-              connection.selectTab(tab.id);
-            }}><Globe size={13} /><span>{tab.title || tab.url || "New tab"}</span></button>}</For>
-        </div></Show>
         <form class="browser-address" onSubmit={(event) => { event.preventDefault(); if (url().trim()) send({ type: "navigate", url: url().trim() }); }}>
           <Globe size={14} aria-hidden="true" />
           <input aria-label="Browser address" placeholder="Enter a URL"
@@ -342,13 +350,14 @@ export function BrowserPanel(props: {
           <button class="workspace-icon-btn" type="submit" title="Navigate" aria-label="Navigate" disabled={!canControl() || !url().trim()}><ArrowRight size={16} /></button>
         </form>
       </div>
-      <div ref={viewport} class="browser-viewport" aria-label="Live browser viewport" aria-busy={Boolean(status()?.open && !frameFresh())}>
+      <div ref={viewport} class="browser-viewport" aria-label="Live browser viewport" aria-description={connectionLabel()} aria-busy={Boolean(status()?.open && !frameFresh())}>
       <Show when={!hasFrame()}><div class="browser-empty">
         <div class="browser-empty-icon"><Show when={status()?.open} fallback={<Globe size={28} />}><LoaderCircle size={28} class="browser-spinner" /></Show></div>
         <strong>{!props.threadId ? "Start a conversation to browse" : status()?.open ? "Connecting to your browser" : "A browser for your agent"}</strong>
         <p>{!props.threadId ? "Your browser session will stay with this conversation." : status()?.open ? "The live page will appear here. You can keep chatting while it connects." : "Open a session or ask your agent to browse. Follow its work here and take control when it needs you."}</p>
       </div></Show>
-        <div class="browser-screen" hidden={!hasFrame()} classList={{ "browser-screen-interactive": canControl(), "browser-screen-stale": !frameFresh() }}>
+        <div class="browser-screen" hidden={!hasFrame()} style={{ width: `${screenWidth()}px` }}
+          classList={{ "browser-screen-interactive": canControl(), "browser-screen-stale": !frameFresh() }}>
           <Show when={!frameFresh()}><div class="browser-stream-overlay" role="status">{connectionLabel()}</div></Show>
           <canvas ref={screen} role="img" aria-label="Live browser page"
             onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); mouse(event, "mousePressed"); }}
@@ -364,22 +373,9 @@ export function BrowserPanel(props: {
             }} onPaste={(event) => { event.preventDefault(); const text = event.clipboardData?.getData("text/plain"); if (text) send({ type: "text", text }); }} />
         </div>
       </div>
-      <footer class="browser-footer"><ShieldCheck size={14} /><span>{canControl() ? "Enter credentials directly in the browser, then return control to your agent." : "Ask your agent to hand over control when you need to sign in."}</span></footer>
-      <Show when={metrics() && status()?.open}><details class="browser-stream-details">
-        <summary>Connection details</summary>
-        <dl>
-          <dt>First image</dt><dd>{Math.round(metrics()!.firstFrameMs)} ms</dd>
-          <dt>Network round trip</dt><dd>{Math.round(metrics()!.heartbeatMs)} ms</dd>
-          <dt>Frame acknowledgement</dt><dd>{Math.round(metrics()!.ackMs)} ms</dd>
-          <dt>Decode / render</dt><dd>{Math.round(metrics()!.decodeMs)} / {Math.round(metrics()!.renderMs)} ms</dd>
-          <dt>Transfer</dt><dd>{(metrics()!.bytesPerSecond / 1024).toFixed(1)} KB/s</dd>
-          <dt>Frame rate</dt><dd>{metrics()!.framesPerSecond.toFixed(1)} fps</dd>
-          <dt>Input acknowledgement</dt><dd>{Math.round(metrics()!.inputAckMs)} ms</dd>
-          <dt>Input to next image</dt><dd>{Math.round(metrics()!.inputToFrameMs)} ms</dd>
-          <dt>Image quality</dt><dd>{metrics()!.quality}%</dd>
-          <dt>Reconnections / skipped images</dt><dd>{metrics()!.reconnects} / {metrics()!.droppedFrames}</dd>
-        </dl>
-      </details></Show>
+      <Show when={status()?.open && !status()?.handoff}>
+        <footer class="browser-footer"><ShieldCheck size={14} /><span>{canControl() ? "Enter credentials directly in the browser, then return control to your agent." : "Ask your agent to hand over control when you need to sign in."}</span></footer>
+      </Show>
       <Show when={status()?.images?.length}><details class="browser-captures"><summary><Camera size={14} />Screenshots <span>{status()?.images.length}</span><ChevronDown size={14} /></summary><div class="browser-images"><For each={status()?.images}>{(image) =>
         <a href={image.image_url} target="_blank" rel="noreferrer"><img src={image.image_url} alt="Agent browser screenshot" /></a>
       }</For></div></details></Show>

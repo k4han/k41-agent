@@ -123,6 +123,39 @@ def dashboard_client(make_dashboard_client):
     return make_dashboard_client()
 
 
+def test_browser_stream_settings_defaults_save_and_reset(make_dashboard_client):
+    service, _ = _db_config_service("")
+    client = make_dashboard_client(service)
+    defaults = {"browser.stream_quality": 65, "browser.stream_max_width": 1280, "browser.stream_max_height": 720}
+    settings = client.get("/dashboard-api/browser/configuration").json()["settings"]
+    assert {key: settings[key]["value"] for key in defaults} == defaults
+    values = {"browser.stream_quality": 100, "browser.stream_max_width": 1500, "browser.stream_max_height": 850}
+    assert client.put("/settings", json={"values": values}).status_code == 200
+    settings = client.get("/dashboard-api/browser/configuration").json()["settings"]
+    assert {key: settings[key]["value"] for key in values} == values
+    assert not any(settings[key].get("restart_required") for key in values)
+    assert client.put("/settings", json={"values": defaults}).status_code == 200
+    assert {key: service.get(key) for key in defaults} == defaults
+
+
+@pytest.mark.parametrize("key,invalid", [
+    ("browser.stream_quality", value) for value in (0, 101, True, 1.5, "65")
+] + [
+    (key, value) for key in ("browser.stream_max_width", "browser.stream_max_height")
+    for value in (0, -1, 8193, False, 600.5, "800")
+])
+def test_browser_stream_settings_reject_invalid_updates(make_dashboard_client, key, invalid):
+    service, _ = _db_config_service("")
+    client = make_dashboard_client(service)
+    before = service.get(key)
+    response = client.put(f"/settings/{key}", json={"value": invalid})
+    assert response.status_code == 400
+    assert "must be an integer" in response.json()["detail"]
+    assert client.put("/settings", json={"values": {key: invalid, "browser.stream_quality": invalid if key == "browser.stream_quality" else 90}}).status_code == 400
+    assert service.get(key) == before
+    assert service.get("browser.stream_quality") == 65
+
+
 def test_model_profile_settings_save_validate_and_clear(make_dashboard_client) -> None:
     service, db_source = _db_config_service("llm: {default_model: ''}")
     client = make_dashboard_client(service)

@@ -18,6 +18,9 @@ const settings = Object.fromEntries([
   ['storage_root', 'Browser storage root', '', 'text'],
   ['idle_ttl_seconds', 'Browser idle timeout (seconds)', 600, 'number'],
   ['operation_timeout_seconds', 'Browser operation timeout (seconds)', 60, 'number'],
+  ['stream_quality', 'Live image quality', 65, 'number'],
+  ['stream_max_width', 'Maximum live image width', 1280, 'number'],
+  ['stream_max_height', 'Maximum live image height', 720, 'number'],
 ].map(([suffix, label, value, input_type]) => [`browser.${suffix}`, {
   key: `browser.${suffix}`, label, value, input_type, source: 'default', category: 'browser',
   description: label, restart_required: suffix === 'storage_root',
@@ -129,7 +132,7 @@ try {
   const status = text => js(`document.querySelector('.browser-setup-status')?.textContent.includes(${JSON.stringify(text)})`);
   const open = async () => {
     await call('Page.navigate', { url: base + '/settings/browser' });
-    await until(() => js(`document.querySelectorAll('.browser-settings-fields input').length === 4`), 'browser settings');
+    await until(() => js(`document.querySelectorAll('.browser-settings-fields input').length === 6`), 'browser settings');
   };
   await open();
   await until(() => status('Browser not installed'), 'initial state');
@@ -179,11 +182,42 @@ try {
   await js(`${button('Refresh')}.click()`);
   await until(() => js(`${button('Reinstall Chrome')}.disabled`), 'unsupported installation disabled');
   assert.equal(await js(`${button('Check browser')}.disabled`), false);
+  const slider = async (id, value) => js(`(() => { const input = document.getElementById(${JSON.stringify(id)}); input.value = ${value}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  assert.equal(await js(`document.querySelector('output[for="browser-stream-size"]').textContent`), '1280 × 720');
+  for (const [index, size] of ['800 × 600', '1024 × 600', '1280 × 720', '1600 × 900', '1920 × 1080'].entries()) {
+    await slider('browser-stream-size', index);
+    assert.equal(await js(`document.querySelector('output[for="browser-stream-size"]').textContent`), size);
+  }
+  await slider('browser-stream-quality', 100);
+  await js(`${button('Save Changes')}.click()`);
+  await until(() => js(`!document.querySelector('.settings-pending-bar')`), 'save viewer settings');
+  assert.equal(saves.at(-1)['browser.stream_quality'], 100);
+  assert.equal(saves.at(-1)['browser.stream_max_width'], 1920);
+  assert.equal(saves.at(-1)['browser.stream_max_height'], 1080);
+  await open();
+  assert.equal(await js(`document.getElementById('browser-stream-quality').value`), '100');
+  assert.equal(await js(`document.querySelector('output[for="browser-stream-size"]').textContent`), '1920 × 1080');
+  await slider('browser-stream-size', 0);
+  await js(`${button('Discard')}.click()`);
+  assert.equal(await js(`document.querySelector('output[for="browser-stream-size"]').textContent`), '1920 × 1080');
+  await js(`${button('Reset viewer defaults')}.click()`);
+  assert.equal(await js(`document.getElementById('browser-stream-quality').value`), '65');
+  assert.equal(await js(`document.querySelector('output[for="browser-stream-size"]').textContent`), '1280 × 720');
+  await js(`${button('Save Changes')}.click()`);
+  await until(() => js(`!document.querySelector('.settings-pending-bar')`), 'save viewer defaults');
+  settings['browser.stream_max_width'].value = 1500;
+  settings['browser.stream_max_height'].value = 850;
+  await open();
+  assert.equal(await js(`document.querySelector('output[for="browser-stream-size"]').textContent`), 'Custom: 1500 × 850');
+  assert.equal(await js(`!!document.querySelector('.settings-pending-bar')`), false, 'Loading custom dimensions must not change them');
+  await slider('browser-stream-size', 1);
+  await js(`document.querySelectorAll('.settings-group')[0].querySelector('[aria-label="Undo change"]').click()`);
+  assert.equal(await js(`document.querySelector('output[for="browser-stream-size"]').textContent`), 'Custom: 1500 × 850');
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await delay(300);
   assert.equal(await js('document.documentElement.scrollWidth <= window.innerWidth'), true, 'Mobile page must not overflow horizontally');
   assert.deepEqual(exceptions, []);
-  console.log('PASS: browser settings navigation, install, duplicate clicks, reload, repair errors, CSRF, saved paths, check, polling cleanup, launch errors, unsupported hosts and mobile layout.');
+  console.log('PASS: browser setup, viewer sliders, all size presets, save/reload, discard, undo, defaults, custom dimensions and mobile layout.');
 } finally {
   await Promise.race([call?.('Browser.close').catch(() => {}), delay(2000)]);
   ws?.close(); browser.kill();

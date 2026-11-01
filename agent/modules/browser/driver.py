@@ -309,10 +309,11 @@ class CDPViewer:
             self.frames.get_nowait()
         self.frames.put_nowait(frame)
 
-    async def configure(self, *, visible=True, width=1280, quality=65, every_nth_frame=1, refresh=False):
-        width = max(320, min(1280, int(width)))
-        options = {"format": "jpeg", "quality": max(35, min(85, int(quality))),
-                   "maxWidth": width, "maxHeight": round(width * 800 / 1280),
+    async def configure(self, *, visible=True, width=1280, height=None, quality=65, every_nth_frame=1, refresh=False):
+        width = max(1, min(8192, int(width)))
+        height = max(1, min(8192, int(height if height is not None else width * 800 / 1280)))
+        options = {"format": "jpeg", "quality": max(1, min(100, int(quality))),
+                   "maxWidth": width, "maxHeight": height,
                    "everyNthFrame": max(1, min(4, int(every_nth_frame)))}
         async with self.configure_lock:
             if visible == self.visible and options == self.stream_options:

@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { batch, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Download, Globe, RefreshCw, RotateCcw, ShieldCheck } from "lucide-solid";
 
 import { DataGate } from "@/components/State";
@@ -7,6 +7,11 @@ import { SettingsLayout } from "./SettingsLayout";
 import { SettingRow, SettingsPendingBar, SettingsSection, useSettingsData } from "./shared";
 
 type SetupAction = "install" | "repair" | "check";
+const STREAM_QUALITY = "browser.stream_quality";
+const STREAM_WIDTH = "browser.stream_max_width";
+const STREAM_HEIGHT = "browser.stream_max_height";
+const STREAM_KEYS = new Set([STREAM_QUALITY, STREAM_WIDTH, STREAM_HEIGHT]);
+const STREAM_SIZES = [[800, 600], [1024, 600], [1280, 720], [1600, 900], [1920, 1080]] as const;
 type SetupJob = {
   id: string;
   action: SetupAction;
@@ -35,6 +40,22 @@ export function BrowserPage() {
   const [refreshing, setRefreshing] = createSignal(false);
   const busy = () => starting() || setup()?.job?.state === "running";
   const actionsDisabled = () => busy() || saving() || !setup() || pendingChanges().length > 0;
+  const streamWidth = () => Number(drafts()[STREAM_WIDTH] ?? 1280);
+  const streamHeight = () => Number(drafts()[STREAM_HEIGHT] ?? 720);
+  const streamSizeIndex = createMemo(() => STREAM_SIZES.findIndex(([width, height]) => width === streamWidth() && height === streamHeight()));
+  const streamSizeLabel = () => `${streamSizeIndex() < 0 ? "Custom: " : ""}${streamWidth()} × ${streamHeight()}`;
+  const streamSliderIndex = createMemo(() => {
+    if (streamSizeIndex() >= 0) return streamSizeIndex();
+    return STREAM_SIZES.reduce((nearest, [width, height], index) =>
+      Math.hypot(width - streamWidth(), height - streamHeight()) <
+      Math.hypot(STREAM_SIZES[nearest][0] - streamWidth(), STREAM_SIZES[nearest][1] - streamHeight()) ? index : nearest, 0);
+  });
+  const selectStreamSize = (index: number) => batch(() => {
+    const [width, height] = STREAM_SIZES[index];
+    setDraft(STREAM_WIDTH, width);
+    setDraft(STREAM_HEIGHT, height);
+  });
+  const streamSizeDirty = () => pendingChanges().some(change => change.key === STREAM_WIDTH || change.key === STREAM_HEIGHT);
   let disposed = false;
   let revision = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -175,10 +196,55 @@ export function BrowserPage() {
         </section>
 
         <DataGate data={data()} error={error()} onRetry={load}>{(payload) => <>
+          <SettingsSection title="Live viewer" actions={
+            <button class="btn btn-ghost btn-sm" type="button" disabled={busy() || saving()}
+              onClick={() => batch(() => { setDraft(STREAM_QUALITY, 65); selectStreamSize(2); })}>
+              <RotateCcw size={13} /> Reset viewer defaults
+            </button>
+          }>
+            <fieldset class="browser-settings-fields" disabled={busy() || saving()}>
+              <div class="settings-list">
+                <Show when={payload().settings[STREAM_QUALITY]}>{info =>
+                  <SettingRow settingKey={STREAM_QUALITY} info={info()} draft={drafts()[STREAM_QUALITY]}
+                    dirty={pendingChanges().some(change => change.key === STREAM_QUALITY)}
+                    onChange={value => setDraft(STREAM_QUALITY, value)} onRestore={() => restoreDraft(STREAM_QUALITY)}
+                    control={<div class="browser-stream-control">
+                      <output for="browser-stream-quality">{Number(drafts()[STREAM_QUALITY] ?? 65)}%</output>
+                      <input id="browser-stream-quality" type="range" min="1" max="100" step="1"
+                        aria-label="Live image quality" aria-describedby="browser-stream-quality-hint"
+                        value={Number(drafts()[STREAM_QUALITY] ?? 65)}
+                        onInput={event => setDraft(STREAM_QUALITY, Number(event.currentTarget.value))} />
+                      <p class="hint" id="browser-stream-quality-hint">JPEG quality stays at this level, including on slow connections.</p>
+                    </div>} />
+                }</Show>
+                <Show when={payload().settings[STREAM_WIDTH]}>{info =>
+                  <SettingRow settingKey={STREAM_WIDTH} info={{ ...info(), label: "Maximum live image size" }} draft={drafts()[STREAM_WIDTH]}
+                    dirty={streamSizeDirty()} onChange={value => setDraft(STREAM_WIDTH, value)}
+                    onRestore={() => batch(() => { restoreDraft(STREAM_WIDTH); restoreDraft(STREAM_HEIGHT); })}
+                    control={<div class="browser-stream-control">
+                      <output for="browser-stream-size">{streamSizeLabel()}</output>
+                      <input id="browser-stream-size" type="range" min="0" max="4" step="1" list="browser-stream-size-marks"
+                        aria-label="Maximum live image size" aria-valuetext={streamSizeLabel()} aria-describedby="browser-stream-size-hint"
+                        value={streamSliderIndex()} onInput={event => selectStreamSize(Number(event.currentTarget.value))} />
+                      <datalist id="browser-stream-size-marks">
+                        <For each={STREAM_SIZES}>{([width, height], index) => <option value={index()} label={`${width} × ${height}`} />}</For>
+                      </datalist>
+                      <div class="browser-resolution-marks">
+                        <For each={STREAM_SIZES}>{([width, height], index) =>
+                          <button type="button" aria-label={`Use ${width} × ${height}`} aria-pressed={streamSizeIndex() === index()}
+                            onClick={() => selectStreamSize(index())}>{width} × {height}</button>
+                        }</For>
+                      </div>
+                      <p class="hint" id="browser-stream-size-hint">Smaller viewers use smaller images. Larger viewers scale the image locally. Page layout stays unchanged.</p>
+                    </div>} />
+                }</Show>
+              </div>
+            </fieldset>
+          </SettingsSection>
           <SettingsSection title="Browser configuration">
             <fieldset class="browser-settings-fields" disabled={busy() || saving()}>
               <div class="settings-list">
-                <For each={Object.entries(payload().settings)}>{([key, info]) =>
+                <For each={Object.entries(payload().settings).filter(([key]) => !STREAM_KEYS.has(key))}>{([key, info]) =>
                   <SettingRow settingKey={key} info={info} draft={drafts()[key]}
                     dirty={pendingChanges().some(change => change.key === key)}
                     onChange={value => setDraft(key, value)} onRestore={() => restoreDraft(key)} />

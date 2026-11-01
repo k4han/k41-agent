@@ -21,6 +21,9 @@ test('browser input maps scaled screenshots to viewport coordinates', () => {
   const point = browserPointer(420, 250, { left: 100, top: 50, width: 640, height: 400 });
   assert.equal(point.x, 640);
   assert.equal(point.y, 400);
+  const enlarged = browserPointer(1600, 900, { left: 0, top: 0, width: 1920, height: 1200 });
+  assert.equal(enlarged.x, 1600 * 1280 / 1920);
+  assert.equal(enlarged.y, 600);
   assert.equal(browserPointer(-10, 900, { left: 0, top: 0, width: 320, height: 200 }).y, 800);
   assert.equal(browserPointer(-10, 900, { left: 0, top: 0, width: 320, height: 200 }).x, 0);
 });
@@ -243,15 +246,29 @@ test('hidden tabs pause streaming and resume requests a fresh image without a ne
   fixture.dispose();
 });
 
-test('reconnecting preserves a pinned tab and viewport size', async () => {
+test('reconnecting preserves a pinned tab without negotiating capture size', async () => {
   const fixture = connectionFixture(async () => ({ ticket: 'ticket' }));
   await flushPromises(); const first = fixture.open(); first.frame(); await flushPromises();
-  fixture.connection.selectTab('second'); fixture.connection.resize(650);
+  fixture.connection.selectTab('second');
   first.message({ type: 'status', tab_id: 'second', follow_agent: false, sequence: 2 });
   first.close(); await fixture.advance(1000); fixture.open();
   const auth = fixture.sockets[1].sent[0];
-  assert.equal(auth.tab_id, 'second'); assert.equal(auth.follow_agent, false); assert.equal(auth.width, 640);
+  assert.equal(auth.tab_id, 'second'); assert.equal(auth.follow_agent, false);
+  assert.equal('width' in auth, false); assert.equal('height' in auth, false);
   fixture.dispose();
+});
+
+test('authentication and visibility messages leave capture dimensions to server settings', async () => {
+  const fixture = connectionFixture(async () => ({ ticket: 'ticket' }));
+  await flushPromises(); const socket = fixture.open();
+  assert.equal('width' in socket.sent[0], false); assert.equal('height' in socket.sent[0], false);
+  fixture.visibility('hidden'); fixture.visibility('visible');
+  assert.deepEqual(socket.sent.filter(item => item.type === 'visibility'), [
+    { type: 'visibility', visible: false, revision: 1 },
+    { type: 'visibility', visible: true, revision: 2 },
+  ]);
+  fixture.dispose();
+  assert.equal(fixture.timers.size, 0);
 });
 
 test('a viewer opened in the background waits for visibility before requiring an image', async () => {

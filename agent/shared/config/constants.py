@@ -134,7 +134,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^tools\.(permissions|shell|storage_root)$",
     r"^(host|port|enable_web|enable_api|enable_dashboard|tray\.enabled|tray\.autostart)$",
     r"^chat\.stream_thinking$",
-    r"^browser\.(executable_path|storage_root|idle_ttl_seconds|operation_timeout_seconds)$",
+    r"^browser\.(executable_path|storage_root|idle_ttl_seconds|operation_timeout_seconds|stream_quality|stream_max_width|stream_max_height)$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
@@ -172,7 +172,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^web\.defaults\.(google|tavily|firecrawl|brave|bing)$",
     r"^tools\.(permissions|shell|storage_root)$",
     r"^chat\.stream_thinking$",
-    r"^browser\.(executable_path|storage_root|idle_ttl_seconds|operation_timeout_seconds)$",
+    r"^browser\.(executable_path|storage_root|idle_ttl_seconds|operation_timeout_seconds|stream_quality|stream_max_width|stream_max_height)$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
@@ -331,6 +331,7 @@ def _expand_runtime_keys() -> set[str]:
     keys.update({"tools.permissions", "tools.shell", "tools.storage_root"})
     keys.add("chat.stream_thinking")
     keys.update({"browser.executable_path", "browser.storage_root", "browser.idle_ttl_seconds", "browser.operation_timeout_seconds"})
+    keys.update({"browser.stream_quality", "browser.stream_max_width", "browser.stream_max_height"})
     keys.add("google_calendar.enabled")
     keys.add("decision.router.mode")
     keys.add("decision.router.threshold")
@@ -352,6 +353,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "browser.storage_root": "",
     "browser.idle_ttl_seconds": 600,
     "browser.operation_timeout_seconds": 60,
+    "browser.stream_quality": 65,
+    "browser.stream_max_width": 1280,
+    "browser.stream_max_height": 720,
     "tools.permissions": [],
     "tools.shell": None,
     "tools.storage_root": None,
@@ -457,6 +461,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 # Metadata for settings - used by dashboard to render appropriate input types
 SETTING_METADATA: dict[str, dict[str, Any]] = {
+    "browser.stream_quality": {
+        "type": "number", "category": "browser", "label": "Live image quality",
+        "description": "JPEG quality for the live viewer. Slow connections reduce the frame rate, not image quality.",
+        "min": 1, "max": 100, "step": 1,
+    },
+    "browser.stream_max_width": {
+        "type": "number", "category": "browser", "label": "Maximum live image width",
+        "description": "Maximum captured width in pixels. Smaller viewer areas request smaller images.",
+        "min": 1, "max": 8192, "step": 1,
+    },
+    "browser.stream_max_height": {
+        "type": "number", "category": "browser", "label": "Maximum live image height",
+        "description": "Maximum captured height in pixels. Larger viewer areas scale the image locally.",
+        "min": 1, "max": 8192, "step": 1,
+    },
     "browser.executable_path": {
         "type": "text", "category": "browser", "label": "Chrome executable",
         "description": "Optional Chrome or Chromium executable. Empty uses automatic discovery; applies to new sessions.",

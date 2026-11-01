@@ -172,6 +172,24 @@ def test_viewer_tickets_origins_and_agent_control(browser_client, monkeypatch):
         assert ws.receive_json()["type"] == "error"
 
 
+def test_viewer_ticket_dimensions_do_not_override_stream_settings(browser_client, monkeypatch):
+    client, _ = browser_client
+    configurations = []
+
+    class ConfigurableViewer(FakeViewer):
+        async def configure(self, **values):
+            configurations.append(values)
+
+    monkeypatch.setattr(routes, "CDPViewer", ConfigurableViewer)
+    client.post("/dashboard-api/browser/threads/chat")
+    ticket = client.post("/dashboard-api/browser/threads/chat/viewer-ticket").json()["ticket"]
+    with client.websocket_connect("/dashboard-api/browser/viewer", headers={"Origin": "http://testserver"}) as ws:
+        ws.send_json({"ticket": ticket, "width": 320, "height": 200})
+        while ws.receive_json().get("paused") is not False:
+            pass
+        assert (configurations[-1]["width"], configurations[-1]["height"]) == (1280, 720)
+
+
 def test_only_one_human_controller_and_disconnect_preserves_handoff(browser_client, monkeypatch):
     client, browser = browser_client
     monkeypatch.setattr(routes, "CDPViewer", FakeViewer)
@@ -426,7 +444,8 @@ async def test_pause_sends_no_images_and_resume_requests_fresh_capture(monkeypat
             await asyncio.wait_for(socket.frames.get(), 0.05)
         socket.events.put_nowait({"type": "visibility", "visible": True, "width": 640})
         configuration = await asyncio.wait_for(viewer.configurations.get(), 1)
-        assert configuration["visible"] and configuration["width"] == 640
+        assert configuration["visible"]
+        assert (configuration["width"], configuration["height"]) == (1280, 720)
         await asyncio.wait_for(socket.frames.get(), 1)
         assert current.last_activity == 42 and current.controller is None
     finally:
@@ -477,22 +496,67 @@ async def test_input_queue_coalesces_motion_and_preserves_discrete_order():
         queue.put({"type": "text", "text": "b"}, "handoff", 0)
 
 
-def test_stream_quality_adapts_to_slow_acks_and_recovers_with_hysteresis(monkeypatch):
+def test_stream_frame_rate_adapts_without_changing_quality_or_size(monkeypatch):
     from agent.delivery.http.dashboard.routes.helpers import browser_stream
 
     now = 10.0
     monkeypatch.setattr(browser_stream.time, "monotonic", lambda: now)
-    state = routes.BrowserStreamState()
+    state = routes.BrowserStreamState(quality=92, max_width=1800, max_height=1000)
     state.pending[1] = now - 0.4
     state.acknowledge({"frame_id": 1, "render_ms": 30})
-    assert (state.quality, state.every_nth_frame) == (45, 3)
+    assert (state.quality, state.every_nth_frame) == (92, 3)
+    assert (state.max_width, state.max_height) == (1800, 1000)
     assert state.settings_changed.is_set()
     for frame_id in range(2, 20):
         now += 2.1
         state.pending[frame_id] = now - 0.02
         state.acknowledge({"frame_id": frame_id, "render_ms": 5})
-    assert (state.quality, state.every_nth_frame) == (65, 1)
-    state.resize(50000)
-    assert state.width == 1280
-    state.resize(float("nan"))
-    assert state.width == 1280
+    assert (state.quality, state.every_nth_frame) == (92, 1)
+    assert (state.max_width, state.max_height) == (1800, 1000)
+
+
+@pytest.mark.asyncio
+async def test_stream_ignores_viewer_dimensions_and_updates_saved_settings_on_ping(monkeypatch):
+    class ConfigurableViewer(FakeViewer):
+        def __init__(self):
+            super().__init__()
+            self.configurations = asyncio.Queue()
+
+        async def configure(self, **values):
+            self.configurations.put_nowait(values)
+
+    current, viewer, socket = stream_fixture(monkeypatch, ConfigurableViewer())
+    values = {"browser.stream_quality": 90, "browser.stream_max_width": 1024, "browser.stream_max_height": 600}
+    browser = SimpleNamespace(container=SimpleNamespace(config_service=SimpleNamespace(get=values.get)))
+
+    async def viewer_status(current):
+        return {}
+
+    browser.viewer_status = viewer_status
+    state = routes.BrowserStreamState()
+    task = asyncio.create_task(routes.view_tab(socket, browser, current, "first", "viewer", False, state=state))
+    try:
+        configuration = await asyncio.wait_for(viewer.configurations.get(), 1)
+        assert (configuration["width"], configuration["height"], configuration["quality"]) == (1024, 600, 90)
+        socket.events.put_nowait({"type": "resize", "width": 700, "height": 400, "quality": 1})
+        socket.events.put_nowait({"type": "ping", "id": 0})
+        while (await asyncio.wait_for(socket.messages.get(), 1))["type"] != "pong":
+            pass
+        assert viewer.configurations.empty()
+        for visible in (False, True):
+            socket.events.put_nowait({"type": "visibility", "visible": visible, "width": 320, "height": 200})
+            configuration = await asyncio.wait_for(viewer.configurations.get(), 1)
+            assert configuration["visible"] is visible
+            assert (configuration["width"], configuration["height"], configuration["quality"]) == (1024, 600, 90)
+        values.update({"browser.stream_quality": 100, "browser.stream_max_width": 500, "browser.stream_max_height": 300})
+        socket.events.put_nowait({"type": "ping", "id": 1})
+        configuration = await asyncio.wait_for(viewer.configurations.get(), 1)
+        assert (configuration["width"], configuration["height"], configuration["quality"]) == (500, 300, 100)
+        values.update({"browser.stream_max_width": 1920, "browser.stream_max_height": 1080})
+        socket.events.put_nowait({"type": "ping", "id": 2})
+        configuration = await asyncio.wait_for(viewer.configurations.get(), 1)
+        assert (configuration["width"], configuration["height"]) == (1920, 1080)
+        assert current.last_activity == 42 and current.controller is None
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

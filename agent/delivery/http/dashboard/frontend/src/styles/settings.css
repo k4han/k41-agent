@@ -1745,6 +1745,15 @@
   flex-wrap: wrap;
 }
 
+.browser-stream-control { display: grid; gap: 8px; width: 100%; min-width: 0; }
+.browser-stream-control output { color: var(--fg); font-size: 12px; font-variant-numeric: tabular-nums; }
+.browser-stream-control input[type="range"] { width: 100%; min-width: 0; padding: 0; accent-color: var(--primary); cursor: pointer; }
+.browser-stream-control .hint { margin: 0; font-size: 11px; line-height: 1.5; }
+.browser-resolution-marks { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; }
+.browser-resolution-marks button { padding: 4px 1px; border: 0; border-radius: 4px; color: var(--muted); background: transparent; font: inherit; font-size: 10px; cursor: pointer; }
+.browser-resolution-marks button[aria-pressed="true"] { color: var(--fg); background: var(--surface-2); }
+.browser-resolution-marks button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
 .skill-card-title-group {
   display: flex;
   align-items: center;

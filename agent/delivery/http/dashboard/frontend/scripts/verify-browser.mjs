@@ -60,7 +60,7 @@ const inputs = [], resumes = [], viewers = new Set();
 const profiles = [], checkpointLoads = [], invalidThreadRequests = [];
 const sessionMutations = [];
 const frameAcknowledgements = [], frameSequences = new WeakMap();
-const viewerOptions = new WeakMap(), visibilityEvents = [];
+const viewerOptions = new WeakMap(), visibilityEvents = [], resizeEvents = [];
 let connections = 0;
 let ticketRequests = 0;
 let holdBrowserStatus = false;
@@ -188,6 +188,8 @@ server.on('upgrade', (req, socket) => {
       const message = JSON.parse(payload.toString());
       if (message.ticket) {
         assert.equal(message.ticket, 'ticket');
+        assert.equal('width' in message, false, 'Authentication must leave capture width to settings');
+        assert.equal('height' in message, false, 'Authentication must leave capture height to settings');
         viewerOptions.set(socket, { ...message });
         sendStatus(socket, true);
         sendFrame(socket);
@@ -197,11 +199,15 @@ server.on('upgrade', (req, socket) => {
       } else if (message.type === 'ping') {
         send(socket, { type: 'pong', id: message.id, metrics: { ack_ms: 30, quality: 65 } });
       } else if (message.type === 'visibility') {
+        assert.equal('width' in message, false, 'Visibility must leave capture width to settings');
+        assert.equal('height' in message, false, 'Visibility must leave capture height to settings');
         visibilityEvents.push(message.visible);
         Object.assign(viewerOptions.get(socket), { visible: message.visible, visibility_revision: message.revision });
         sendStatus(socket);
         if (message.visible) sendFrame(socket);
       } else if (message.type === 'resize') {
+        resizeEvents.push(message);
+        Object.assign(viewerOptions.get(socket), { width: message.width, height: message.height });
         sendFrame(socket);
       } else if (message.type === 'select_tab' || message.type === 'follow_agent') {
         inputs.push(message);
@@ -263,7 +269,7 @@ try {
   await until(() => js('document.querySelector(".browser-keyboard")?.disabled === false'), 'fresh image restores control after visibility resume');
   await call('Target.closeTarget', { targetId: backgroundTarget.targetId });
   for (const socket of viewers) send(socket, { ...status, type: 'status', tab_id: 'tab', controller: 'other', can_control: false });
-  await until(() => js('document.querySelector(".browser-connection").textContent.includes("Another window")'), 'another controller has a distinct label');
+  await until(() => js('document.querySelector(".browser-viewport").getAttribute("aria-description").includes("Another window")'), 'another controller has a distinct accessible description');
   assert.equal(await js('document.querySelector(".browser-keyboard").disabled'), true);
   for (const socket of viewers) sendStatus(socket);
   await until(() => js('document.querySelector(".browser-keyboard")?.disabled === false'), 'released controller becomes available');
@@ -313,6 +319,27 @@ try {
   await js(`document.querySelector('[aria-label="Expand workspace"]').click()`);
   await until(() => js('document.querySelector(".workspace-browser-panel").getBoundingClientRect().width > 900'), 'browser uses the full workspace width');
   assert.equal(await js('document.querySelector(".workspace-explorer").classList.contains("is-split")'), false, 'browser fullscreen has no file sidebar');
+  for (const [width, height, deviceScaleFactor] of [[800, 700, 1], [2400, 1600, 2], [1280, 1000, 1]]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor, mobile: false });
+    if (width >= 1280) {
+      await until(() => js(`!!document.querySelector('[aria-label="Expand workspace"], [aria-label="Restore split view"]')`), 'desktop workspace controls');
+      await js(`document.querySelector('[aria-label="Expand workspace"]')?.click()`);
+      await until(() => js(`document.querySelector('.chat-shell').classList.contains('workspace-fullscreen')`), 'expand desktop viewer after a compact layout');
+    }
+    await until(() => js('!document.querySelector(".app-layout").getAnimations().some(animation => animation.playState === "running")'), 'sidebar layout transition settled');
+    await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    const fit = await js(`(() => {
+      const viewport = document.querySelector('.browser-viewport').getBoundingClientRect();
+      const canvas = document.querySelector('.browser-screen canvas').getBoundingClientRect();
+      return { fits: canvas.left >= viewport.left && canvas.right <= viewport.right && canvas.top >= viewport.top && canvas.bottom <= viewport.bottom,
+        width: canvas.width, height: canvas.height };
+    })()`);
+    assert.equal(fit.fits, true, 'The whole page must fit in the available viewer area');
+    assert.ok(Math.abs(fit.width / fit.height - 1280 / 800) < 0.01, 'Scaling preserves the page aspect ratio');
+    if (width === 2400) assert.ok(fit.width > 1280, 'Large viewers upscale locally beyond the old 1280px limit');
+    await delay(400);
+    assert.equal(resizeEvents.length, 0, 'Resizing the dashboard must not negotiate capture dimensions');
+  }
   await js(`document.querySelector('[aria-label="Restore split view"]').click()`);
   if (process.env.BROWSER_UI_SCREENSHOT_DIR) {
     fs.mkdirSync(process.env.BROWSER_UI_SCREENSHOT_DIR, { recursive: true });

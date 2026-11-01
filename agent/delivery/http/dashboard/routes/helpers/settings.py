@@ -294,6 +294,13 @@ def is_channel_context_trim_setting(key: str) -> bool:
 
 
 def normalize_setting_value(key: str, value: Any | None) -> Any | None:
+    if key in {"browser.stream_quality", "browser.stream_max_width", "browser.stream_max_height"}:
+        if value is None:
+            return None
+        maximum = 100 if key == "browser.stream_quality" else 8192
+        if type(value) is not int or not 1 <= value <= maximum:
+            raise HTTPException(400, f"{key} must be an integer between 1 and {maximum}.")
+        return value
     if key == "skills.local_execution_mode":
         if not isinstance(value, str) or value not in {"snapshot", "source"}:
             raise HTTPException(400, "Local skill execution must be snapshot or source.")

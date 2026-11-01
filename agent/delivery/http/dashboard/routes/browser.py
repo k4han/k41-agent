@@ -210,7 +210,6 @@ async def browser_viewer(websocket: WebSocket):
         revision = payload.get("visibility_revision", 0)
         state = BrowserStreamState(visible=payload.get("visible") is not False,
             visibility_revision=revision if type(revision) is int and 0 <= revision <= 0xFFFFFFFF else 0)
-        state.resize(payload.get("width"))
         while not current.closed:
             target_id, follow_agent = await view_tab(websocket, container.browser_service, current, target_id,
                                                     viewer_id, follow_agent, state=state)

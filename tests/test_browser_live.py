@@ -200,6 +200,36 @@ async def test_live_capture_pause_resume_scaling_and_target_notifications(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_live_capture_independent_limits_keep_layout_and_pointer_coordinates(tmp_path):
+    driver = await StagehandDriver.launch(tmp_path / "profile", tmp_path / "artifacts")
+    try:
+        tab = (await driver.tabs())[0]["id"]
+        async with CDPViewer(driver, tab) as viewer:
+            await viewer.call("Runtime.evaluate", {"expression": """
+                document.body.innerHTML = '<button style="position:absolute;left:1000px;top:100px;width:100px;height:100px" onclick="document.body.dataset.clicked=1">Click</button>';
+            """})
+            dimensions = (await viewer.call("Runtime.evaluate", {
+                "expression": "({width: innerWidth, height: innerHeight})", "returnByValue": True}))["result"]["value"]
+            for width, height, quality in [(800, 600, 1), (1024, 600, 100), (1280, 720, 65),
+                                           (1600, 900, 80), (1920, 1080, 90), (1000, 200, 95)]:
+                await viewer.configure(width=width, height=height, quality=quality, refresh=True)
+                frame = await asyncio.wait_for(viewer.frames.get(), 5)
+                image = Image.open(io.BytesIO(base64.b64decode(frame["data"])))
+                assert image.width <= min(width, dimensions["width"])
+                assert image.height <= min(height, dimensions["height"])
+                assert abs(image.width / image.height - dimensions["width"] / dimensions["height"]) < 0.02
+                assert (frame["metadata"]["deviceWidth"], frame["metadata"]["deviceHeight"]) == (dimensions["width"], dimensions["height"])
+            for kind in ["mousePressed", "mouseReleased"]:
+                await viewer.input({"type": kind, "x": 1050, "y": 150, "button": "left", "clickCount": 1})
+            assert (await viewer.call("Runtime.evaluate", {"expression": "document.body.dataset.clicked"}))["result"]["value"] == "1"
+            after = (await viewer.call("Runtime.evaluate", {
+                "expression": "({width: innerWidth, height: innerHeight})", "returnByValue": True}))["result"]["value"]
+            assert after == dimensions
+    finally:
+        await driver.close()
+
+
+@pytest.mark.asyncio
 async def test_live_dashboard_stream_resumes_after_normal_and_rapid_visibility_changes(tmp_path):
     from agent.delivery.http.dashboard.routes.browser import view_tab
 

@@ -14,7 +14,8 @@ from itertools import count
 @dataclass
 class BrowserStreamState:
     visible: bool = True
-    width: int = 1280
+    max_width: int = 1280
+    max_height: int = 720
     frame_ids: object = field(default_factory=count)
     pending: dict[int, float] = field(default_factory=dict)
     send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -34,11 +35,14 @@ class BrowserStreamState:
     every_nth_frame: int = 1
     last_adaptation: float = 0
 
-    def resize(self, value):
-        if type(value) in {int, float} and math.isfinite(value):
-            width = max(320, min(1280, round(value / 80) * 80))
-            if self.width != width:
-                self.width = width
+    def refresh_settings(self, config):
+        if config is None:
+            return
+        for name, default, maximum in (("quality", 65, 100), ("max_width", 1280, 8192), ("max_height", 720, 8192)):
+            value = config.get(f"browser.stream_{name}", default)
+            value = value if type(value) is int and 1 <= value <= maximum else default
+            if getattr(self, name) != value:
+                setattr(self, name, value)
                 self.settings_changed.set()
 
     def acknowledge(self, event):
@@ -56,12 +60,12 @@ class BrowserStreamState:
             return
         self.last_adaptation = time.monotonic()
         load = max(self.ack_ms, self.render_ms * 4)
-        quality, interval = (45, 3) if load > 250 else (55, 2) if load > 120 else (65, 1)
-        # Avoid restarting capture repeatedly near a quality boundary.
-        if quality > self.quality and load > (180 if self.quality == 45 else 80):
+        interval = 3 if load > 250 else 2 if load > 120 else 1
+        # Avoid restarting capture repeatedly near a frame-rate boundary.
+        if interval < self.every_nth_frame and load > (180 if self.every_nth_frame == 3 else 80):
             return
-        if (quality, interval) != (self.quality, self.every_nth_frame):
-            self.quality, self.every_nth_frame = quality, interval
+        if interval != self.every_nth_frame:
+            self.every_nth_frame = interval
             self.settings_changed.set()
 
     def metrics(self):
@@ -120,6 +124,8 @@ class BrowserInputQueue:
 async def stream_tab(websocket, browser, current, target_id, viewer_id, viewer_factory, target_selector,
                      follow_agent=True, state=None):
     state = state or BrowserStreamState()
+    config = getattr(getattr(browser, "container", None), "config_service", None)
+    state.refresh_settings(config)
     state.pending.clear()
     state.streaming.clear()
     state.status_ready.clear()
@@ -146,7 +152,7 @@ async def stream_tab(websocket, browser, current, target_id, viewer_id, viewer_f
                 revision = state.visibility_revision
                 if hasattr(viewer, "configure"):
                     await viewer.configure(visible=state.visible,
-                        width=min(state.width, 960) if state.quality == 45 else state.width,
+                        width=state.max_width, height=state.max_height,
                         quality=state.quality, every_nth_frame=state.every_nth_frame,
                         refresh=revision != configured_visibility)
                 configured_visibility = revision
@@ -235,8 +241,11 @@ async def stream_tab(websocket, browser, current, target_id, viewer_id, viewer_f
                     nonce = event.get("id")
                     if type(nonce) is not int or not 0 <= nonce <= 0xFFFFFFFF:
                         raise ValueError("Invalid heartbeat.")
+                    state.refresh_settings(config)
                     await state.send_json(websocket, {"type": "pong", "id": nonce, "metrics": state.metrics()})
                 elif kind in {"visibility", "resize"}:
+                    # Older viewers may send dimensions; capture size comes only from settings.
+                    state.refresh_settings(config)
                     if kind == "visibility":
                         visible = event.get("visible")
                         if type(visible) is not bool:
@@ -253,7 +262,6 @@ async def stream_tab(websocket, browser, current, target_id, viewer_id, viewer_f
                             state.status_ready.clear()
                             state.settings_changed.set()
                             state.changed.set()
-                    state.resize(event.get("width"))
                 else:
                     inputs.put(event, current.handoff_id, state.visibility_revision)
 
