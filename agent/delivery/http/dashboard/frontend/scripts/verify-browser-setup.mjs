@@ -63,7 +63,7 @@ const server = http.createServer(async (req, res) => {
         if (!failNext) installed = true;
       }
       res.end(JSON.stringify({ installed, installation_supported: supported,
-        installation_unavailable_reason: supported ? null : 'Automatic installation supports Debian/Ubuntu x86_64.',
+        installation_unavailable_reason: supported ? null : 'Automatic installation supports Debian/Ubuntu x86_64 and ARM64.',
         executable_path: settings['browser.executable_path'].value || (installed ? '/usr/bin/google-chrome' : null),
         configured_executable_path: settings['browser.executable_path'].value, job })); return;
     }
@@ -137,7 +137,7 @@ try {
   await open();
   await until(() => status('Browser not installed'), 'initial state');
   assert.equal(await js(`!!document.querySelector('a[href="/settings/browser"]')`), true);
-  await js(`(() => { const button = ${button('Install Chrome')}; button.click(); button.click(); })()`);
+  await js(`(() => { const button = ${button('Install browser')}; button.click(); button.click(); })()`);
   await until(() => status('Installing Chrome'), 'background installation');
   assert.deepEqual(actions, ['install']);
   assert.equal(await js(`${button('Check browser')}.disabled`), true);
@@ -147,7 +147,7 @@ try {
   await until(() => status('Browser ready'), 'installation success');
 
   hold = true; failNext = true;
-  await js(`${button('Reinstall Chrome')}.click()`);
+  await js(`${button('Reinstall browser')}.click()`);
   await until(() => status('Installing Chrome'), 'repair starts');
   hold = false;
   await until(() => status('Last operation failed'), 'repair fails');
@@ -180,7 +180,7 @@ try {
   assert.equal(await js(`document.querySelector('.browser-setup-error')?.textContent.includes('Cannot start browser setup worker')`), true);
   launchError = false; supported = false; job = null;
   await js(`${button('Refresh')}.click()`);
-  await until(() => js(`${button('Reinstall Chrome')}.disabled`), 'unsupported installation disabled');
+  await until(() => js(`${button('Reinstall browser')}.disabled`), 'unsupported installation disabled');
   assert.equal(await js(`${button('Check browser')}.disabled`), false);
   const slider = async (id, value) => js(`(() => { const input = document.getElementById(${JSON.stringify(id)}); input.value = ${value}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   assert.equal(await js(`document.querySelector('output[for="browser-stream-size"]').textContent`), '1280 × 720');

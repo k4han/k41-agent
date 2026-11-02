@@ -45,6 +45,7 @@ dependencies = [
     "stagehand==4.3.0",
     "stagehand-middleware==0.1.2",
     "websockets>=16.1.1,<17",
+    "playwright>=1.56.0,<2 ; (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'arm64' and sys_platform == 'linux')",
 ]
 
 [dependency-groups]

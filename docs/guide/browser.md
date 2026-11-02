@@ -10,8 +10,8 @@ optional remote execution environment.
 
 ## Set up the browser
 
-1. Open **Settings > Browser** to view browser status, install Chrome, or check
-   an existing installation. Automatic installation supports Debian/Ubuntu x86_64;
+1. Open **Settings > Browser** to view browser status, install Chrome/Chromium, or check
+   an existing installation. Automatic installation supports Debian/Ubuntu x86_64 and ARM64;
    on other platforms, install Chrome/Chromium with your system installer.
 2. Open **Settings > Agents** and select the intended agent.
 3. Enable its Browser tools under **Capabilities & Tools**.
@@ -33,8 +33,8 @@ lacks permission, use the CLI from a terminal with the appropriate privileges.
 
 Run `k41 browser check` to test headless startup and browser automation with a
 temporary profile. If you configured a custom path, check that same binary with
-`k41 browser check --executable-path /path/to/chrome`. On Debian/Ubuntu x86_64,
-`k41 browser install --force` reinstalls Chrome and repairs system dependencies.
+`k41 browser check --executable-path /path/to/chrome`. On Debian/Ubuntu x86_64 or ARM64,
+`k41 browser install --force` reinstalls Chrome/Chromium and repairs system dependencies.
 Package installation requires root or cached sudo credentials (`sudo -v`);
 run the check as the same user that runs the agent. See
 [installation](./installation#optional-browser-support) to include browser setup
@@ -50,6 +50,14 @@ access to a background server process.
 
 A source installation needs its normal `uv sync` dependencies. No Browserbase
 account or separately configured browser model is required.
+
+On ARM64, installation uses Playwright's full Chromium build and installs its
+system libraries with `apt-get`. The browser is downloaded as the agent user;
+only package installation uses sudo. K41 discovers it through
+`~/.k41-agent/browser/chromium`, including after restarting the service. This
+avoids Snap restrictions on the profile and Stagehand extension directories.
+Use a Debian/Ubuntu release supported by
+[Playwright](https://playwright.dev/python/docs/intro#system-requirements).
 
 ## Ask for a browser task
 

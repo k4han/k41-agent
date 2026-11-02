@@ -156,7 +156,7 @@ export function BrowserPage() {
             </Show>
             <Show when={setup()}>{(value) => <>
               <Show when={!value().installation_supported} fallback={
-                <p class="hint">Install official Google Chrome and its required system libraries. The server needs root or passwordless sudo access.</p>
+                <p class="hint">Install Chrome or Chromium for this host and its required system libraries. The server needs root or passwordless sudo access.</p>
               }>
                 <p class="hint">{value().installation_unavailable_reason}</p>
               </Show>
@@ -166,11 +166,11 @@ export function BrowserPage() {
                 </button>
                 <Show when={!value().installed} fallback={
                   <button class="btn btn-secondary btn-sm" type="button" disabled={actionsDisabled() || !value().installation_supported} onClick={() => void start("repair")}>
-                    <RotateCcw size={14} /> Reinstall Chrome
+                    <RotateCcw size={14} /> Reinstall browser
                   </button>
                 }>
                   <button class="btn btn-primary btn-sm" type="button" disabled={actionsDisabled() || !value().installation_supported} onClick={() => void start("install")}>
-                    <Download size={14} /> Install Chrome
+                    <Download size={14} /> Install browser
                   </button>
                 </Show>
               </div>

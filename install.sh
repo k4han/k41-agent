@@ -44,7 +44,7 @@ Options:
   --uv-version VALUE       Pinned uv version. Defaults to 0.12.13 (use "latest" to follow upstream).
   --use-branch-source      Download source from the configured branch instead of a release artifact.
   --skip-init              Skip runtime initialization.
-  --with-browser           Install and check Chrome (Debian/Ubuntu x86_64).
+  --with-browser           Install and check Chrome/Chromium (Debian/Ubuntu x86_64 or ARM64).
   --enable-autostart       Enable systemd user service autostart on boot (default).
   --no-autostart           Disable systemd user service autostart.
   --skip-autostart         Alias for --no-autostart.
@@ -951,4 +951,4 @@ echo "  k41"
 echo "  k41 status"
 echo "  k41 stop"
 echo "  k41 service status"
-echo "  k41 browser install  # Optional browser support on Debian/Ubuntu x86_64"
+echo "  k41 browser install  # Optional browser support on Debian/Ubuntu x86_64 or ARM64"

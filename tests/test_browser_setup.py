@@ -1,7 +1,8 @@
 """Browser installation, failure handling, and isolated automation checks."""
 
 import subprocess
-from contextlib import closing
+import sys
+from contextlib import closing, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,11 +13,12 @@ from typer.testing import CliRunner
 from agent.bootstrap import browser
 from agent.bootstrap.cli import app
 from agent.modules.browser import StagehandDriver
+from agent.shared.infrastructure import browser as discovery
 
 
-def linux_host(monkeypatch, uid=0):
-    monkeypatch.setattr(browser, "sys", SimpleNamespace(platform="linux"))
-    monkeypatch.setattr(browser.platform, "machine", lambda: "x86_64")
+def linux_host(monkeypatch, uid=0, machine="x86_64"):
+    monkeypatch.setattr(browser, "sys", SimpleNamespace(platform="linux", executable="/agent/python"))
+    monkeypatch.setattr(browser.platform, "machine", lambda: machine)
     monkeypatch.setattr(browser.platform, "freedesktop_os_release", lambda: {"ID": "ubuntu"})
     monkeypatch.setattr(browser.os, "geteuid", lambda: uid, raising=False)
     monkeypatch.setattr(browser, "find_browser", lambda: None)
@@ -87,7 +89,7 @@ def test_force_repairs_even_when_browser_exists(monkeypatch):
     assert "install" in commands[-1]
 
 
-@pytest.mark.parametrize("machine,distribution", [("aarch64", "ubuntu"), ("x86_64", "fedora")])
+@pytest.mark.parametrize("machine,distribution", [("armv7l", "ubuntu"), ("x86_64", "fedora"), ("aarch64", "fedora")])
 def test_unsupported_host_fails_before_download_or_package_changes(monkeypatch, machine, distribution):
     linux_host(monkeypatch)
     monkeypatch.setattr(browser.platform, "machine", lambda: machine)
@@ -100,6 +102,116 @@ def test_unsupported_host_fails_before_download_or_package_changes(monkeypatch, 
     monkeypatch.setattr(browser.subprocess, "run", unexpected)
     with pytest.raises(browser.BrowserSetupError, match="Debian/Ubuntu"):
         browser.install_browser()
+
+
+@pytest.mark.parametrize("machine", ["aarch64", "arm64"])
+@pytest.mark.parametrize("distribution", ["ubuntu", "debian"])
+@pytest.mark.parametrize("force", [False, True])
+def test_arm_install_uses_full_native_chromium_and_unprivileged_download(monkeypatch, tmp_path, machine, distribution, force):
+    linux_host(monkeypatch, uid=1000, machine=machine)
+    monkeypatch.setattr(browser.platform, "freedesktop_os_release", lambda: {"ID": distribution})
+    executable = tmp_path / "playwright" / "chrome"
+    executable.parent.mkdir()
+    executable.write_bytes(b"chromium")
+    executable.chmod(0o755)
+    link = tmp_path / "managed" / "chromium"
+    monkeypatch.setattr(browser, "managed_browser_path", lambda: link)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", SimpleNamespace(
+        sync_playwright=lambda: nullcontext(SimpleNamespace(chromium=SimpleNamespace(executable_path=str(executable)))),
+    ))
+    links = []
+    monkeypatch.setattr(Path, "symlink_to", lambda path, target: links.append((path, target)))
+    commands = []
+    monkeypatch.setattr(browser.subprocess, "run", lambda command, **kwargs: commands.append(command))
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("ARM hosts must not download the x86_64 Chrome package")
+
+    monkeypatch.setattr(httpx, "stream", unexpected)
+    assert browser.installation_unavailable_reason() is None
+    assert browser.install_browser(force=force) == str(link)
+    prefix = ["sudo", "-n", "env", "DEBIAN_FRONTEND=noninteractive"]
+    assert commands[:2] == [
+        [*prefix, "apt-get", "update"],
+        [*prefix, "dpkg", "--force-confdef", "--force-confold", "--configure", "-a"],
+    ]
+    assert commands[2] == [*prefix, "/agent/python", "-m", "playwright", "install-deps", "chromium"]
+    assert commands[3] == [
+        "/agent/python", "-m", "playwright", "install", "--no-shell", *(["--force"] if force else []), "chromium",
+    ]
+    assert links == [(link, executable)]
+
+
+def test_failed_arm_download_does_not_publish_browser_or_claim_success(monkeypatch, tmp_path):
+    linux_host(monkeypatch, machine="aarch64")
+    link = tmp_path / "managed" / "chromium"
+    monkeypatch.setattr(browser, "managed_browser_path", lambda: link)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", SimpleNamespace(sync_playwright=lambda: pytest.fail("Download failed")))
+
+    def run(command, **kwargs):
+        if "--no-shell" in command:
+            raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(browser.subprocess, "run", run)
+    result = CliRunner().invoke(app, ["browser", "install"])
+    assert result.exit_code == 1
+    assert "Browser is ready" not in result.output
+    assert not link.exists()
+
+
+@pytest.mark.parametrize("override", [False, True])
+def test_discovery_finds_managed_browser_and_respects_environment_override(monkeypatch, tmp_path, override):
+    managed = tmp_path / "chromium"
+    custom = tmp_path / "custom-chrome"
+    for path in (managed, custom):
+        path.write_bytes(b"browser")
+        path.chmod(0o755)
+    monkeypatch.setattr(discovery, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(discovery, "managed_browser_path", lambda: managed)
+    monkeypatch.setattr(discovery.shutil, "which", lambda name: None)
+    monkeypatch.setenv("CHROME_PATH", str(custom) if override else "")
+    assert discovery.find_browser() == str(custom if override else managed)
+
+
+def test_discovery_skips_missing_managed_browser_and_finds_system_chromium(monkeypatch, tmp_path):
+    executable = tmp_path / "chromium"
+    executable.write_bytes(b"browser")
+    executable.chmod(0o755)
+    monkeypatch.setattr(discovery, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(discovery, "managed_browser_path", lambda: tmp_path / "missing")
+    monkeypatch.setattr(discovery.shutil, "which", lambda name: str(executable) if name == "chromium" else None)
+    monkeypatch.delenv("CHROME_PATH", raising=False)
+    assert discovery.find_browser() == str(executable)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("configured", ["", "/custom/chrome"])
+async def test_runtime_uses_same_browser_discovery_as_installation(monkeypatch, tmp_path, configured):
+    from agent.modules.browser import driver
+    from stagehand import Stagehand, local_browser
+
+    captured = {}
+
+    async def launch(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(context=SimpleNamespace(pages=pages))
+
+    async def pages():
+        return []
+
+    async def create(**kwargs):
+        return object()
+
+    async def reset_facade(self, artifacts):
+        pass
+
+    monkeypatch.setattr(driver, "find_browser", lambda: "/managed/chromium")
+    monkeypatch.setattr(local_browser, "launch", launch)
+    monkeypatch.setattr(Stagehand, "create", create)
+    monkeypatch.setattr(StagehandDriver, "reset_facade", reset_facade)
+    await StagehandDriver._launch(tmp_path / "profile", tmp_path / "artifacts", configured)
+    assert captured["executable_path"] == (configured or "/managed/chromium")
+    assert captured["chromium_sandbox"] is True
 
 
 def test_missing_sudo_fails_before_download(monkeypatch):

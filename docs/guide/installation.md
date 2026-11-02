@@ -73,10 +73,10 @@ chmod +x install.sh
 
 ## Optional browser support
 
-On Debian/Ubuntu x86_64, install and verify Chrome for
+On Debian/Ubuntu x86_64 or ARM64, install and verify Chrome/Chromium for
 [browser automation](./browser) with:
 
-Open **Settings > Browser** and select **Install Chrome** to set it up from the
+Open **Settings > Browser** and select **Install browser** to set it up from the
 dashboard. The server process needs root or passwordless sudo access. You can
 also install it from a terminal:
 
@@ -85,8 +85,10 @@ k41 browser install
 ```
 
 The command reuses an existing Chrome/Chromium installation. Otherwise it
-downloads official Google Chrome and uses `apt-get` to install it with its system
-dependencies. Run it as the agent's user; package installation requires root or
+downloads official Google Chrome on x86_64 or Playwright's full Chromium build on
+ARM64, and uses `apt-get` to install the system dependencies. The ARM64 path
+requires a [Playwright-supported Debian/Ubuntu release](https://playwright.dev/python/docs/intro#system-requirements).
+Run it as the agent's user; package installation requires root or
 cached sudo credentials (`sudo -v`). It does not require a desktop session.
 
 To include this step in the shell installer:

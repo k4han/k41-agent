@@ -11,6 +11,8 @@ from tempfile import TemporaryDirectory
 
 import typer
 
+from agent.shared.infrastructure.browser import find_browser, managed_browser_path
+
 
 app = typer.Typer(
     help="Install and check the local browser used by browser tools.",
@@ -25,48 +27,24 @@ class BrowserSetupError(RuntimeError):
     """A browser setup failure with an actionable operator message."""
 
 
-def find_browser() -> str | None:
-    """Find Chrome in locations also searched by Stagehand."""
-    candidates = [os.environ.get("CHROME_PATH", "")]
-    if sys.platform == "win32":
-        for name in ("LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)"):
-            if root := os.environ.get(name):
-                candidates.extend(
-                    str(Path(root) / "Google" / product / "Application" / "chrome.exe")
-                    for product in ("Chrome SxS", "Chrome")
-                )
-    elif sys.platform == "darwin":
-        candidates.extend(
-            f"/Applications/{product}.app/Contents/MacOS/{product}"
-            for product in ("Google Chrome Canary", "Google Chrome", "Google Chrome Beta", "Chromium")
-        )
-    else:
-        candidates.extend(
-            path for name in ("google-chrome-stable", "google-chrome", "chromium-browser", "chromium")
-            if (path := shutil.which(name))
-        )
-    return next((path for path in candidates if path and Path(path).is_file()
-                 and (sys.platform == "win32" or os.access(path, os.X_OK))), None)
-
-
 def _run_package_command(command: list[str]) -> None:
     try:
         subprocess.run(command, check=True, timeout=600)
     except subprocess.CalledProcessError as exc:
         raise BrowserSetupError(
             f"Browser installation command failed (exit {exc.returncode}). "
-            "Check the package-manager output above. If sudo requires a password, "
+            "Check the command output above. If sudo requires a password, "
             "run 'sudo -v', then retry as the same user."
         ) from exc
     except subprocess.TimeoutExpired as exc:
-        raise BrowserSetupError("Browser installation timed out. Check apt/dpkg locks and retry.") from exc
+        raise BrowserSetupError("Browser installation timed out. Check network access and apt/dpkg locks, then retry.") from exc
 
 
 def installation_unavailable_reason() -> str | None:
     """Describe unsupported hosts without downloading or changing packages."""
-    if sys.platform != "linux" or platform.machine().lower() not in {"x86_64", "amd64"}:
+    if sys.platform != "linux" or platform.machine().lower() not in {"x86_64", "amd64", "aarch64", "arm64"}:
         return (
-            "Automatic installation supports Debian/Ubuntu x86_64. "
+            "Automatic installation supports Debian/Ubuntu x86_64 and ARM64. "
             "Install Chrome or Chromium for this platform, then run 'k41 browser check'."
         )
     release = platform.freedesktop_os_release()
@@ -80,7 +58,7 @@ def installation_unavailable_reason() -> str | None:
 
 
 def install_browser(*, force: bool = False) -> str:
-    """Reuse an installed browser or install official Chrome and its dependencies."""
+    """Reuse a browser or install Chrome/Chromium and its system dependencies."""
     if not force and (existing := find_browser()):
         typer.echo(f"Using existing browser: {existing}")
         return existing
@@ -89,7 +67,7 @@ def install_browser(*, force: bool = False) -> str:
     prefix = []
     if os.geteuid() != 0:
         if not shutil.which("sudo"):
-            raise BrowserSetupError("Installing Chrome requires root or sudo. Ask an administrator to install Chrome.")
+            raise BrowserSetupError("Installing a browser requires root or sudo. Ask an administrator to install Chrome or Chromium.")
         prefix = ["sudo", "-n"]
     # Set this after sudo so its environment filtering cannot restore prompts.
     prefix.extend(["env", "DEBIAN_FRONTEND=noninteractive"])
@@ -109,6 +87,9 @@ def install_browser(*, force: bool = False) -> str:
             "Run 'sudo dpkg --configure -a' in a terminal on the agent host, "
             "resolve the reported package errors, then retry browser installation."
         ) from exc
+
+    if platform.machine().lower() in {"aarch64", "arm64"}:
+        return _install_arm_chromium(prefix, force=force)
 
     import httpx
 
@@ -132,6 +113,28 @@ def install_browser(*, force: bool = False) -> str:
     if not executable:
         raise BrowserSetupError("Chrome installation finished, but its executable was not found on PATH.")
     return executable
+
+
+def _install_arm_chromium(prefix: list[str], *, force: bool) -> str:
+    """Install full Chromium without Snap's profile and extension restrictions."""
+    from playwright.sync_api import sync_playwright
+
+    command = [sys.executable, "-m", "playwright"]
+    typer.echo("Installing Chromium system libraries...")
+    _run_package_command([*prefix, *command, "install-deps", "chromium"])
+    typer.echo("Downloading Chromium for ARM64...")
+    # Download as the agent user; only system package installation needs sudo.
+    # The full browser is required for Stagehand's extension in headless mode.
+    _run_package_command([*command, "install", "--no-shell", *(["--force"] if force else []), "chromium"])
+    with sync_playwright() as playwright:
+        executable = Path(playwright.chromium.executable_path)
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        raise BrowserSetupError("Chromium installation finished, but its executable was not found or is not executable.")
+    link = managed_browser_path()
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.unlink(missing_ok=True)
+    link.symlink_to(executable)
+    return str(link)
 
 
 async def check_browser(executable_path: str = "") -> None:
@@ -159,7 +162,8 @@ def _verify(executable_path: str) -> None:
         detail = str(exc) or type(exc).__name__
         raise BrowserSetupError(
             f"Browser check failed: {detail}. Run 'k41 browser install --force' to repair "
-            "Chrome and its system dependencies on Debian/Ubuntu x86_64. "
+            "Chrome/Chromium and its system dependencies on Debian/Ubuntu x86_64 or ARM64. "
+            "On other platforms, install a browser and set browser.executable_path or CHROME_PATH. "
             "If the browser still exits, check AppArmor/container restrictions and available memory."
         ) from exc
     typer.echo("Browser is ready for browser tools. No desktop session is required.")
@@ -167,9 +171,9 @@ def _verify(executable_path: str) -> None:
 
 @app.command("install")
 def install(
-    force: bool = typer.Option(False, "--force", help="Reinstall Chrome and repair system dependencies."),
+    force: bool = typer.Option(False, "--force", help="Reinstall Chrome/Chromium and repair system dependencies."),
 ) -> None:
-    """Install Chrome on Debian/Ubuntu x86_64 and verify browser automation."""
+    """Install Chrome/Chromium on Debian/Ubuntu x86_64 or ARM64 and verify automation."""
     try:
         executable = install_browser(force=force)
         typer.echo(f"Browser executable: {executable}")
@@ -182,7 +186,7 @@ def install(
 @app.command("check")
 def check(
     executable_path: str = typer.Option(
-        "", "--executable-path", help="Chrome executable to check; empty uses automatic discovery.",
+        "", "--executable-path", help="Chrome/Chromium executable to check; empty uses automatic discovery.",
     ),
 ) -> None:
     """Check browser automation without installing packages or changing login profiles."""

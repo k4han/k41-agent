@@ -24,8 +24,8 @@ The default dashboard is at
 
 | Command | Purpose |
 | --- | --- |
-| `k41 browser install` | Reuse Chrome/Chromium or install Chrome with system dependencies on Debian/Ubuntu x86_64, then verify automation. |
-| `k41 browser install --force` | Reinstall Chrome and repair system dependencies on Debian/Ubuntu x86_64. |
+| `k41 browser install` | Reuse Chrome/Chromium or install it with system dependencies on Debian/Ubuntu x86_64 or ARM64, then verify automation. |
+| `k41 browser install --force` | Reinstall Chrome (x86_64) or Chromium (ARM64) and repair system dependencies on Debian/Ubuntu. |
 | `k41 browser check` | Verify headless browser automation using a disposable profile. |
 | `k41 browser check --executable-path /path/to/chrome` | Verify a specific Chrome/Chromium executable. |
 
