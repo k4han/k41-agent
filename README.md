@@ -126,7 +126,7 @@ Check logs with:
 
 ```sh
 journalctl --user -u k41-agent -e
-tail -f ~/.k41-agent/server.log
+tail -F ~/.k41-agent/logs/server.log
 ```
 
 To start the service at boot without login, enable linger once:
@@ -224,8 +224,15 @@ Runtime data:
 Server log:
 
 ```text
-~/.k41-agent/server.log
+~/.k41-agent/logs/server.log
 ```
+
+Each log file rotates at 10 MiB and keeps up to five numbered backups in
+`~/.k41-agent/logs/`. Tray and dashboard updater output use `tray.log` and
+`update.log` in the same directory. Existing logs outside this directory are
+left intact. Use `tail -F` to keep following the active file across rotations.
+Restart the server after upgrading; existing Linux services also need their
+unit refreshed with `k41 service install --no-now` before restarting.
 
 ## Troubleshooting
 
@@ -245,7 +252,7 @@ k41
 View logs:
 
 ```text
-~/.k41-agent/server.log
+~/.k41-agent/logs/server.log
 ```
 
 If the `k41` command is not found after installation, open a new terminal. On macOS or Linux, also make sure your shell profile has been reloaded.

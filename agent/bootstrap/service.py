@@ -13,6 +13,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent.bootstrap.logs import SERVER_LOG_FILE
+
 SERVICE_NAME = "k41-agent.service"
 SERVICE_DESCRIPTION = "K41 Agent Server"
 SERVICE_STOP_TIMEOUT_SECONDS = 30
@@ -82,7 +84,7 @@ def render_unit(paths: ServicePaths) -> str:
     runtime_home = str(Path.home() / ".k41-agent")
     envs_bin = str(paths.agent_home / "envs" / "bin")
     tools_dir = str(paths.agent_home / "tools")
-    server_log = str(Path.home() / ".k41-agent" / "server.log")
+    server_log = str(SERVER_LOG_FILE)
     return f"""[Unit]
 Description={SERVICE_DESCRIPTION}
 Wants=network-online.target
@@ -91,16 +93,17 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory={app_dir}
-ExecStart={python_exe} -m agent.bootstrap.cli --foreground --no-tray
+ExecStart="{python_exe}" -m agent.bootstrap.logs --log-file "{server_log}" --tee -- "{python_exe}" -m agent.bootstrap.cli --foreground --no-tray
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec={SERVICE_STOP_TIMEOUT_SECONDS}
+KillMode=mixed
 Environment=K41_AGENT_HOME={agent_home}
 Environment=AGENT_HOME={agent_home}
 Environment=VIRTUAL_ENV={agent_home}/envs
 Environment=PATH={envs_bin}:{tools_dir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-StandardOutput=append:{server_log}
-StandardError=append:{server_log}
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=default.target

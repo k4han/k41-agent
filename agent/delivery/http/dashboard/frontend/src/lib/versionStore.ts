@@ -117,7 +117,7 @@ async function pollForServerRestart(
         hasSeenServerDown = true;
       }
       if (status?.status === "failed" || status?.status === "cancelled") {
-        throw new Error(status.error || "The update failed. Check ~/.k41-agent/update.log for details.");
+        throw new Error(status.error || "The update failed. Check ~/.k41-agent/logs/update.log for details.");
       }
     }
     let ready = false;
@@ -167,5 +167,5 @@ async function pollForServerRestart(
   }
 
   setUpdateState("error");
-  setUpdateError("The update is taking longer than expected. Check ~/.k41-agent/update.log and server.log before retrying.");
+  setUpdateError("The update is taking longer than expected. Check ~/.k41-agent/logs/update.log and ~/.k41-agent/logs/server.log before retrying.");
 }

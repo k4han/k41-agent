@@ -52,8 +52,16 @@ installation by passing `--no-autostart` to the shell installer.
 | Windows installation | `%LOCALAPPDATA%\k41-agent` |
 | macOS or Linux installation | `${XDG_DATA_HOME:-~/.local/share}/k41-agent` |
 | Runtime data | `~/.k41-agent` |
-| Server log | `~/.k41-agent/server.log` |
+| Server log | `~/.k41-agent/logs/server.log` |
+| Tray log | `~/.k41-agent/logs/tray.log` |
+| Dashboard updater log | `~/.k41-agent/logs/update.log` |
 | Bootstrap configuration | `~/.k41-agent/config.yaml` |
+
+Logs rotate at 10 MiB per file, retaining up to five numbered backups per log.
+Follow the active server log across rotations with
+`tail -F ~/.k41-agent/logs/server.log`. Existing logs outside `logs/` are kept.
+After upgrading, restart the server to use rotation. Refresh an existing Linux
+service with `k41 service install --no-now` before restarting it.
 
 The bootstrap file and the dashboard's runtime settings serve different
 purposes. Manage providers, agents, tools, and channels through their dashboard

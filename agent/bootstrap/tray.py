@@ -10,12 +10,12 @@ import webbrowser
 from pathlib import Path
 from typing import Callable
 
+from agent.bootstrap.logs import SERVER_LOG_FILE, TRAY_LOG_FILE
+
 logger = logging.getLogger(__name__)
 
 TRAY_PID_FILE = Path.home() / ".k41-agent" / "tray.pid"
-TRAY_LOG_FILE = Path.home() / ".k41-agent" / "tray.log"
 SERVER_PID_FILE = Path.home() / ".k41-agent" / "server.pid"
-SERVER_LOG_FILE = Path.home() / ".k41-agent" / "server.log"
 SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
 
 APP_NAME = "k41-agent"

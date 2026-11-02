@@ -4,12 +4,12 @@ import logging
 import shutil
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from agent.bootstrap.logs import UPDATE_LOG_FILE, logged_command
 from agent.bootstrap.process_utils import spawn_detached_process
 from agent.bootstrap.update import (
     DEFAULT_ARTIFACT_NAME,
@@ -114,7 +114,6 @@ def trigger_system_update(request: Request) -> dict[str, Any]:
 
     try:
         install = resolve_managed_install()
-        update_log = Path.home() / ".k41-agent" / "update.log"
         with update_lock(install.agent_home):
             previous = read_update_status(install.agent_home)
             if previous and previous.get("status") in {"queued", "running"}:
@@ -124,6 +123,9 @@ def trigger_system_update(request: Request) -> dict[str, Any]:
                 str(install.python_exe), "-m", "agent.bootstrap.cli", "update",
                 "--yes", "--delay", "1.5", "--update-id", update_id,
             ]
+            # Keep the log writer in the updater's scope so stopping the server
+            # cannot close its output pipe during an update.
+            command = logged_command(command, UPDATE_LOG_FILE, python_executable=str(install.python_exe))
             if is_systemd_service_active():
                 systemd_run = shutil.which("systemd-run")
                 if systemd_run is None:
@@ -133,7 +135,7 @@ def trigger_system_update(request: Request) -> dict[str, Any]:
             status = {"update_id": update_id, "status": "queued", "queued_at": time.time(), "error": None}
             write_update_status(install.agent_home, status)
             try:
-                spawn_detached_process(command, update_log, cwd=install.agent_home)
+                spawn_detached_process(command, None, cwd=install.agent_home)
             except Exception as exc:
                 write_update_status(install.agent_home, {**status, "status": "failed", "error": str(exc)})
                 raise

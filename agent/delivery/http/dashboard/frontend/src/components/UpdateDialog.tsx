@@ -145,7 +145,7 @@ export function UpdateDialog() {
             <h3 class="update-dialog-progress-title">Update Failed</h3>
             <p class="update-dialog-progress-desc text-danger">{error()}</p>
             <p class="update-dialog-progress-subdesc">
-              Check server.log or ~/.k41-agent/update.log for the installation and recovery status.
+              Check ~/.k41-agent/logs/server.log or ~/.k41-agent/logs/update.log for the installation and recovery status.
             </p>
           </div>
         </Show>

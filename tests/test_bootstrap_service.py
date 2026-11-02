@@ -29,6 +29,12 @@ def test_render_unit_uses_foreground_no_tray(tmp_path: Path) -> None:
     assert str(paths.python_exe) in content
     assert str(paths.app_dir) in content
     assert "-m agent.bootstrap.cli" in content
+    assert "-m agent.bootstrap.logs" in content
+    assert str(service_module.SERVER_LOG_FILE) in content
+    assert "StandardOutput=journal" in content
+    assert "StandardError=journal" in content
+    assert "append:" not in content
+    assert "KillMode=mixed" in content
 
 
 def test_resolve_service_paths_prefers_env_home(monkeypatch, tmp_path: Path) -> None:

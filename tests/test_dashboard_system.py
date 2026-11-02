@@ -172,6 +172,9 @@ def test_systemd_updater_runs_in_separate_scope(managed_install, monkeypatch) ->
     assert command[:4] == ["/usr/bin/systemd-run", "--user", "--scope", "--quiet"]
     assert command[4] == f"--unit=k41-agent-update-{response.json()['update_id']}"
     assert command[5] == "--"
+    assert command[7:9] == ["-m", "agent.bootstrap.logs"]
+    assert "--log-file" in command
+    assert calls[0][0][1] is None
     assert calls[0][1]["cwd"] == managed_install.agent_home
 
 

@@ -14,6 +14,7 @@ import typer
 from agent.bootstrap import ui
 from agent.bootstrap.browser import app as browser_app
 from agent.bootstrap.chatgpt import app as chatgpt_app
+from agent.bootstrap.logs import SERVER_LOG_FILE, TRAY_LOG_FILE
 from agent.bootstrap.version import APP_VERSION
 
 logger = logging.getLogger(__name__)
@@ -45,9 +46,7 @@ app.add_typer(browser_app, name="browser")
 
 PID_FILE = Path.home() / ".k41-agent" / "server.pid"
 SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
-SERVER_LOG_FILE = Path.home() / ".k41-agent" / "server.log"
 TRAY_PID_FILE = Path.home() / ".k41-agent" / "tray.pid"
-TRAY_LOG_FILE = Path.home() / ".k41-agent" / "tray.log"
 
 
 def _echo_info(message: str) -> None:

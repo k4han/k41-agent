@@ -90,7 +90,8 @@ tracked in Git.
 
 ## Find more detail
 
-Inspect `~/.k41-agent/server.log`. On Linux, use
+Inspect `~/.k41-agent/logs/server.log` and its numbered backups. Use
+`tail -F ~/.k41-agent/logs/server.log` to follow output across rotations. On Linux, use
 `journalctl --user -u k41-agent -e` for service logs.
 
 When reporting an issue, include the K41 version, operating system, relevant

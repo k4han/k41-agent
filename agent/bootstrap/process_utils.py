@@ -190,52 +190,54 @@ def is_tray_running(
 
 def spawn_detached_process(
     cmd: list[str],
-    log_file: Path,
+    log_file: Path | None,
     env: dict[str, str] | None = None,
     cwd: Path | None = None,
 ) -> None:
     """Spawn a detached background process with platform-specific flags.
 
-    Centralizes the duplicated `subprocess.Popen` logic that previously
-    lived in cli._daemonize, cli._spawn_tray_process, update.start_server,
-    update.start_tray and tray._start_server.
+    Capture combined output through a rotating log writer. Pass None when
+    the command already contains its own log writer (for a systemd scope).
     """
-    log_file.parent.mkdir(parents=True, exist_ok=True)
+    from agent.bootstrap.logs import logged_command
+
+    if log_file is not None:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        cmd = logged_command(cmd, log_file)
     spawn_env = (os.environ if env is None else env).copy()
     if "VIRTUAL_ENV" not in spawn_env and sys.prefix != sys.base_prefix:
         spawn_env["VIRTUAL_ENV"] = sys.prefix
 
-    with log_file.open("ab") as lf:
-        if os.name == "nt":
-            startupinfo = subprocess.STARTUPINFO()  # type: ignore[attr-defined]
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
-            startupinfo.wShowWindow = subprocess.SW_HIDE  # type: ignore[attr-defined]
-            subprocess.Popen(
-                cmd,
-                env=spawn_env,
-                cwd=str(cwd) if cwd else None,
-                stdin=subprocess.DEVNULL,
-                stdout=lf,
-                stderr=subprocess.STDOUT,
-                creationflags=(
-                    subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
-                    | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
-                    | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
-                ),
-                startupinfo=startupinfo,
-                close_fds=True,
-            )
-        else:
-            subprocess.Popen(
-                cmd,
-                env=spawn_env,
-                cwd=str(cwd) if cwd else None,
-                stdin=subprocess.DEVNULL,
-                stdout=lf,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-                close_fds=True,
-            )
+    if os.name == "nt":
+        startupinfo = subprocess.STARTUPINFO()  # type: ignore[attr-defined]
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
+        startupinfo.wShowWindow = subprocess.SW_HIDE  # type: ignore[attr-defined]
+        subprocess.Popen(
+            cmd,
+            env=spawn_env,
+            cwd=str(cwd) if cwd else None,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+            creationflags=(
+                subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+                | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
+                | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+            ),
+            startupinfo=startupinfo,
+            close_fds=True,
+        )
+    else:
+        subprocess.Popen(
+            cmd,
+            env=spawn_env,
+            cwd=str(cwd) if cwd else None,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            close_fds=True,
+        )
 
 
 def is_server_running(pid_file: Path) -> bool:

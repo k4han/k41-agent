@@ -18,6 +18,7 @@ from uuid import uuid4
 import httpx
 import psutil
 
+from agent.bootstrap.logs import SERVER_LOG_FILE, TRAY_LOG_FILE
 from agent.bootstrap.version import APP_VERSION, PACKAGE_NAME
 from agent.bootstrap.update_state import (
     UpdateBusyError,
@@ -35,7 +36,6 @@ DOWNLOAD_TIMEOUT_SECONDS = 60.0
 SERVER_STOP_TIMEOUT_SECONDS = 15.0
 SERVER_TERMINATE_TIMEOUT_SECONDS = 10.0
 SERVER_KILL_TIMEOUT_SECONDS = 5.0
-SERVER_LOG_FILE = Path.home() / ".k41-agent" / "server.log"
 PID_FILE = Path.home() / ".k41-agent" / "server.pid"
 TRAY_PID_FILE = Path.home() / ".k41-agent" / "tray.pid"
 SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
@@ -892,7 +892,6 @@ def start_tray(install: ManagedInstall) -> None:
 
     env = os.environ.copy()
     env["K41_TRAY_DAEMONIZED"] = "1"
-    tray_log = Path.home() / ".k41-agent" / "tray.log"
     tray_exe = install.python_exe
     tray_argv_tail = ["-m", "agent.bootstrap.tray"]
     if os.name == "nt":
@@ -909,7 +908,7 @@ def start_tray(install: ManagedInstall) -> None:
                 tray_exe = pythonw
     spawn_detached_process(
         [str(tray_exe), *tray_argv_tail],
-        tray_log,
+        TRAY_LOG_FILE,
         env=env,
         cwd=install.app_dir,
     )
