@@ -139,6 +139,7 @@ async def test_local_variables_use_configured_coding_shell(tmp_path, monkeypatch
         **get_execution_environment("custom-shell"),
         "workspace": "Local project", "working_dir": str(tmp_path),
     }
+    assert variables["operating_system"] == variables["host_os"]
 
 
 @pytest.mark.asyncio

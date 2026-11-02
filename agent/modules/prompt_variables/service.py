@@ -62,13 +62,8 @@ class PromptVariableService:
     async def list_variables(self) -> list[dict[str, Any]]:
         import getpass
 
-        from agent.modules.prompt_variables.environment import (
-            get_environment_defaults,
-            get_host_os,
-        )
+        from agent.modules.prompt_variables.environment import get_environment_defaults
 
-        # Get system info
-        os_name = get_host_os()
         environment = get_environment_defaults()
 
         try:
@@ -77,14 +72,6 @@ class PromptVariableService:
             username = "user"
 
         system_vars = [
-            {
-                "name": "operating_system",
-                "value": os_name,
-                "placeholder": "{{operating_system}}",
-                "is_system": True,
-                "created_at": None,
-                "updated_at": None,
-            },
             {
                 "name": "host_os",
                 "value": environment["host_os"],

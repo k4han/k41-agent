@@ -55,6 +55,10 @@ OS, shell, and user information from the coding worker inside the sandbox;
 friendly label. Runtime lookup failures propagate instead of substituting host
 values. The assembled prompt cache remains scoped to the workspace execution.
 
+`host_os` is the OS variable shown in the prompt variable catalog.
+`operating_system` remains a reserved runtime alias for existing templates and
+is omitted from the catalog to avoid duplicate entries.
+
 GitHub automation policy is shared across issue and review tasks even when a
 repository selects a custom executing agent. Manual repository tasks receive
 their request and repository context without the backend automation policy.

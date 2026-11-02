@@ -93,10 +93,10 @@ async def test_prompt_variable_dashboard_api_crud(prompt_variable_db) -> None:
     empty = client.get("/dashboard-api/prompt-variables")
     assert empty.status_code == 200
     variables = empty.json()["variables"]
-    assert len(variables) == 7
+    assert len(variables) == 6
     assert all(var["is_system"] is True for var in variables)
     system_names = {var["name"] for var in variables}
-    assert {"operating_system", "host_os", "shell_name", "shell_kind", "workspace", "working_dir", "user_name"} <= system_names
+    assert system_names == {"host_os", "shell_name", "shell_kind", "workspace", "working_dir", "user_name"}
 
     created = client.post(
         "/prompt-variables",
