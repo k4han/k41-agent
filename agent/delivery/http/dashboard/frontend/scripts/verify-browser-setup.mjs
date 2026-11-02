@@ -18,7 +18,7 @@ const settings = Object.fromEntries([
   ['storage_root', 'Browser storage root', '', 'text'],
   ['idle_ttl_seconds', 'Browser idle timeout (seconds)', 600, 'number'],
   ['operation_timeout_seconds', 'Browser operation timeout (seconds)', 60, 'number'],
-  ['stream_quality', 'Live image quality', 65, 'number'],
+  ['stream_quality', 'Live image quality', 50, 'number'],
   ['stream_max_width', 'Maximum live image width', 1280, 'number'],
   ['stream_max_height', 'Maximum live image height', 720, 'number'],
 ].map(([suffix, label, value, input_type]) => [`browser.${suffix}`, {
@@ -201,7 +201,7 @@ try {
   await js(`${button('Discard')}.click()`);
   assert.equal(await js(`document.querySelector('output[for="browser-stream-size"]').textContent`), '1920 × 1080');
   await js(`${button('Reset viewer defaults')}.click()`);
-  assert.equal(await js(`document.getElementById('browser-stream-quality').value`), '65');
+  assert.equal(await js(`document.getElementById('browser-stream-quality').value`), '50');
   assert.equal(await js(`document.querySelector('output[for="browser-stream-size"]').textContent`), '1280 × 720');
   await js(`${button('Save Changes')}.click()`);
   await until(() => js(`!document.querySelector('.settings-pending-bar')`), 'save viewer defaults');

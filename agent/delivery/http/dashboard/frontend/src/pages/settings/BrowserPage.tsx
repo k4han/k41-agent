@@ -198,7 +198,7 @@ export function BrowserPage() {
         <DataGate data={data()} error={error()} onRetry={load}>{(payload) => <>
           <SettingsSection title="Live viewer" actions={
             <button class="btn btn-ghost btn-sm" type="button" disabled={busy() || saving()}
-              onClick={() => batch(() => { setDraft(STREAM_QUALITY, 65); selectStreamSize(2); })}>
+              onClick={() => batch(() => { setDraft(STREAM_QUALITY, 50); selectStreamSize(2); })}>
               <RotateCcw size={13} /> Reset viewer defaults
             </button>
           }>
@@ -209,10 +209,10 @@ export function BrowserPage() {
                     dirty={pendingChanges().some(change => change.key === STREAM_QUALITY)}
                     onChange={value => setDraft(STREAM_QUALITY, value)} onRestore={() => restoreDraft(STREAM_QUALITY)}
                     control={<div class="browser-stream-control">
-                      <output for="browser-stream-quality">{Number(drafts()[STREAM_QUALITY] ?? 65)}%</output>
+                      <output for="browser-stream-quality">{Number(drafts()[STREAM_QUALITY] ?? 50)}%</output>
                       <input id="browser-stream-quality" type="range" min="1" max="100" step="1"
                         aria-label="Live image quality" aria-describedby="browser-stream-quality-hint"
-                        value={Number(drafts()[STREAM_QUALITY] ?? 65)}
+                        value={Number(drafts()[STREAM_QUALITY] ?? 50)}
                         onInput={event => setDraft(STREAM_QUALITY, Number(event.currentTarget.value))} />
                       <p class="hint" id="browser-stream-quality-hint">JPEG quality stays at this level, including on slow connections.</p>
                     </div>} />

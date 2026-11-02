@@ -19,7 +19,7 @@ class Socket:
         self.commands = []
         self.layout = {}
         image = io.BytesIO()
-        Image.new("RGB", (1280, 800), "green").save(image, format="JPEG")
+        Image.new("RGB", (1280, 720), "green").save(image, format="JPEG")
         self.snapshot_bytes = image.getvalue()
         self.snapshot_data = base64.b64encode(self.snapshot_bytes).decode()
 
@@ -202,7 +202,7 @@ async def test_refresh_allows_unchanged_source_until_current_snapshot_is_ready(v
     async def resize(*args):
         entered.set()
         await release.wait()
-        return socket.snapshot_bytes, 1280, 800
+        return socket.snapshot_bytes, 1280, 720
 
     async with viewer:
         socket.frame(1)
@@ -249,7 +249,7 @@ async def test_hidden_viewer_stops_capture_and_resume_captures_scaled_fresh_imag
         assert not any(command["method"] == "Page.captureScreenshot" for command in socket.commands[commands:])
         await viewer.configure(visible=True, width=640, quality=45)
         frame = await asyncio.wait_for(viewer.frames.get(), 1)
-        assert Image.open(io.BytesIO(frame["data"])).size == (640, 400)
+        assert Image.open(io.BytesIO(frame["data"])).size == (640, 360)
         assert frame["metadata"]["deviceWidth"] == 1280
         start = next(command for command in reversed(socket.commands) if command["method"] == "Page.startScreencast")
         assert start["params"]["maxWidth"] == 640
@@ -272,10 +272,10 @@ async def test_fresh_capture_uses_current_scroll_position_instead_of_old_source_
 
 
 @pytest.mark.parametrize("width,height,quality,expected", [
-    (800, 600, 1, (800, 500)), (1024, 600, 100, (960, 600)),
-    (1280, 720, 65, (1152, 720)), (1600, 900, 80, (1280, 800)),
-    (1920, 1080, 90, (1280, 800)), (1280, 100, 95, (160, 100)),
-    (100, 800, 35, (100, 63)), (1280, 800, 65, (1280, 800)),
+    (800, 600, 1, (800, 450)), (1024, 600, 100, (1024, 576)),
+    (1280, 720, 50, (1280, 720)), (1600, 900, 80, (1280, 720)),
+    (1920, 1080, 90, (1280, 720)), (1280, 100, 95, (178, 100)),
+    (100, 800, 35, (100, 56)), (1280, 800, 65, (1280, 720)),
 ])
 @pytest.mark.asyncio
 async def test_capture_respects_independent_caps_and_preserves_input_dimensions(viewer_socket, width, height, quality, expected):
@@ -286,7 +286,7 @@ async def test_capture_respects_independent_caps_and_preserves_input_dimensions(
         image = Image.open(io.BytesIO(frame["data"]))
         assert image.size == expected
         assert image.width <= width and image.height <= height
-        assert (frame["metadata"]["deviceWidth"], frame["metadata"]["deviceHeight"]) == (1280, 800)
+        assert (frame["metadata"]["deviceWidth"], frame["metadata"]["deviceHeight"]) == (1280, 720)
         assert viewer.stream_options["maxWidth"] == width
         assert viewer.stream_options["maxHeight"] == height
         snapshot = next(command for command in reversed(socket.commands) if command["method"] == "Page.captureScreenshot")
@@ -357,7 +357,7 @@ async def test_delayed_snapshot_cannot_replace_a_newer_screencast_frame(viewer_s
     async def resize(*args):
         entered.set()
         await release.wait()
-        return socket.snapshot_bytes, 1280, 800
+        return socket.snapshot_bytes, 1280, 720
 
     monkeypatch.setattr(transport.asyncio, "to_thread", resize)
     async with viewer:
@@ -396,7 +396,7 @@ async def test_unchanged_screencast_feedback_does_not_discard_final_snapshot(vie
     async def resize(*args):
         socket.frame(1)
         await viewer.call("Input.insertText", {"text": "barrier"})
-        return socket.snapshot_bytes, 1280, 800
+        return socket.snapshot_bytes, 1280, 720
 
     monkeypatch.setattr(transport.asyncio, "to_thread", resize)
     async with viewer:

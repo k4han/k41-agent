@@ -516,24 +516,69 @@ def test_stream_frame_rate_adapts_without_changing_quality_or_size(monkeypatch):
 
     now = 10.0
     monkeypatch.setattr(browser_stream.time, "monotonic", lambda: now)
-    state = routes.BrowserStreamState(quality=92, max_width=1800, max_height=1000)
+    state = routes.BrowserStreamState(human_control=True, quality=92, max_width=1800, max_height=1000)
     state.pending[1] = now - 0.4
     state.acknowledge({"frame_id": 1, "render_ms": 30})
-    assert (state.quality, state.every_nth_frame) == (92, 3)
+    assert (state.quality, state.target_fps, state.every_nth_frame) == (92, 15, 2)
     assert (state.max_width, state.max_height) == (1800, 1000)
     assert state.settings_changed.is_set()
     for frame_id in range(2, 20):
         now += 2.1
         state.pending[frame_id] = now - 0.02
         state.acknowledge({"frame_id": frame_id, "render_ms": 5})
-    assert (state.quality, state.every_nth_frame) == (92, 1)
+    assert (state.quality, state.target_fps, state.every_nth_frame) == (92, 20, 1)
     assert (state.max_width, state.max_height) == (1800, 1000)
 
 
-def test_stream_metrics_support_fourth_source_sampling_interval():
-    state = routes.BrowserStreamState(every_nth_frame=4)
-    assert state.target_fps == 10
-    assert state.metrics()["target_fps"] == 10
+@pytest.mark.parametrize("human_control,congested,fps,interval", [
+    (False, False, 10, 3), (False, True, 10, 3), (True, False, 20, 1), (True, True, 15, 2),
+])
+def test_stream_frame_rate_limits_follow_control_mode(human_control, congested, fps, interval):
+    state = routes.BrowserStreamState(human_control=human_control, congested=congested)
+    assert state.target_fps == state.metrics()["target_fps"] == fps
+    assert state.every_nth_frame == interval
+
+
+@pytest.mark.asyncio
+async def test_handoff_updates_capture_rate_without_reconnecting(monkeypatch):
+    class ConfigurableViewer(FakeViewer):
+        def __init__(self):
+            super().__init__()
+            self.configurations = asyncio.Queue()
+
+        async def configure(self, **values):
+            self.configurations.put_nowait(values)
+
+    current, viewer, socket = stream_fixture(monkeypatch, ConfigurableViewer())
+    state = routes.BrowserStreamState()
+    task = asyncio.create_task(routes.view_tab(socket, None, current, "first", "viewer", False, state=state))
+    try:
+        configuration = await asyncio.wait_for(viewer.configurations.get(), 1)
+        assert (configuration["width"], configuration["height"], configuration["quality"]) == (1280, 720, 50)
+        assert configuration["every_nth_frame"] == 3 and state.target_fps == 10
+        await stream_message(socket, "status", mode="agent")
+
+        current.handoff_id = "handoff"
+        current.notify()
+        configuration = await asyncio.wait_for(viewer.configurations.get(), 1)
+        assert configuration["every_nth_frame"] == 1 and state.target_fps == 20
+        await stream_message(socket, "status", mode="human")
+
+        state.send_ms = 140
+        state.pending[1] = asyncio.get_running_loop().time() - 0.01
+        socket.events.put_nowait({"type": "frame_ack", "frame_id": 1})
+        configuration = await asyncio.wait_for(viewer.configurations.get(), 1)
+        assert configuration["every_nth_frame"] == 2 and state.target_fps == 15
+
+        current.handoff_id = None
+        current.notify()
+        configuration = await asyncio.wait_for(viewer.configurations.get(), 1)
+        assert configuration["every_nth_frame"] == 3 and state.target_fps == 10
+        await stream_message(socket, "status", mode="agent")
+        assert state.quality == 50 and current.last_activity == 42
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio
@@ -724,23 +769,25 @@ async def test_frame_bytes_are_bounded_independently_of_frame_count(monkeypatch)
         metrics = state.metrics()
         assert metrics["frame_bytes"] == 16 and metrics["decode_ms"] == 5
         assert metrics["client_queue_ms"] == 7 and metrics["capture_ack_ms"] >= 0
-        assert state.quality == 65
+        assert state.quality == 50
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
 
+@pytest.mark.parametrize("human_control", [False, True])
 @pytest.mark.parametrize("signal,value", [("send_ms", 140), ("decode_ms", 70),
                                           ("client_queue_ms", 140), ("queue_ms", 180)])
-def test_stream_adapts_to_network_decode_and_queue_pressure(monkeypatch, signal, value):
+def test_stream_adapts_to_network_decode_and_queue_pressure(monkeypatch, human_control, signal, value):
     from agent.delivery.http.dashboard.routes.helpers import browser_stream
 
     monkeypatch.setattr(browser_stream.time, "monotonic", lambda: 10)
-    state = routes.BrowserStreamState(quality=95, max_width=1800, max_height=1000)
+    state = routes.BrowserStreamState(human_control=human_control, quality=95, max_width=1800, max_height=1000)
     setattr(state, signal, value)
     state.pending[1] = 9.99
     state.acknowledge({"frame_id": 1, "decode_ms": state.decode_ms, "queue_ms": state.client_queue_ms})
-    assert state.target_fps == 10 and state.every_nth_frame == 3
+    assert state.target_fps == (15 if human_control else 10)
+    assert state.every_nth_frame == (2 if human_control else 3)
     assert (state.quality, state.max_width, state.max_height) == (95, 1800, 1000)
 
 
@@ -748,7 +795,7 @@ def test_intentional_pacing_and_skipped_images_do_not_mask_render_pressure(monke
     from agent.delivery.http.dashboard.routes.helpers import browser_stream
 
     monkeypatch.setattr(browser_stream.time, "monotonic", lambda: 10)
-    state = routes.BrowserStreamState(every_nth_frame=3, queue_ms=95)
+    state = routes.BrowserStreamState(human_control=True, congested=True, queue_ms=95)
     state.pending[1] = 9.99
     state.acknowledge({"frame_id": 1, "drawn": True, "render_ms": 5})
     assert state.every_nth_frame == 1
@@ -840,15 +887,17 @@ async def test_delayed_old_status_cannot_release_resume_image_before_new_status(
 
 
 @pytest.mark.asyncio
-async def test_pacing_coalesces_frames_and_priority_snapshot_bypasses_delay(monkeypatch):
+async def test_pacing_coalesces_frames_and_caps_priority_snapshots(monkeypatch):
     current, viewer, socket = stream_fixture(monkeypatch)
-    state = routes.BrowserStreamState(every_nth_frame=3)
+    state = routes.BrowserStreamState()
     task = asyncio.create_task(routes.view_tab(socket, None, current, "first", "viewer", False, state=state))
     try:
         viewer.frames.put_nowait(stream_frame())
         await asyncio.wait_for(socket.frames.get(), 1)
         viewer.frames.put_nowait({**stream_frame(), "priority": True})
-        await asyncio.wait_for(socket.frames.get(), 0.08)
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(socket.frames.get(), 0.04)
+        await asyncio.wait_for(socket.frames.get(), 0.5)
         viewer.frames.put_nowait(stream_frame())
         # Allow pacing to take the first candidate, then replace it during the delay.
         await asyncio.sleep(0.01)

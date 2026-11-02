@@ -353,7 +353,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "browser.storage_root": "",
     "browser.idle_ttl_seconds": 600,
     "browser.operation_timeout_seconds": 60,
-    "browser.stream_quality": 65,
+    "browser.stream_quality": 50,
     "browser.stream_max_width": 1280,
     "browser.stream_max_height": 720,
     "tools.permissions": [],

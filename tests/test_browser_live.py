@@ -215,6 +215,7 @@ async def test_live_capture_independent_limits_keep_layout_and_pointer_coordinat
             """})
             dimensions = (await viewer.call("Runtime.evaluate", {
                 "expression": "({width: innerWidth, height: innerHeight})", "returnByValue": True}))["result"]["value"]
+            assert dimensions == {"width": 1280, "height": 720}
             for width, height, quality in [(800, 600, 1), (1024, 600, 100), (1280, 720, 65),
                                            (1600, 900, 80), (1920, 1080, 90), (1000, 200, 95)]:
                 await viewer.configure(width=width, height=height, quality=quality, refresh=True)

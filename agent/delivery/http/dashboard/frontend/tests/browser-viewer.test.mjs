@@ -20,11 +20,11 @@ function binaryFrame(id = 1, width = 1280, height = 800) {
 test('browser input maps scaled screenshots to viewport coordinates', () => {
   const point = browserPointer(420, 250, { left: 100, top: 50, width: 640, height: 400 });
   assert.equal(point.x, 640);
-  assert.equal(point.y, 400);
+  assert.equal(point.y, 360);
   const enlarged = browserPointer(1600, 900, { left: 0, top: 0, width: 1920, height: 1200 });
   assert.equal(enlarged.x, 1600 * 1280 / 1920);
-  assert.equal(enlarged.y, 600);
-  assert.equal(browserPointer(-10, 900, { left: 0, top: 0, width: 320, height: 200 }).y, 800);
+  assert.equal(enlarged.y, 540);
+  assert.equal(browserPointer(-10, 900, { left: 0, top: 0, width: 320, height: 200 }).y, 720);
   assert.equal(browserPointer(-10, 900, { left: 0, top: 0, width: 320, height: 200 }).x, 0);
 });
 

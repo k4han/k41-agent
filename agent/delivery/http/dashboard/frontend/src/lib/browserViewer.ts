@@ -123,9 +123,9 @@ export function connectBrowserViewer(options: {
   let appliedInput: { sent: number; acknowledged: number } | undefined;
   const metrics: BrowserStreamMetrics = { firstFrameMs: 0, decodeMs: 0, renderMs: 0, ackMs: 0,
     heartbeatMs: 0, bytesPerSecond: 0, framesPerSecond: 0, reconnects: 0, droppedFrames: 0,
-    inputAckMs: 0, inputToFrameMs: 0, quality: 65, sendMs: 0, serverQueueMs: 0,
+    inputAckMs: 0, inputToFrameMs: 0, quality: 50, sendMs: 0, serverQueueMs: 0,
     captureAckMs: 0, captureMs: 0, resizeMs: 0, pendingBytes: 0, frameBytes: 0,
-    targetFps: 30, sourceDroppedFrames: 0, pacingDroppedFrames: 0 };
+    targetFps: 10, sourceDroppedFrames: 0, pacingDroppedFrames: 0 };
   const publishMetrics = () => {
     const elapsed = (performance.now() - sampleAt) / 1000;
     if (elapsed >= 1) {
@@ -278,7 +278,7 @@ export function connectBrowserViewer(options: {
             const outstanding = ping;
             if (outstanding && outstanding.id === message.id) { metrics.heartbeatMs = performance.now() - outstanding.sent; ping = undefined; }
             metrics.ackMs = message.metrics?.ack_ms || 0;
-            metrics.quality = message.metrics?.quality || 65;
+            metrics.quality = message.metrics?.quality || 50;
             metrics.sendMs = message.metrics?.send_ms || 0;
             metrics.serverQueueMs = message.metrics?.queue_ms || 0;
             metrics.captureAckMs = message.metrics?.capture_ack_ms || 0;
@@ -286,7 +286,7 @@ export function connectBrowserViewer(options: {
             metrics.resizeMs = message.metrics?.resize_ms || 0;
             metrics.pendingBytes = message.metrics?.pending_bytes || 0;
             metrics.frameBytes = message.metrics?.frame_bytes || 0;
-            metrics.targetFps = message.metrics?.target_fps || 30;
+            metrics.targetFps = message.metrics?.target_fps || 10;
             metrics.sourceDroppedFrames = message.metrics?.source_frames_dropped || 0;
             metrics.pacingDroppedFrames = message.metrics?.pacing_dropped || 0;
             publishMetrics(); return;
@@ -404,7 +404,7 @@ export function connectBrowserViewer(options: {
 }
 
 export function browserPointer(clientX: number, clientY: number,
-  rect: { left: number; top: number; width: number; height: number }, width = 1280, height = 800) {
+  rect: { left: number; top: number; width: number; height: number }, width = 1280, height = 720) {
   return {
     x: Math.max(0, Math.min(width, (clientX - rect.left) * width / Math.max(1, rect.width))),
     y: Math.max(0, Math.min(height, (clientY - rect.top) * height / Math.max(1, rect.height))),

@@ -126,7 +126,7 @@ def dashboard_client(make_dashboard_client):
 def test_browser_stream_settings_defaults_save_and_reset(make_dashboard_client):
     service, _ = _db_config_service("")
     client = make_dashboard_client(service)
-    defaults = {"browser.stream_quality": 65, "browser.stream_max_width": 1280, "browser.stream_max_height": 720}
+    defaults = {"browser.stream_quality": 50, "browser.stream_max_width": 1280, "browser.stream_max_height": 720}
     settings = client.get("/dashboard-api/browser/configuration").json()["settings"]
     assert {key: settings[key]["value"] for key in defaults} == defaults
     values = {"browser.stream_quality": 100, "browser.stream_max_width": 1500, "browser.stream_max_height": 850}
@@ -153,7 +153,7 @@ def test_browser_stream_settings_reject_invalid_updates(make_dashboard_client, k
     assert "must be an integer" in response.json()["detail"]
     assert client.put("/settings", json={"values": {key: invalid, "browser.stream_quality": invalid if key == "browser.stream_quality" else 90}}).status_code == 400
     assert service.get(key) == before
-    assert service.get("browser.stream_quality") == 65
+    assert service.get("browser.stream_quality") == 50
 
 
 def test_model_profile_settings_save_validate_and_clear(make_dashboard_client) -> None:

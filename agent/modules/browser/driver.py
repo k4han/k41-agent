@@ -45,10 +45,13 @@ class StagehandDriver:
             headless=True, port=port, user_data_dir=profile, preserve_user_data_dir=True,
             executable_path=executable_path or None, chromium_sandbox=True,
             args=["--remote-debugging-address=127.0.0.1"],
-            viewport_width=1280, viewport_height=800, accept_downloads=False,
+            viewport_width=1280, viewport_height=720, accept_downloads=False,
         )
         try:
             stagehand = await Stagehand.create(browser=browser)
+            # Chrome window dimensions include browser chrome on some platforms.
+            for page in await browser.context.pages():
+                await page.set_viewport_size(1280, 720)
             driver = cls(browser, stagehand, None, port)
             await driver.reset_facade(artifacts)
             return driver
@@ -215,7 +218,7 @@ class CDPViewer:
     IDLE_SNAPSHOT_DELAY = 0.1
 
     def __init__(self, driver, target_id: str, *, visible=True, width=1280, height=None,
-                 quality=65, every_nth_frame=1):
+                 quality=50, every_nth_frame=3):
         self.driver = driver
         self.target_id = target_id
         self.socket = None
@@ -247,7 +250,7 @@ class CDPViewer:
     @staticmethod
     def _options(width, height, quality, every_nth_frame):
         width = max(1, min(8192, int(width)))
-        height = max(1, min(8192, int(height if height is not None else width * 800 / 1280)))
+        height = max(1, min(8192, int(height if height is not None else width * 720 / 1280)))
         return {"format": "jpeg", "quality": max(1, min(100, int(quality))),
                 "maxWidth": width, "maxHeight": height,
                 "everyNthFrame": max(1, min(4, int(every_nth_frame)))}
@@ -351,7 +354,7 @@ class CDPViewer:
         self.frames.put_nowait({**frame, "capture_revision": self.capture_revision,
                                "captured_at": frame.get("captured_at", time.monotonic())})
 
-    async def configure(self, *, visible=True, width=1280, height=None, quality=65, every_nth_frame=1, refresh=False):
+    async def configure(self, *, visible=True, width=1280, height=None, quality=50, every_nth_frame=3, refresh=False):
         options = self._options(width, height, quality, every_nth_frame)
         async with self.configure_lock:
             if visible == self.visible and options == self.stream_options:
@@ -460,7 +463,7 @@ class CDPViewer:
             if button not in {"none", "left", "right", "middle"}:
                 raise ValueError("Invalid mouse button.")
             params = {"type": kind, "x": self.number(event.get("x"), 0, 1280),
-                      "y": self.number(event.get("y"), 0, 800), "button": button,
+                      "y": self.number(event.get("y"), 0, 720), "button": button,
                       "modifiers": modifiers, "buttons": int(self.number(event.get("buttons", 0), 0, 7))}
             if kind == "mouseWheel":
                 params.update(deltaX=self.number(event.get("deltaX", 0), -2000, 2000),

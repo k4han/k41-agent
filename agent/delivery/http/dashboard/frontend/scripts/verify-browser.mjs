@@ -197,7 +197,7 @@ server.on('upgrade', (req, socket) => {
         assert.ok(message.frame_id > 0 && message.frame_id <= frameSequences.get(socket));
         frameAcknowledgements.push(message.frame_id);
       } else if (message.type === 'ping') {
-        send(socket, { type: 'pong', id: message.id, metrics: { ack_ms: 30, quality: 65 } });
+        send(socket, { type: 'pong', id: message.id, metrics: { ack_ms: 30, quality: 50 } });
       } else if (message.type === 'visibility') {
         assert.equal('width' in message, false, 'Visibility must leave capture width to settings');
         assert.equal('height' in message, false, 'Visibility must leave capture height to settings');

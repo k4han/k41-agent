@@ -44,8 +44,9 @@ class BrowserStreamState:
     frames_sent: int = 0
     bytes_sent: int = 0
     frames_dropped: int = 0
-    quality: int = 65
-    every_nth_frame: int = 1
+    quality: int = 50
+    human_control: bool = False
+    congested: bool = False
     last_adaptation: float = 0
 
     @property
@@ -54,7 +55,18 @@ class BrowserStreamState:
 
     @property
     def target_fps(self):
-        return {1: 30, 2: 20, 3: 10}.get(self.every_nth_frame, 10)
+        return (15 if self.congested else 20) if self.human_control else 10
+
+    @property
+    def every_nth_frame(self):
+        return (2 if self.congested else 1) if self.human_control else 3
+
+    def set_human_control(self, enabled):
+        if self.human_control != enabled:
+            self.human_control = enabled
+            self.congested = False
+            self.last_adaptation = 0
+            self.settings_changed.set()
 
     def clear_pending(self):
         self.pending.clear()
@@ -64,7 +76,7 @@ class BrowserStreamState:
     def refresh_settings(self, config):
         if config is None:
             return
-        for name, default, maximum in (("quality", 65, 100), ("max_width", 1280, 8192), ("max_height", 720, 8192)):
+        for name, default, maximum in (("quality", 50, 100), ("max_width", 1280, 8192), ("max_height", 720, 8192)):
             value = config.get(f"browser.stream_{name}", default)
             value = value if type(value) is int and 1 <= value <= maximum else default
             if getattr(self, name) != value:
@@ -88,7 +100,7 @@ class BrowserStreamState:
                 setattr(self, name, max(0, min(10000, value)))
         self.frames_dropped += event.get("drawn") is False
         self.credits.set()
-        if time.monotonic() - self.last_adaptation < 2:
+        if not self.human_control or time.monotonic() - self.last_adaptation < 2:
             return
         self.last_adaptation = time.monotonic()
         # Intentional pacing must not prevent recovery to a higher frame rate.
@@ -96,13 +108,13 @@ class BrowserStreamState:
         load = max(self.ack_ms, self.render_ms * 4, self.decode_ms * 4,
                    self.send_ms * 2, queue_pressure * 2, self.client_queue_ms * 2)
         if self.pending_bytes >= FRAME_BYTE_WINDOW * 0.75:
-            load = max(load, 251)
-        interval = 3 if load > 250 else 2 if load > 120 else 1
+            load = max(load, 121)
         # Avoid restarting capture repeatedly near a frame-rate boundary.
-        if interval < self.every_nth_frame and load > (180 if self.every_nth_frame == 3 else 80):
+        if 80 < load <= 120:
             return
-        if interval != self.every_nth_frame:
-            self.every_nth_frame = interval
+        congested = load > 120
+        if congested != self.congested:
+            self.congested = congested
             self.settings_changed.set()
 
     def metrics(self):
@@ -202,6 +214,7 @@ async def stream_tab(websocket, browser, current, target_id, viewer_id, viewer_f
     state = state or BrowserStreamState()
     config = getattr(getattr(browser, "container", None), "config_service", None)
     state.refresh_settings(config)
+    state.set_human_control(bool(current.handoff_id))
     state.clear_pending()
     state.streaming.clear()
     state.status_ready.clear()
@@ -302,8 +315,7 @@ async def stream_tab(websocket, browser, current, target_id, viewer_id, viewer_f
                 if not state.visible or not current_frame(frame):
                     continue
                 revision = state.visibility_revision
-                delay = last_sent + 1 / state.target_fps - time.monotonic()
-                if delay > 0 and not frame.get("priority"):
+                while (delay := last_sent + 1 / state.target_fps - time.monotonic()) > 0:
                     await asyncio.sleep(delay)
                     frame = latest(frame)
                 decoded_frame = None
@@ -328,7 +340,7 @@ async def stream_tab(websocket, browser, current, target_id, viewer_id, viewer_f
                 frame_id = next(state.frame_ids) % 0xFFFFFFFF + 1
                 metadata = frame["metadata"]
                 payload = struct.pack("!III", frame_id, int(metadata.get("deviceWidth", 1280)),
-                                      int(metadata.get("deviceHeight", 800))) + jpeg
+                                      int(metadata.get("deviceHeight", 720))) + jpeg
                 await output.send_frame((frame, payload, frame_id, revision))
                 last_sent = time.monotonic()
             raise ConnectionError("Browser session closed.")
@@ -342,6 +354,7 @@ async def stream_tab(websocket, browser, current, target_id, viewer_id, viewer_f
                 if current.closed or (data and data.get("generation") != current.generation):
                     await output.send_json({"type": "session_closed"})
                     raise ConnectionError("Browser session closed.")
+                state.set_human_control(bool(current.handoff_id))
                 tabs = data.get("tabs") if data else await current.driver.tabs()
                 if not tabs:
                     raise ConnectionError("The browser has no visible tabs.")

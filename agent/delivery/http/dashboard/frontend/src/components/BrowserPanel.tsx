@@ -40,7 +40,7 @@ export function BrowserPanel(props: {
   const [connectionState, setConnectionState] = createSignal<BrowserConnectionState>("connecting");
   const [controller, setController] = createSignal("agent");
   const [viewportSize, setViewportSize] = createSignal({ width: 0, height: 0 });
-  const [frameAspect, setFrameAspect] = createSignal(1280 / 800);
+  const [frameAspect, setFrameAspect] = createSignal(1280 / 720);
   const screenWidth = createMemo(() => {
     const size = viewportSize();
     return Math.max(0, Math.min(size.width, Math.max(0, size.height - 2) * frameAspect() + 2));
@@ -65,7 +65,7 @@ export function BrowserPanel(props: {
   let viewport: HTMLDivElement | undefined;
   let keyboard: HTMLTextAreaElement | undefined;
   let width = 1280;
-  let height = 800;
+  let height = 720;
   let announcedHandoff = "";
   let statusRevision = 0;
   let viewerSession = "";
