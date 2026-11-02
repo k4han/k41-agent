@@ -257,6 +257,12 @@ try {
   assert.equal(await js('document.querySelector(".workspace-browser-panel").hidden'), false);
   assert.equal(await js('document.querySelector(".browser-panel").closest("[role=dialog]")'), null, 'browser belongs to the workspace');
   assert.equal(await js(`document.querySelector('[aria-label="Browser address"]').value`), status.tabs[0].url, 'address displays the active page URL');
+  assert.equal(await js(`document.querySelector('.browser-navigation').getBoundingClientRect().right <= document.querySelector('.browser-address').getBoundingClientRect().left`), true, 'navigation controls sit to the left of the address bar');
+  for (const [label, type] of [['Go back', 'back'], ['Go forward', 'forward'], ['Reload page', 'reload']]) {
+    await js(`document.querySelector('[aria-label="${label}"]').click()`);
+    await until(() => inputs.some(input => input.type === type), `${type} navigation forwarded`);
+    assert.equal(inputs.find(input => input.type === type).handoff_id, 'handoff');
+  }
   const backgroundTarget = await call('Target.createTarget', { url: 'about:blank' });
   await until(() => visibilityEvents.at(-1) === false, 'background dashboard pauses image delivery');
   assert.equal(await js('document.querySelector(".browser-keyboard").disabled'), true, 'a hidden dashboard cannot send input');
@@ -271,6 +277,7 @@ try {
   for (const socket of viewers) send(socket, { ...status, type: 'status', tab_id: 'tab', controller: 'other', can_control: false });
   await until(() => js('document.querySelector(".browser-viewport").getAttribute("aria-description").includes("Another window")'), 'another controller has a distinct accessible description');
   assert.equal(await js('document.querySelector(".browser-keyboard").disabled'), true);
+  assert.equal(await js('[...document.querySelectorAll(".browser-navigation button")].every(button => button.disabled)'), true, 'navigation requires control of the browser');
   for (const socket of viewers) sendStatus(socket);
   await until(() => js('document.querySelector(".browser-keyboard")?.disabled === false'), 'released controller becomes available');
   await js('[...document.querySelectorAll(".workspace-primary-tabs [role=tab]")].find(tab => tab.title === "Files Explorer").click()');

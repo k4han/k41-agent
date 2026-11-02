@@ -491,5 +491,12 @@ class CDPViewer:
             if not isinstance(url, str) or len(url) > 8192 or not url.startswith(("https://", "http://")):
                 raise ValueError("Navigation requires an HTTP or HTTPS URL.")
             await self.call("Page.navigate", {"url": url})
+        elif kind in {"back", "forward"}:
+            history = await self.call("Page.getNavigationHistory")
+            index = history["currentIndex"] + (-1 if kind == "back" else 1)
+            if 0 <= index < len(history["entries"]):
+                await self.call("Page.navigateToHistoryEntry", {"entryId": history["entries"][index]["id"]})
+        elif kind == "reload":
+            await self.call("Page.reload")
         else:
             raise ValueError("Unsupported viewer input.")

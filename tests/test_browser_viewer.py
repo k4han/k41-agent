@@ -5,6 +5,7 @@ import base64
 import io
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, call
 
 import pytest
 from PIL import Image
@@ -62,6 +63,32 @@ def viewer_socket(monkeypatch):
 
     monkeypatch.setattr(transport, "connect", connect)
     return transport.CDPViewer(SimpleNamespace(target_url=target_url), "target"), socket
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,current_index,entry_id", [
+    ("back", 1, 12), ("forward", 0, 34), ("back", 0, None), ("forward", 1, None),
+])
+async def test_viewer_history_navigation_respects_history_boundaries(viewer_socket, kind, current_index, entry_id):
+    viewer, _ = viewer_socket
+    viewer.call = AsyncMock(return_value={"currentIndex": current_index, "entries": [{"id": 12}, {"id": 34}]})
+
+    await viewer.input({"type": kind})
+
+    expected = [call("Page.getNavigationHistory")]
+    if entry_id is not None:
+        expected.append(call("Page.navigateToHistoryEntry", {"entryId": entry_id}))
+    assert viewer.call.call_args_list == expected
+
+
+@pytest.mark.asyncio
+async def test_viewer_reload_refreshes_the_current_page(viewer_socket):
+    viewer, _ = viewer_socket
+    viewer.call = AsyncMock()
+
+    await viewer.input({"type": "reload"})
+
+    viewer.call.assert_awaited_once_with("Page.reload")
 
 
 @pytest.mark.asyncio

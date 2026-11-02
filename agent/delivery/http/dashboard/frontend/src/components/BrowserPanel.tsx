@@ -1,4 +1,4 @@
-import { ArrowRight, Camera, ChevronDown, Globe, LoaderCircle, Power, RefreshCw, Settings2, ShieldCheck } from "lucide-solid";
+import { ArrowLeft, ArrowRight, Camera, ChevronDown, Globe, LoaderCircle, Power, RefreshCw, Settings2, ShieldCheck } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack } from "solid-js";
 import { apiFetch, postJson } from "@/lib/api";
 import { browserModifiers, browserPointer, connectBrowserViewer, createBrowserFrameRenderer, createBrowserInputSender,
@@ -343,6 +343,14 @@ export function BrowserPanel(props: {
         <p class="browser-profile-hint">Close the browser before changing or deleting its profile.</p>
       </section></Show>
       <div class="browser-chrome">
+        <div class="browser-navigation" role="group" aria-label="Browser navigation">
+          <button class="workspace-icon-btn" type="button" title="Go back" aria-label="Go back" disabled={!canControl()}
+            onClick={() => send({ type: "back" })}><ArrowLeft size={16} /></button>
+          <button class="workspace-icon-btn" type="button" title="Go forward" aria-label="Go forward" disabled={!canControl()}
+            onClick={() => send({ type: "forward" })}><ArrowRight size={16} /></button>
+          <button class="workspace-icon-btn" type="button" title="Reload page" aria-label="Reload page" disabled={!canControl()}
+            onClick={() => send({ type: "reload" })}><RefreshCw size={16} /></button>
+        </div>
         <form class="browser-address" onSubmit={(event) => { event.preventDefault(); if (url().trim()) send({ type: "navigate", url: url().trim() }); }}>
           <Globe size={14} aria-hidden="true" />
           <input aria-label="Browser address" placeholder="Enter a URL"
