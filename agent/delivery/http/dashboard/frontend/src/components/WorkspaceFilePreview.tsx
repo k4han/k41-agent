@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, For, Match, on, Show, Switch, type JSX } from "solid-js";
-import { Download } from "lucide-solid";
+import { Download, Maximize2, Minimize2 } from "lucide-solid";
 
 import { Markdown } from "@/components/Markdown";
 import { parseDelimitedPreview, sandboxedWorkspaceHtml, workspacePreviewKind } from "@/lib/workspacePreview";
@@ -12,6 +12,8 @@ export function WorkspaceFilePreview(props: {
   previewUrl: string;
   downloadUrl: string;
   renderSource: () => JSX.Element;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
 }) {
   const [source, setSource] = createSignal(false);
   const [failed, setFailed] = createSignal(false);
@@ -34,6 +36,20 @@ export function WorkspaceFilePreview(props: {
             </button>
           </Show>
           <a class="btn btn-sm" href={props.downloadUrl} download="" title="Download file"><Download size={14} />Download</a>
+          <Show when={props.onToggleExpand}>
+            <button
+              class="btn btn-sm"
+              type="button"
+              title={props.isExpanded ? "Restore split view" : "Expand file view (hide tree)"}
+              aria-label={props.isExpanded ? "Restore split view" : "Expand file view"}
+              onClick={props.onToggleExpand}
+            >
+              <Show when={props.isExpanded} fallback={<Maximize2 size={13} />}>
+                <Minimize2 size={13} />
+              </Show>
+              <span>{props.isExpanded ? "Restore" : "Expand"}</span>
+            </button>
+          </Show>
         </div>
       </div>
       <Show when={!source() && kind() !== "text"} fallback={props.renderSource()}>
