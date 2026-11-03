@@ -85,6 +85,12 @@ snapshot so the agent can continue from the current page.
 Closing the Browser tab does not return control or close the session.
 **Cancel browser task** ends the handoff and closes that browser.
 
+If the handoff times out, the browser closes automatically. The Browser tab
+keeps a timeout notice with **Continue after timeout** and **Cancel browser task**,
+including after reloading the conversation. Choose Continue to notify the agent
+that the manual step was not confirmed, or Cancel to stop the task. The agent
+asks whether to restart before repeating a timed out browser task.
+
 ## Reuse a login profile
 
 Open **Login profiles** in the Browser toolbar to create or select a named

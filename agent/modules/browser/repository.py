@@ -104,12 +104,16 @@ class BrowserRepository:
             return await session.scalar(select(BrowserArtifact).where(
                 BrowserArtifact.artifact_id == artifact_id, BrowserArtifact.owner_id == owner_id))
 
-    async def pending_handoff(self, thread_id: str):
+    async def pending_handoff(self, thread_id: str, *, include_expired=False):
         async with self.session() as session:
             row = await session.scalar(select(BrowserInvocation).where(
-                BrowserInvocation.thread_id == thread_id, BrowserInvocation.status == "handoff")
+                BrowserInvocation.thread_id == thread_id,
+                BrowserInvocation.status.in_(["handoff", "expired"] if include_expired else ["handoff"]))
                 .order_by(BrowserInvocation.id.desc()).limit(1))
-            return json.loads(row.result) if row else None
+            if row is None:
+                return None
+            result = json.loads(row.result)
+            return {**result["handoff"], "expired": True} if row.status == "expired" else result
 
     async def handoff_threads(self) -> set[str]:
         async with self.session() as session:
@@ -127,9 +131,11 @@ class BrowserRepository:
                 if payload.get("expires_at", 0) > time.time():
                     continue
                 expired.append(payload)
-                row.status = "completed"
-                row.result = json.dumps({"handoff_status": "expired", "snapshot_status": "skipped",
-                                         "content": "Browser handoff expired and was cancelled. Start a new browser task and inspect a fresh snapshot before continuing."})
+                # Keep the request visible until the interrupted workflow consumes its receipt.
+                row.status = "expired"
+                row.result = json.dumps({"handoff": payload, "receipt": {
+                    "handoff_status": "expired", "snapshot_status": "skipped",
+                    "content": "Browser handoff expired and the browser was closed automatically. The manual interaction was not confirmed and no fresh snapshot was captured. Explain the timeout and ask whether to restart the browser task before continuing."}})
             if expired:
                 await session.commit()
         return expired
@@ -157,7 +163,7 @@ class BrowserRepository:
 
     async def owned_handoff(self, thread_id: str, owner_id: str):
         binding = await self.binding(thread_id)
-        return await self.pending_handoff(thread_id) if binding and binding["owner_id"] == owner_id else None
+        return await self.pending_handoff(thread_id, include_expired=True) if binding and binding["owner_id"] == owner_id else None
 
     async def images(self, owner_id: str, thread_id: str):
         async with self.session() as session:

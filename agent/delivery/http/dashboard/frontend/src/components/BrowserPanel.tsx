@@ -14,7 +14,7 @@ type BrowserStatus = {
   revision?: number;
   mode: "agent" | "human";
   tabs: { id: string; title: string; url: string }[];
-  handoff: { handoff_id: string; reason: string } | null;
+  handoff: { handoff_id: string; reason: string; expired?: boolean } | null;
   handoff_expired: boolean;
   images: { artifact_id: string; image_url: string }[];
 };
@@ -311,11 +311,14 @@ export function BrowserPanel(props: {
       </header>
       <Show when={error()}><div class="thread-banner thread-banner-error" role="alert">{error()}</div></Show>
       <Show when={status()?.handoff}>{(pending) => <div class="browser-handoff" role="status">
-        <div class="browser-handoff-heading"><ShieldCheck size={17} /><strong>{status()?.handoff_expired ? "The previous browser session ended" : "Your turn in the browser"}</strong></div>
-        <p>{pending().reason}</p>
+        <div class="browser-handoff-heading"><ShieldCheck size={17} /><strong>{pending().expired ? "Browser handoff timed out" : status()?.handoff_expired ? "The previous browser session ended" : "Your turn in the browser"}</strong></div>
+        <p>{pending().expired
+          ? "The browser closed automatically because the handoff timed out. Continue to notify the agent, or cancel this task."
+          : status()?.handoff_expired ? "The browser session ended before control was returned. Continue to notify the agent, or cancel this task."
+          : pending().reason}</p>
         <div class="browser-actions">
           <button class="btn btn-sm btn-primary" disabled={props.busy || working()} onClick={() => props.onResume({ action: "browser_handoff", handoff_id: pending().handoff_id, decision: "return" })}>
-            {status()?.handoff_expired ? "Continue after session loss" : "Return control to agent"}
+            {pending().expired ? "Continue after timeout" : status()?.handoff_expired ? "Continue after session loss" : "Return control to agent"}
           </button>
           <button class="btn btn-sm" disabled={props.busy || working()} onClick={() => props.onResume({ action: "browser_handoff", handoff_id: pending().handoff_id, decision: "cancel" })}>Cancel browser task</button>
         </div>

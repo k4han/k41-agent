@@ -104,7 +104,7 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify(handoff) + '\n'); return;
     }
     resumes.push(request);
-    status.handoff = null; status.mode = 'agent';
+    status.handoff = null; status.mode = 'agent'; status.handoff_expired = false;
     if (request.resume_payload.decision === 'cancel') { status.open = false; status.generation = null; }
     history.pending_browser_handoffs = [];
     for (const socket of viewers) sendStatus(socket);
@@ -422,6 +422,32 @@ try {
   await js('[...document.querySelectorAll("button")].find(button => button.textContent === "Delete profile").click()');
   await until(() => js('![...document.querySelectorAll(".browser-panel option")].some(option => option.textContent === "Temporary profile")'), 'deleted profile removed locally');
   assert.equal(await js('document.querySelector(".browser-panel select").value'), '', 'deleting the selected profile clears its binding in the panel');
+  for (const decision of ['return', 'cancel']) {
+    const handoff = { handoff_id: `timeout-${decision}`, reason: 'Complete a manual sign in' };
+    Object.assign(status, { open: true, generation: `timeout-session-${decision}`, mode: 'human',
+      handoff, handoff_expired: false });
+    history.pending_browser_handoffs = [handoff];
+    await call('Page.reload');
+    await until(() => js('document.querySelector(".browser-keyboard")?.disabled === false'), 'manual control before timeout');
+    Object.assign(status, { open: false, generation: null, mode: 'agent',
+      handoff: { ...handoff, expired: true }, handoff_expired: true });
+    history.pending_browser_handoffs = [status.handoff];
+    for (const socket of viewers) send(socket, { type: 'session_closed' });
+    await until(() => js('document.querySelector(".browser-handoff")?.textContent.includes("Browser handoff timed out")'), 'timeout notice replaces manual instructions');
+    assert.equal(await js('document.querySelector(".browser-keyboard")?.disabled'), true, 'expired sessions reject input');
+    assert.equal(await js('document.querySelector(".chat-prompt-input").disabled'), true, 'timed out workflow still needs a resume decision');
+    await call('Page.reload');
+    await until(() => js('document.querySelector(".browser-handoff")?.textContent.includes("Continue after timeout")'), 'timeout recovery survives conversation reload');
+    assert.equal(await js('document.querySelector(".chat-prompt-input").disabled'), true);
+    const previousResumes = resumes.length, previousMutations = sessionMutations.length;
+    const label = decision === 'return' ? 'Continue after timeout' : 'Cancel browser task';
+    await js(`[...document.querySelectorAll('.browser-handoff button')].find(button => button.textContent.includes('${label}')).click()`);
+    await until(() => resumes.length === previousResumes + 1, 'timeout decision resumes the workflow');
+    assert.deepEqual(resumes.at(-1).resume_payload, { action: 'browser_handoff', handoff_id: handoff.handoff_id, decision });
+    await until(() => js('document.querySelector(".chat-prompt-input")?.disabled === false && !document.querySelector(".browser-handoff")'), 'timeout decision clears the handoff and unlocks chat');
+    assert.equal(sessionMutations.length, previousMutations, 'settling a timeout does not reopen or close another browser');
+  }
+  await js(`document.querySelector('[aria-label="Login profiles"][aria-expanded="false"]')?.click()`);
   await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
   await js('[...document.querySelectorAll("a")].find(link => link.getAttribute("href") === "/chat").click()');
   await until(() => js('location.pathname === "/chat" && document.querySelector(".browser-panel select")?.disabled'), 'new chat while browser panel stays open');
@@ -433,7 +459,7 @@ try {
   assert.deepEqual(invalidThreadRequests, [], 'profile operations must not fetch an empty thread endpoint');
   assert.equal(await js('document.querySelector(".browser-panel [role=alert]")?.textContent || ""'), '');
   assert.deepEqual(exceptions, []);
-  console.log('Browser dashboard: ticket retry, transport recovery, tab pinning, follow agent, workspace tabs, live view, Unicode input, checkpoint handoff recovery, fullscreen, mobile layout, handback and profile operations passed.');
+  console.log('Browser dashboard: ticket retry, transport recovery, tab pinning, follow agent, workspace tabs, live view, Unicode input, checkpoint and timeout handoff recovery, fullscreen, mobile layout, handback and profile operations passed.');
 } finally {
   if (ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
   ws?.close();

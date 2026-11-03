@@ -488,7 +488,8 @@ def handoff_graph(browser):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("checkpoint_id", [None, "older-checkpoint"])
 @pytest.mark.parametrize("admin", ["1", "2"])
-async def test_history_returns_live_handoff_independently_of_checkpoint(browser, monkeypatch, checkpoint_id, admin):
+@pytest.mark.parametrize("expired", [False, True])
+async def test_history_returns_live_handoff_independently_of_checkpoint(browser, monkeypatch, checkpoint_id, admin, expired):
     from unittest.mock import AsyncMock
 
     from fastapi import FastAPI
@@ -501,6 +502,10 @@ async def test_history_returns_live_handoff_independently_of_checkpoint(browser,
     config = {"configurable": {"thread_id": "graph"}}
     await graph.ainvoke({}, config)
     pending = await browser.repository.pending_handoff(browser.canonical("chat"))
+    if expired:
+        pending["expires_at"] = 0
+        prior = await browser.repository.invocation("chat", "handoff")
+        await browser.repository.record("chat", "handoff", prior.arguments_hash, "handoff", pending)
     monkeypatch.setattr(browser.container, "_persistence_ready", True)
     messages = AsyncMock(return_value=([], checkpoint_id or "current-checkpoint"))
     monkeypatch.setattr(conversations, "get_thread_messages_payload", messages)
@@ -514,14 +519,18 @@ async def test_history_returns_live_handoff_independently_of_checkpoint(browser,
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/dashboard-api/chat-history/chat", params={"checkpoint_id": checkpoint_id} if checkpoint_id else {})
     assert response.status_code == 200
-    assert response.json().get("pending_browser_handoffs", []) == ([pending] if admin == "1" else [])
+    expected = {**pending, "expired": True} if expired else pending
+    assert response.json().get("pending_browser_handoffs", []) == ([expected] if admin == "1" else [])
+    if expired and admin == "1":
+        assert not browser.sessions
     messages.assert_awaited_once_with(browser.canonical("chat"), checkpoint_id=checkpoint_id, include_branch_metadata=True)
     assert (await graph.aget_state(config)).tasks[0].interrupts
     resumed = await graph.ainvoke(Command(resume={
         "action": "browser_handoff", "handoff_id": pending["handoff_id"], "decision": "return",
     }), config)
-    assert "returned" in resumed["result"]["content"].lower()
+    assert resumed["result"]["handoff_status"] == ("expired" if expired else "returned")
     assert await browser.repository.pending_handoff(browser.canonical("chat")) is None
+    assert await browser.owned_handoff("chat", "admin:1") is None
 
 
 @pytest.mark.asyncio
@@ -742,7 +751,8 @@ async def test_handoff_survives_browser_loss_without_accepting_stale_control(bro
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cleanup", ["status", "ensure", "reap"])
-async def test_expired_handoff_releases_control_and_remains_safe_to_replay(browser, cleanup):
+@pytest.mark.parametrize("decision", ["return", "cancel"])
+async def test_expired_handoff_releases_control_and_remains_safe_to_replay(browser, cleanup, decision):
     graph = handoff_graph(browser)
     config = {"configurable": {"thread_id": "graph"}}
     await graph.ainvoke({}, config)
@@ -753,20 +763,30 @@ async def test_expired_handoff_releases_control_and_remains_safe_to_replay(brows
     payload["expires_at"] = 0
     await browser.repository.record("chat", "handoff", prior.arguments_hash, "handoff", payload)
     if cleanup == "status":
-        assert (await browser.status("chat", "admin:1"))["handoff"] is None
+        status = await browser.status("chat", "admin:1")
+        assert status["handoff"]["handoff_id"] == payload["handoff_id"]
+        assert status["handoff"]["expired"] and status["handoff_expired"]
     elif cleanup == "ensure":
         assert await browser.ensure("chat", "admin:1") is not current
     else:
         await browser.reap_idle()
     assert current.closed
     assert await browser.repository.pending_handoff("chat") is None
-    assert (await browser.repository.invocation("chat", "handoff")).status == "completed"
+    assert (await browser.repository.invocation("chat", "handoff")).status == "expired"
+    assert (await browser.owned_handoff("chat", "admin:1"))["expired"]
+    assert await browser.owned_handoff("chat", "admin:2") is None
     replacement = await browser.ensure("chat", "admin:1")
+    status = await browser.status("chat", "admin:1")
+    assert status["open"] and status["handoff_expired"]
     result = await graph.ainvoke(Command(resume={"action": "browser_handoff", "handoff_id": payload["handoff_id"],
-                                               "decision": "return"}), config)
-    assert "expired" in result["result"]["content"]
-    assert result["result"]["handoff_status"] == "expired"
+                                               "decision": decision}), config)
+    assert result["result"]["handoff_status"] == ("expired" if decision == "return" else "cancelled")
     assert result["result"]["snapshot_status"] == "skipped"
+    assert (await browser.repository.invocation("chat", "handoff")).status == "completed"
+    assert await browser.owned_handoff("chat", "admin:1") is None
+    assert (await browser.status("chat", "admin:1"))["handoff"] is None
+    assert await browser.handoff("chat", "admin:1", "handoff", "Please sign in") == result["result"]
+    assert not (await graph.aget_state(config)).tasks
     assert current.driver.facade.snapshots == replacement.driver.facade.snapshots == 0
     assert not replacement.closed
     assert replacement.handoff_id is None
@@ -780,7 +800,48 @@ async def test_legacy_handoff_without_expiry_does_not_permanently_block_thread(b
         "handoff_id": "orphan", "generation": "old-process", "thread_id": "chat"})
     assert await browser.ensure("chat", "admin:1")
     assert await browser.repository.pending_handoff("chat") is None
-    assert (await browser.repository.invocation("chat", "legacy")).status == "completed"
+    assert (await browser.repository.invocation("chat", "legacy")).status == "expired"
+
+
+@pytest.mark.asyncio
+async def test_expired_handoff_can_resume_after_service_restart_and_agent_switch(browser, monkeypatch):
+    from langchain_core.messages import AIMessage
+    from agent.modules.workflows.nodes.tool import _include_resumed_browser_handoff
+
+    async def node(state):
+        return {"result": await browser.container.browser_service.handoff(
+            "chat", "admin:1", "handoff", "Please sign in")}
+
+    builder = StateGraph(dict)
+    builder.add_node("handoff", node)
+    builder.add_edge(START, "handoff")
+    builder.add_edge("handoff", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "chat"}}
+    await graph.ainvoke({}, config)
+    payload = await browser.repository.pending_handoff("chat")
+    prior = await browser.repository.invocation("chat", "handoff")
+    payload["expires_at"] = 0
+    await browser.repository.record("chat", "handoff", prior.arguments_hash, "handoff", payload)
+    await browser.reap_idle()
+    await browser.shutdown()
+    restored = BrowserService(browser.container, root=browser.root, launcher=browser.launcher)
+    monkeypatch.setattr(browser.container, "_browser_service", restored)
+    monkeypatch.setattr(browser.container, "_persistence_ready", True)
+    try:
+        assert (await restored.owned_handoff("chat", "admin:1"))["expired"]
+        state = {"messages": [AIMessage(content="", tool_calls=[{
+            "id": "handoff", "name": "browser_handoff", "args": {"reason": "Please sign in"}}])]}
+        tools = await _include_resumed_browser_handoff(state, [], config)
+        assert [tool.name for tool in tools] == ["browser_handoff"]
+        result = await graph.ainvoke(Command(resume={"action": "browser_handoff",
+            "handoff_id": payload["handoff_id"], "decision": "return"}), config)
+        assert result["result"]["handoff_status"] == "expired"
+        assert not restored.sessions
+        assert await restored.owned_handoff("chat", "admin:1") is None
+        assert not (await graph.aget_state(config)).tasks
+    finally:
+        await restored.shutdown()
 
 
 @pytest.mark.asyncio

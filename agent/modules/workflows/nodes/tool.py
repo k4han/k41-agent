@@ -115,7 +115,7 @@ async def _include_resumed_browser_handoff(state, tools, config):
     browser = container.browser_service
     for call in calls:
         prior = await browser.repository.invocation(browser.canonical(thread_id), call["id"])
-        if prior is not None and prior.status in {"handoff", "completed"}:
+        if prior is not None and prior.status in {"handoff", "expired", "completed"}:
             pending_tool = get_tool_by_name("browser_handoff")
             if pending_tool is not None:
                 return [*tools, pending_tool]

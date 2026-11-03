@@ -141,6 +141,15 @@ class BrowserService:
         async with self.thread_scope(thread_id):
             return await self._status(thread_id, owner_id)
 
+    async def owned_handoff(self, thread_id, owner_id):
+        thread_id = self.canonical(thread_id)
+        async with self.thread_scope(thread_id):
+            binding = await self.repository.binding(thread_id)
+            if not binding or binding["owner_id"] != owner_id:
+                return None
+            await self._expire_handoffs(thread_id)
+            return await self.repository.pending_handoff(thread_id, include_expired=True)
+
     async def _status(self, thread_id, owner_id):
         binding = await self.repository.binding(thread_id)
         if binding and binding["owner_id"] != owner_id:
@@ -168,13 +177,13 @@ class BrowserService:
                                           None if current.closed else current, tabs)
 
     async def _status_snapshot(self, thread_id, owner_id, binding, current, tabs):
-        pending = await self.repository.pending_handoff(thread_id)
+        pending = await self.repository.pending_handoff(thread_id, include_expired=True)
         return {**binding, "open": current is not None,
                 "generation": current.generation if current else None,
                 "revision": current.revision if current else 0,
                 "mode": "human" if current and current.handoff_id else "agent",
                 "tabs": tabs, "handoff": pending,
-                "handoff_expired": bool(pending and (not current or pending["generation"] != current.generation)),
+                "handoff_expired": bool(pending and (pending.get("expired") or not current or pending["generation"] != current.generation)),
                 "images": await self.repository.images(owner_id, thread_id)}
 
     async def select_profile(self, thread_id, owner_id, profile_id):
@@ -415,10 +424,14 @@ class BrowserService:
             raise BrowserError("invalid_input", "Handoff call changed during replay.")
         if prior and prior.status == "completed":
             return json.loads(prior.result)
+        expired_receipt = None
         if prior:
-            if prior.arguments_hash != fingerprint or prior.status != "handoff":
+            if prior.status not in {"handoff", "expired"}:
                 raise BrowserError("invalid_input", "Handoff call changed during replay.")
             payload = json.loads(prior.result)
+            if prior.status == "expired":
+                expired_receipt = payload["receipt"]
+                payload = payload["handoff"]
         else:
             current = await self._ensure(thread_id, owner_id)
             async with current.lock:
@@ -451,7 +464,9 @@ class BrowserService:
         current = self.sessions.get(thread_id)
         cancelled = {"handoff_status": "cancelled", "snapshot_status": "skipped",
                      "content": "HANDOFF CANCELLED: Browser handoff was cancelled by the user. The manual interaction was aborted. Browser control is now with you (the agent). Acknowledge that the user cancelled this browser task and do not continue the cancelled action. Ask the user what they would like to do next. Do not say you failed to transfer control."}
-        if not current or current.generation != payload["generation"]:
+        if expired_receipt is not None:
+            result = cancelled if response.decision == "cancel" else expired_receipt
+        elif not current or current.generation != payload["generation"]:
             result = cancelled if response.decision == "cancel" else {
                 "handoff_status": "session_lost", "snapshot_status": "skipped",
                 "content": "Browser session was lost while waiting. Start a new browser session and inspect it before continuing."}

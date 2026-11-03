@@ -267,7 +267,7 @@ async def get_chat_thread_messages(
     handoff = None
     if container.persistence_ready:
         # Browser control belongs to the live thread, even when viewing an older checkpoint.
-        handoff = await container.browser_service.repository.owned_handoff(thread_id, f"admin:{admin}")
+        handoff = await container.browser_service.owned_handoff(thread_id, f"admin:{admin}")
     resume_error = await get_thread_resume_error(
         thread_id,
         agent_name=str(parsed.get("agent_name") or "default"),
