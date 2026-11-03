@@ -267,7 +267,7 @@ export function WorkspaceExplorer(props: {
   const browserActive = () => lastPrimaryTab() === "browser" && openTabs().includes("browser");
   let explorerRef: HTMLElement | undefined;
   const [containerWidth, setContainerWidth] = createSignal(
-    typeof window !== "undefined" ? window.innerWidth : 560
+    typeof window !== "undefined" ? window.innerWidth : 640
   );
   const [treeCollapsed, setTreeCollapsed] = createSignal(false);
   const WORKSPACE_SIDEBAR_WIDTH_KEY = "k41-workspace-sidebar-width";
@@ -275,7 +275,7 @@ export function WorkspaceExplorer(props: {
   const [sidebarWidth, setSidebarWidth] = createSignal(220);
   const [treeHeight, setTreeHeight] = createSignal(220);
   const [innerResizing, setInnerResizing] = createSignal(false);
-  const isCompact = () => !props.fullscreen && containerWidth() < 480;
+  const isCompact = () => !props.fullscreen && containerWidth() < 640;
   const isSplit = createMemo(() => {
     if (browserActive()) return false;
     if (isCompact()) return false;

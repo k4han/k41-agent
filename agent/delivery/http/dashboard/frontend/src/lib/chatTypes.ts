@@ -104,7 +104,7 @@ export const DEFAULT_ATTACHMENT_MESSAGE = "Please review the attached file(s).";
 
 export const WORKSPACE_EXPLORER_OPEN_KEY = "k41-dashboard-workspace-explorer-open";
 export const WORKSPACE_EXPLORER_WIDTH_KEY = "k41-dashboard-workspace-explorer-width";
-export const WORKSPACE_EXPLORER_DEFAULT_WIDTH = 560;
+export const WORKSPACE_EXPLORER_DEFAULT_WIDTH = 640;
 export const WORKSPACE_EXPLORER_MIN_WIDTH = 340;
 export const WORKSPACE_EXPLORER_MAX_WIDTH = 1200;
 export const CHAT_COMPOSER_MAX_WIDTH = 960;

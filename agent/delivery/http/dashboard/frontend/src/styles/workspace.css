@@ -786,7 +786,7 @@ body.workspace-row-resizing .workspace-explorer * {
   transition: none !important;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 640px) {
   .workspace-fullscreen-btn {
     display: none !important;
   }
