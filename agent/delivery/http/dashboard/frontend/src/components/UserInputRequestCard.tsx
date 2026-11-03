@@ -219,7 +219,7 @@ export function UserInputRequestCard(props: {
           when={isLastQuestion()}
           fallback={
             <button
-              class="btn primary user-input-submit-btn"
+              class="btn btn-primary user-input-submit-btn"
               type="button"
               onClick={goNext}
               disabled={props.disabled || !canContinue()}
@@ -230,7 +230,7 @@ export function UserInputRequestCard(props: {
           }
         >
         <button
-          class="btn primary user-input-submit-btn"
+          class="btn btn-primary user-input-submit-btn"
           type="button"
           onClick={submit}
           disabled={props.disabled || !canSubmit()}

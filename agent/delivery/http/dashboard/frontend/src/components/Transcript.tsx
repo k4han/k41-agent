@@ -877,7 +877,7 @@ export function PlanReviewView(props: {
               ariaLabel="Target agent"
             />
             <button
-              class="btn primary plan-review-approve-btn"
+              class="btn btn-primary plan-review-approve-btn"
               type="button"
               onClick={approve}
               disabled={!canAct() || !targetAgent().trim()}

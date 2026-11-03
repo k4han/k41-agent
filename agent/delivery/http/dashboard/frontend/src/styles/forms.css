@@ -853,7 +853,7 @@
 
 .form-progress-step--current .form-progress-step-indicator {
   background: var(--accent);
-  color: white;
+  color: var(--accent-fg);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
@@ -926,13 +926,13 @@
 
 .form-button--primary {
   background: var(--accent);
-  color: white;
+  color: var(--accent-fg);
   border-color: var(--accent);
 }
 
 .form-button--primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 90%, white);
-  border-color: color-mix(in srgb, var(--accent) 90%, white);
+  background: color-mix(in srgb, var(--accent) 88%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 88%, transparent);
 }
 
 .form-button--secondary {
@@ -948,13 +948,18 @@
 
 .form-button--danger {
   background: var(--danger);
-  color: white;
+  color: #ffffff;
   border-color: var(--danger);
 }
 
+.dark .form-button--danger {
+  color: #0a0a0a;
+  font-weight: 650;
+}
+
 .form-button--danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 90%, white);
-  border-color: color-mix(in srgb, var(--danger) 90%, white);
+  background: color-mix(in srgb, var(--danger) 88%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 88%, transparent);
 }
 
 .form-button--ghost {

@@ -468,6 +468,11 @@
   transition: opacity 150ms ease;
 }
 
+.dark .chat-recursion-warning-btn {
+  color: #0a0a0a;
+  font-weight: 700;
+}
+
 .chat-recursion-warning-btn:hover {
   opacity: 0.9;
 }

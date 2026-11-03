@@ -492,14 +492,46 @@
   background: color-mix(in srgb, var(--accent) 88%, transparent);
 }
 
+.btn-secondary {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.btn-secondary:hover {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg);
+}
+
+.btn-ghost:hover {
+  background: var(--surface-2);
+  border-color: transparent;
+}
+
 .btn-danger {
   border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
   color: var(--danger);
 }
 
+.btn-danger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  border-color: var(--danger);
+}
+
 .btn-warning {
   border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
   color: var(--warning);
+}
+
+.btn-warning:hover {
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+  border-color: var(--warning);
 }
 
 .btn-icon {
