@@ -54,6 +54,7 @@ export interface ChatTranscriptProps {
     sourceCheckpointId: string;
     text: string;
   }) => void;
+  hideRegenerateAction?: boolean;
   onRegenerateMessage?: (payload: {
     itemId?: number;
     messageIndex?: number;
@@ -197,7 +198,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                       itemId={row().id}
                       deferHighlight={isStreamingItem(row().id)}
                       showAssistantActions={showAssistantActions(row().id)}
-                      showRegenerateAction={answerItemId() === row().id}
+                      showRegenerateAction={!props.hideRegenerateAction && answerItemId() === row().id}
                       forking={props.forkingItemId === row().id}
                       onForkMessage={completedAnswerIds().has(row().id) ? props.onForkMessage : undefined}
                       onResume={props.currentThreadId && resumeItemId() === row().id ? props.onResume : undefined}

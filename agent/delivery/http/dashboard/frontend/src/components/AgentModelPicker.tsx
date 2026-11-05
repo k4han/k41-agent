@@ -1,5 +1,5 @@
 import { Bot, Check, ChevronDown, ChevronRight, Search, Sparkles, Star, X } from "lucide-solid";
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, type JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
 import { resolveModelAndProvider } from "@/lib/modelSelection";
@@ -12,6 +12,9 @@ type PickerModel = ModelOption & { provider: string };
 type ModelGroup = { provider: string; label: string; models: PickerModel[] };
 
 export interface AgentModelPickerProps {
+  // External agents list their own settings here instead of the K41 model catalog.
+  hideModel?: boolean;
+  externalOptions?: JSX.Element;
   agentName: string;
   agents: AgentCard[];
   onAgentChange: (name: string) => void;
@@ -332,6 +335,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
         <span class="agent-model-badge-agent">{currentAgentName()}</span>
         <ChevronDown size={13} class={`agent-model-badge-caret ${open() && activePicker() === "agent" ? "is-open" : ""}`} />
       </button>
+      <Show when={!props.hideModel} fallback={props.externalOptions}>
       <span class="agent-model-divider" aria-hidden="true" />
       <button
         ref={modelTriggerRef}
@@ -353,6 +357,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
         </Show>
         <ChevronDown size={13} class={`agent-model-badge-caret ${open() && activePicker() === "model" ? "is-open" : ""}`} />
       </button>
+      </Show>
 
       <Show when={open()}>
         <Portal>

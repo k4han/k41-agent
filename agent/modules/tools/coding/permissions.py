@@ -33,16 +33,18 @@ def permission_request_event(value: dict[str, Any], interrupt_id: str = "") -> d
 
 
 async def pending_permission_requests(thread_id: str, checkpoint_id: str | None = None) -> list[dict[str, Any]]:
-    from agent.modules.workflows import get_workflow_graph, make_run_config
+    from agent.modules.acp import PERMISSION_INTERRUPT_TYPE, permission_request_event as acp_permission_event
+    from agent.modules.workflows import get_workflow_graph, graph_name_for_thread, make_run_config
     config = make_run_config(thread_id=thread_id)
     if checkpoint_id:
         config["configurable"]["checkpoint_id"] = checkpoint_id
+    projections = {"permission_request": permission_request_event, PERMISSION_INTERRUPT_TYPE: acp_permission_event}
     try:
-        snapshot = await get_workflow_graph("react_agent").aget_state(config)
-        return [permission_request_event(item.value, str(item.id))
+        snapshot = await get_workflow_graph(await graph_name_for_thread(thread_id)).aget_state(config)
+        return [projections[item.value["type"]](item.value, str(item.id))
                 for task in getattr(snapshot, "tasks", ())
                 for item in getattr(task, "interrupts", ())
-                if isinstance(item.value, dict) and item.value.get("type") == "permission_request"]
+                if isinstance(item.value, dict) and item.value.get("type") in projections]
     except Exception:
         return []
 

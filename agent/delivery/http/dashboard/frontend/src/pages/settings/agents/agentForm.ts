@@ -1,4 +1,4 @@
-import type { AgentCard, AgentsPayload } from "@/types";
+import type { AcpAgentSettings, AgentCard, AgentsPayload } from "@/types";
 import { sameJsonValue, uniqueSorted } from "@/lib/utils";
 
 export type ToolConfigValue = string | number | boolean | null;
@@ -25,6 +25,7 @@ export type AgentForm = {
   internal: boolean;
   context_compact_threshold: number;
   system_prompt: string;
+  acp: AcpAgentSettings | null;
 };
 
 export const AGENT_TABS = ["general", "tools", "prompt"] as const;
@@ -88,6 +89,7 @@ export function blankForm(workflow: string): AgentForm {
     internal: false,
     context_compact_threshold: DEFAULT_CONTEXT_COMPACT_THRESHOLD,
     system_prompt: "",
+    acp: null,
   };
 }
 
@@ -108,6 +110,7 @@ export function cardToForm(card: AgentCard): AgentForm {
     internal: card.internal || false,
     context_compact_threshold: card.context_compact_threshold || DEFAULT_CONTEXT_COMPACT_THRESHOLD,
     system_prompt: card.system_prompt || "",
+    acp: card.acp ?? null,
   };
 }
 

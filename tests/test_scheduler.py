@@ -182,6 +182,7 @@ async def test_execute_scheduled_task_uses_scheduled_thread_for_usage(monkeypatc
 
     from agent.modules.agent_runtime.session import SessionManager
 
+    assert "agent_name" not in captured["upsert"]
     run = captured["run"]
     assert len(run["thread_id"]) == 32
     assert run["usage_context"]["platform"] == "bg"

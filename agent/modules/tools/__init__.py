@@ -199,6 +199,7 @@ async def aresolve_tools_for_agent(agent_name: str) -> list[BaseTool]:
 __all__ = [
     "BuiltinToolSource",
     "CodingError",
+    "AcpPermissionResume",
     "PermissionResume",
     "ToolResult",
     "invocation_context",
@@ -291,7 +292,7 @@ __all__ = [
     "workspace_storage_root",
 ]
 
-from agent.modules.tools.coding.models import CodingError, PermissionResume, ToolResult
+from agent.modules.tools.coding.models import AcpPermissionResume, CodingError, PermissionResume, ToolResult
 from agent.modules.tools.coding.adapter import coding_message_for_model, invocation_context, prepare_tool_batch
 from agent.modules.tools.coding.contracts import InvocationContext
 from agent.modules.tools.coding.remote import coding_authorization_scope
@@ -302,7 +303,7 @@ def get_coding_service(*args, **kwargs):
 from agent.modules.tools.coding.permissions import pending_permission_requests, permission_request_event
 from agent.modules.tools.coding.storage import bounded_text as bound_tool_text
 from agent.modules.tools.coding.storage import conversation_key
-from agent.modules.tools.coding.processes import kill_tree as kill_process_tree
+from agent.modules.tools.coding.processes import kill_tree as kill_process_tree, spawn_contained as spawn_contained_process
 from agent.modules.tools.runtime.output_retention import retain_tool_messages
 from agent.modules.tools.runtime.output_policy import TextCapture
 from agent.modules.tools.runtime.secret_policy import (

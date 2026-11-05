@@ -110,6 +110,12 @@ export type ModelCatalog = {
   error: string | null;
 };
 
+export type AcpAgentSettings = {
+  agent: string;
+  permission_mode: "ask" | "auto_allow";
+  config_options: Record<string, string>;
+};
+
 export type AgentCard = {
   name: string;
   display_name: string;
@@ -126,6 +132,7 @@ export type AgentCard = {
   internal: boolean;
   context_compact_threshold: number;
   system_prompt: string;
+  acp?: AcpAgentSettings | null;
   source: "builtin" | "user";
   path: string;
   editable: boolean;

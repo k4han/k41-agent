@@ -5,7 +5,17 @@ const TOOL_LABELS: Record<string, string> = {
   list_dir: "list",
 };
 
+function acpToolSummary(name: string | null | undefined, args: unknown): string | null {
+  if (!name?.startsWith("acp_") || !args || typeof args !== "object") return null;
+  const { title, paths } = args as { title?: unknown; paths?: unknown };
+  // Agents title pending edits like "Run create_file?", so a path says more.
+  if (Array.isArray(paths) && typeof paths[0] === "string") return paths[0];
+  return typeof title === "string" && title ? title : null;
+}
+
 export function toolCallSummary(name: string | null | undefined, args: unknown): string {
+  const acpSummary = acpToolSummary(name, args);
+  if (acpSummary) return acpSummary;
   const toolName = name || "unknown";
   const label = TOOL_LABELS[toolName] || toolName;
 

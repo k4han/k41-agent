@@ -42,6 +42,13 @@ async def test_clear_agent_session_closes_shell_sessions_and_deletes_thread_tree
     async def fake_delete_thread_workspace(thread_id: str):
         calls.append(("delete_workspace", thread_id))
 
+    async def fake_release_thread_agent(thread_id: str):
+        calls.append(("release_agent", thread_id))
+
+    monkeypatch.setattr(
+        "agent.modules.conversations.release_conversation_thread_agent",
+        fake_release_thread_agent,
+    )
     monkeypatch.setattr(shell_manager_module, "stop_thread_processes", FakeSessionManager().close_thread_sessions)
     monkeypatch.setattr(
         workspaces_module,
@@ -65,6 +72,7 @@ async def test_clear_agent_session_closes_shell_sessions_and_deletes_thread_tree
         ("close_shell", thread_id),
         ("delete_workspace", thread_id),
         ("delete_tree", thread_id),
+        ("release_agent", thread_id),
     ]
 
 
@@ -111,6 +119,7 @@ async def test_record_conversation_thread_schedules_title_generation_for_user_th
     assert calls["upsert"] == {
         "thread_id": "api:dashboard:thread-1",
         "agent_name": "default",
+        "graph_family": "",
         "provider": None,
         "model": None,
         "title": "How do I debug this login issue?",
@@ -162,6 +171,7 @@ async def test_record_conversation_thread_preserves_existing_manual_title(monkey
     assert calls["upsert"] == {
         "thread_id": "api:dashboard:thread-1",
         "agent_name": "default",
+        "graph_family": "",
         "provider": None,
         "model": None,
         "title": "",
@@ -210,6 +220,7 @@ async def test_record_conversation_thread_skips_generation_for_background_thread
     assert calls["upsert"] == {
         "thread_id": "task_dashboard_123",
         "agent_name": "default",
+        "graph_family": "",
         "provider": None,
         "model": None,
         "title": "Run background task",
@@ -1264,7 +1275,7 @@ async def test_run_agent_stream_answer_resume_payload_does_not_switch_agent(
                 },
             )
 
-    async def _fake_update_thread_agent(thread_id: str, agent_name: str):
+    async def _fake_update_thread_agent(thread_id: str, agent_name: str, graph_family: str = ""):
         updated.append((thread_id, agent_name))
 
     monkeypatch.setattr(
@@ -1359,7 +1370,7 @@ async def test_run_agent_stream_resume_payload_switches_agent(monkeypatch):
                 },
             )
 
-    async def _fake_update_thread_agent(thread_id: str, agent_name: str):
+    async def _fake_update_thread_agent(thread_id: str, agent_name: str, graph_family: str = ""):
         updated.append((thread_id, agent_name))
 
     monkeypatch.setattr(

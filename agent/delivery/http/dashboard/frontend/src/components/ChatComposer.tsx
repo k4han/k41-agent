@@ -12,6 +12,7 @@ import {
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
+import { AcpSessionOptions } from "@/components/AcpSessionOptions";
 import { AgentModelPicker } from "@/components/AgentModelPicker";
 import { ChatTodos, type TodoProgress } from "@/components/ChatTodos";
 import { ContextWindowIndicator, type ContextWindowData } from "@/components/ContextWindowIndicator";
@@ -20,6 +21,7 @@ import {
   UserInputRequestCard,
   type UserInputRequestSubmitPayload,
 } from "@/components/UserInputRequestCard";
+import type { AcpConfigOption, AcpOptionValues } from "@/lib/acp";
 import { formatBytes } from "@/lib/chatAttachments";
 import { useSkillSuggestions } from "@/lib/useSkillSuggestions";
 import { PASTE_AS_ATTACHMENT_THRESHOLD, type PendingAttachment, type ReasoningEffort } from "@/lib/chatTypes";
@@ -61,6 +63,10 @@ export interface ChatComposerProps {
   onTodosToggle: () => void;
   contextWindowData: ContextWindowData;
   onCompactClick?: () => void;
+  hideModelPicker?: boolean;
+  acpOptions?: AcpConfigOption[];
+  acpOptionValues?: AcpOptionValues;
+  onAcpOptionChange?: (id: string, value: string) => void;
   compacting?: boolean;
   userInputRequest: TranscriptUserInputRequest | null;
   userInputRequestDisabled: boolean;
@@ -502,6 +508,15 @@ export function ChatComposer(props: ChatComposerProps) {
             </Show>
           </div>
           <AgentModelPicker
+            hideModel={props.hideModelPicker}
+            externalOptions={
+              <AcpSessionOptions
+                options={props.acpOptions ?? []}
+                values={props.acpOptionValues ?? {}}
+                onChange={(id, value) => props.onAcpOptionChange?.(id, value)}
+                disabled={props.composerDisabled}
+              />
+            }
             agentName={props.agentName}
             agents={props.agents}
             onAgentChange={props.onAgentChange}

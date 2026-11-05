@@ -43,6 +43,19 @@ class PermissionResume(BaseModel):
     decision: Literal["allow_once", "allow_thread", "deny"]
 
 
+class AcpPermissionResume(BaseModel):
+    """Answer to an ACP agent's permission request.
+
+    Deliberately separate from PermissionResume. Its consumer treats anything
+    other than ``deny`` as approval, so ACP's free-form option ids must never be
+    able to reach it.
+    """
+
+    action: Literal["acp_permission"]
+    request_id: str
+    option_id: str
+
+
 @dataclass(frozen=True)
 class ToolDefinition:
     name: str

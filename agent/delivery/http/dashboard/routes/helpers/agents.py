@@ -396,4 +396,5 @@ def agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
         internal=body.internal,
         context_compact_threshold=body.context_compact_threshold,
         system_prompt=body.system_prompt.strip(),
+        acp=body.acp,
     )

@@ -249,6 +249,8 @@ class ActiveSessionRegistry:
             current = self._sessions.get(session_id)
         if current and container and container._coding_service:
             container._coding_service.processes.stop_thread_now(current.thread_id)
+        if current and container and container._acp_service:
+            container._acp_service.cancel_thread_now(current.thread_id)
         with self._lock:
             session = self._sessions.get(session_id)
             if session:
@@ -278,6 +280,9 @@ class ActiveSessionRegistry:
         container = get_active_container()
         if container and container._coding_service:
             cancelled = bool(container._coding_service.processes.stop_thread_now(thread_id))
+        # A turn paused on a permission card has no active session to find below.
+        if container and container._acp_service and container._acp_service.cancel_thread_now(thread_id):
+            cancelled = True
         sessions_to_cancel = []
         with self._lock:
             for session_id, session in list(self._sessions.items()):

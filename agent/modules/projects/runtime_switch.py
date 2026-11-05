@@ -123,10 +123,16 @@ class WorkspaceRuntimeSwitcher:
     async def _assert_no_interrupts(self, threads: set[str]):
         if not threads:
             return
-        from agent.modules.workflows import get_workflow_graph, make_run_config
-        graph = get_workflow_graph("react_agent")
+        from agent.modules.acp import peek_acp_service
+        from agent.modules.workflows import get_workflow_graph, graph_name_for_thread, make_run_config
+        acp_service = peek_acp_service()
         for thread_id in threads:
+            # A run lease ends when a run pauses, while the external agent keeps
+            # working in this workspace, so ask the ACP service as well.
+            if acp_service is not None and acp_service.has_active_turn(thread_id):
+                raise ProjectWorkspaceError("Finish or stop the running agent turn before switching backends.", "workspace_busy")
             try:
+                graph = get_workflow_graph(await graph_name_for_thread(thread_id))
                 snapshot = await graph.aget_state(make_run_config(thread_id=thread_id))
             except Exception as exc:
                 raise ProjectWorkspaceError("Cannot verify pending workspace approvals. Retry after conversation history is available.", "workspace_busy") from exc

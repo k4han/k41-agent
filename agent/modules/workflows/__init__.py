@@ -9,7 +9,15 @@ from agent.modules.workflows.run_config import (
     make_context as make_run_context,
     make_config as make_run_config,
 )
+from agent.modules.workflows.thread_graph import (
+    graph_family_for,
+    graph_name_for_thread,
+    thread_graph_family,
+    thread_is_acp,
+)
 from agent.modules.workflows.constants import (
+    ACP_AGENT_GRAPH_TYPE,
+    GRAPH_FAMILY_ACP,
     REACT_AGENT_GRAPH_TYPE,
     ROUTER_GRAPH_TYPE,
 )
@@ -160,7 +168,13 @@ __all__ = [
     "DEFAULT_WORKING_DIR",
     "delete_workflow_thread",
     "delete_workflow_thread_tree",
+    "ACP_AGENT_GRAPH_TYPE",
+    "GRAPH_FAMILY_ACP",
+    "graph_family_for",
+    "thread_graph_family",
     "get_workflow_graph",
+    "graph_name_for_thread",
+    "thread_is_acp",
     "initialize_checkpointer",
     "get_checkpointer",
     "list_registered_workflows",

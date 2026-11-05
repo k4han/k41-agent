@@ -1,3 +1,6 @@
+from agent.modules.workflows.graphs.acp_agent import (
+    build_acp_agent_graph,
+)
 from agent.modules.workflows.graphs.decision_agent import (
     build_decision_agent_graph,
 )
@@ -12,6 +15,7 @@ from agent.modules.workflows.graphs.router import (
 )
 
 __all__ = [
+    "build_acp_agent_graph",
     "build_decision_agent_graph",
     "build_react_graph",
     "build_research_graph",

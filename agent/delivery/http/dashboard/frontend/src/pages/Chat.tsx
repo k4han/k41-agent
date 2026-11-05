@@ -25,6 +25,7 @@ import { ProjectLocalSync } from "@/components/ProjectLocalSync";
 import type { TodoProgress } from "@/components/ChatTodos";
 import { apiFetch, fetchWithCsrf, postJson, readError } from "@/lib/api";
 import { fetchAgentChatOptions } from "@/lib/agents";
+import { acpPermissionRequestId, isAcpCard, selectableAgentCards } from "@/lib/acp";
 import { readChatModelPreference, writeChatModelPreference, type ChatModelPreference } from "@/lib/chatModelPreference";
 import { resolveModelAndProvider } from "@/lib/modelSelection";
 import {
@@ -92,6 +93,7 @@ import { useChatAttachments } from "@/lib/useChatAttachments";
 import { useContextWindow } from "@/lib/useContextWindow";
 import { useBackgroundStream } from "@/lib/useBackgroundStream";
 import { useReasoningEffort } from "@/lib/useReasoningEffort";
+import { useAcpSessionOptions } from "@/lib/useAcpSessionOptions";
 import { ASK_USER_TOOL_NAME, normalizeUserInputRequest } from "@/lib/userInputRequest";
 import {
   INITIALIZING_ENVIRONMENT_TEXT,
@@ -268,6 +270,9 @@ export function ChatPage() {
   const selectedCard = createMemo<AgentCard | undefined>(() =>
     validCards().find((card) => card.name === agentName()),
   );
+  const acpAgentSelected = createMemo(() => isAcpCard(selectedCard()));
+  const acpOptions = useAcpSessionOptions(selectedCard);
+  const selectableCards = createMemo(() => selectableAgentCards(validCards(), selectedCard(), Boolean(currentThreadId())));
 
   const modelSelectionAvailable = (nextProvider: string, nextModel: string, customModel = false): boolean => {
     const payload = data();
@@ -1019,6 +1024,11 @@ export function ChatPage() {
     if (model()) {
       payload.model = model();
     }
+    // A plan approval can hand the run to another agent, which these options do not describe.
+    const acpConfigOptions = payload.agent_name === agentName() ? acpOptions.requestOptions() : undefined;
+    if (acpConfigOptions) {
+      payload.acp_config_options = acpConfigOptions;
+    }
     const workspace = resolvedWorkspace || workspaceRef() || localWorkspaceRef(workingDir());
     if (workspace) {
       payload.workspace = workspaceBinding() || workspace;
@@ -1383,6 +1393,11 @@ export function ChatPage() {
         try {
           await Promise.allSettled(requests);
         } catch {}
+        // An ACP run commits its partial output while handling the stop, which can
+        // be after the refresh that follows the aborted stream.
+        if (acpAgentSelected() && currentThreadId() === tid) {
+          void refreshThread(tid);
+        }
       }
       return;
     }
@@ -1511,6 +1526,20 @@ export function ChatPage() {
     const request = pendingUserInputRequest();
     if (!request || request.tool_call_id !== payload.toolCallId) {
       showToast("The input request is no longer active.", "warning");
+      return;
+    }
+    const acpQuestion = request.questions.find((question) => acpPermissionRequestId(question.id));
+    if (acpQuestion) {
+      const optionId = payload.answers.find((answer) => answer.question_id === acpQuestion.id)?.selected_option_ids[0];
+      if (!optionId) {
+        showToast("Choose a permission decision.", "warning");
+        return;
+      }
+      // The card already showed the whole operation, so the reply only states the decision.
+      const decision = acpQuestion.options.find((option) => option.id === optionId)?.label || optionId;
+      updateUserInputRequest(payload.toolCallId, { status: "answered", answers: payload.answers, summary: decision });
+      appendItem({ type: "message", role: "user", text: decision }, "turn-start");
+      void sendMessage(true, { action: "acp_permission", request_id: acpPermissionRequestId(acpQuestion.id) || "", option_id: optionId });
       return;
     }
     const permission = request.questions.find((question) => question.id.startsWith("permission:"));
@@ -2098,7 +2127,8 @@ export function ChatPage() {
                 backgroundLive={backgroundLive()}
                 compacting={compacting()}
                 forkingItemId={forking() ? forkRequest()?.itemId : null}
-                onForkMessage={(payload) => void handleForkMessage(payload)}
+                onForkMessage={acpAgentSelected() ? undefined : (payload) => void handleForkMessage(payload)}
+                hideRegenerateAction={acpAgentSelected()}
                 showScrollToBottom={showScrollToBottom()}
                 turnAnchorSpacerHeight={turnAnchorSpacerHeight()}
                 onScrollToBottomClick={handleScrollToBottomClick}
@@ -2134,7 +2164,11 @@ export function ChatPage() {
                 attachments={attachments()}
                 attachmentAccept={attachmentAccept()}
                 agentName={agentName()}
-                agents={validCards()}
+                agents={selectableCards()}
+                hideModelPicker={acpAgentSelected()}
+                acpOptions={acpOptions.options()}
+                acpOptionValues={acpOptions.values()}
+                onAcpOptionChange={acpOptions.setValue}
                 onAgentChange={handleAgentChange}
                 provider={provider()}
                 model={model()}
@@ -2151,7 +2185,7 @@ export function ChatPage() {
                 onTodosToggle={() => setTodosExpanded(!todosExpanded())}
                 contextWindowData={contextWindowData()}
                 compacting={compacting()}
-                onCompactClick={handleCompactConversation}
+                onCompactClick={acpAgentSelected() ? undefined : handleCompactConversation}
                 userInputRequest={pendingUserInputRequest()}
                 userInputRequestDisabled={userInputRequestDisabled()}
                 onSubmitUserInputRequest={handleSubmitUserInputRequest}

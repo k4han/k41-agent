@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 from agent.modules.agents import normalize_agent_model, reject_legacy_agent_settings
 from agent.modules.providers import EFFORT_PATTERN
 
+from agent.modules.agents import AcpAgentSettings
 from agent.modules.workflows import REACT_AGENT_GRAPH_TYPE
 from agent.delivery.http.dashboard.routes.helpers.agents import (
     agent_cards_payload,
@@ -59,6 +60,7 @@ class AgentCardBody(BaseModel):
     internal: bool = Field(default=False, description="Whether this is a system-only internal agent. Fixed for existing cards.")
     context_compact_threshold: int = Field(default=75, ge=1, le=100, strict=True, description="Context usage percentage triggering compaction.")
     system_prompt: str = Field(default="", description="Custom system prompt for this agent.")
+    acp: AcpAgentSettings | None = Field(default=None, description="External agent settings when graph_type is acp_agent.")
 
     @model_validator(mode="before")
     @classmethod

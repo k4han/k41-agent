@@ -9,6 +9,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from agent.modules.acp import ACP_LIVE_KWARG
 from agent.modules.conversations.service import (
     THREAD_KIND_BACKGROUND,
     THREAD_KIND_USER,
@@ -556,7 +557,12 @@ def _serialize_thread_messages(
 ) -> list[dict[str, Any]]:
     sources = sources or {}
     branches = branches or {}
-    forkable = forkable_message_indices(messages)
+    # ACP sessions cannot rewind, so their messages expose no edit or fork points.
+    is_acp_thread = any(getattr(msg, "additional_kwargs", {}).get(ACP_LIVE_KWARG) for msg in messages)
+    if is_acp_thread:
+        sources = {}
+        branches = {}
+    forkable = set() if is_acp_thread else forkable_message_indices(messages)
 
     result = []
     for message_index, msg in enumerate(messages):

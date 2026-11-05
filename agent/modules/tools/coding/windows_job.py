@@ -96,7 +96,7 @@ def resume_initial_thread(kernel, process_id: int) -> None:
 
 
 class WindowsJob:
-    def __init__(self, process: subprocess.Popen[bytes]) -> None:
+    def __init__(self, process: subprocess.Popen[bytes], *, track_descendants: bool = True) -> None:
         self.lock = threading.Lock()
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
@@ -125,8 +125,11 @@ class WindowsJob:
         self.known = {process.pid: self.root}
         self.tracking_lock = threading.Lock()
         self.tracking_stop = threading.Event()
-        self.tracker = threading.Thread(target=self.track, daemon=True)
-        self.tracker.start()
+        # Long-lived agents rely on job membership alone; the fast rescan is
+        # only affordable for short coding jobs.
+        self.tracker = threading.Thread(target=self.track, daemon=True) if track_descendants else None
+        if self.tracker:
+            self.tracker.start()
 
     def scan(self) -> None:
         # Some launchers create independent jobs rather than inherit ours.
@@ -182,7 +185,8 @@ class WindowsJob:
 
     def close(self) -> None:
         self.tracking_stop.set()
-        self.tracker.join(timeout=1)
+        if self.tracker:
+            self.tracker.join(timeout=1)
         with self.lock:
             if self.handle:
                 self.kernel.CloseHandle(self.handle)
@@ -206,13 +210,13 @@ def cancel_pipe_read(thread: threading.Thread) -> None:
             kernel.CloseHandle(handle)
 
 
-def spawn_contained(*args, **kwargs) -> subprocess.Popen[bytes]:
+def spawn_contained(*args, track_descendants: bool = True, **kwargs) -> subprocess.Popen[bytes]:
     if os.name == "nt":
         kwargs["creationflags"] = kwargs.get("creationflags", 0) | 0x00000004  # CREATE_SUSPENDED
     process = subprocess.Popen(*args, **kwargs)
     if os.name == "nt":
         try:
-            process.coding_job = WindowsJob(process)
+            process.coding_job = WindowsJob(process, track_descendants=track_descendants)
             # Popen closes its initial thread handle. Reopen that thread and
             # resume only after containment, removing the child creation race.
             resume_initial_thread(process.coding_job.kernel, process.pid)

@@ -2,6 +2,8 @@ import { Show } from "solid-js";
 
 import type { AgentMcpInstall, AgentsPayload, PromptVariable } from "@/types";
 
+import { isAcpCard } from "@/lib/acp";
+
 import { type AgentForm, type AgentTab, type AgentToolGroup, type ToolConfigValue } from "./agentForm";
 import { AgentGeneralTab } from "./AgentGeneralTab";
 import { AgentPromptTab } from "./AgentPromptTab";
@@ -43,6 +45,7 @@ export function AgentEditTabs(props: {
         >
           General Config
         </button>
+        <Show when={!isAcpCard(props.form)}>
         <button
           class={`btn btn-sm ${props.activeTab === "tools" ? "btn-primary" : ""}`}
           type="button"
@@ -50,6 +53,7 @@ export function AgentEditTabs(props: {
         >
           Capabilities & Tools
         </button>
+        </Show>
         <button
           class={`btn btn-sm ${props.activeTab === "prompt" ? "btn-primary" : ""}`}
           type="button"
@@ -70,7 +74,7 @@ export function AgentEditTabs(props: {
               onUpdate={props.onUpdate}
             />
           </Show>
-          <Show when={props.activeTab === "tools"}>
+          <Show when={props.activeTab === "tools" && !isAcpCard(props.form)}>
             <AgentToolsTab
               form={props.form}
               onUpdate={props.onUpdate}
