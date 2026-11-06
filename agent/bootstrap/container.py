@@ -174,6 +174,9 @@ class AppContainer:
     _zalo_webhook_runtime: Any = field(default=None, repr=False)
     _tool_registry_service: Any = field(default=None, repr=False)
     _coding_service: Any = field(default=None, repr=False)
+    _acp_service: Any = field(default=None, repr=False)
+    _acp_auth_manager: Any = field(default=None, repr=False)
+    _acp_installer: Any = field(default=None, repr=False)
     _project_workspace_service: Any = field(default=None, repr=False)
     _mcp_loaded: bool = field(default=False, repr=False)
     _mcp_load_lock: Any = field(default=None, repr=False)
@@ -712,6 +715,8 @@ class AppContainer:
 
         if self._chatgpt_auth_manager is not None:
             await asyncio.to_thread(self._chatgpt_auth_manager.close)
+        if self._acp_service is not None:
+            await self._acp_service.close()
         if self._mcp_load_task is not None:
             self._mcp_load_task.cancel()
             await asyncio.gather(self._mcp_load_task, return_exceptions=True)

@@ -23,6 +23,7 @@ def serialize_thread(thread: ConversationThread) -> dict[str, Any]:
         "user_id": thread.user_id,
         "channel_id": thread.channel_id,
         "agent_name": thread.agent_name,
+        "graph_family": thread.graph_family,
         "provider": thread.provider,
         "model": thread.model,
         "title": thread.title,
@@ -114,12 +115,14 @@ class ConversationThreadRepository:
         user_id: str,
         channel_id: str = "",
         agent_name: str = "",
+        graph_family: str = "",
         provider: str | None = None,
         model: str | None = None,
         title: str = "",
         kind: str = "user",
     ) -> dict[str, Any]:
         now = utcnow()
+        normalized_graph_family = _trim(graph_family, 50)
         normalized_thread_id = _trim(resolve_thread_id(thread_id), 512)
         normalized_platform = _trim(platform or "unknown", 50) or "unknown"
         normalized_user_id = _trim(user_id, 255)
@@ -144,6 +147,7 @@ class ConversationThreadRepository:
                     user_id=normalized_user_id,
                     channel_id=normalized_channel_id,
                     agent_name=normalized_agent_name,
+                    graph_family=normalized_graph_family,
                     provider=normalized_provider or "",
                     model=normalized_model or "",
                     title=normalized_title,
@@ -156,8 +160,15 @@ class ConversationThreadRepository:
                 thread.platform = normalized_platform or thread.platform
                 thread.user_id = normalized_user_id or thread.user_id
                 thread.channel_id = normalized_channel_id
+                if thread.deleted_at is not None:
+                    # A deleted thread's history is gone, so its next run starts unbound.
+                    thread.agent_name = ""
+                    thread.graph_family = ""
                 if normalized_agent_name:
                     thread.agent_name = normalized_agent_name
+                if normalized_graph_family and not thread.graph_family:
+                    # The first run owns the thread; only a clear or delete releases it.
+                    thread.graph_family = normalized_graph_family
                 if normalized_provider is not None:
                     thread.provider = normalized_provider
                 if normalized_model is not None:
@@ -341,6 +352,17 @@ class ConversationThreadRepository:
                 )
             )
             return {row[0] for row in result.all()}
+
+    async def release_agent_binding(self, thread_id: str) -> None:
+        """Let any agent run the thread again, for when its history has been cleared."""
+        session = await get_async_session()
+        async with session:
+            await session.execute(
+                update(ConversationThread)
+                .where(ConversationThread.thread_id == resolve_thread_id(thread_id))
+                .values(agent_name="", graph_family="", updated_at=utcnow())
+            )
+            await session.commit()
 
     async def mark_deleted(self, thread_id: str) -> bool:
         now = utcnow()

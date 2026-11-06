@@ -31,9 +31,19 @@ from agent.modules.agent_runtime.active_sessions import (
     current_session_id_var,
     current_thread_id_var,
 )
+from agent.shared.infrastructure.errors import ThreadGraphConflictError
 from agent.shared.thread_ids import SessionManager, resolve_thread_id
+from agent.modules.acp import (
+    ACP_LIVE_EVENT,
+    ACP_LIVE_KWARG,
+    PERMISSION_INTERRUPT_TYPE as ACP_PERMISSION_INTERRUPT_TYPE,
+    permission_request_event as acp_permission_request_event,
+)
 from agent.modules.workflows import (
+    ACP_AGENT_GRAPH_TYPE,
     get_workflow_graph,
+    graph_family_for,
+    thread_graph_family,
     make_run_config,
     make_run_context,
 )
@@ -76,6 +86,7 @@ def build_run_params(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    acp_config_options: dict[str, str] | None = None,
     browser_owner_id: str | None = None,
     allowed_skill_names: list[str] | None = None,
     attachments: list[Any] | None = None,
@@ -100,6 +111,7 @@ def build_run_params(
         agent_name: Agent to use (loads config from catalog)
         provider: Override agent card provider for this run if needed
         model: Override agent card model for this run if needed
+        acp_config_options: Override an ACP card's session options for this run
         attachments: Optional files attached to the user message
         resume: Request to resume execution from the last checkpoint
     """
@@ -133,6 +145,8 @@ def build_run_params(
         params["browser_owner_id"] = browser_owner_id
     if reasoning_effort is not None:
         params["reasoning_effort"] = reasoning_effort
+    if acp_config_options:
+        params["acp_config_options"] = dict(acp_config_options)
     if checkpoint_id:
         params["checkpoint_id"] = checkpoint_id
     if resume_payload is not None:
@@ -465,6 +479,7 @@ async def clear_agent_session(
     channel_id: str = "",
 ) -> None:
     """Clear the session history (checkpoint thread) for a specific user and channel."""
+    from agent.modules.conversations import release_conversation_thread_agent
     from agent.modules.tools import stop_thread_processes
     from agent.modules.workspaces import delete_thread_workspace
     from agent.modules.workflows import delete_workflow_thread_tree
@@ -473,6 +488,8 @@ async def clear_agent_session(
     stop_thread_processes(thread_id)
     await delete_thread_workspace(thread_id)
     await delete_workflow_thread_tree(thread_id)
+    # The history is gone, so nothing ties this fixed thread id to its old agent.
+    await release_conversation_thread_agent(thread_id)
 
 
 def _graph_accepts_context(graph: Any) -> bool:
@@ -486,6 +503,7 @@ async def _record_conversation_thread(
     *,
     thread_id: str,
     agent_name: str,
+    graph_family: str = "",
     provider: str | None = None,
     model: str | None = None,
     title: str = "",
@@ -525,6 +543,7 @@ async def _record_conversation_thread(
         await upsert_conversation_thread(
             thread_id=thread_id,
             agent_name=agent_name,
+            graph_family=graph_family,
             provider=provider,
             model=model,
             title=resolved_title,
@@ -739,6 +758,9 @@ def _normalize_human_resume_payload(
     if action == "permission":
         from agent.modules.tools import PermissionResume
         return PermissionResume.model_validate(resume_payload)
+    if action == "acp_permission":
+        from agent.modules.tools import AcpPermissionResume
+        return AcpPermissionResume.model_validate(resume_payload)
     if action == "answer":
         return AskUserAnswerResumePayload.model_validate(resume_payload)
     return _normalize_plan_resume_payload(resume_payload)
@@ -762,6 +784,8 @@ def _resolve_agent_name_for_resume(
     target_card = catalog.get_agent_card(target_agent)
     if target_config is None or target_card is None:
         raise ValueError(f"Agent '{target_agent}' not found in catalog.")
+    if target_config.graph_type == ACP_AGENT_GRAPH_TYPE:
+        raise ValueError("A plan cannot be handed to an ACP agent.")
     if target_card.internal or not target_card.valid:
         raise ValueError(f"Agent '{target_agent}' cannot be selected for plan approval.")
     source_agent = str(source_agent_name or "").strip()
@@ -800,18 +824,36 @@ def _validate_human_resume_payload(
 ) -> None:
     if resume_payload is None:
         return
-    if resume_payload.action in {"answer", "permission", "browser_handoff"}:
+    if resume_payload.action in {"answer", "permission", "acp_permission", "browser_handoff"}:
         return
     _validate_plan_resume_payload(resume_payload)
 
 
-async def _update_thread_agent(thread_id: str, agent_name: str) -> None:
+async def _assert_thread_graph_family(thread_id: str, resolved_workflow: str, agent_config: Any) -> None:
+    """Keep a thread on one side of the ACP boundary.
+
+    An ACP session does not hold what a model agent said earlier in the thread,
+    and model agents would inherit ACP tool messages they never made.
+    """
+    family = graph_family_for(resolved_workflow)
+    if family != graph_family_for(agent_config.graph_type):
+        raise ValueError(f"Workflow '{resolved_workflow}' cannot run agent '{agent_config.name}'.")
+    bound_family = await thread_graph_family(thread_id)
+    if bound_family and bound_family != family:
+        raise ThreadGraphConflictError(
+            "This conversation cannot switch between an ACP agent and other agents. "
+            "Start a new conversation, or send /clear in a chat channel."
+        )
+
+
+async def _update_thread_agent(thread_id: str, agent_name: str, graph_family: str = "") -> None:
     try:
         from agent.modules.conversations import upsert_conversation_thread
 
         await upsert_conversation_thread(
             thread_id=thread_id,
             agent_name=agent_name,
+            graph_family=graph_family,
         )
     except Exception as exc:
         logger.debug(
@@ -931,6 +973,9 @@ def _user_input_request_events_from_value_event(
         if value.get("type") == "permission_request":
             from agent.modules.tools import permission_request_event
             out.append(permission_request_event(value, _interrupt_id(interrupt_obj)))
+            continue
+        if value.get("type") == ACP_PERMISSION_INTERRUPT_TYPE:
+            out.append(acp_permission_request_event(value, _interrupt_id(interrupt_obj)))
             continue
         if value.get("type") != ASK_USER_INTERRUPT_TYPE:
             continue
@@ -1073,6 +1118,7 @@ async def run_agent(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    acp_config_options: dict[str, str] | None = None,
     browser_owner_id: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
@@ -1126,8 +1172,12 @@ async def run_agent(
 
     # Resolve: explicit params > agent config
     resolved_workflow = workflow or agent_config.graph_type
+    if resolved_workflow == ACP_AGENT_GRAPH_TYPE:
+        # ACP history is linear: the agent's session cannot rewind to a checkpoint.
+        checkpoint_id = None
 
     thread_id = resolve_thread_id(thread_id)
+    await _assert_thread_graph_family(thread_id, resolved_workflow, agent_config)
     approval_supported = str((usage_context or {}).get("platform", "")) == "api"
     usage_context = (await load_usage_context(thread_id, usage_context)).to_dict()
     graph = get_workflow_graph(resolved_workflow)
@@ -1150,13 +1200,15 @@ async def run_agent(
         model=model,
         reasoning_effort=reasoning_effort,
         browser_owner_id=browser_owner_id,
+        acp_config_options=acp_config_options,
     )
     if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
-        await _update_thread_agent(thread_id, agent_name)
+        await _update_thread_agent(thread_id, agent_name, graph_family_for(resolved_workflow))
     elif not resume and not checkpoint_id:
         await _record_conversation_thread(
             thread_id=thread_id,
             agent_name=agent_name,
+            graph_family=graph_family_for(resolved_workflow),
             provider=provider,
             model=model,
             title=user_input,
@@ -1213,6 +1265,7 @@ async def run_agent_stream(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    acp_config_options: dict[str, str] | None = None,
     browser_owner_id: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
@@ -1273,8 +1326,12 @@ async def run_agent_stream(
 
     # Resolve: explicit params > agent config
     resolved_workflow = workflow or agent_config.graph_type
+    if resolved_workflow == ACP_AGENT_GRAPH_TYPE:
+        # ACP history is linear: the agent's session cannot rewind to a checkpoint.
+        checkpoint_id = None
 
     thread_id = resolve_thread_id(thread_id)
+    await _assert_thread_graph_family(thread_id, resolved_workflow, agent_config)
     approval_supported = str((usage_context or {}).get("platform", "")) == "api"
     usage_context = (await load_usage_context(thread_id, usage_context)).to_dict()
     graph = get_workflow_graph(resolved_workflow)
@@ -1284,6 +1341,9 @@ async def run_agent_stream(
     )
     config = _config_with_checkpoint(config, checkpoint_id)
     config["configurable"]["approval_supported"] = approval_supported or usage_context["platform"] == "api" or bool(config["configurable"].get("approval_supported"))
+    # Only this path surfaces interrupts to a person. run_agent ignores them, so an
+    # ACP permission request raised there would hang with nobody to answer it.
+    config["configurable"]["acp_can_interrupt"] = config["configurable"]["approval_supported"]
 
     context = make_run_context(
         workspace=workspace,
@@ -1297,14 +1357,16 @@ async def run_agent_stream(
         model=model,
         reasoning_effort=reasoning_effort,
         browser_owner_id=browser_owner_id,
+        acp_config_options=acp_config_options,
     )
     conversation_title_task: asyncio.Task[dict[str, Any] | None] | None = None
     if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
-        await _update_thread_agent(thread_id, agent_name)
+        await _update_thread_agent(thread_id, agent_name, graph_family_for(resolved_workflow))
     elif not resume and not checkpoint_id:
         conversation_title_task = await _record_conversation_thread(
             thread_id=thread_id,
             agent_name=agent_name,
+            graph_family=graph_family_for(resolved_workflow),
             provider=provider,
             model=model,
             title=user_input,
@@ -1386,7 +1448,16 @@ async def run_agent_stream(
                 while not title_event_queue.empty():
                     yield title_event_queue.get_nowait()
                 if stream_mode == "custom":
-                    if isinstance(event_data, dict) and event_data.get("type") == "context_usage":
+                    if isinstance(event_data, dict) and event_data.get("type") == ACP_LIVE_EVENT:
+                        live_event = event_data.get("event") or {}
+                        if live_event.get("type") == "thinking" and not emit_thinking:
+                            continue
+                        if live_event.get("type") == "message":
+                            registry.update_step(session_id, SESSION_STEP_RESPONDING)
+                        elif live_event.get("type") == "tool_call":
+                            registry.add_tool_call(session_id, str(live_event.get("name") or "unknown"))
+                        yield live_event
+                    elif isinstance(event_data, dict) and event_data.get("type") == "context_usage":
                         event_thread_id = str(event_data.get("thread_id") or "")
                         if not event_thread_id or event_thread_id == thread_id:
                             yield event_data
@@ -1458,6 +1529,9 @@ async def run_agent_stream(
                         seen_ids.add(message_id)
 
                     if getattr(message, "additional_kwargs", {}).get("is_compact_summary"):
+                        continue
+                    # Already delivered live as custom events, including its `final`.
+                    if getattr(message, "additional_kwargs", {}).get(ACP_LIVE_KWARG):
                         continue
                     if isinstance(message, AIMessage):
                         tool_calls = getattr(message, "tool_calls", None)
@@ -1551,8 +1625,11 @@ async def run_agent_edit_stream(
         raise ValueError(f"Agent '{agent_name}' not found in catalog")
 
     resolved_workflow = workflow or agent_config.graph_type
+    if resolved_workflow == ACP_AGENT_GRAPH_TYPE:
+        raise ValueError("Messages in ACP agent conversations cannot be edited: the agent's session cannot rewind.")
 
     thread_id = resolve_thread_id(thread_id)
+    await _assert_thread_graph_family(thread_id, resolved_workflow, agent_config)
     approval_supported = str((usage_context or {}).get("platform", "")) == "api"
     usage_context = (await load_usage_context(thread_id, usage_context)).to_dict()
     graph = get_workflow_graph(resolved_workflow)
@@ -1743,6 +1820,7 @@ async def run_agent_full(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    acp_config_options: dict[str, str] | None = None,
     browser_owner_id: str | None = None,
     attachments: list[Any] | None = None,
     usage_context: dict[str, Any] | None = None,
@@ -1785,6 +1863,7 @@ async def run_agent_full(
         provider=provider,
         model=model,
         reasoning_effort=reasoning_effort,
+        acp_config_options=acp_config_options,
         browser_owner_id=browser_owner_id,
         attachments=attachments,
         usage_context=usage_context,

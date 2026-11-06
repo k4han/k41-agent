@@ -59,6 +59,41 @@
   color: var(--muted);
 }
 
+/* Matches the model badge it stands in for. Short values such as "High" keep their
+   width in a narrow composer; only the model name truncates. */
+.chat-composer .acp-session-option {
+  width: auto;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.chat-composer .acp-session-option--model {
+  flex: 0 1 auto;
+  min-width: 56px;
+}
+
+.chat-composer .acp-session-option .select-control-trigger {
+  min-height: 28px;
+  padding: 0 22px 0 26px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.chat-composer .acp-session-option .select-control-trigger:hover {
+  background: var(--surface-2);
+}
+
+.chat-composer .acp-session-option .select-control-icon {
+  left: 6px;
+}
+
+.chat-composer .acp-session-option .select-control-caret {
+  right: 6px;
+}
+
 .chat-composer .agent-model-badge-agent,
 .chat-composer .agent-model-badge-model {
   min-width: 0;

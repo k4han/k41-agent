@@ -110,6 +110,12 @@ export type ModelCatalog = {
   error: string | null;
 };
 
+export type AcpAgentSettings = {
+  agent: string;
+  permission_mode: "ask" | "auto_allow";
+  config_options: Record<string, string>;
+};
+
 export type AgentCard = {
   name: string;
   display_name: string;
@@ -126,6 +132,7 @@ export type AgentCard = {
   internal: boolean;
   context_compact_threshold: number;
   system_prompt: string;
+  acp?: AcpAgentSettings | null;
   source: "builtin" | "user";
   path: string;
   editable: boolean;
@@ -241,6 +248,7 @@ export type AgentToolsPayload = {
   tool_config_sources?: Record<string, Record<string, string>>;
   tools: string[];
   tool_groups?: ToolGroup[];
+  acp_unavailable_tools?: string[];
   tool_config_schemas?: Record<string, ToolConfigSchema>;
   tool_config_effective?: Record<string, Record<string, unknown>>;
 };

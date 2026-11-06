@@ -140,6 +140,16 @@ class BrowserRepository:
                 await session.commit()
         return expired
 
+    async def finish_handoffs(self, thread_id: str, receipt: dict, *, expired_only: bool = False) -> None:
+        statuses = ["expired"] if expired_only else ["handoff", "expired"]
+        async with self.session() as session:
+            rows = (await session.scalars(select(BrowserInvocation).where(
+                BrowserInvocation.thread_id == thread_id, BrowserInvocation.status.in_(statuses)))).all()
+            for row in rows:
+                row.status = "completed"
+                row.result = json.dumps(receipt)
+            await session.commit()
+
     @staticmethod
     def thread_filter(column, thread_id: str):
         return or_(column == thread_id, column.startswith(f"{thread_id}:sub:", autoescape=True))

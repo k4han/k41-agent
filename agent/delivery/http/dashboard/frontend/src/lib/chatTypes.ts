@@ -42,6 +42,7 @@ export type ChatPayload = {
   provider?: string;
   model?: string;
   reasoning_effort?: ReasoningEffort;
+  acp_config_options?: Record<string, string>;
   thread_id?: string;
   new_thread?: boolean;
   checkpoint_id?: string;
@@ -54,7 +55,7 @@ export type PlanResumePayload =
   | { action: "approve"; target_agent: string }
   | { action: "revise"; feedback: string };
 
-export type ChatResumePayload = PlanResumePayload | UserAnswerResumePayload | BrowserHandoffResume | { action: "permission"; request_id: string; decision: "allow_once" | "allow_thread" | "deny" };
+export type ChatResumePayload = PlanResumePayload | UserAnswerResumePayload | BrowserHandoffResume | { action: "permission"; request_id: string; decision: "allow_once" | "allow_thread" | "deny" } | { action: "acp_permission"; request_id: string; option_id: string };
 
 // ── Scroll & streaming ──
 

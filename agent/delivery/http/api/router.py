@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 
 from agent.modules.admin_auth import get_current_admin
 from agent.modules.agents import get_catalog_service
+from agent.modules.workflows import ACP_AGENT_GRAPH_TYPE, thread_is_acp
 from agent.delivery.http.api.schemas import (
     ChatRequest,
     ChatResponse,
@@ -122,6 +123,8 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
     }
     if request.reasoning_effort is not None:
         params["reasoning_effort"] = request.reasoning_effort
+    if request.acp_config_options:
+        params["acp_config_options"] = request.acp_config_options
     if request.resume_payload is not None:
         params["resume_payload"] = request.resume_payload.model_dump(exclude_none=True)
     if request.checkpoint_id:
@@ -241,6 +244,9 @@ def _validate_pool_request(request: ChatRequest | EditChatRequest) -> None:
     from agent.modules.providers import get_model_pool_service, selected_pool_name, validate_pool_effort
 
     card = get_catalog_service().get_agent_card(request.agent_name or "default")
+    if getattr(card, "graph_type", "") == ACP_AGENT_GRAPH_TYPE:
+        # The external agent picks its own model; a remembered pool does not apply.
+        return
     provider = request.provider or getattr(card, "provider", None)
     model = request.model or getattr(card, "model", None)
     try:
@@ -316,6 +322,9 @@ async def chat_events_edit(request: EditChatRequest, admin: str = Depends(get_cu
         raise HTTPException(status_code=400, detail="Edited message cannot be empty.")
 
     _ensure_chat_agent_available(request.agent_name)
+    requested_graph = request.workflow or getattr(get_catalog_service().get_agent_card(request.agent_name or "default"), "graph_type", "")
+    if requested_graph == ACP_AGENT_GRAPH_TYPE or await thread_is_acp(resolve_thread_id(request.thread_id)):
+        raise HTTPException(status_code=409, detail="Messages in ACP agent conversations cannot be edited: the agent's session cannot rewind.")
     _validate_pool_request(request)
     request = request.model_copy(update={"thread_id": resolve_thread_id(request.thread_id)})
     params = build_run_params(

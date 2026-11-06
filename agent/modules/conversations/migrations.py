@@ -13,6 +13,7 @@ from agent.shared.infrastructure.db.engine import _normalize_url_to_sync
 CONVERSATION_THREAD_COLUMNS: dict[str, str] = {
     "provider": "VARCHAR(255) NOT NULL DEFAULT ''",
     "model": "VARCHAR(255) NOT NULL DEFAULT ''",
+    "graph_family": "VARCHAR(50) NOT NULL DEFAULT ''",
 }
 
 _CANONICAL_ROOT_RE = re.compile(r"[a-f0-9]{32}")

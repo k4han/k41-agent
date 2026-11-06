@@ -157,6 +157,8 @@ def serialize_agent_config(config: AgentConfig) -> str:
         data["plan_approval_targets"] = list(config.plan_approval_targets)
     if config.internal:
         data["internal"] = True
+    if config.acp is not None:
+        data["acp"] = config.acp.model_dump()
 
     yaml_block = yaml.safe_dump(
         data,
@@ -254,6 +256,7 @@ def _build_agent_config(
             internal=internal,
             context_compact_threshold=context_compact_threshold,
             system_prompt=body,
+            **({"acp": data["acp"]} if data.get("acp") else {}),
         )
     except Exception as exc:
         raise AgentMarkdownError(

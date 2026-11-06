@@ -115,6 +115,24 @@ def reset_system_prompt_cache():
     reset_revisions()
 
 
+@pytest.fixture(autouse=True)
+def _threads_are_unbound_without_persistence(monkeypatch):
+    """Let runner tests skip the database, which every real entry point initializes first."""
+    from agent.modules.agent_runtime import runner
+
+    read_family = runner.thread_graph_family
+
+    async def family_or_unbound(thread_id):
+        try:
+            return await read_family(thread_id)
+        except RuntimeError as exc:
+            if "engine not initialized" in str(exc):
+                return ""
+            raise
+
+    monkeypatch.setattr(runner, "thread_graph_family", family_or_unbound)
+
+
 @pytest.fixture
 def isolated_container(tmp_path, sqlite_schema_template):
     """Build isolated AppContainer activated for the current test."""

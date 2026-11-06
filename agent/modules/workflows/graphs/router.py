@@ -34,6 +34,7 @@ from agent.modules.workflows.run_config import (
 )
 from agent.modules.workflows.state.base import BaseState
 from agent.modules.workflows.constants import (
+    ACP_AGENT_GRAPH_TYPE,
     ROUTER_GRAPH_TYPE,
     REACT_AGENT_GRAPH_TYPE,
     DEFAULT_AGENT_NAME,
@@ -717,7 +718,7 @@ def _select_fallback_agent(candidates: dict[str, AgentConfig], catalog: Any) -> 
 
     # Last resort: first non-router agent from catalog
     for agent in catalog.list_agents():
-        if agent.graph_type != ROUTER_GRAPH_TYPE:
+        if agent.graph_type not in (ROUTER_GRAPH_TYPE, ACP_AGENT_GRAPH_TYPE):
             return agent
 
     return None

@@ -28,6 +28,32 @@ def coerce_agent_text(value: Any, default: str = "") -> str:
     return text
 
 
+class AcpAgentSettings(BaseModel):
+    """Settings of an agent card that runs an external agent over ACP."""
+
+    agent: str = Field(default="antigravity-acp", min_length=1)
+    # "ask" pauses for approval where a person can answer and denies elsewhere.
+    permission_mode: Literal["ask", "auto_allow"] = "ask"
+    # Session config option id -> value, for example {"model": "gemini-3.8-flash"}.
+    config_options: dict[str, str] = Field(default_factory=dict)
+
+
+def normalize_acp_card(data: Any) -> Any:
+    """Keep only the settings an external agent can use, which excludes delegation and plans."""
+    if isinstance(data, dict) and data.get("graph_type") == "acp_agent":
+        from agent.modules.tools import ACP_UNAVAILABLE_TOOL_NAMES
+
+        data = {
+            **data,
+            "sub_agents": None,
+            "plan_approval_targets": [],
+            "acp": data.get("acp") or {},
+        }
+        if isinstance(data.get("tools"), (list, tuple)):
+            data["tools"] = [name for name in data["tools"] if name not in ACP_UNAVAILABLE_TOOL_NAMES]
+    return data
+
+
 def normalize_agent_defaults(data: Any) -> Any:
     """Fill nullable provider/model settings with their runtime defaults."""
     if isinstance(data, dict):
@@ -92,6 +118,7 @@ class AgentConfig(BaseModel):
     internal: bool = Field(default=False, description="Whether this agent is reserved for system use.")
     context_compact_threshold: int = Field(default=75, ge=1, le=100, strict=True)
     system_prompt: str = ""  # Markdown body content (after frontmatter)
+    acp: AcpAgentSettings | None = None
 
     @model_validator(mode="after")
     def _validate_pool_effort(self):
@@ -114,9 +141,9 @@ class AgentConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize(cls, data: Any) -> Any:
-        data = normalize_agent_defaults(
+        data = normalize_acp_card(normalize_agent_defaults(
             normalize_agent_model(reject_legacy_agent_settings(data))
-        )
+        ))
         if isinstance(data, dict):
             from agent.modules.tools import TOOL_ALIASES, canonical_tool_names
             if "tools" in data and data["tools"] is not None:
@@ -152,6 +179,7 @@ class AgentCard(BaseModel):
     internal: bool = Field(default=False, description="Whether this agent is reserved for system use.")
     context_compact_threshold: int = Field(default=75, ge=1, le=100, strict=True)
     system_prompt: str = ""
+    acp: AcpAgentSettings | None = None
     source: Literal["builtin", "user"]
     path: str
     editable: bool = False
@@ -162,9 +190,9 @@ class AgentCard(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize(cls, data: Any) -> Any:
-        data = normalize_agent_defaults(
+        data = normalize_acp_card(normalize_agent_defaults(
             normalize_agent_model(reject_legacy_agent_settings(data))
-        )
+        ))
         if isinstance(data, dict):
             from agent.modules.tools import TOOL_ALIASES, canonical_tool_names
             if "tools" in data and data["tools"] is not None:
@@ -211,6 +239,7 @@ class AgentCard(BaseModel):
             internal=config.internal,
             context_compact_threshold=config.context_compact_threshold,
             system_prompt=config.system_prompt,
+            acp=config.acp,
             source=source,
             path=path,
             editable=editable,
@@ -262,4 +291,5 @@ class AgentCard(BaseModel):
             internal=self.internal,
             context_compact_threshold=self.context_compact_threshold,
             system_prompt=self.system_prompt,
+            acp=self.acp,
         )

@@ -3,7 +3,9 @@ import { ModelPicker } from "@/components/ModelPicker";
 import { SelectControl } from "@/components/SelectControl";
 import type { AgentsPayload } from "@/types";
 import { resolveModelAndProvider } from "@/lib/modelSelection";
+import { isAcpCard } from "@/lib/acp";
 
+import { AcpAgentFields } from "./AcpAgentFields";
 import type { AgentForm } from "./agentForm";
 
 export function AgentGeneralTab(props: {
@@ -50,7 +52,9 @@ export function AgentGeneralTab(props: {
         <p class="hint">
           {props.form.internal
             ? "Used only by the system. Clone the built-in agent to customize its configuration."
-            : "Available in the chat agent picker. Can also be used by other agents and workflows."}
+            : isAcpCard(props.form)
+              ? "Available in the chat agent picker. An external agent runs this card, so other agents cannot call it."
+              : "Available in the chat agent picker. Can also be used by other agents and workflows."}
         </p>
       </div>
       <div class="grid-2">
@@ -96,6 +100,7 @@ export function AgentGeneralTab(props: {
             ariaLabel="Workflow"
           />
         </div>
+        <Show when={!isAcpCard(props.form)}>
         <div class="field">
           <label>Provider / Model</label>
           <ModelPicker
@@ -145,7 +150,9 @@ export function AgentGeneralTab(props: {
             </p>
           </div>
         </div>
+        </Show>
       </div>
+      <Show when={isAcpCard(props.form)} fallback={
       <div class="field">
         <label>Context Compact Threshold (%)</label>
         <input
@@ -162,6 +169,9 @@ export function AgentGeneralTab(props: {
         />
         <p class="hint">Automatically summarize older context before each model call when this percentage of the model context window is reached. Default: 75%.</p>
       </div>
+      }>
+        <AcpAgentFields form={props.form} readOnly={props.readOnly} onUpdate={props.onUpdate} />
+      </Show>
     </div>
   );
 }

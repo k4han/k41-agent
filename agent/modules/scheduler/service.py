@@ -58,9 +58,9 @@ async def execute_scheduled_task(platform: str, user_id: str, task: str):
             usage_context={"platform": BACKGROUND_THREAD_PREFIX, "user_id": user_id, "channel_id": job_id},
         )
 
+        # No agent name: the executor ran in its own thread, and the user's agent keeps this one.
         await upsert_conversation_thread(
             thread_id=user_thread_id,
-            agent_name=AGENT_NAME,
             title=task,
             platform=platform,
             user_id=user_id,

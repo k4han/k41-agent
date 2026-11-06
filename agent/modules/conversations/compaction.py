@@ -54,6 +54,8 @@ from agent.modules.usage import (
 from agent.modules.workflows import (
     DEFAULT_CONTEXT_COMPACT_THRESHOLD,
     get_workflow_graph,
+    graph_name_for_thread,
+    thread_is_acp,
     make_run_config,
     normalize_messages_for_chat_model,
 )
@@ -367,7 +369,7 @@ async def has_pending_interrupt(thread_id: str) -> bool:
     """
     thread_id = resolve_thread_id(thread_id)
     try:
-        graph = get_workflow_graph(_INJECTION_GRAPH_NAME)
+        graph = get_workflow_graph(await graph_name_for_thread(thread_id))
         config = make_run_config(thread_id=thread_id)
         state = await graph.aget_state(config)
     except Exception as exc:
@@ -496,6 +498,8 @@ async def compact_conversation_thread(
     earlier messages in the LangGraph checkpoint state.
     """
     thread_id = resolve_thread_id(thread_id)
+    if await thread_is_acp(thread_id):
+        raise ValueError("ACP agents manage their own context, so this conversation cannot be compacted here.")
     if not thread_id:
         raise ValueError("thread_id is required.")
 

@@ -239,7 +239,7 @@ class TestFilesystemAgentRepository:
     def test_load_from_directory(self, agents_dir):
         repo = FilesystemAgentRepository(agents_dir)
         agents = repo.load()
-        assert len(agents) == 15
+        assert len(agents) == 16
         assert "researcher" in agents
         assert "coder" in agents
         assert "kode" in agents
@@ -257,7 +257,7 @@ class TestFilesystemAgentRepository:
         d = tempfile.mkdtemp()
         repo = FilesystemAgentRepository(d)
         agents = repo.load()
-        assert len(agents) == 13
+        assert len(agents) == 14
         assert "default" in agents
         assert "conversation-title" in agents
         assert "conversation-compactor" in agents
@@ -271,7 +271,7 @@ class TestFilesystemAgentRepository:
     def test_load_nonexistent_directory(self):
         repo = FilesystemAgentRepository("/nonexistent/path/12345")
         agents = repo.load()
-        assert len(agents) == 13
+        assert len(agents) == 14
         assert "default" in agents
         assert "conversation-title" in agents
         assert "conversation-compactor" in agents
@@ -284,7 +284,7 @@ class TestFilesystemAgentRepository:
         repo = FilesystemAgentRepository(agents_dir)
         repo.load()
         agents2 = repo.reload()
-        assert len(agents2) == 15
+        assert len(agents2) == 16
 
 
 # --- service tests ---
@@ -317,6 +317,7 @@ class TestAgentCatalogService:
         agents = self.service.list_agents()
         names = {a.name for a in agents}
         assert names == {
+            "antigravity",
             "researcher",
             "coder",
             "kode",
@@ -371,4 +372,4 @@ class TestAgentCatalogService:
 
     def test_reload(self):
         agents = self.service.reload_agents()
-        assert len(agents) == 15
+        assert len(agents) == 16

@@ -9,6 +9,7 @@ import { useToast } from "@/components/Toast";
 import { API_PATHS } from "@/lib/endpoints";
 import { fetchAgentEditorOptions } from "@/lib/agents";
 import { apiFetch, postJson, putJson } from "@/lib/api";
+import { isAcpCard } from "@/lib/acp";
 import { cloneValue, uniqueSorted } from "@/lib/utils";
 import { SettingsLayout } from "@/pages/settings/SettingsLayout";
 import type { AgentsPayload, PromptVariable, PromptVariablesPayload } from "@/types";
@@ -218,7 +219,7 @@ export function AgentEditPage(props: { agentName?: string }) {
     if (!p) {
       return [];
     }
-    return buildToolGroups(p, initialForm().tools);
+    return buildToolGroups(p, initialForm().tools, isAcpCard(form()));
   });
   const totalBuiltInTools = createMemo(() =>
     toolGroups().reduce((total, group) => total + group.tools.length, 0),

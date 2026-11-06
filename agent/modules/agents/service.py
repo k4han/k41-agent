@@ -7,7 +7,7 @@ import re
 from agent.modules.agents.models import AgentCard, AgentConfig
 from agent.modules.agents.parser import serialize_agent_config, parse_agent_markdown_content
 from agent.modules.agents.repository import FilesystemAgentRepository, get_repository
-from agent.modules.workflows import ROUTER_GRAPH_TYPE
+from agent.modules.workflows import ACP_AGENT_GRAPH_TYPE, ROUTER_GRAPH_TYPE
 
 
 class AgentCatalogService:
@@ -51,7 +51,9 @@ class AgentCatalogService:
         if target_name not in config.sub_agents:
             return False
         target = self.get_agent(target_name)
-        return target is not None and not target.internal
+        # ACP cards cannot be delegated to: their agent keeps its own session and
+        # tools, and a delegate call has no way to answer its permission requests.
+        return target is not None and not target.internal and target.graph_type != ACP_AGENT_GRAPH_TYPE
 
     def reload_agents(self) -> list[AgentConfig]:
         """Re-scan directory and update cache."""
@@ -152,7 +154,7 @@ class AgentCatalogService:
                 invalid.append(target_name or "<empty>")
                 continue
             target_card = cards.get(target_name)
-            if target_card is None or target_card.internal:
+            if target_card is None or target_card.internal or target_card.graph_type == ACP_AGENT_GRAPH_TYPE:
                 invalid.append(target_name)
         if invalid:
             joined = ", ".join(sorted(set(invalid)))

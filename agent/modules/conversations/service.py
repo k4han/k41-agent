@@ -251,6 +251,7 @@ async def upsert_conversation_thread(
     *,
     thread_id: str,
     agent_name: str = "",
+    graph_family: str = "",
     provider: str | None = None,
     model: str | None = None,
     title: str = "",
@@ -272,6 +273,7 @@ async def upsert_conversation_thread(
         user_id=user_id or parsed["user_id"],
         channel_id=channel_id if channel_id is not None else parsed["channel_id"],
         agent_name=agent_name,
+        graph_family=graph_family,
         provider=provider,
         model=model,
         title=title or thread_id,
@@ -308,6 +310,15 @@ async def get_conversation_thread(
 ) -> dict[str, Any] | None:
     repo = repository or get_conversation_thread_repository()
     return await repo.get(thread_id)
+
+
+async def release_conversation_thread_agent(
+    thread_id: str,
+    *,
+    repository: ConversationThreadRepository | None = None,
+) -> None:
+    repo = repository or get_conversation_thread_repository()
+    await repo.release_agent_binding(thread_id)
 
 
 async def rename_conversation_thread(
@@ -389,7 +400,13 @@ async def inject_agent_message_pair(
     """
     from langchain_core.messages import AIMessage, HumanMessage
 
-    from agent.modules.workflows import get_workflow_graph, make_run_config
+    from agent.modules.workflows import get_workflow_graph, make_run_config, thread_is_acp
+
+    if await thread_is_acp(thread_id):
+        # This writes as a react node, which would discard a pending ACP interrupt,
+        # and the external agent's session would never see the text anyway.
+        logger.debug("Skipping message injection for ACP thread %s.", thread_id)
+        return
 
     config = make_run_config(thread_id=thread_id)
     graph = get_workflow_graph(_INJECTION_GRAPH_NAME)

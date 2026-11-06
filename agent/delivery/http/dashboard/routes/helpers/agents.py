@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from agent.delivery.http.dashboard.routes.helpers.providers import provider_model_options
 from agent.modules.agents import AgentCard, AgentConfig, get_catalog_service
-from agent.modules.tools import ToolSource, find_descriptors, serialize_tool_config_schemas
+from agent.modules.tools import ACP_UNAVAILABLE_TOOL_NAMES, ToolSource, find_descriptors, serialize_tool_config_schemas
 from agent.modules.workflows import (
     REACT_AGENT_GRAPH_TYPE,
     ROUTER_GRAPH_TYPE,
@@ -222,6 +222,7 @@ async def agent_tools_payload() -> dict[str, Any]:
             "tools": sorted(tool_names),
             "tool_groups": _build_tool_groups(tool_names, tool_categories),
             "tool_config_schemas": tool_config_schemas,
+            "acp_unavailable_tools": sorted(ACP_UNAVAILABLE_TOOL_NAMES),
         }
         if cache_version == _agent_tools_cache_version:
             _agent_tools_cache = payload
@@ -396,4 +397,5 @@ def agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
         internal=body.internal,
         context_compact_threshold=body.context_compact_threshold,
         system_prompt=body.system_prompt.strip(),
+        acp=body.acp,
     )

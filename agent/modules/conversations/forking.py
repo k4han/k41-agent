@@ -33,7 +33,7 @@ from agent.modules.conversations.history import (
 )
 from agent.modules.conversations.repository import get_conversation_thread_repository
 from agent.modules.projects import get_project_workspace_service
-from agent.modules.workflows import get_workflow_graph
+from agent.modules.workflows import ACP_AGENT_GRAPH_TYPE, get_workflow_graph, thread_is_acp
 from agent.modules.workspaces import (
     TEMP_WORKSPACE_KEY,
     WorkspaceBinding,
@@ -206,6 +206,8 @@ async def _fork_reserved(thread_id: str, checkpoint_id: str, message_index: int)
     agent = get_catalog_service().get_agent(source["agent_name"] or "default")
     if agent is None:
         raise ValueError("The conversation agent is no longer available.")
+    if agent.graph_type == ACP_AGENT_GRAPH_TYPE or await thread_is_acp(thread_id):
+        raise ConversationForkConflictError("ACP agent conversations cannot be forked: the agent's session cannot rewind.")
     graph = get_workflow_graph(agent.graph_type)
     source_config = {"configurable": {
         "thread_id": thread_id, "checkpoint_ns": "", "checkpoint_id": checkpoint_id,
@@ -305,7 +307,7 @@ async def _fork_reserved(thread_id: str, checkpoint_id: str, message_index: int)
                 metadata = await repository.upsert(
                     thread_id=new_id,
                     **{key: source[key] for key in (
-                        "platform", "user_id", "channel_id", "agent_name", "provider", "model",
+                        "platform", "user_id", "channel_id", "agent_name", "graph_family", "provider", "model",
                     )},
                     title=next_fork_title(source["title"], titles), kind="user",
                 )

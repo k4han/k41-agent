@@ -27,6 +27,7 @@ from agent.delivery.http.dashboard.routes.helpers.sse import (
     SSE_HEARTBEAT_SECONDS,
     sse_event,
 )
+from agent.modules.acp import AGENT_DEFINITIONS, is_installed, peek_acp_service
 from agent.modules.agent_runtime import (
     get_active_session_registry,
     get_background_task_manager,
@@ -196,7 +197,8 @@ def _build_onboarding(
 ) -> dict[str, bool]:
     running_channels = sum(1 for s in services if s.get("status") == "running")
     ready_providers = sum(1 for p in providers if p.get("ready"))
-    needs_provider = ready_providers == 0
+    # An installed ACP agent can answer chats without any provider configured.
+    needs_provider = ready_providers == 0 and not any(is_installed(agent_id) for agent_id in AGENT_DEFINITIONS)
     needs_channel = running_channels == 0
     needs_agent = agents_total == 0
     return {
@@ -303,7 +305,7 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
         tasks_failed=tasks_failed,
         jobs_total=len(jobs),
         sessions_active=sessions_active,
-        providers_configured=ready_providers,
+        providers_configured=ready_providers + sum(is_installed(agent_id) for agent_id in AGENT_DEFINITIONS),
         mcp_connected=mcp_connected,
     )
 
@@ -498,13 +500,22 @@ async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
         thread_id = resolve_thread_id(str(thread_id))
     registry = get_active_session_registry()
 
-    success = False
     # Resolve thread_id for chat stream cancellation when only session_id is provided.
     resolved_thread_id: str | None = None
     if session_id:
         info = registry.get(session_id)
         if info and isinstance(info.get("thread_id"), str):
             resolved_thread_id = str(info["thread_id"])
+
+    # An ACP run stops by itself once the agent acknowledges the cancel, and that
+    # lets it commit the partial output. Cancelling its task would discard it.
+    acp_service = peek_acp_service()
+    acp_thread_id = resolved_thread_id or (str(thread_id) if thread_id else None)
+    if acp_service is not None and acp_thread_id and await acp_service.stop_thread(acp_thread_id):
+        return {"success": True}
+
+    success = False
+    if session_id:
         success = registry.cancel_session(session_id)
     elif thread_id:
         success = registry.cancel_by_thread(thread_id)

@@ -55,6 +55,10 @@ const KNOWN_WORKSPACE_AFFECTING_TOOLS = new Set([
   "apply_diff",
   "save_file",
   "append_file",
+  "acp_edit",
+  "acp_execute",
+  "acp_delete",
+  "acp_move",
 ]);
 
 const WORKSPACE_READ_ONLY_TOOLS = new Set([
@@ -224,6 +228,11 @@ export function handleStreamEvent(
     return;
   }
 
+  if (event.type === "browser_handoff_settled") {
+    callbacks.onBrowserHandoffChange?.(false, streamThreadIdRef.id);
+    return;
+  }
+
   if (event.type === STREAM_EVENTS.TOOL_RESULT) {
     const toolName = String(event.name || "unknown");
     if (toolName === "browser_handoff") {
@@ -336,7 +345,9 @@ export function handleStreamEvent(
   }
 
   if (event.type === STREAM_EVENTS.FINAL) {
-    if (streamedRef.received) {
+    // ACP agents stream this text as `message` events. Text then a tool then the
+    // end resets `received`, so that check alone would show it a second time.
+    if (streamedRef.received || event.already_streamed === true) {
       return;
     }
     const content = String(event.content || "");

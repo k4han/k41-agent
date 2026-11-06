@@ -9,7 +9,15 @@ from agent.modules.workflows.run_config import (
     make_context as make_run_context,
     make_config as make_run_config,
 )
+from agent.modules.workflows.thread_graph import (
+    graph_family_for,
+    graph_name_for_thread,
+    thread_graph_family,
+    thread_is_acp,
+)
 from agent.modules.workflows.constants import (
+    ACP_AGENT_GRAPH_TYPE,
+    GRAPH_FAMILY_ACP,
     REACT_AGENT_GRAPH_TYPE,
     ROUTER_GRAPH_TYPE,
 )
@@ -115,11 +123,15 @@ async def delete_workflow_thread_tree(thread_id: str) -> None:
 
 
 async def _delete_workflow_thread_tree_reserved(thread_id: str) -> None:
+    from agent.modules.acp import peek_acp_service
     from agent.modules.agent_runtime import get_active_session_registry
     from agent.modules.browser import delete_thread_browsers
     from agent.modules.tools import clear_conversation_storage
     from agent.modules.workflows.checkpoint.store import get_checkpointer
 
+    acp_service = peek_acp_service()
+    if acp_service is not None:
+        acp_service.forget_thread(thread_id)
     await delete_thread_browsers(thread_id)
     await clear_conversation_storage(thread_id)
     checkpointer = get_checkpointer()
@@ -160,7 +172,13 @@ __all__ = [
     "DEFAULT_WORKING_DIR",
     "delete_workflow_thread",
     "delete_workflow_thread_tree",
+    "ACP_AGENT_GRAPH_TYPE",
+    "GRAPH_FAMILY_ACP",
+    "graph_family_for",
+    "thread_graph_family",
     "get_workflow_graph",
+    "graph_name_for_thread",
+    "thread_is_acp",
     "initialize_checkpointer",
     "get_checkpointer",
     "list_registered_workflows",

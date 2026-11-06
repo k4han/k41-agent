@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from agent.modules.skills.discovery import clear_discovery_cache
+from agent.modules.skills.package_worker import safe_path as safe_package_path, validate_member as validate_package_member
 from agent.modules.skills.rendering import skill_catalog_xml, skill_content_xml
 from agent.modules.skills.service import SkillsService, allowed_names as normalize_allowed_names
 from agent.modules.skills.repository import (

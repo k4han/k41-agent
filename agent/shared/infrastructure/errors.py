@@ -14,6 +14,12 @@ ERROR_CODE_AUTH = "auth"
 ERROR_CODE_CONNECTION = "connection"
 ERROR_CODE_UPSTREAM = "upstream"
 ERROR_CODE_UNKNOWN = "unknown"
+ERROR_CODE_THREAD_GRAPH_CONFLICT = "thread_graph_conflict"
+
+
+class ThreadGraphConflictError(ValueError):
+    """A thread bound to one side of the ACP boundary was asked to run on the other."""
+
 
 _ERROR_MESSAGES: dict[str, str] = {
     ERROR_CODE_RATE_LIMIT: (
@@ -230,6 +236,9 @@ def classify_agent_error(exc: BaseException) -> AgentError:
     exhausted = find_exception(exc, ModelPoolExhausted)
     if exhausted is not None:
         return AgentError(code="model_pool_exhausted", message=str(exhausted))
+    conflict = find_exception(exc, ThreadGraphConflictError)
+    if conflict is not None:
+        return AgentError(code=ERROR_CODE_THREAD_GRAPH_CONFLICT, message=str(conflict))
     code = _find_code(exc, set())
     if code is None:
         code = ERROR_CODE_UNKNOWN

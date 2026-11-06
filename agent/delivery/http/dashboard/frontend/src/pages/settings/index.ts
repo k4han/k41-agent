@@ -1,6 +1,7 @@
 export { AgentsPage } from "./AgentsPage";
 export { AppearancePage } from "./AppearancePage";
 export { BackendsPage } from "./BackendsPage";
+export { AcpAgentsPage } from "./AcpAgentsPage";
 export { BrowserPage } from "./BrowserPage";
 export { ChannelsPage } from "./ChannelsPage";
 export { ConnectionsPage } from "./ConnectionsPage";
