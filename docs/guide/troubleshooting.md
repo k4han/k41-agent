@@ -75,6 +75,14 @@ Run the task in a dashboard conversation. Channel and scheduler runs do not
 provide the account identity required for browser sessions. See
 [browser automation](./browser).
 
+## A site rejects sign-in in the browser
+
+If a site reports "This browser or app may not be secure" or a similar message,
+close the browser and retry in a new session. If the server log warns that it could
+not read the browser version, set `browser.executable_path` to a standard Chrome or
+Chromium installation. See
+[signing in to sites that reject automated browsers](./browser#sign-in-to-sites-that-reject-automated-browsers).
+
 ## A source installation has no dashboard assets
 
 From the repository root:

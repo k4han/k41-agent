@@ -214,6 +214,77 @@ async def test_runtime_uses_same_browser_discovery_as_installation(monkeypatch, 
     assert captured["chromium_sandbox"] is True
 
 
+@pytest.mark.parametrize("platform,system", [
+    ("win32", "Windows NT 10.0; Win64; x64"),
+    ("darwin", "Macintosh; Intel Mac OS X 10_15_7"),
+    ("linux", "X11; Linux x86_64"),
+])
+def test_headless_reports_regular_chrome_for_host_and_version(monkeypatch, platform, system):
+    monkeypatch.setattr(discovery, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(discovery, "browser_major_version", lambda executable: "157")
+    assert discovery.headless_user_agent_args("/chrome") == [
+        f"--user-agent=Mozilla/5.0 ({system}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+    ]
+
+
+def test_headless_without_known_version_keeps_browser_user_agent(monkeypatch, caplog):
+    monkeypatch.setattr(discovery, "browser_major_version", lambda executable: None)
+    assert discovery.headless_user_agent_args(None) == []
+    assert "browser version" in caplog.text
+
+
+def test_windows_version_comes_from_newest_sibling(monkeypatch, tmp_path):
+    monkeypatch.setattr(discovery, "sys", SimpleNamespace(platform="win32"))
+    for name in ("99.0.1.1", "157.0.7000.10", "157.0.7000.9.manifest", "Dictionaries"):
+        (tmp_path / name).mkdir()
+    assert discovery.browser_major_version(str(tmp_path / "chrome.exe")) == "157"
+    assert discovery.browser_major_version(str(tmp_path / "missing" / "chrome.exe")) is None
+
+
+@pytest.mark.parametrize("result,expected", [
+    (lambda: SimpleNamespace(stdout="Google Chrome 157.0.7000.10 \n"), "157"),
+    (lambda: SimpleNamespace(stdout="Chromium 148.0.1.2 snap\n"), "148"),
+    (lambda: SimpleNamespace(stdout="unrecognized\n"), None),
+    (lambda: (_ for _ in ()).throw(FileNotFoundError()), None),
+    (lambda: (_ for _ in ()).throw(subprocess.TimeoutExpired("chrome", 10)), None),
+])
+def test_unix_version_comes_from_version_flag(monkeypatch, result, expected):
+    monkeypatch.setattr(discovery, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(discovery.subprocess, "run", lambda *args, **kwargs: result())
+    assert discovery.browser_major_version("/usr/bin/chrome") == expected
+
+
+@pytest.mark.asyncio
+async def test_runtime_launch_runs_headless_with_regular_user_agent(monkeypatch, tmp_path):
+    from agent.modules.browser import driver
+    from stagehand import Stagehand, local_browser
+
+    captured = {}
+
+    async def pages():
+        return []
+
+    async def launch(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(context=SimpleNamespace(pages=pages))
+
+    async def create(**kwargs):
+        return object()
+
+    async def reset_facade(self, artifacts):
+        pass
+
+    monkeypatch.setattr(driver, "find_browser", lambda: "/managed/chromium")
+    monkeypatch.setattr(local_browser, "launch", launch)
+    monkeypatch.setattr(Stagehand, "create", create)
+    monkeypatch.setattr(StagehandDriver, "reset_facade", reset_facade)
+    monkeypatch.setattr(discovery, "browser_major_version", lambda executable: "157")
+    await StagehandDriver._launch(tmp_path / "profile", tmp_path / "artifacts")
+    assert captured["headless"] is True
+    assert captured["args"][0] == "--remote-debugging-address=127.0.0.1"
+    assert "Chrome/157.0.0.0" in captured["args"][1] and captured["args"][1].startswith("--user-agent=")
+
+
 def test_missing_sudo_fails_before_download(monkeypatch):
     linux_host(monkeypatch, uid=1000)
     monkeypatch.setattr(browser.shutil, "which", lambda name: "/usr/bin/apt-get" if name == "apt-get" else None)

@@ -16,7 +16,7 @@ from threading import Thread
 import httpx
 from websockets.asyncio.client import connect
 
-from agent.shared.infrastructure.browser import find_browser
+from agent.shared.infrastructure.browser import find_browser, headless_user_agent_args
 
 
 def available_port() -> int:
@@ -43,10 +43,12 @@ class StagehandDriver:
         from stagehand import Stagehand, local_browser
 
         port = available_port()
+        executable = executable_path or find_browser()
+        user_agent_args = await asyncio.to_thread(headless_user_agent_args, executable)
         browser = await local_browser.launch(
             headless=True, port=port, user_data_dir=profile, preserve_user_data_dir=True,
-            executable_path=executable_path or find_browser(), chromium_sandbox=True,
-            args=["--remote-debugging-address=127.0.0.1"],
+            executable_path=executable, chromium_sandbox=True,
+            args=["--remote-debugging-address=127.0.0.1", *user_agent_args],
             viewport_width=1280, viewport_height=720, accept_downloads=False,
         )
         try:

@@ -101,6 +101,18 @@ Profiles belong to the authenticated dashboard account. Use a dashboard
 conversation for browser tasks; channel and scheduler runs do not supply that
 account identity.
 
+## Sign in to sites that reject automated browsers
+
+Google and some other sites refuse to sign in from a browser they identify as
+automated, for example with "This browser or app may not be secure". K41 runs
+Chrome headless, with no window or desktop required, and reports a regular Chrome
+user agent so these checks do not reject it for being headless.
+
+Sign in yourself through the Browser tab with a
+[handoff](#take-control-when-needed). Sites can use other signals too, so this does
+not guarantee that every site accepts the sign-in. Use an account you can recover
+if a site restricts it.
+
 ## Understand host and workspace addresses
 
 The browser runs on the K41 host. A URL such as `localhost` points to that host,
