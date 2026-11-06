@@ -3,6 +3,7 @@ import { RotateCcw } from "lucide-solid";
 import { useLocation, useNavigate } from "@solidjs/router";
 
 import { ModelPicker } from "@/components/ModelPicker";
+import { isAcpCard } from "@/lib/acp";
 import type { AgentMcpInstall, AgentsPayload, ToolConfigField, ToolConfigSchema } from "@/types";
 
 import type { AgentForm, AgentToolGroup, ToolConfigValue } from "./agentForm";
@@ -164,6 +165,11 @@ export function AgentToolsTab(props: {
 
   return (
     <div class="agent-config-tools">
+      <Show when={isAcpCard(props.form)}>
+        <p class="hint">
+          The agent keeps its own tools and can also use the ones selected here. They run with K41's credentials, and each call goes through this card's tool approvals. Permission rules set to Ask are refused, because a tool cannot pause for approval here. Use Allow or Deny for these tools.
+        </p>
+      </Show>
       <fieldset disabled={props.readOnly}>
         <legend>Tool permissions</legend>
         <p>Rules are evaluated in order; the last match wins. Inherit uses global rules. An empty override uses built-in defaults.</p>
@@ -194,14 +200,16 @@ export function AgentToolsTab(props: {
           <span>MCP servers</span>
           <strong>{`${activeMcpCount()}/${props.mcpServerOptions.length}`}</strong>
         </div>
-        <div class="agent-config-stat">
-          <span>Sub-agents</span>
-          <strong>{`${props.form.sub_agents.length}/${props.subAgentOptions.length}`}</strong>
-        </div>
-        <div class="agent-config-stat">
-          <span>Plan targets</span>
-          <strong>{`${props.form.plan_approval_targets.length}/${props.planApprovalTargetOptions.length}`}</strong>
-        </div>
+        <Show when={!isAcpCard(props.form)}>
+          <div class="agent-config-stat">
+            <span>Sub-agents</span>
+            <strong>{`${props.form.sub_agents.length}/${props.subAgentOptions.length}`}</strong>
+          </div>
+          <div class="agent-config-stat">
+            <span>Plan targets</span>
+            <strong>{`${props.form.plan_approval_targets.length}/${props.planApprovalTargetOptions.length}`}</strong>
+          </div>
+        </Show>
       </div>
 
       <section class="agent-config-section">
@@ -507,6 +515,7 @@ export function AgentToolsTab(props: {
         </section>
       </Show>
 
+      <Show when={!isAcpCard(props.form)}>
       <section class="agent-config-section">
         <div class="agent-config-section-header">
           <div>
@@ -583,6 +592,7 @@ export function AgentToolsTab(props: {
           </Show>
         </div>
       </section>
+      </Show>
     </div>
   );
 }

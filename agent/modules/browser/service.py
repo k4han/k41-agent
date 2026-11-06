@@ -20,6 +20,12 @@ from agent.modules.browser.repository import BrowserRepository
 logger = logging.getLogger(__name__)
 
 
+# Waiting past the deadline by this much guarantees the record counts as expired.
+HANDOFF_EXPIRY_GRACE_SECONDS = 1.0
+HANDOFF_CANCELLED ={"handoff_status": "cancelled", "snapshot_status": "skipped",
+                     "content": "HANDOFF CANCELLED: Browser handoff was cancelled by the user. The manual interaction was aborted. Browser control is now with you (the agent). Acknowledge that the user cancelled this browser task and do not continue the cancelled action. Ask the user what they would like to do next. Do not say you failed to transfer control."}
+
+
 class BrowserError(Exception):
     def __init__(self, code: str, message: str):
         super().__init__(message)
@@ -396,9 +402,16 @@ class BrowserService:
         return {"artifact_id": artifact_id, "image_url": f"/dashboard-api/browser/artifacts/{artifact_id}",
                 "mime_type": image["mimeType"]}
 
-    async def handoff(self, thread_id, owner_id, call_id, reason, *, authorize_snapshot=None):
+    async def handoff(self, thread_id, owner_id, call_id, reason, *, authorize_snapshot=None, wait_for_human=None):
+        """Hand the browser to the user.
+
+        Inside a graph run this interrupts. A caller outside any run passes
+        ``wait_for_human``, which receives the request and returns the decision.
+        """
         thread_id = self.canonical(thread_id)
         self.assert_handoff_supported(thread_id)
+        if wait_for_human is not None:
+            return await self._handoff_outside_graph(thread_id, owner_id, call_id, reason, wait_for_human, authorize_snapshot)
         key = self.repository.invocation_key(thread_id, call_id)
         async with self.thread_scope(thread_id), self.operation_scope(key):
             return await self._handoff(thread_id, owner_id, call_id, reason, authorize_snapshot=authorize_snapshot)
@@ -414,44 +427,9 @@ class BrowserService:
         from agent.modules.browser.models import BrowserHandoffResume
 
         thread_id = self.canonical(thread_id)
-        if not owner_id.startswith("admin:") or not call_id:
-            raise BrowserError("approval_unavailable", "Browser handoff requires an authenticated dashboard conversation.")
-        await self.repository.bind(thread_id, owner_id)
-        await self._expire_handoffs(thread_id)
-        fingerprint = hashlib.sha256(reason.encode()).hexdigest()
-        prior = await self.repository.invocation(thread_id, call_id)
-        if prior and prior.arguments_hash != fingerprint:
-            raise BrowserError("invalid_input", "Handoff call changed during replay.")
-        if prior and prior.status == "completed":
-            return json.loads(prior.result)
-        expired_receipt = None
-        if prior:
-            if prior.status not in {"handoff", "expired"}:
-                raise BrowserError("invalid_input", "Handoff call changed during replay.")
-            payload = json.loads(prior.result)
-            if prior.status == "expired":
-                expired_receipt = payload["receipt"]
-                payload = payload["handoff"]
-        else:
-            current = await self._ensure(thread_id, owner_id)
-            async with current.lock:
-                self.assert_agent(current)
-                current.handoff_id = uuid4().hex
-                current.handoff_expires_at = time.time() + self.idle_ttl
-                current.active_tab_id = None
-                current.last_activity = time.monotonic()
-                payload = {"type": "browser_handoff_request", "handoff_id": current.handoff_id,
-                           "generation": current.generation, "reason": reason,
-                           "expires_at": current.handoff_expires_at,
-                           "tool_call_id": call_id, "thread_id": thread_id}
-                try:
-                    await self.repository.record(thread_id, call_id, fingerprint, "handoff", payload)
-                except BaseException:
-                    current.handoff_id = None
-                    current.handoff_expires_at = None
-                    raise
-                finally:
-                    current.notify()
+        result, payload, expired_receipt = await self._open_handoff(thread_id, owner_id, call_id, reason)
+        if result is not None:
+            return result
         while True:
             raw_response = interrupt(payload)
             # An earlier permission interrupt may disappear on replay because
@@ -461,13 +439,102 @@ class BrowserService:
             response = BrowserHandoffResume.model_validate(raw_response)
             if response.handoff_id == payload["handoff_id"]:
                 break
+        return await self._settle_handoff(thread_id, call_id, reason, payload, expired_receipt, response.decision, authorize_snapshot)
+
+    async def _handoff_outside_graph(self, thread_id, owner_id, call_id, reason, wait_for_human, authorize_snapshot):
+        """Wait without the thread's locks, because the viewer and status need them meanwhile."""
+        key = self.repository.invocation_key(thread_id, call_id)
+        async with self.thread_scope(thread_id), self.operation_scope(key):
+            result, payload, _ = await self._open_handoff(thread_id, owner_id, call_id, reason)
+        if result is not None:
+            return result
+
+        async def settle(decision):
+            async with self.thread_scope(thread_id), self.operation_scope(key):
+                await self._expire_handoffs(thread_id)
+                recorded = await self._recorded_handoff(thread_id, call_id, reason)
+                if recorded is None:
+                    return {"handoff_status": "session_lost", "snapshot_status": "skipped",
+                            "content": "Browser session was lost while waiting. Start a new browser session and inspect it before continuing."}
+                result, payload, expired_receipt = recorded
+                if result is not None:
+                    return result
+                if decision is None and expired_receipt is not None:
+                    # The record stays for the workflow, which still waits for the user's answer.
+                    return expired_receipt
+                return await self._settle_handoff(thread_id, call_id, reason, payload, expired_receipt, decision or "cancel", authorize_snapshot)
+
+        try:
+            # The caller holds a request open meanwhile, so the wait must end with the handoff.
+            decision = await asyncio.wait_for(wait_for_human(payload), payload["expires_at"] - time.time() + HANDOFF_EXPIRY_GRACE_SECONDS)
+        except TimeoutError:
+            return await settle(None)
+        except asyncio.CancelledError:
+            # Nobody can answer anymore, and the browser must not stay under human control.
+            try:
+                await asyncio.shield(settle("cancel"))
+            except Exception:
+                logger.warning("A browser handoff could not be released after its turn ended.", exc_info=True)
+            raise
+        return await settle(decision)
+
+    @staticmethod
+    def _handoff_fingerprint(reason):
+        return hashlib.sha256(reason.encode()).hexdigest()
+
+    async def _recorded_handoff(self, thread_id, call_id, reason):
+        """Return (finished result, request, expired receipt), or None if this call never started."""
+        prior = await self.repository.invocation(thread_id, call_id)
+        if prior is None:
+            return None
+        if prior.arguments_hash != self._handoff_fingerprint(reason):
+            raise BrowserError("invalid_input", "Handoff call changed during replay.")
+        if prior.status == "completed":
+            return json.loads(prior.result), None, None
+        if prior.status not in {"handoff", "expired"}:
+            raise BrowserError("invalid_input", "Handoff call changed during replay.")
+        payload = json.loads(prior.result)
+        if prior.status == "expired":
+            return None, payload["handoff"], payload["receipt"]
+        return None, payload, None
+
+    async def _open_handoff(self, thread_id, owner_id, call_id, reason):
+        """Give the browser to the user, unless this call already did."""
+        if not owner_id.startswith("admin:") or not call_id:
+            raise BrowserError("approval_unavailable", "Browser handoff requires an authenticated dashboard conversation.")
+        await self.repository.bind(thread_id, owner_id)
+        await self._expire_handoffs(thread_id)
+        recorded = await self._recorded_handoff(thread_id, call_id, reason)
+        if recorded is not None:
+            return recorded
+        current = await self._ensure(thread_id, owner_id)
+        async with current.lock:
+            self.assert_agent(current)
+            current.handoff_id = uuid4().hex
+            current.handoff_expires_at = time.time() + self.idle_ttl
+            current.active_tab_id = None
+            current.last_activity = time.monotonic()
+            payload = {"type": "browser_handoff_request", "handoff_id": current.handoff_id,
+                       "generation": current.generation, "reason": reason,
+                       "expires_at": current.handoff_expires_at,
+                       "tool_call_id": call_id, "thread_id": thread_id}
+            try:
+                await self.repository.record(thread_id, call_id, self._handoff_fingerprint(reason), "handoff", payload)
+            except BaseException:
+                current.handoff_id = None
+                current.handoff_expires_at = None
+                raise
+            finally:
+                current.notify()
+        return None, payload, None
+
+    async def _settle_handoff(self, thread_id, call_id, reason, payload, expired_receipt, decision, authorize_snapshot):
+        """Take the browser back after the user's decision and record the receipt."""
         current = self.sessions.get(thread_id)
-        cancelled = {"handoff_status": "cancelled", "snapshot_status": "skipped",
-                     "content": "HANDOFF CANCELLED: Browser handoff was cancelled by the user. The manual interaction was aborted. Browser control is now with you (the agent). Acknowledge that the user cancelled this browser task and do not continue the cancelled action. Ask the user what they would like to do next. Do not say you failed to transfer control."}
         if expired_receipt is not None:
-            result = cancelled if response.decision == "cancel" else expired_receipt
+            result = HANDOFF_CANCELLED if decision == "cancel" else expired_receipt
         elif not current or current.generation != payload["generation"]:
-            result = cancelled if response.decision == "cancel" else {
+            result = HANDOFF_CANCELLED if decision == "cancel" else {
                 "handoff_status": "session_lost", "snapshot_status": "skipped",
                 "content": "Browser session was lost while waiting. Start a new browser session and inspect it before continuing."}
         else:
@@ -477,7 +544,7 @@ class BrowserService:
                 current.controller = None
                 current.notify()
                 current.last_activity = time.monotonic()
-                if response.decision == "cancel":
+                if decision == "cancel":
                     await self._dispose(current)
                 else:
                     # Reset snapshot IDs held by the previous facade after human interaction.
@@ -492,17 +559,31 @@ class BrowserService:
                         except Exception:
                             await self._dispose(current)
                 current.active_tab_id = None
-                if response.decision == "cancel":
-                    result = cancelled
+                if decision == "cancel":
+                    result = HANDOFF_CANCELLED
                 elif current.closed:
                     result = {"handoff_status": "session_lost", "snapshot_status": "skipped",
                               "content": "Browser session was lost while returning control. Start a new session and inspect it before continuing."}
                 else:
                     result = await self._handoff_snapshot(current, authorize_snapshot)
-        await self.repository.record(thread_id, call_id, fingerprint, "completed", result)
+        await self.repository.record(thread_id, call_id, self._handoff_fingerprint(reason), "completed", result)
         if current:
             current.notify()
         return result
+
+    async def abandon_handoffs(self, thread_id, *, expired_only=False):
+        """Finish handoffs that no workflow will resume, so they stop blocking this thread's browser.
+
+        ``expired_only`` leaves a handoff that the user can still answer in place.
+        """
+        thread_id = self.canonical(thread_id)
+        if not await self.repository.pending_handoff(thread_id, include_expired=True):
+            return
+        async with self.thread_scope(thread_id):
+            await self.repository.finish_handoffs(thread_id, HANDOFF_CANCELLED, expired_only=expired_only)
+            current = self.sessions.get(thread_id)
+            if not expired_only and current and current.handoff_id:
+                await self._close_session(current)
 
     async def _handoff_snapshot(self, current, authorize_snapshot):
         """Observe the returned browser under its lock before completing the handoff receipt."""

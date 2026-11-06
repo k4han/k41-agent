@@ -37,15 +37,57 @@ The agent's `mode` option cannot be set this way, on a card or in a request: too
 Everything lives under `~/.k41-agent/acp/antigravity-acp`: versions, sign-in, and sessions.
 **Remove** deletes all of it.
 
+### Giving the agent K41 tools
+
+The agent always has its own tools. To add K41 tools, select them under **Capabilities & Tools** on
+an ACP card, or list them on the card. This covers built-in tools and the tools of MCP servers
+enabled for the card:
+
+```yaml
+graph_type: acp_agent
+tools: [web_search, web_fetch, mcp__github__create_issue]
+acp:
+  agent: antigravity-acp
+```
+
+The built-in **Antigravity** card has no K41 tools and is read-only. Clone it or create your own card
+to use them.
+
+- **Approval.** Every call goes through `permission_mode`, like the agent's own edits and commands.
+  K41 also checks this itself: a tool runs only if K41 saw that exact call approved, so an agent that
+  skips the question, or changes the arguments afterwards, is refused. **Allow in this conversation**
+  is kept by K41, in memory, until K41 restarts. The agent itself only ever hears "allow once".
+- **K41's credentials.** These tools run inside K41 and can use its connections, such as calendar or
+  GitHub access, which the agent does not otherwise have. Select only what the card needs, because
+  text the agent reads can try to make it use them.
+- **Permission rules.** `tool_permissions` still apply. A rule set to `ask` is refused, because a tool
+  cannot pause for approval on this path. Use `allow` or `deny` for these tools.
+- **Browser handoff.** `browser_handoff` works as for other agents, in dashboard conversations: the
+  turn pauses until you choose **Return control to agent** or **Cancel browser task**, and the agent
+  then receives the result. Stopping the turn, or sending a new message, cancels the handoff and closes
+  the browser. Stopping also records the turn's output and ends the paused run. If nobody answers before
+  the handoff expires (`browser.idle_ttl_seconds`), the browser closes and the agent is told right away.
+  Its reply appears once you dismiss the expired handoff. Elsewhere, such as channels, the call fails
+  because nobody can take over the browser.
+- **Not available:** `ask_user`, `delegate_task`, `plan_mode_respond`, `request_plan_review`, `skill`
+  and `write_todos`. They need a K41 graph run, which an external agent does not have. Selecting them
+  on a card has no effect. A small `read` tool limited to retained tool output is added, as for other
+  agents, so long results stay reachable.
+- **Changing the selection** applies from the next message, including in a conversation already under
+  way.
+
+K41 serves these tools from an MCP endpoint on `127.0.0.1` with a random port and one secret token per
+agent session. The endpoint starts the first time a card with tools runs.
+
 ### What is different from other agents
 
-- **Tool approvals.** With `permission_mode: ask`, edits and shell commands pause for approval on
-  the dashboard. Surfaces where nobody can answer (channels, the scheduler, the synchronous API)
-  deny automatically. `auto_allow` approves everything the agent asks for.
+- **Tool approvals.** With `permission_mode: ask`, edits, shell commands and K41 tools pause for
+  approval on the dashboard. Surfaces where nobody can answer (channels, the scheduler, the
+  synchronous API) deny automatically. `auto_allow` approves everything the agent asks for.
 - **The agent's tools run on the machine running K41, with K41's access.** Approval only covers what
   the agent asks about, and an approved shell command can reach anything that user can.
-- **Card settings that do not apply.** Tools, skills, sub-agents, MCP servers and the K41 provider
-  and model settings are unused. ACP cards cannot be delegated to or receive plan approvals.
+- **Card settings that do not apply.** Skills, sub-agents and the K41 provider and model settings are
+  unused. ACP cards cannot be delegated to or receive plan approvals.
 - **History is linear.** The agent's session cannot rewind, so messages cannot be edited, forked or
   regenerated, and the conversation cannot be compacted. A conversation cannot switch between an ACP
   agent and another agent: its first run decides. In a chat channel, `/clear` releases the thread.
@@ -125,6 +167,20 @@ listed under "Not verified".
 - Results are in `rawOutput` (a string or an object). `content` is only set on some calls.
 - Thought tokens are counted, but no `agent_thought_chunk` was observed.
 
+### Client-provided MCP servers
+- `initialize` advertises `mcpCapabilities: {http: true, sse: true}`. Both `http` and stdio servers
+  work. K41 uses `http`, because its tools have to run inside the K41 process.
+- The server connects on the first prompt, not on `session/new`. It sends `server/discover`,
+  `initialize`, `notifications/initialized` and `tools/list`, and accepts a 405 on GET.
+- Tools are named `<server>_<tool>` in titles, for example `k41_get_current_time`.
+- Every call asks through `session/request_permission`, with `allow_always`, `allow` and `deny`.
+  `kind` is `other` and `_meta` has `{mcp: {tool, server}, is_mcp_tool_call: true}`.
+- `rawInput` holds the arguments twice: `{arguments: {...}, ...each argument}`.
+- **`rawOutput` is not the result.** It reads `Call <tool> tool`, while the model does receive the real
+  output. K41 therefore shows what the tool returned, as recorded by its own endpoint.
+- `session/resume` on a live session with a changed `mcpServers` list takes effect: the next prompt
+  connects with the new headers and lists the tools again. K41 uses this when a card's tools change.
+
 ### Cancellation and process lifetime
 - `session/cancel` returns `stopReason: "cancelled"` in about 0.2 s, even with a permission request
   left unanswered. A trailing chunk `The request was cancelled by the client.` is sent.
@@ -141,3 +197,5 @@ listed under "Not verified".
 - `stopReason` on quota exhaustion. A third-party source reports a non-spec `"error"` value, so K41
   accepts unknown stop reasons.
 - Linux and macOS, including the meaning of the Linux `--uid=` argument from the registry.
+- How long the server waits for one MCP tool call. `browser_handoff` keeps its request open until the
+  person answers or the handoff expires, which can take minutes.

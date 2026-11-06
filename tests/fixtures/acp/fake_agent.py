@@ -3,7 +3,7 @@
 The default shapes mirror what agy_acp_server 1.4.5 was observed to send, including
 its quirks. They are written by hand, so no captured traffic or credentials exist here.
 
-Usage: fake_agent.py <state_dir> [--no-resume] [--no-load] [--require-auth]
+Usage: fake_agent.py <state_dir> [--no-resume] [--no-load] [--require-auth] [--mcp-http] [--mcp-on-new]
 The scenario is chosen per prompt from the prompt text: "scenario:<name>".
 Every received message is appended to <state_dir>/calls.jsonl.
 """
@@ -14,7 +14,9 @@ import os
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
 import uuid
 from pathlib import Path
 
@@ -26,6 +28,7 @@ out_lock = threading.Lock()
 responses = {}
 cancels = {}
 next_id = [1000]
+session_mcp_servers = {}
 
 
 def send(message):
@@ -96,7 +99,101 @@ def run_edit(session_id, tag="1"):
     return original
 
 
+def mcp_request(session_id, method, params=None, *, token=None):
+    """POST one JSON-RPC request as agy_acp_server does. Returns (status, parsed body)."""
+    server = session_mcp_servers[session_id][0]
+    headers = {item["name"]: item["value"] for item in server["headers"]}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
+    headers.update({"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}).encode()
+    request = urllib.request.Request(server["url"], data=body, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=20) as reply:
+            return reply.status, json.loads(reply.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, None
+
+
+def mcp_tool_text(reply):
+    result = reply["result"]
+    text = " ".join(block.get("text", "") for block in result["content"])
+    return ("ERROR " if result.get("isError") else "") + text
+
+
+def mcp_tool_call_fields(tool, arguments):
+    """The shape agy_acp_server gives a client-provided MCP tool."""
+    return {"title": f"k41_{tool}", "kind": "other", "rawInput": {"arguments": arguments, **arguments},
+            "_meta": {"mcp": {"tool": tool, "server": "k41"}, "is_mcp_tool_call": True}}
+
+
+def run_mcp_tool(session_id, call_id, tool, arguments, sent_arguments=None, report_input=True):
+    """Ask, call the tool if allowed, and report it with the misleading rawOutput seen in practice."""
+    fields = mcp_tool_call_fields(tool, arguments)
+    if not report_input:
+        # rawInput is optional in ACP.
+        del fields["rawInput"]
+    update(session_id, {"sessionUpdate": "tool_call", "toolCallId": call_id, "status": "pending", **fields})
+    options = [{"optionId": "allow_always", "name": "Allow Always", "kind": "allow_always"},
+               {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+               {"optionId": "deny", "name": "Deny", "kind": "reject_once"}]
+    message = client_request("session/request_permission", {
+        "sessionId": session_id, "options": options,
+        "toolCall": {"toolCallId": call_id, "status": "pending", **fields},
+    })
+    outcome = message.get("result", {}).get("outcome", {})
+    (STATE / "mcp_choices.log").open("a", encoding="utf-8").write(f"{outcome.get('optionId')}\n")
+    if outcome.get("outcome") != "selected" or outcome.get("optionId") == "deny":
+        update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": call_id, "status": "failed", "rawOutput": "Rejected by user"})
+        return "denied"
+    update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": call_id, "status": "in_progress", **fields})
+    _, reply = mcp_request(session_id, "tools/call", {"name": tool, "arguments": sent_arguments if sent_arguments is not None else arguments})
+    update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": call_id, "status": "completed", "rawOutput": f"Call {tool} tool"})
+    return mcp_tool_text(reply)
+
+
 def turn_body(session_id, name, cancel, text):
+    if name == "mcp_list":
+        _, reply = mcp_request(session_id, "tools/list")
+        chunk(session_id, json.dumps(reply["result"]["tools"]))
+        return "end_turn"
+    if name == "mcp_call":
+        chunk(session_id, run_mcp_tool(session_id, "m1", "get_current_time", {}))
+        return "end_turn"
+    if name == "mcp_call_without_input":
+        chunk(session_id, run_mcp_tool(session_id, "m1", "get_current_time", {}, report_input=False))
+        return "end_turn"
+    if name == "mcp_call_twice":
+        first = run_mcp_tool(session_id, "m1", "get_current_time", {})
+        second = run_mcp_tool(session_id, "m2", "get_current_time", {})
+        chunk(session_id, f"{bool(first)} {bool(second)}")
+        return "end_turn"
+    if name == "mcp_swapped_arguments":
+        chunk(session_id, run_mcp_tool(session_id, "m1", "get_current_time", {"a": 1}, sent_arguments={"a": 2}))
+        return "end_turn"
+    if name == "mcp_unapproved":
+        _, reply = mcp_request(session_id, "tools/call", {"name": "get_current_time", "arguments": {}})
+        chunk(session_id, mcp_tool_text(reply))
+        return "end_turn"
+    if name == "mcp_control_tool":
+        chunk(session_id, run_mcp_tool(session_id, "m1", "ask_user", {"questions": []}))
+        return "end_turn"
+    if name == "mcp_handoff":
+        chunk(session_id, run_mcp_tool(session_id, "m1", "browser_handoff", {"reason": "Sign in"}))
+        return "end_turn"
+    if name == "mcp_bad_token":
+        status, _ = mcp_request(session_id, "tools/list", token="not-the-token")
+        chunk(session_id, f"status={status}")
+        return "end_turn"
+    if name == "mcp_get":
+        server = session_mcp_servers[session_id][0]
+        headers = {item["name"]: item["value"] for item in server["headers"]}
+        try:
+            with urllib.request.urlopen(urllib.request.Request(server["url"], headers=headers), timeout=20) as reply:
+                chunk(session_id, f"status={reply.status}")
+        except urllib.error.HTTPError as exc:
+            chunk(session_id, f"status={exc.code}")
+        return "end_turn"
     if name == "text":
         chunk(session_id, "Hello ")
         chunk(session_id, "world")
@@ -261,6 +358,8 @@ def main():
                             "auth": {"logout": {}},
                             "sessionCapabilities": {} if "--no-resume" in FLAGS else {"resume": {}},
                             "_meta": {"antigravity": {"systemPrompt": {"append": True}}}}
+            if "--mcp-http" in FLAGS:
+                capabilities["mcpCapabilities"] = {"http": True, "sse": True}
             send({"jsonrpc": "2.0", "id": rid, "result": {
                 "protocolVersion": 1, "agentCapabilities": capabilities,
                 "agentInfo": {"name": "fake", "title": "Fake", "version": "0.0.0"},
@@ -286,6 +385,12 @@ def main():
                 send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32000, "message": "Authentication required"}})
                 continue
             session_id = str(uuid.uuid4())
+            session_mcp_servers[session_id] = params.get("mcpServers") or []
+            if "--mcp-on-new" in FLAGS and session_mcp_servers[session_id]:
+                # Connecting this early is allowed, although agy_acp_server waits for the first prompt.
+                _, reply = mcp_request(session_id, "tools/list")
+                listed = [tool["name"] for tool in reply["result"]["tools"]]
+                (STATE / "mcp_tools_on_new.json").write_text(json.dumps(listed), encoding="utf-8")
             (STATE / f"session-{session_id}").write_text(params.get("cwd", ""), encoding="utf-8")
             send({"jsonrpc": "2.0", "id": rid, "result": {"sessionId": session_id, **session_setup_payload()}})
             update(session_id, {"sessionUpdate": "available_commands_update", "availableCommands": []})
@@ -294,6 +399,7 @@ def main():
             if not known_session(session_id):
                 send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32002, "message": "Session not found"}})
                 continue
+            session_mcp_servers[session_id] = params.get("mcpServers") or []
             if method == "session/load":
                 update(session_id, {"sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": "old prompt"}})
                 chunk(session_id, "old reply")

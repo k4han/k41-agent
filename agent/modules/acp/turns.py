@@ -16,18 +16,26 @@ import logging
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Callable
-from concurrent.futures import Future
+from collections.abc import Awaitable, Callable
+from concurrent.futures import Future, InvalidStateError
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import BaseMessage
 
 from agent.modules.acp.client import CANCELLED_OUTCOME, AcpClient
 from agent.modules.acp.errors import AcpConnectionClosed, AcpRpcError
-from agent.modules.acp.translator import TurnTranscript, _clip_value
+from agent.modules.acp.tool_bridge import bridged_tool_name
+from agent.modules.acp.translator import TurnTranscript, _clip_value, mcp_call_arguments
+
+if TYPE_CHECKING:
+    from agent.modules.acp.tool_bridge import SessionTools
 
 logger = logging.getLogger(__name__)
+
+_ALLOW_KINDS = ("allow_once", "allow_always")
+_REJECT_KINDS = ("reject_once", "reject_always")
+GRANT_LABEL = "Allow in this conversation"
 
 STOP_TURN_OPTION_ID = "__stop_turn__"
 PERMISSION_INTERRUPT_TYPE = "acp_permission_request"
@@ -57,10 +65,15 @@ class PendingPermission:
     rpc_id: int | str
     tool_call: dict[str, Any]
     options: list[dict[str, Any]]
+    bridged_tool: str | None = None
 
     def interrupt_value(self) -> dict[str, Any]:
         locations = self.tool_call.get("locations")
         paths = [item.get("path") for item in locations if isinstance(item, dict)] if isinstance(locations, list) else []
+        options = [_public_option(option) for option in self.options]
+        if self.bridged_tool:
+            # K41 keeps this grant itself, and only for this session.
+            options = [{**option, "label": GRANT_LABEL} if option["kind"] == "allow_always" else option for option in options]
         return {
             "type": PERMISSION_INTERRUPT_TYPE,
             "request_id": self.request_id,
@@ -68,12 +81,24 @@ class PendingPermission:
             "title": str(self.tool_call.get("title") or "Tool call"),
             "kind": str(self.tool_call.get("kind") or "other"),
             "paths": [str(path) for path in paths if path],
-            "raw_input": _clip_value(self.tool_call.get("rawInput")),
-            "options": [_public_option(option) for option in self.options],
+            "raw_input": _clip_value(mcp_call_arguments(self.tool_call)),
+            "options": options,
         }
 
-    def has_option(self, option_id: str) -> bool:
-        return any(option.get("optionId") == option_id for option in self.options)
+    def option(self, option_id: str) -> dict[str, Any] | None:
+        return next((option for option in self.options if option.get("optionId") == option_id), None)
+
+
+@dataclass
+class PendingHandoff:
+    """A K41 tool call waiting while the user controls the browser."""
+
+    request_id: str
+    payload: dict[str, Any]
+    decision: Future[str]
+
+    def interrupt_value(self) -> dict[str, Any]:
+        return self.payload
 
 
 def _public_option(option: dict[str, Any]) -> dict[str, str]:
@@ -139,6 +164,8 @@ class AcpTurn:
         auto_allow: bool = False,
         can_interrupt: bool = False,
         on_done: Callable[[AcpTurn], None] | None = None,
+        tools: SessionTools | None = None,
+        commit_stopped: Callable[[AcpTurn], Awaitable[None]] | None = None,
     ) -> None:
         self.turn_id = turn_id
         self.thread_id = thread_id
@@ -148,6 +175,9 @@ class AcpTurn:
         self.auto_allow = auto_allow
         self.can_interrupt = can_interrupt
         self.on_done = on_done
+        self.tools = tools
+        # Commits this turn when it was stopped and no graph run can do it.
+        self.commit_stopped = commit_stopped
         self.created_at = time.monotonic()
         self.finished_at: float | None = None
         self.stop_reason: str | None = None
@@ -159,7 +189,7 @@ class AcpTurn:
         self._lock = threading.Lock()
         self._events: list[dict[str, Any]] = []
         self._cursor = 0
-        self._pending: OrderedDict[str, PendingPermission] = OrderedDict()
+        self._pending: OrderedDict[str, PendingPermission | PendingHandoff] = OrderedDict()
         self._waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
         self._done = threading.Event()
 
@@ -196,10 +226,14 @@ class AcpTurn:
             self.transcript.cancel_requested = True
             pending = list(self._pending.values())
             self._pending.clear()
+        if self.tools is not None:
+            self.tools.cancel_running()
         try:
             self.client.cancel(self.session_id)
             for request in pending:
-                self.client.respond_permission(request.rpc_id, CANCELLED_OUTCOME)
+                # A pending handoff ends with its tool call, cancelled above.
+                if isinstance(request, PendingPermission):
+                    self.client.respond_permission(request.rpc_id, CANCELLED_OUTCOME)
         except Exception:
             logger.debug("ACP cancel could not be delivered.", exc_info=True)
         self._notify()
@@ -212,6 +246,9 @@ class AcpTurn:
             self.error = exc
         with self._lock:
             self._pending.clear()
+        if self.tools is not None:
+            self.tools.cancel_running()
+            self.tools.end_turn(self)
         self.finished_at = time.monotonic()
         self.client.unsubscribe(self.session_id, self)
         self._done.set()
@@ -234,6 +271,8 @@ class AcpTurn:
         tool_call = params.get("toolCall") if isinstance(params.get("toolCall"), dict) else {}
         decision: str | None = None
         queue_it = False
+        bridged = bridged_tool_name(tool_call) if self.tools is not None else None
+        approved = False
         with self._lock:
             # The request can arrive before its tool_call update. It carries the
             # same fields, so the transcript learns the title and input either way.
@@ -242,18 +281,21 @@ class AcpTurn:
                 self.transcript.merge_tool(self.transcript.tool_item(tool_id), {key: value for key, value in tool_call.items() if key != "status"})
             if self.transcript.cancel_requested:
                 decision = None
-            elif self.auto_allow:
-                decision = _select_automatic_option(options, ("allow_once", "allow_always"))
+            elif self.auto_allow or (bridged and self.tools.is_granted(bridged)):
+                decision = _select_automatic_option(options, _ALLOW_KINDS)
+                approved = decision is not None
             elif not self.can_interrupt:
                 # No human can answer on this surface, so the safe answer is no.
-                decision = _select_automatic_option(options, ("reject_once", "reject_always"))
+                decision = _select_automatic_option(options, _REJECT_KINDS)
             else:
                 digest = hashlib.sha256(f"{self.turn_id}\0{rpc_id}".encode()).hexdigest()[:32]
-                self._pending[digest] = PendingPermission(digest, rpc_id, tool_call, options)
+                self._pending[digest] = PendingPermission(digest, rpc_id, tool_call, options, bridged)
                 queue_it = True
         if queue_it:
             self._notify()
         elif decision is not None:
+            if bridged and approved:
+                self.tools.approve(tool_call, bridged)
             self.client.select_option(rpc_id, decision)
         else:
             self.client.respond_permission(rpc_id, CANCELLED_OUTCOME)
@@ -266,7 +308,7 @@ class AcpTurn:
             self._cursor = len(self._events)
             return events
 
-    def next_pending(self) -> PendingPermission | None:
+    def next_pending(self) -> PendingPermission | PendingHandoff | None:
         with self._lock:
             return next(iter(self._pending.values()), None)
 
@@ -278,12 +320,60 @@ class AcpTurn:
         """Answer a pending request. Options that were not offered are refused."""
         with self._lock:
             request = self._pending.get(request_id)
-            if request is None or not request.has_option(option_id):
+            option = request.option(option_id) if isinstance(request, PendingPermission) else None
+            if option is None:
                 return False
             del self._pending[request_id]
+        if request.bridged_tool and option.get("kind") in _ALLOW_KINDS:
+            self.tools.approve(request.tool_call, request.bridged_tool)
+            if option.get("kind") == "allow_always":
+                # The agent could remember "always" beyond what K41 can see, so it
+                # hears "once" and K41 answers the later requests itself.
+                self.tools.grant(request.bridged_tool)
+                option_id = _select_automatic_option(request.options, ("allow_once",)) or option_id
         self.client.select_option(request.rpc_id, option_id)
         self._notify()
         return True
+
+    async def wait_for_handoff(self, payload: dict[str, Any]) -> str:
+        """Show a browser handoff to the user and return their decision."""
+        request = PendingHandoff(str(payload["handoff_id"]), payload, Future())
+        with self._lock:
+            if self.done or self.transcript.cancel_requested:
+                return "cancel"
+            self._pending[request.request_id] = request
+        self._notify()
+        try:
+            return await asyncio.wrap_future(request.decision)
+        finally:
+            with self._lock:
+                self._pending.pop(request.request_id, None)
+            self._notify()
+
+    def answer_handoff(self, request_id: str, decision: str) -> bool:
+        with self._lock:
+            request = self._pending.get(request_id)
+            if not isinstance(request, PendingHandoff):
+                return False
+            del self._pending[request_id]
+        try:
+            request.decision.set_result(decision)
+        except InvalidStateError:
+            # The tool call was cancelled at the same moment, which already released the browser.
+            return False
+        self._notify()
+        return True
+
+    def add_event(self, event: dict[str, Any]) -> None:
+        """Queue a stream event for whichever node is draining this turn."""
+        with self._lock:
+            self._events.append(event)
+        self._notify()
+
+    def record_tool_output(self, tool_call_id: str, text: str) -> None:
+        """Keep what a K41 tool returned. The agent reports the call as finished after this."""
+        with self._lock:
+            self.transcript.tool_item(tool_call_id).bridged_output = text
 
     async def wait_for_progress(self) -> None:
         """Block until new events, a pending request, or the end of the turn."""

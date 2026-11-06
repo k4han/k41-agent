@@ -248,6 +248,7 @@ export type AgentToolsPayload = {
   tool_config_sources?: Record<string, Record<string, string>>;
   tools: string[];
   tool_groups?: ToolGroup[];
+  acp_unavailable_tools?: string[];
   tool_config_schemas?: Record<string, ToolConfigSchema>;
   tool_config_effective?: Record<string, Record<string, unknown>>;
 };

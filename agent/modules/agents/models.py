@@ -39,17 +39,18 @@ class AcpAgentSettings(BaseModel):
 
 
 def normalize_acp_card(data: Any) -> Any:
-    """ACP agents bring their own tools, so card-level tool settings do not apply."""
+    """Keep only the settings an external agent can use, which excludes delegation and plans."""
     if isinstance(data, dict) and data.get("graph_type") == "acp_agent":
+        from agent.modules.tools import ACP_UNAVAILABLE_TOOL_NAMES
+
         data = {
             **data,
-            "tools": [],
-            "tool_permissions": None,
-            "tool_configs": {},
             "sub_agents": None,
             "plan_approval_targets": [],
             "acp": data.get("acp") or {},
         }
+        if isinstance(data.get("tools"), (list, tuple)):
+            data["tools"] = [name for name in data["tools"] if name not in ACP_UNAVAILABLE_TOOL_NAMES]
     return data
 
 

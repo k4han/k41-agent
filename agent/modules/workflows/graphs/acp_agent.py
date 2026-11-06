@@ -8,15 +8,18 @@ the transcript at every permission boundary, and only ``acp_permission`` interru
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
+from langgraph.runtime import Runtime
 from langgraph.types import interrupt
 from pydantic import ValidationError
 
@@ -28,21 +31,24 @@ from agent.modules.acp import (
     AcpError,
     AcpNotInstalled,
     AcpRpcError,
+    AcpTurn,
+    PendingHandoff,
+    ToolOutput,
     TurnRequest,
     describe_failure,
     get_acp_service,
     not_installed_notice,
+    tool_output,
 )
-from agent.modules.tools import AcpPermissionResume, get_thread_id
+from agent.modules.browser import BROWSER_HANDOFF_WAIT_KEY, BrowserHandoffResume, abandon_thread_handoffs
+from agent.modules.tools import AcpPermissionResume, ToolResolver, coding_message_for_model, get_thread_id, is_browser_tool
 from agent.modules.workflows.checkpoint import get_checkpointer
 from agent.modules.workflows.constants import ACP_AGENT_GRAPH_TYPE
+from agent.modules.workflows.nodes.tool import tool_node
 from agent.modules.workflows.prompt_builders import resolve_prompt_variables
 from agent.modules.workflows.registry import GraphRegistry
 from agent.modules.workflows.run_config import WorkflowContext
 from agent.modules.workflows.state.acp import AcpState
-
-if TYPE_CHECKING:
-    from langgraph.runtime import Runtime
 
 logger = logging.getLogger(__name__)
 
@@ -90,11 +96,86 @@ def prompt_blocks(message: HumanMessage, *, images_supported: bool = True) -> li
     return blocks
 
 
+class CardToolProvider:
+    """Run a card's tools through the regular tool node, outside any graph run.
+
+    Reusing the node keeps policy, tool configs, coding permissions and output
+    retention identical to other agents. No node is active here, so a tool cannot
+    interrupt for approval and ``approval_supported`` stays off: "ask" rules fail
+    closed. The agent's own approval request covers the call as a whole. A browser
+    handoff waits on the turn instead, and ``acp_permission`` asks the user for it.
+    """
+
+    def __init__(self, context: WorkflowContext, config: RunnableConfig, turn_id: str) -> None:
+        self._context = context
+        self._turn_id = turn_id
+        self._can_interrupt = bool(config.get("configurable", {}).get("acp_can_interrupt"))
+        # Only what tools read. The rest of a node's config belongs to that graph run.
+        self._config: RunnableConfig = {
+            "configurable": {
+                "thread_id": get_thread_id(config),
+                "approval_supported": False,
+                BROWSER_HANDOFF_WAIT_KEY: self._wait_for_handoff,
+            },
+            "metadata": dict(config.get("metadata") or {}),
+        }
+        self._browser_lock = asyncio.Lock()
+
+    async def _wait_for_handoff(self, payload: dict[str, Any]) -> str:
+        turn = get_acp_service().turn(self._turn_id)
+        return await turn.wait_for_handoff(payload) if turn is not None else "cancel"
+
+    async def _resolve(self):
+        resolver = ToolResolver()
+        tools = await resolver.aresolve_for_agent(
+            self._context.get_agent_name(),
+            override_tool_names=self._context.get_allowed_tool_names(),
+        )
+        return resolver.for_workspace(tools, self._context.get_workspace())
+
+    async def list_tools(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description or "",
+                "inputSchema": convert_to_openai_tool(tool)["function"]["parameters"],
+            }
+            for tool in await self._resolve()
+        ]
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolOutput:
+        # Checked here because the node restores control tools named by a pending call.
+        if name not in {tool.name for tool in await self._resolve()}:
+            return ToolOutput(f"Tool '{name}' is not available to this agent.", is_error=True)
+        if name == "browser_handoff" and not self._can_interrupt:
+            return ToolOutput("Nobody can take over the browser from this surface. Use a dashboard conversation.", is_error=True)
+        if not is_browser_tool(name):
+            return await self._invoke(name, arguments)
+        # One browser call at a time, as tool_node enforces for a model's batch.
+        async with self._browser_lock:
+            try:
+                return await self._invoke(name, arguments)
+            finally:
+                turn = get_acp_service().turn(self._turn_id)
+                if name == "browser_handoff" and turn is not None:
+                    # The transcript names this call acp_other, so the dashboard cannot recognise its result.
+                    turn.add_event({"type": "browser_handoff_settled"})
+
+    async def _invoke(self, name: str, arguments: dict[str, Any]) -> ToolOutput:
+        call = {"id": uuid.uuid4().hex, "name": name, "args": arguments, "type": "tool_call"}
+        state = {"messages": [AIMessage(content="", id=uuid.uuid4().hex, tool_calls=[call])]}
+        result = await tool_node(state, self._config, Runtime(context=self._context))
+        message = coding_message_for_model(result["messages"][-1])
+        return tool_output(message.content, is_error=message.status == "error")
+
+
 async def acp_prepare_node(state: AcpState, config: RunnableConfig, runtime: Runtime[WorkflowContext]) -> dict[str, Any]:
     """Name this turn and end any turn the thread still has running."""
     service = get_acp_service()
     thread_id = get_thread_id(config)
     await service.supersede(thread_id)
+    # A handoff left by a restart has no tool call waiting on it anymore.
+    await abandon_thread_handoffs(thread_id)
     user_message = _last_human_message(state)
     message_id = user_message.id if user_message is not None else uuid.uuid4().hex
     return {
@@ -139,7 +220,30 @@ async def _start_turn(state: AcpState, config: RunnableConfig, runtime: Runtime[
         can_interrupt=bool(config.get("configurable", {}).get("acp_can_interrupt")),
         config_options={**settings.config_options, **(ctx.acp_config_options or {})},
         system_prompt=system_prompt,
+        tools=CardToolProvider(ctx, config, turn_id) if agent_config.tools else None,
+        commit_stopped=_commit_stopped_turn,
     ))
+
+
+async def _commit_stopped_turn(turn: AcpTurn) -> None:
+    """Record a turn stopped during a handoff and release the graph paused on that handoff.
+
+    No run can do this: the handoff's request is gone, so the dashboard has nothing
+    left to answer. The graph is moved directly, the way forking moves one.
+    """
+    from agent.modules.agent_runtime import get_active_session_registry
+    from agent.modules.workflows import get_workflow_graph, make_run_config
+
+    graph = get_workflow_graph(ACP_AGENT_GRAPH_TYPE)
+    config = make_run_config(thread_id=turn.thread_id)
+    async with get_active_session_registry().wait_for_thread_mutation(turn.thread_id):
+        state = await graph.aget_state(config)
+        # A new message may have replaced this turn while the agent acknowledged the cancel.
+        if state.values.get("acp_turn_id") == turn.turn_id and "acp_permission" in state.next:
+            values = {"messages": turn.messages(notice=turn.result_notice()), "acp_pending": False}
+            updated = await graph.aupdate_state(config, values, as_node="acp_turn")
+            await graph.aupdate_state(updated, None, as_node=END)
+    turn.committed = True
 
 
 async def acp_turn_node(state: AcpState, config: RunnableConfig, runtime: Runtime[WorkflowContext]) -> dict[str, Any]:
@@ -151,6 +255,7 @@ async def acp_turn_node(state: AcpState, config: RunnableConfig, runtime: Runtim
     if turn is None:
         if service.was_started(turn_id) or state.get("acp_boot_id") != service.boot_id:
             # The prompt may already have run, so it must not be sent again.
+            await abandon_thread_handoffs(get_thread_id(config))
             return _end_with_notice(writer, turn_id, "lost", TURN_LOST_NOTICE)
         if runtime.context.get_workspace().backend != "local":
             return _end_with_notice(writer, turn_id, "remote", REMOTE_WORKSPACE_NOTICE)
@@ -199,7 +304,9 @@ async def acp_turn_node(state: AcpState, config: RunnableConfig, runtime: Runtim
 
 
 async def acp_permission_node(state: AcpState, config: RunnableConfig) -> dict[str, Any]:
-    """Pause for one permission decision and hand it to the waiting agent."""
+    """Pause for one decision and hand it to whatever in the turn waits for it."""
+    # Being here again means the person answered, which also dismisses an expired handoff.
+    await abandon_thread_handoffs(get_thread_id(config), expired_only=True)
     turn = get_acp_service().turn(str(state.get("acp_turn_id") or ""))
     pending = turn.next_pending() if turn is not None else None
     if pending is None:
@@ -207,6 +314,15 @@ async def acp_permission_node(state: AcpState, config: RunnableConfig) -> dict[s
         return {"acp_pending": False}
     while True:
         response = interrupt(pending.interrupt_value())
+        if isinstance(pending, PendingHandoff):
+            try:
+                handoff = BrowserHandoffResume.model_validate(response)
+            except ValidationError:
+                continue
+            if handoff.handoff_id != pending.request_id:
+                continue
+            turn.answer_handoff(pending.request_id, handoff.decision)
+            return {"acp_pending": False}
         try:
             decision = AcpPermissionResume.model_validate(response)
         except ValidationError:

@@ -41,13 +41,14 @@ export function manualToolNames(tools: readonly string[]): string[] {
   return tools.filter((name) => name !== "delegate_task" && name !== "call_agent");
 }
 
-export function buildToolGroups(payload: AgentsPayload, initialTools: string[]): AgentToolGroup[] {
+export function buildToolGroups(payload: AgentsPayload, initialTools: string[], isAcp = false): AgentToolGroup[] {
+  const unavailable = new Set(isAcp ? payload.acp_unavailable_tools || [] : []);
   const groups = (payload.tool_groups || []).map((group) => ({
     category: group.category,
-    tools: manualToolNames(group.tools),
+    tools: manualToolNames(group.tools).filter((tool) => !unavailable.has(tool)),
   })).filter((group) => group.tools.length > 0);
   const known = new Set(groups.flatMap((group) => group.tools));
-  const extras = manualToolNames(initialTools).filter((tool) => !known.has(tool) && !tool.startsWith("mcp__"));
+  const extras = manualToolNames(initialTools).filter((tool) => !known.has(tool) && !unavailable.has(tool) && !tool.startsWith("mcp__"));
   if (extras.length > 0) {
     const other = groups.find((group) => group.category === "unknown");
     if (other) {

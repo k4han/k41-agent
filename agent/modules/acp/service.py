@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import os
 import time
@@ -16,7 +17,8 @@ from agent.modules.acp.agents import get_agent_definition
 from agent.modules.acp.client import AcpClient
 from agent.modules.acp.errors import AcpError, AcpNotInstalled, AcpRpcError
 from agent.modules.acp.process import AgentCommand
-from agent.modules.acp.turns import AcpTurn
+from agent.modules.acp.tool_bridge import SessionTools, ToolBridge, ToolProvider
+from agent.modules.acp.turns import AcpTurn, PendingHandoff
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,8 @@ class TurnRequest:
     can_interrupt: bool = False
     config_options: dict[str, str] | None = None
     system_prompt: Callable[[], Awaitable[str]] | None = None
+    tools: ToolProvider | None = None
+    commit_stopped: Callable[[AcpTurn], Awaitable[None]] | None = None
 
 
 class AcpService:
@@ -68,11 +72,15 @@ class AcpService:
         self._turns: dict[str, AcpTurn] = {}
         self._started_turn_ids: set[str] = set()
         self._active_by_thread: dict[str, str] = {}
+        self._thread_sessions: dict[str, str] = {}
+        self._stranded_commits: set[asyncio.Task[None]] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._idle_handles: dict[str, asyncio.TimerHandle] = {}
         self._holds: dict[str, int] = {}
         self._applied_options: dict[str, dict[str, str]] = {}
         self._option_categories: dict[str, dict[str, str]] = {}
+        self._tool_bridge = ToolBridge()
+        self._session_tools: dict[str, SessionTools] = {}
         self._closed = False
 
     @staticmethod
@@ -153,10 +161,15 @@ class AcpService:
             self._cancel_idle(agent_id)
         for turn in list(self._turns.values()):
             turn.cancel()
+        commits = list(self._stranded_commits)
+        for task in commits:
+            task.cancel()
+        await asyncio.gather(*commits, return_exceptions=True)
         clients = list(self._clients.values())
         self._clients.clear()
         self._live_sessions.clear()
         await asyncio.gather(*(asyncio.to_thread(client.stop) for client in clients), return_exceptions=True)
+        await self._tool_bridge.close()
 
     # Turns ------------------------------------------------------------------
 
@@ -197,6 +210,7 @@ class AcpService:
         try:
             self.hold(request.agent_id)
             session_id, blocks, notices = await self._prepare_session(client, request)
+            tools = self._session_tools.get(session_id)
             turn = AcpTurn(
                 turn_id=request.turn_id,
                 thread_id=request.thread_id,
@@ -206,9 +220,14 @@ class AcpService:
                 auto_allow=request.auto_allow,
                 can_interrupt=request.can_interrupt,
                 on_done=self._on_turn_done,
+                tools=tools,
+                commit_stopped=request.commit_stopped,
             )
+            if tools is not None:
+                tools.begin_turn(turn, request.tools)
             self._turns[request.turn_id] = turn
             self._active_by_thread[request.thread_id] = request.turn_id
+            self._thread_sessions[request.thread_id] = session_id
             turn.start(blocks, notices=notices)
             return turn
         finally:
@@ -216,18 +235,24 @@ class AcpService:
 
     async def _prepare_session(self, client: AcpClient, request: TurnRequest) -> tuple[str, list[dict[str, Any]], list[str]]:
         notices: list[str] = []
+        tool_names = await self._wanted_tool_names(client, request, notices)
         live = self._live_sessions.setdefault(id(client), set())
         session_id = ""
         result: dict[str, Any] = {}
         if request.session_id and request.session_cwd == request.cwd:
-            if request.session_id in live:
+            if request.session_id in live and self._attached_tools_match(request.session_id, tool_names):
                 session_id = request.session_id
             else:
-                session_id, result, notice = await self._reattach(client, request)
+                # A live session also takes this path when the card's tools changed or
+                # their endpoint moved: session/resume makes the agent connect again.
+                session_id, result, notice = await self._reattach(client, request, tool_names)
                 if notice:
                     notices.append(notice)
         elif request.session_id:
             notices.append("The workspace changed, so the agent started a new session without earlier context.")
+        if request.session_id and session_id != request.session_id:
+            # The thread moves to a new session and nothing uses this one again.
+            self._forget_session(request.session_id)
         blocks = [block for block in request.blocks if block.get("type") != "image" or client.supports_image()]
         if not session_id:
             prompt_text = await request.system_prompt() if request.system_prompt else ""
@@ -236,31 +261,97 @@ class AcpService:
                 meta = {"antigravity": {"systemPrompt": {"append": prompt_text}}}
             elif prompt_text.strip():
                 blocks.insert(0, {"type": "text", "text": f"<system_instructions>\n{prompt_text}\n</system_instructions>"})
-            result = await client.new_session(request.cwd, meta=meta)
-            session_id = str(result.get("sessionId") or "")
-            if not session_id:
-                raise AcpError("The agent did not return a session id.")
+            tools = self._tool_bridge.open_session(tool_names, request.tools) if tool_names else None
+            try:
+                result = await client.new_session(request.cwd, meta=meta, mcp_servers=self._mcp_servers(tools))
+                session_id = str(result.get("sessionId") or "")
+                if not session_id:
+                    raise AcpError("The agent did not return a session id.")
+            except BaseException:
+                if tools is not None:
+                    self._tool_bridge.revoke(tools)
+                raise
+            self._bind_tools(session_id, tools)
         live.add(session_id)
         notices.extend(await self._apply_config_options(client, session_id, result, request.config_options))
         return session_id, blocks, notices
 
-    @staticmethod
-    async def _reattach(client: AcpClient, request: TurnRequest) -> tuple[str, dict[str, Any], str]:
+    async def _wanted_tool_names(self, client: AcpClient, request: TurnRequest, notices: list[str]) -> frozenset[str]:
+        """Names of the K41 tools this turn should offer. A problem here only costs the tools."""
+        if request.tools is None:
+            return frozenset()
+        if not client.supports_http_mcp():
+            notices.append("This agent cannot connect to K41 tools, so it runs with its own tools only.")
+            return frozenset()
+        try:
+            names = frozenset(tool["name"] for tool in await request.tools.list_tools())
+            if names:
+                await self._tool_bridge.ensure_started()
+            return names
+        except Exception as exc:
+            logger.warning("K41 tools are unavailable for an ACP turn: %s", exc, exc_info=not isinstance(exc, AcpError | OSError | ValueError))
+            notices.append(f"K41 tools are unavailable for this message: {exc}")
+            return frozenset()
+
+    def _attached_tools_match(self, session_id: str, wanted: frozenset[str]) -> bool:
+        tools = self._session_tools.get(session_id)
+        if tools is None:
+            return not wanted
+        return tools.names == wanted and self._tool_bridge.is_reachable(tools)
+
+    def _mcp_servers(self, tools: SessionTools | None) -> list[dict[str, Any]]:
+        return [self._tool_bridge.server_entry(tools)] if tools is not None else []
+
+    def _bind_tools(self, session_id: str, tools: SessionTools | None) -> None:
+        previous = self._session_tools.pop(session_id, None)
+        if previous is not None:
+            self._tool_bridge.revoke(previous)
+        if tools is not None:
+            if previous is not None:
+                tools.inherit_grants(previous)
+            self._session_tools[session_id] = tools
+
+    def _forget_session(self, session_id: str) -> None:
+        self._bind_tools(session_id, None)
+        self._applied_options.pop(session_id, None)
+        self._option_categories.pop(session_id, None)
+        for live in self._live_sessions.values():
+            live.discard(session_id)
+
+    def forget_thread(self, thread_id: str) -> None:
+        """End what a deleted conversation still holds. The agent's session itself just stays unused."""
+        turn = self.active_turn(thread_id)
+        if turn is not None:
+            turn.cancel()
+        self._active_by_thread.pop(thread_id, None)
+        session_id = self._thread_sessions.pop(thread_id, None)
+        if session_id:
+            self._forget_session(session_id)
+
+    async def _reattach(self, client: AcpClient, request: TurnRequest, tool_names: frozenset[str]) -> tuple[str, dict[str, Any], str]:
         lost = "The earlier agent session could not be restored, so this one starts without earlier context."
         if not client.supports_resume() and not client.supports_load():
             return "", {}, lost
+        tools = self._tool_bridge.open_session(tool_names, request.tools) if tool_names else None
         try:
             # No listener is subscribed yet, so history replayed by session/load
             # is dropped instead of being shown again.
             if client.supports_resume():
-                result = await client.resume_session(request.session_id, request.cwd)
+                result = await client.resume_session(request.session_id, request.cwd, mcp_servers=self._mcp_servers(tools))
             else:
-                result = await client.load_session(request.session_id, request.cwd)
+                result = await client.load_session(request.session_id, request.cwd, mcp_servers=self._mcp_servers(tools))
         except AcpRpcError as exc:
+            if tools is not None:
+                self._tool_bridge.revoke(tools)
             if exc.auth_required:
                 raise
             logger.info("ACP session could not be restored (code %s).", exc.code)
             return "", {}, lost
+        except BaseException:
+            if tools is not None:
+                self._tool_bridge.revoke(tools)
+            raise
+        self._bind_tools(request.session_id, tools)
         return request.session_id, result, ""
 
     async def _apply_config_options(
@@ -310,8 +401,8 @@ class AcpService:
         turn = self.active_turn(thread_id)
         if turn is None:
             return False
-        turn.cancel()
-        if not turn.attached:
+        stranded = self._stop_turn(turn)
+        if not turn.attached and not stranded:
             # Paused on a permission card: no run is active, so there is no task to
             # cancel. Answering the card later commits the partial output.
             return True
@@ -320,15 +411,46 @@ class AcpService:
             if turn.done and turn.committed:
                 return True
             await asyncio.sleep(0.05)
-        return False
+        return stranded
 
     def cancel_thread_now(self, thread_id: str) -> bool:
         """Signal cancellation without waiting. Usable from synchronous code."""
         turn = self.active_turn(thread_id)
         if turn is None:
             return False
-        turn.cancel()
+        self._stop_turn(turn)
         return True
+
+    def _stop_turn(self, turn: AcpTurn) -> bool:
+        """Cancel a turn and return whether it gets committed without a graph run.
+
+        A permission card outlives the cancel, and answering it resumes the graph.
+        A handoff ends with its tool call, which leaves nothing to resume a graph
+        paused on it, so its output would stay uncommitted and the graph paused.
+        """
+        stranded = (
+            not turn.attached
+            and turn.commit_stopped is not None
+            and self._loop is not None
+            and isinstance(turn.next_pending(), PendingHandoff)
+        )
+        turn.cancel()
+        if stranded:
+            # The caller's context holds the container that the commit needs.
+            self._loop.call_soon_threadsafe(self._start_stranded_commit, turn, context=contextvars.copy_context())
+        return stranded
+
+    def _start_stranded_commit(self, turn: AcpTurn) -> None:
+        task = asyncio.ensure_future(self._commit_stranded(turn))
+        self._stranded_commits.add(task)
+        task.add_done_callback(self._stranded_commits.discard)
+
+    async def _commit_stranded(self, turn: AcpTurn) -> None:
+        await self._end_cancelled_turn(turn)
+        try:
+            await turn.commit_stopped(turn)
+        except Exception:
+            logger.exception("The output of a stopped ACP turn could not be committed.")
 
     async def supersede(self, thread_id: str) -> None:
         """End a thread's previous turn before a new prompt starts."""
@@ -336,6 +458,9 @@ class AcpService:
         if turn is None:
             return
         turn.cancel()
+        await self._end_cancelled_turn(turn)
+
+    async def _end_cancelled_turn(self, turn: AcpTurn) -> None:
         deadline = time.monotonic() + SUPERSEDE_TIMEOUT_SECONDS
         while not turn.done and time.monotonic() < deadline:
             await asyncio.sleep(0.05)

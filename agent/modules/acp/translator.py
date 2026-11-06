@@ -28,6 +28,14 @@ NEVER_EXECUTED_OUTPUT = "Tool call was approved but never executed."
 CANCELLED_NOTICE_TEXT = "The request was cancelled by the client."
 
 
+def mcp_call_arguments(fields: dict[str, Any]) -> Any:
+    """Return a tool call's input. MCP calls also repeat each argument beside ``arguments``."""
+    raw = fields.get("rawInput")
+    meta = fields.get("_meta")
+    is_mcp = isinstance(meta, dict) and meta.get("is_mcp_tool_call")
+    return raw["arguments"] if is_mcp and isinstance(raw, dict) and "arguments" in raw else raw
+
+
 def _clip(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
@@ -88,6 +96,8 @@ class ToolItem:
     status: str = "pending"
     raw_input: Any = None
     raw_output: Any = None
+    # What a K41 tool really returned, which the agent's own report does not carry.
+    bridged_output: str | None = None
     content: Any = None
     locations: list[Any] = field(default_factory=list)
     announced: bool = False
@@ -157,7 +167,7 @@ class TurnTranscript:
         if fields.get("status"):
             item.status = str(fields["status"])
         if fields.get("rawInput") is not None:
-            item.raw_input = _clip_value(fields["rawInput"])
+            item.raw_input = _clip_value(mcp_call_arguments(fields))
         if fields.get("rawOutput") is not None:
             item.raw_output = fields["rawOutput"]
         if fields.get("content") is not None:
@@ -238,6 +248,8 @@ class TurnTranscript:
 
     @staticmethod
     def tool_output(item: ToolItem) -> str:
+        if item.bridged_output is not None:
+            return _clip(item.bridged_output, MAX_TOOL_TEXT_CHARS)
         return _clip(_output_text(item.raw_output) or _content_text(item.content) or item.status, MAX_TOOL_TEXT_CHARS)
 
     def _tool_result_event(self, item: ToolItem) -> dict[str, Any]:

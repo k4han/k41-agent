@@ -123,11 +123,15 @@ async def delete_workflow_thread_tree(thread_id: str) -> None:
 
 
 async def _delete_workflow_thread_tree_reserved(thread_id: str) -> None:
+    from agent.modules.acp import peek_acp_service
     from agent.modules.agent_runtime import get_active_session_registry
     from agent.modules.browser import delete_thread_browsers
     from agent.modules.tools import clear_conversation_storage
     from agent.modules.workflows.checkpoint.store import get_checkpointer
 
+    acp_service = peek_acp_service()
+    if acp_service is not None:
+        acp_service.forget_thread(thread_id)
     await delete_thread_browsers(thread_id)
     await clear_conversation_storage(thread_id)
     checkpointer = get_checkpointer()

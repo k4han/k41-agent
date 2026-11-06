@@ -1413,6 +1413,10 @@ export function ChatPage() {
     const results = await Promise.allSettled(requests);
     if (results.some((result) => result.status === "fulfilled")) {
       showToast("Session stop requested.");
+      // A stop during a browser handoff ends it with no stream left to report that.
+      if (acpAgentSelected() && currentThreadId() === tid) {
+        void refreshThread(tid);
+      }
     } else {
       const rejected = results.find((result) => result.status === "rejected") as
         PromiseRejectedResult | undefined;

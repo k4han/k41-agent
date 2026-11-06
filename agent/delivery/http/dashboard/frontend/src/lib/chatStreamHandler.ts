@@ -228,6 +228,11 @@ export function handleStreamEvent(
     return;
   }
 
+  if (event.type === "browser_handoff_settled") {
+    callbacks.onBrowserHandoffChange?.(false, streamThreadIdRef.id);
+    return;
+  }
+
   if (event.type === STREAM_EVENTS.TOOL_RESULT) {
     const toolName = String(event.name || "unknown");
     if (toolName === "browser_handoff") {

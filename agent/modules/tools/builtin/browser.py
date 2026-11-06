@@ -9,7 +9,7 @@ from langchain_core.tools import BaseTool, InjectedToolArg, StructuredTool
 from langgraph.prebuilt import ToolRuntime
 from typing_extensions import NotRequired, TypedDict
 
-from agent.modules.browser import get_browser_service
+from agent.modules.browser import BROWSER_HANDOFF_WAIT_KEY, get_browser_service
 from agent.modules.browser import BrowserError, BrowserService
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
@@ -159,8 +159,9 @@ async def _handoff(runtime: Runtime, reason: str):
     try:
         BrowserService.assert_handoff_supported(thread_id)
         authorize(runtime, "browser_handoff", {"reason": reason})
-        result = await get_browser_service().handoff(thread_id, owner_id, runtime.tool_call_id, reason,
-                                                    authorize_snapshot=authorize_snapshot)
+        result = await get_browser_service().handoff(
+            thread_id, owner_id, runtime.tool_call_id, reason, authorize_snapshot=authorize_snapshot,
+            wait_for_human=(runtime.config.get("configurable") or {}).get(BROWSER_HANDOFF_WAIT_KEY))
     except BrowserError as exc:
         raise ToolError(ToolErrorCode.EXECUTION_ERROR, f"{exc.code}: {exc}") from None
     return message(runtime, "browser_handoff", result)

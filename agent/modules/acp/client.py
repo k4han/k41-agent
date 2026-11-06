@@ -87,6 +87,10 @@ class AcpClient:
         system_prompt = vendor.get("systemPrompt") if isinstance(vendor, dict) else None
         return isinstance(system_prompt, dict) and bool(system_prompt.get("append"))
 
+    def supports_http_mcp(self) -> bool:
+        capabilities = self.agent_capabilities.get("mcpCapabilities")
+        return isinstance(capabilities, dict) and bool(capabilities.get("http"))
+
     def supports_logout(self) -> bool:
         capabilities = self.agent_capabilities.get("auth")
         return isinstance(capabilities, dict) and capabilities.get("logout") is not None
@@ -111,17 +115,23 @@ class AcpClient:
     async def logout(self) -> dict[str, Any]:
         return await self._call("logout", {})
 
-    async def new_session(self, cwd: str, *, meta: dict[str, Any] | None = None) -> dict[str, Any]:
-        params: dict[str, Any] = {"cwd": cwd, "mcpServers": []}
+    async def new_session(
+        self,
+        cwd: str,
+        *,
+        meta: dict[str, Any] | None = None,
+        mcp_servers: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"cwd": cwd, "mcpServers": mcp_servers or []}
         if meta:
             params["_meta"] = meta
         return await self._call("session/new", params)
 
-    async def resume_session(self, session_id: str, cwd: str) -> dict[str, Any]:
-        return await self._call("session/resume", {"sessionId": session_id, "cwd": cwd, "mcpServers": []})
+    async def resume_session(self, session_id: str, cwd: str, *, mcp_servers: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        return await self._call("session/resume", {"sessionId": session_id, "cwd": cwd, "mcpServers": mcp_servers or []})
 
-    async def load_session(self, session_id: str, cwd: str) -> dict[str, Any]:
-        return await self._call("session/load", {"sessionId": session_id, "cwd": cwd, "mcpServers": []})
+    async def load_session(self, session_id: str, cwd: str, *, mcp_servers: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        return await self._call("session/load", {"sessionId": session_id, "cwd": cwd, "mcpServers": mcp_servers or []})
 
     async def set_config_option(self, session_id: str, config_id: str, value: str) -> dict[str, Any]:
         return await self._call("session/set_config_option", {

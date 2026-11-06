@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import logging
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,16 +13,22 @@ import pytest_asyncio
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import ValidationError
+from sqlalchemy import MetaData
 
 from agent.modules.acp.errors import AcpNotInstalled
 from agent.modules.acp.process import AgentCommand
 from agent.modules.acp.service import AcpService, not_installed_notice
+from agent.modules.acp.translator import TurnTranscript
 from agent.modules.acp.turns import SIGN_IN_NOTICE, STOP_TURN_OPTION_ID
 from agent.modules.agent_runtime import runner as runner_module
 from agent.modules.agents.models import AcpAgentSettings, AgentConfig
 from agent.modules.agents.parser import parse_agent_markdown_content, serialize_agent_config
+from agent.modules.browser.models import BrowserArtifact, BrowserBinding, BrowserInvocation, BrowserProfile
+from agent.modules.browser.service import BrowserService
 from agent.modules.tools.coding.models import PermissionResume
+from agent.modules.workflows import delete_workflow_thread_tree
 from agent.modules.workflows.graphs.acp_agent import TURN_LOST_NOTICE, compile_acp_agent_graph
+from agent.shared.infrastructure.db.engine import close_async_engine, initialize_async_engine
 
 FAKE_AGENT = Path(__file__).parent / "fixtures" / "acp" / "fake_agent.py"
 THREAD = "api_dashboard_acp-thread"
@@ -85,6 +93,7 @@ async def env(tmp_path, isolated_container, monkeypatch):
     graph = compile_acp_agent_graph(InMemorySaver())
     environment = Env(tmp_path, isolated_container, monkeypatch, graph)
     monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: graph)
+    monkeypatch.setattr("agent.modules.workflows.get_workflow_graph", lambda name: graph)
     monkeypatch.setattr("agent.modules.agents.get_catalog_service", lambda: SimpleNamespace(
         get_agent=lambda name: environment.agent, get_card=lambda name: None,
     ))
@@ -588,14 +597,573 @@ def test_build_run_params_passes_acp_options_only_when_set():
     assert with_options["acp_config_options"] == {"model": "m"} and "acp_config_options" not in without
 
 
-def test_card_round_trips_acp_settings_and_drops_tool_settings():
+def test_card_round_trips_acp_settings_and_keeps_only_usable_tool_settings():
     config = AgentConfig(
-        name="ag", graph_type="acp_agent", tools=["read"], sub_agents=["x"], plan_approval_targets=["y"],
+        name="ag", graph_type="acp_agent", tools=["read", "ask_user", "skill", "delegate_task"],
+        tool_configs={"read": {"x": 1}}, sub_agents=["x"], plan_approval_targets=["y"],
         acp=AcpAgentSettings(permission_mode="auto_allow", config_options={"model": "m"}),
     )
-    assert config.tools == [] and config.sub_agents is None and config.plan_approval_targets == []
+    assert config.tools == ["read"] and config.sub_agents is None and config.plan_approval_targets == []
+    assert config.tool_configs == {"read": {"x": 1}}
     parsed = parse_agent_markdown_content(serialize_agent_config(config), source_label="test")
-    assert parsed.acp == config.acp and parsed.graph_type == "acp_agent"
+    assert parsed.acp == config.acp and parsed.graph_type == "acp_agent" and parsed.tools == ["read"]
+
+
+# K41 tools --------------------------------------------------------------------
+
+
+def use_card_tools(env, *tools, permission_mode="ask"):
+    env.flags = ["--mcp-http"]
+    env.agent = AgentConfig(name="ag", graph_type="acp_agent", tools=list(tools),
+                            acp=AcpAgentSettings(permission_mode=permission_mode))
+
+
+def attached_servers(env, method="session/new", index=-1):
+    return env.calls(method)[index]["params"]["mcpServers"]
+
+
+def mcp_choices(env):
+    path = env.state_dir / "mcp_choices.log"
+    return path.read_text(encoding="utf-8").split() if path.exists() else []
+
+
+@pytest.mark.asyncio
+async def test_a_card_without_tools_attaches_no_server(env):
+    env.flags = ["--mcp-http"]
+    await env.collect("scenario:text")
+    assert attached_servers(env) == []
+
+
+@pytest.mark.asyncio
+async def test_card_tools_are_listed_with_their_schemas(env):
+    use_card_tools(env, "get_current_time")
+    events = await env.collect("scenario:mcp_list")
+    [server] = attached_servers(env)
+    assert server["type"] == "http" and server["name"] == "k41" and server["url"].startswith("http://127.0.0.1:")
+    assert server["headers"][0]["value"].startswith("Bearer ")
+    # "read" is limited to retained output, as for other agents, so long results stay reachable.
+    assert [tool["name"] for tool in json.loads(texts(events))] == ["get_current_time", "read"]
+    assert json.loads(texts(events))[0]["inputSchema"]["type"] == "object"
+
+
+@pytest.mark.asyncio
+async def test_an_agent_without_http_mcp_runs_with_its_own_tools_and_says_so(env):
+    use_card_tools(env, "get_current_time")
+    env.flags = []
+    events = await env.collect("scenario:text")
+    assert "cannot connect to K41 tools" in texts(events) and "Hello world" in texts(events)
+    assert attached_servers(env) == []
+
+
+@pytest.mark.asyncio
+async def test_approved_call_runs_and_the_transcript_shows_the_real_result(env):
+    use_card_tools(env, "get_current_time")
+    first = await env.collect("scenario:mcp_call")
+    question = question_of(first)
+    assert "k41_get_current_time" in question["question"]
+    second = await env.collect(resume_payload=resume(first, "allow"))
+    output = next(event for event in second if event["type"] == "tool_result")["content"]
+    assert output[:4].isdigit()  # A timestamp, not the agent's "Call get_current_time tool".
+    assert texts(second) == output
+    assert ("tool", output) in visible(await env.messages())
+
+
+@pytest.mark.asyncio
+async def test_duplicated_mcp_arguments_are_not_shown_twice(env):
+    use_card_tools(env, "get_current_time")
+    first = await env.collect("scenario:mcp_swapped_arguments")
+    assert 'Input: {"a": 1}' in question_of(first)["question"]
+
+
+@pytest.mark.asyncio
+async def test_denied_call_does_not_run(env):
+    use_card_tools(env, "get_current_time")
+    first = await env.collect("scenario:mcp_call")
+    second = await env.collect(resume_payload=resume(first, "deny"))
+    assert texts(second) == "denied"
+    assert mcp_choices(env) == ["deny"]
+
+
+@pytest.mark.asyncio
+async def test_surfaces_without_a_person_deny_card_tools(env):
+    use_card_tools(env, "get_current_time")
+    events = await env.collect("scenario:mcp_call", platform="telegram", thread="telegram_user_1")
+    assert texts(events) == "denied"
+    assert "user_input_request" not in types(events)
+
+
+@pytest.mark.asyncio
+async def test_a_call_the_agent_did_not_get_approved_is_refused(env):
+    use_card_tools(env, "get_current_time")
+    events = await env.collect("scenario:mcp_unapproved")
+    assert texts(events).startswith("ERROR K41 refused this call")
+
+
+@pytest.mark.asyncio
+async def test_an_approval_does_not_cover_other_arguments(env):
+    use_card_tools(env, "get_current_time")
+    first = await env.collect("scenario:mcp_swapped_arguments")
+    second = await env.collect(resume_payload=resume(first, "allow"))
+    assert texts(second).startswith("ERROR K41 refused this call")
+
+
+@pytest.mark.asyncio
+async def test_auto_allow_runs_without_asking_and_tells_the_agent_only_once(env):
+    use_card_tools(env, "get_current_time", permission_mode="auto_allow")
+    events = await env.collect("scenario:mcp_call")
+    assert "user_input_request" not in types(events)
+    assert not texts(events).startswith("ERROR")
+    assert mcp_choices(env) == ["allow"]
+
+
+@pytest.mark.asyncio
+async def test_allow_always_is_kept_by_k41_for_this_conversation(env):
+    use_card_tools(env, "get_current_time")
+    first = await env.collect("scenario:mcp_call_twice")
+    labels = {option["id"]: option["label"] for option in question_of(first)["options"]}
+    assert labels["allow_always"] == "Allow in this conversation"
+    second = await env.collect(resume_payload=resume(first, "allow_always"))
+    # The second call needs no card, and the agent never hears "always".
+    assert "user_input_request" not in types(second)
+    assert texts(second) == "True True"
+    assert mcp_choices(env) == ["allow", "allow"]
+
+
+@pytest.mark.asyncio
+async def test_a_grant_survives_the_idle_stop_of_the_agent_process(env):
+    use_card_tools(env, "get_current_time")
+    first = await env.collect("scenario:mcp_call")
+    await env.collect(resume_payload=resume(first, "allow_always"))
+    await env.service.restart_client(env.agent.acp.agent)
+    events = await env.collect("scenario:mcp_call")
+    assert "user_input_request" not in types(events)
+    assert not texts(events).startswith("ERROR")
+
+
+@pytest.mark.asyncio
+async def test_a_grant_does_not_survive_a_server_restart(env):
+    use_card_tools(env, "get_current_time")
+    first = await env.collect("scenario:mcp_call")
+    await env.collect(resume_payload=resume(first, "allow_always"))
+    await env.restart_server()
+    events = await env.collect("scenario:mcp_call")
+    assert "user_input_request" in types(events)
+
+
+@pytest.mark.asyncio
+async def test_control_tools_stay_out_of_reach(env):
+    use_card_tools(env, "get_current_time", permission_mode="auto_allow")
+    events = await env.collect("scenario:mcp_control_tool")
+    assert texts(events).startswith("ERROR Tool 'ask_user' is not available")
+
+
+@pytest.mark.asyncio
+async def test_the_endpoint_requires_the_session_token_and_post(env):
+    use_card_tools(env, "get_current_time")
+    assert (await env.collect("scenario:mcp_bad_token"))[0]["content"] == "status=401"
+    assert (await env.collect("scenario:mcp_get"))[0]["content"] == "status=405"
+
+
+@pytest.mark.asyncio
+async def test_a_token_stops_working_after_a_tool_change_and_the_session_is_resumed(env):
+    use_card_tools(env, "get_current_time")
+    await env.collect("scenario:text")
+    first_token = attached_servers(env)[0]["headers"][0]["value"]
+    use_card_tools(env, "get_current_time", "html_preview")
+    events = await env.collect("scenario:mcp_list")
+    assert len(env.calls("session/new")) == 1
+    second_token = attached_servers(env, "session/resume")[0]["headers"][0]["value"]
+    assert second_token != first_token
+    assert [tool["name"] for tool in json.loads(texts(events))] == ["get_current_time", "html_preview", "read"]
+    assert first_token.removeprefix("Bearer ") not in env.service._tool_bridge._sessions
+
+
+@pytest.mark.asyncio
+async def test_unchanged_tools_do_not_resume_a_live_session(env):
+    use_card_tools(env, "get_current_time")
+    await env.collect("scenario:text")
+    await env.collect("scenario:text")
+    assert env.calls("session/resume") == []
+
+
+@pytest.mark.asyncio
+async def test_a_restart_attaches_a_fresh_endpoint_to_the_resumed_session(env):
+    use_card_tools(env, "get_current_time")
+    await env.collect("scenario:text")
+    before = attached_servers(env)[0]
+    await env.restart_server()
+    events = await env.collect("scenario:mcp_list")
+    after = attached_servers(env, "session/resume")[0]
+    assert after["headers"] != before["headers"]
+    assert "get_current_time" in [tool["name"] for tool in json.loads(texts(events))]
+
+
+@pytest.mark.asyncio
+async def test_a_restarted_endpoint_reaches_a_live_session_again(env):
+    use_card_tools(env, "get_current_time")
+    await env.collect("scenario:text")
+    before = attached_servers(env)[0]["url"]
+    bridge = env.service._tool_bridge
+    bridge._server.should_exit = True
+    await asyncio.wait_for(bridge._task, 10)
+    events = await env.collect("scenario:mcp_list")
+    assert attached_servers(env, "session/resume")[0]["url"] != before
+    assert "get_current_time" in [tool["name"] for tool in json.loads(texts(events))]
+
+
+@pytest.mark.asyncio
+async def test_tools_are_listed_for_an_agent_that_connects_while_the_session_opens(env):
+    use_card_tools(env, "get_current_time")
+    env.flags = ["--mcp-http", "--mcp-on-new"]
+    await env.collect("scenario:text")
+    assert "get_current_time" in json.loads((env.state_dir / "mcp_tools_on_new.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.asyncio
+async def test_a_call_whose_input_the_agent_did_not_report_can_be_approved(env):
+    use_card_tools(env, "get_current_time")
+    first = await env.collect("scenario:mcp_call_without_input")
+    second = await env.collect(resume_payload=resume(first, "allow"))
+    assert texts(second)[:4].isdigit()
+
+
+@pytest.mark.asyncio
+async def test_the_endpoint_leaves_the_logging_of_the_host_server_alone(env):
+    use_card_tools(env, "get_current_time")
+    records = []
+
+    class Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    access, error = logging.getLogger("uvicorn.access"), logging.getLogger("uvicorn.error")
+    handler = Collect()
+    levels = access.level, error.level
+    propagate = access.propagate
+    access.addHandler(handler)
+    access.setLevel(logging.INFO)
+    error.setLevel(logging.INFO)
+    access.propagate = True
+    try:
+        await env.collect("scenario:mcp_list")
+        assert handler in access.handlers and access.propagate
+        assert access.level == logging.INFO and error.level == logging.INFO
+        assert records == []  # Bridge requests stay out of the host's access log.
+    finally:
+        access.removeHandler(handler)
+        access.setLevel(levels[0])
+        error.setLevel(levels[1])
+        access.propagate = propagate
+
+
+@pytest.mark.asyncio
+async def test_a_finished_turn_leaves_nothing_on_its_session(env):
+    use_card_tools(env, "get_current_time")
+    await env.collect("scenario:text")
+    [tools] = env.service._session_tools.values()
+    assert tools.turn is None and tools.provider is None
+
+
+def bridge_tokens(env):
+    return set(env.service._tool_bridge._sessions)
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_change_revokes_the_token_of_the_old_session(env, tmp_path):
+    use_card_tools(env, "get_current_time")
+    await env.collect("scenario:text")
+    old_tokens = bridge_tokens(env)
+    other = tmp_path / "other"
+    other.mkdir()
+    await env.collect("scenario:text", working_dir=other)
+    assert len(env.service._session_tools) == 1
+    assert not old_tokens & bridge_tokens(env) and len(bridge_tokens(env)) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_session_that_cannot_be_restored_loses_its_token(env):
+    use_card_tools(env, "get_current_time")
+    await env.collect("scenario:text")
+    old_tokens = bridge_tokens(env)
+    await env.service.restart_client(env.agent.acp.agent)
+    for marker in env.state_dir.glob("session-*"):
+        marker.unlink()
+    await env.collect("scenario:text")
+    assert len(env.calls("session/new")) == 2 and len(env.service._session_tools) == 1
+    assert not old_tokens & bridge_tokens(env) and len(bridge_tokens(env)) == 1
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_conversation_releases_its_session(env, monkeypatch):
+    use_card_tools(env, "get_current_time")
+    await env.collect("scenario:text")
+    assert bridge_tokens(env)
+    monkeypatch.setattr("agent.modules.workflows.checkpoint.store.get_checkpointer", InMemorySaver)
+    await delete_workflow_thread_tree(THREAD)
+    assert not bridge_tokens(env) and not env.service._session_tools
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [
+    ValueError("Missing required config 'model' for tool 'x'."),
+    TypeError("Object of type Foo is not JSON serializable"),
+    KeyError("function"),
+])
+async def test_a_tool_problem_only_costs_the_tools(env, monkeypatch, error):
+    use_card_tools(env, "get_current_time")
+
+    async def broken(self):
+        raise error
+
+    monkeypatch.setattr("agent.modules.workflows.graphs.acp_agent.CardToolProvider.list_tools", broken)
+    events = await env.collect("scenario:text")
+    assert "K41 tools are unavailable for this message" in texts(events) and "Hello world" in texts(events)
+
+
+@pytest.mark.asyncio
+async def test_stopping_a_turn_cancels_a_running_tool(env, monkeypatch):
+    use_card_tools(env, "get_current_time", permission_mode="auto_allow")
+    started, stopped = asyncio.Event(), asyncio.Event()
+
+    async def slow(self, name, arguments):
+        started.set()
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            stopped.set()
+            raise
+
+    monkeypatch.setattr("agent.modules.workflows.graphs.acp_agent.CardToolProvider.call_tool", slow)
+    run = asyncio.ensure_future(env.collect("scenario:mcp_call"))
+    await asyncio.wait_for(started.wait(), 20)
+    assert env.service.cancel_thread_now(THREAD)
+    await asyncio.wait_for(stopped.wait(), 5)
+    await asyncio.wait_for(run, 20)
+
+
+# Browser handoff --------------------------------------------------------------
+
+
+OWNER = "admin:1"
+AFTER_SIGN_IN = "heading Signed in [1-1]"
+
+
+class HandoffFacade:
+    async def snapshot(self, **_values):
+        return AFTER_SIGN_IN
+
+
+class HandoffDriver:
+    def __init__(self):
+        self.facade = HandoffFacade()
+
+    async def close(self):
+        pass
+
+    async def tabs(self):
+        return [{"id": "page", "url": "http://localhost", "title": "Login"}]
+
+
+@pytest_asyncio.fixture
+async def browser(env, isolated_container, tmp_path):
+    metadata = MetaData()
+    for model in (BrowserArtifact, BrowserBinding, BrowserInvocation, BrowserProfile):
+        model.__table__.to_metadata(metadata)
+    await initialize_async_engine(metadata=metadata, container=isolated_container)
+
+    async def launch(*_args):
+        return HandoffDriver()
+
+    service = BrowserService(isolated_container, root=tmp_path / "browser", launcher=launch)
+    isolated_container._browser_service = service
+    yield service
+    await service.shutdown()
+    await close_async_engine(container=isolated_container)
+
+
+async def start_handoff(env, *, permission_mode="auto_allow"):
+    use_card_tools(env, "browser_handoff", permission_mode=permission_mode)
+    return await env.collect("scenario:mcp_handoff", browser_owner_id=OWNER)
+
+
+def handoff_request(events):
+    return next(event for event in events if event["type"] == "browser_handoff_request")
+
+
+def handoff_resume(events, decision="return", *, handoff_id=None):
+    return {"action": "browser_handoff", "handoff_id": handoff_id or handoff_request(events)["handoff_id"], "decision": decision}
+
+
+async def wait_until_released(browser):
+    async def released():
+        while browser.sessions or await browser.repository.pending_handoff(THREAD, include_expired=True):
+            await asyncio.sleep(0.02)
+
+    await asyncio.wait_for(released(), 10)
+
+
+@pytest.mark.asyncio
+async def test_handoff_pauses_the_turn_and_returns_the_result_to_the_agent(env, browser):
+    first = await start_handoff(env)
+    assert handoff_request(first)["reason"] == "Sign in"
+    assert (await env.state()).next == ("acp_permission",)
+    # The tool call is still waiting, and the viewer's status needs the same thread lock.
+    status = await asyncio.wait_for(browser.status(THREAD, OWNER), 5)
+    assert status["mode"] == "human" and status["handoff"]["handoff_id"] == handoff_request(first)["handoff_id"]
+
+    second = await env.collect(resume_payload=handoff_resume(first), browser_owner_id=OWNER)
+    result = json.loads(texts(second))
+    assert result["handoff_status"] == "returned" and result["snapshot"] == AFTER_SIGN_IN
+    assert "browser_handoff_settled" in types(second)
+    assert not (await env.state()).next
+    status = await browser.status(THREAD, OWNER)
+    assert status["mode"] == "agent" and status["handoff"] is None
+
+
+@pytest.mark.asyncio
+async def test_handoff_is_asked_after_the_agent_gets_the_call_approved(env, browser):
+    first = await start_handoff(env, permission_mode="ask")
+    assert "browser_handoff_request" not in types(first) and not browser.sessions
+    second = await env.collect(resume_payload=resume(first, "allow"), browser_owner_id=OWNER)
+    third = await env.collect(resume_payload=handoff_resume(second), browser_owner_id=OWNER)
+    assert json.loads(texts(third))["handoff_status"] == "returned"
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_handoff_tells_the_agent_and_closes_the_browser(env, browser):
+    first = await start_handoff(env)
+    second = await env.collect(resume_payload=handoff_resume(first, "cancel"), browser_owner_id=OWNER)
+    assert json.loads(texts(second))["handoff_status"] == "cancelled"
+    assert not browser.sessions and not (await env.state()).next
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("forged", [
+    {"action": "browser_handoff", "handoff_id": "another", "decision": "return"},
+    {"action": "acp_permission", "request_id": "another", "option_id": "allow"},
+])
+async def test_resume_for_something_else_does_not_end_a_handoff(env, browser, forged):
+    first = await start_handoff(env)
+    second = await env.collect(resume_payload=forged, browser_owner_id=OWNER)
+    assert handoff_request(second)["handoff_id"] == handoff_request(first)["handoff_id"]
+    assert (await browser.status(THREAD, OWNER))["mode"] == "human"
+
+
+@pytest.mark.asyncio
+async def test_expired_handoff_ends_the_tool_call_without_waiting_for_an_answer(env, browser, monkeypatch):
+    monkeypatch.setattr(BrowserService, "idle_ttl", 1)
+    first = await start_handoff(env)
+
+    async def turn_ended():
+        while env.service.agent_is_busy(env.agent.acp.agent):
+            await asyncio.sleep(0.02)
+
+    await asyncio.wait_for(turn_ended(), 10)
+    assert not browser.sessions
+    # The graph still waits, so the person can see the result by answering.
+    assert (await env.state()).next == ("acp_permission",)
+    assert (await browser.owned_handoff(THREAD, OWNER))["expired"] is True
+    second = await env.collect(resume_payload=handoff_resume(first), browser_owner_id=OWNER)
+    assert json.loads(texts(second))["handoff_status"] == "expired"
+    assert await browser.owned_handoff(THREAD, OWNER) is None
+    assert not (await env.state()).next
+
+
+async def assert_stopped_handoff_was_committed(env):
+    state = await env.state()
+    assert not state.next and not any(task.interrupts for task in state.tasks)
+    rows = visible(state.values["messages"])
+    assert rows[:3] == [("user", "scenario:mcp_handoff"), ("call", "acp_other"), ("tool", "The tool call was cancelled.")]
+    assert rows[3][0] == "ai"  # Output after the last commit survives as well.
+    assert env.service.turn(state.values["acp_turn_id"]).committed
+
+
+@pytest.mark.asyncio
+async def test_stopping_the_turn_releases_the_browser(env, browser):
+    await start_handoff(env)
+    assert await env.service.stop_thread(THREAD) is True
+    await wait_until_released(browser)
+    await assert_stopped_handoff_was_committed(env)
+    turn = env.service.turn((await env.state()).values["acp_turn_id"])
+    assert "browser_handoff_settled" in types(turn.take_events())
+    events = await env.collect("after the stop", browser_owner_id=OWNER)
+    assert texts(events) == "after the stop"
+
+
+@pytest.mark.asyncio
+async def test_a_stop_from_synchronous_code_also_commits_a_handoff_turn(env, browser):
+    await start_handoff(env)
+    assert env.service.cancel_thread_now(THREAD) is True
+
+    async def committed():
+        while (await env.state()).next:
+            await asyncio.sleep(0.02)
+
+    await asyncio.wait_for(committed(), 10)
+    await assert_stopped_handoff_was_committed(env)
+
+
+@pytest.mark.asyncio
+async def test_new_message_ends_the_handoff_of_the_old_turn(env, browser):
+    await start_handoff(env)
+    events = await env.collect("second message", browser_owner_id=OWNER)
+    assert texts(events) == "second message"
+    await wait_until_released(browser)
+
+
+async def leave_handoff_behind(browser):
+    """What a process that died during a handoff leaves in the database."""
+    await browser.repository.record(THREAD, "old-call", "fingerprint", "handoff", {
+        "type": "browser_handoff_request", "handoff_id": "old", "generation": "gone", "reason": "Sign in",
+        "expires_at": time.time() + 600, "tool_call_id": "old-call", "thread_id": THREAD,
+    })
+
+
+@pytest.mark.asyncio
+async def test_new_message_after_a_restart_clears_the_old_handoff(env, browser):
+    await leave_handoff_behind(browser)
+    await env.collect("hello", browser_owner_id=OWNER)
+    assert await browser.owned_handoff(THREAD, OWNER) is None
+
+
+@pytest.mark.asyncio
+async def test_answering_a_handoff_after_a_restart_reports_a_lost_turn(env, browser):
+    first = await start_handoff(env)
+    await env.restart_server()
+    await wait_until_released(browser)
+    await leave_handoff_behind(browser)
+    events = await env.collect(resume_payload=handoff_resume(first), browser_owner_id=OWNER)
+    assert TURN_LOST_NOTICE in texts(events)
+    assert await browser.owned_handoff(THREAD, OWNER) is None
+
+
+@pytest.mark.asyncio
+async def test_handoff_is_refused_where_nobody_can_answer(env, browser):
+    use_card_tools(env, "browser_handoff", permission_mode="auto_allow")
+    events = await env.collect("scenario:mcp_handoff", platform="telegram", thread="telegram_user_1", browser_owner_id=OWNER)
+    assert texts(events).startswith("ERROR Nobody can take over the browser")
+    assert not browser.sessions
+
+
+def test_handoff_stays_selected_on_a_card():
+    config = AgentConfig(name="ag", graph_type="acp_agent", tools=["browser_handoff", "ask_user"])
+    assert config.tools == ["browser_handoff"]
+
+
+def test_tool_output_keeps_text_and_images():
+    from agent.modules.acp.tool_bridge import tool_output
+
+    output = tool_output([{"type": "text", "text": "a"}, "b", {"type": "image", "base64": "QQ==", "mime_type": "image/jpeg"}])
+    assert output.text == "a\nb" and output.images == (("QQ==", "image/jpeg"),) and not output.is_error
+    assert tool_output("plain", is_error=True).is_error
+
+
+def test_an_empty_tool_result_is_not_replaced_by_the_agents_report():
+    transcript = TurnTranscript("turn")
+    item = transcript.tool_item("m1")
+    transcript.merge_tool(item, {"status": "completed", "rawOutput": "Call get_current_time tool"})
+    item.bridged_output = ""
+    assert transcript.tool_output(item) == ""
 
 
 def test_acp_settings_are_only_defaulted_for_acp_cards():

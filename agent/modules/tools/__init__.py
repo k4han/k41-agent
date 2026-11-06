@@ -28,7 +28,7 @@ from agent.modules.tools.config import (
     serialize_tool_config_schemas,
     ToolConfigService,
 )
-from agent.modules.tools.policy import ToolPolicy, browser_batch_error
+from agent.modules.tools.policy import ACP_UNAVAILABLE_TOOL_NAMES, ToolPolicy, browser_batch_error, is_browser_tool
 from agent.modules.tools.coding.names import TOOL_ALIASES, canonical_tool_names
 from agent.modules.tools.sources.builtin import BuiltinToolSource
 from agent.modules.tools.registry_service import (
@@ -197,6 +197,7 @@ async def aresolve_tools_for_agent(agent_name: str) -> list[BaseTool]:
 
 
 __all__ = [
+    "ACP_UNAVAILABLE_TOOL_NAMES",
     "BuiltinToolSource",
     "CodingError",
     "AcpPermissionResume",
@@ -220,6 +221,7 @@ __all__ = [
     "ToolErrorCode",
     "ToolPolicy",
     "browser_batch_error",
+    "is_browser_tool",
     "ToolRegistryService",
     "ToolResolver",
     "ToolSource",

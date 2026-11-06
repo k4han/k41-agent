@@ -24,6 +24,19 @@ from agent.modules.tools.sources.mcp import _extract_server_name
 
 logger = logging.getLogger(__name__)
 
+# ACP agents call tools outside any graph run. These need one: they interrupt for a
+# person, or their result updates graph state the agent never reads. browser_handoff
+# is absent because it can also wait on the ACP turn.
+ACP_UNAVAILABLE_TOOL_NAMES = frozenset({
+    "ask_user",
+    "call_agent",
+    "delegate_task",
+    "plan_mode_respond",
+    "request_plan_review",
+    "skill",
+    "write_todos",
+})
+
 
 @dataclass(frozen=True)
 class ToolPolicy:
@@ -90,6 +103,12 @@ class ToolPolicy:
         return [d for d in descriptors if self.is_allowed(d)]
 
 
+def is_browser_tool(name: str) -> bool:
+    from agent.modules.tools.builtin.browser import BROWSER_TOOLS
+
+    return name in BROWSER_TOOLS
+
+
 def browser_batch_error(calls: Sequence[Mapping[str, object]]) -> str | None:
     from agent.modules.tools.builtin.browser import BROWSER_TOOLS
 
@@ -99,4 +118,4 @@ def browser_batch_error(calls: Sequence[Mapping[str, object]]) -> str | None:
     return None
 
 
-__all__ = ["ToolPolicy", "browser_batch_error"]
+__all__ = ["ACP_UNAVAILABLE_TOOL_NAMES", "ToolPolicy", "browser_batch_error", "is_browser_tool"]
