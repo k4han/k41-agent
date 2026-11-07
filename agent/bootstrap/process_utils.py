@@ -200,6 +200,7 @@ def spawn_detached_process(
     the command already contains its own log writer (for a systemd scope).
     """
     from agent.bootstrap.logs import logged_command
+    from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
     if log_file is not None:
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -208,36 +209,23 @@ def spawn_detached_process(
     if "VIRTUAL_ENV" not in spawn_env and sys.prefix != sys.base_prefix:
         spawn_env["VIRTUAL_ENV"] = sys.prefix
 
-    if os.name == "nt":
-        startupinfo = subprocess.STARTUPINFO()  # type: ignore[attr-defined]
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
-        startupinfo.wShowWindow = subprocess.SW_HIDE  # type: ignore[attr-defined]
-        subprocess.Popen(
-            cmd,
-            env=spawn_env,
-            cwd=str(cwd) if cwd else None,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
-            creationflags=(
-                subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
-                | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
-                | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
-            ),
-            startupinfo=startupinfo,
-            close_fds=True,
+    detach = (
+        hidden_subprocess_kwargs(
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,  # type: ignore[attr-defined]
         )
-    else:
-        subprocess.Popen(
-            cmd,
-            env=spawn_env,
-            cwd=str(cwd) if cwd else None,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            close_fds=True,
-        )
+        if os.name == "nt"
+        else {"start_new_session": True}
+    )
+    subprocess.Popen(
+        cmd,
+        env=spawn_env,
+        cwd=str(cwd) if cwd else None,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+        close_fds=True,
+        **detach,
+    )
 
 
 def is_server_running(pid_file: Path) -> bool:

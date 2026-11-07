@@ -1844,3 +1844,8 @@
   }
 }
 
+.browser-profile-list { display: grid; gap: 12px; }
+.browser-profile-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-block: 12px; border-top: 1px solid var(--border); }
+.browser-profile-info { display: grid; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.browser-profile-info > span { color: var(--muted); font-size: 12px; }
+

@@ -26,7 +26,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from agent.modules.acp.agents import get_agent_definition
 from agent.modules.acp.errors import AcpError, AcpNotInstalled, AcpRpcError
-from agent.modules.acp.installer import delete_api_key, is_installed, read_api_key, write_api_key
+from agent.modules.acp.installer import agent_root, delete_api_key, is_installed, read_api_key, write_api_key
 from agent.modules.acp.service import AcpService
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,11 @@ SERVER_SIGN_IN_TIMEOUT_SECONDS = 300
 PROBE_TTL_SECONDS = 300.0
 _LINK_WAIT_SECONDS = 15.0
 _COMPLETE_WAIT_SECONDS = 20.0
+
+
+def auth_status(state: str, *, methods: list[dict[str, str]] | None = None, **details: Any) -> dict[str, Any]:
+    """Build the sign-in status the dashboard reads."""
+    return {"signed_in": state == "signed_in", "state": state, "methods": methods or [], "config_options": [], **details}
 
 
 class AcpAuthError(AcpError):
@@ -160,7 +165,7 @@ class AcpAuthManager:
         """Ask the agent itself: opening a session is the only reliable sign-in check."""
         self._definition(agent_id)
         if not is_installed(agent_id, self.data_root):
-            return {"signed_in": False, "state": "not_installed", "methods": [], "config_options": []}
+            return auth_status("not_installed")
         cached = self._probes.get(agent_id)
         if cached is not None and not refresh and time.monotonic() - cached[0] < PROBE_TTL_SECONDS:
             return cached[1]
@@ -169,8 +174,6 @@ class AcpAuthManager:
         return result
 
     async def _probe(self, agent_id: str) -> dict[str, Any]:
-        from agent.modules.acp.installer import agent_root
-
         self.service.hold(agent_id)
         try:
             client = await self.service.client_for(agent_id)
@@ -181,23 +184,22 @@ class AcpAuthManager:
                 session = await client.new_session(str(cwd))
             except AcpRpcError as exc:
                 if exc.auth_required:
-                    return {"signed_in": False, "state": "signed_out", "methods": methods, "config_options": []}
-                return {"signed_in": False, "state": "error", "error": exc.message, "methods": methods, "config_options": []}
+                    return auth_status("signed_out", methods=methods)
+                return auth_status("error", methods=methods, error=exc.message)
             meta = session.get("_meta") if isinstance(session.get("_meta"), dict) else {}
             tier = (meta.get("antigravity") or {}).get("tier") if isinstance(meta.get("antigravity"), dict) else None
-            return {
-                "signed_in": True,
-                "state": "signed_in",
-                "plan": str(tier.get("name") or "") if isinstance(tier, dict) else "",
-                "uses_api_key": bool(read_api_key(agent_id, self.data_root)),
-                "can_sign_out": client.supports_logout(),
-                "methods": methods,
-                "config_options": _public_config_options(session.get("configOptions")),
-            }
+            return auth_status(
+                "signed_in",
+                methods=methods,
+                plan=str(tier.get("name") or "") if isinstance(tier, dict) else "",
+                uses_api_key=bool(read_api_key(agent_id, self.data_root)),
+                can_sign_out=client.supports_logout(),
+                config_options=_public_config_options(session.get("configOptions")),
+            )
         except AcpNotInstalled:
-            return {"signed_in": False, "state": "not_installed", "methods": [], "config_options": []}
+            return auth_status("not_installed")
         except AcpError as exc:
-            return {"signed_in": False, "state": "error", "error": str(exc), "methods": [], "config_options": []}
+            return auth_status("error", error=str(exc))
         finally:
             self.service.release(agent_id)
 
@@ -322,8 +324,7 @@ class AcpAuthManager:
             else:
                 delete_api_key(agent_id, self.data_root)
             await self.service.restart_client(agent_id)
-            message = exc.message if isinstance(exc, AcpRpcError) else str(exc)
-            raise AcpAuthError(f"The agent did not accept this API key: {message}") from None
+            raise AcpAuthError(f"The agent did not accept this API key: {exc}") from None
         finally:
             self.service.release(agent_id)
             self.invalidate(agent_id)

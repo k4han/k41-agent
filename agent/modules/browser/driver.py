@@ -6,6 +6,8 @@ import contextlib
 import io
 import json
 import math
+import os
+import shutil
 import socket
 import sys
 import time
@@ -14,15 +16,80 @@ from pathlib import Path
 from threading import Thread
 
 import httpx
+import psutil
 from websockets.asyncio.client import connect
 
 from agent.shared.infrastructure.browser import find_browser, headless_user_agent_args
+
+# Without restoring, Chrome discards session cookies, which many sites use for their logins.
+PROFILE_ARGS = ("--restore-last-session", f"--disk-cache-size={100 * 1024 * 1024}")
+PROFILE_STOP_SCANS = 5
+OWNER_PREFIX = "--k41-owner="
+# Process start times read from another process can differ when the system clock is adjusted.
+OWNER_START_TOLERANCE_SECONDS = 2
 
 
 def available_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
+
+
+def owner_argument() -> str:
+    """Mark a browser with its K41 process, so a later scan can tell when it was left behind."""
+    current = psutil.Process()
+    return f"{OWNER_PREFIX}{current.pid}:{int(current.create_time())}"
+
+
+def left_behind(cmdline: list[str]) -> bool:
+    """Whether this is a K41 browser with no other live K41 process responsible for it."""
+    marker = next((argument[len(OWNER_PREFIX):] for argument in cmdline if argument.startswith(OWNER_PREFIX)), None)
+    if marker is None:
+        return False
+    try:
+        pid, started = map(int, marker.split(":"))
+        # This process leases its profiles, so a browser here without a lease has no session.
+        return pid == os.getpid() or abs(psutil.Process(pid).create_time() - started) > OWNER_START_TOLERANCE_SECONDS
+    except psutil.NoSuchProcess:
+        return True
+    except (ValueError, psutil.Error):
+        return False
+
+
+def clear_saved_tabs(profile: Path) -> None:
+    """Keep the previous session's cookies, but leave Chrome no tabs to load again."""
+    with contextlib.suppress(FileNotFoundError):
+        shutil.rmtree(profile / "Default" / "Sessions")
+
+
+def terminate_profile_processes(profile: Path) -> int:
+    """Stop browsers K41 left holding a managed profile and return how many processes there were.
+
+    A holder without a stale K41 marker belongs to someone else, such as an
+    operator's own Chrome or another running K41, and is left alone.
+    """
+    prefix = "--user-data-dir="
+    expected = os.path.normcase(os.path.abspath(profile))
+    stopped = 0
+    # A helper process started while the browser was stopping appears only in a later scan.
+    for _ in range(PROFILE_STOP_SCANS):
+        holders = [process for process in psutil.process_iter(["cmdline"])
+                   if any(argument.startswith(prefix)
+                          and os.path.normcase(os.path.abspath(argument[len(prefix):])) == expected
+                          for argument in process.info.get("cmdline") or [])]
+        # Only the main process carries the marker, because Chrome does not pass it to helpers.
+        if not holders or (not stopped and not any(left_behind(process.info.get("cmdline") or []) for process in holders)):
+            break
+        for process in holders:
+            with contextlib.suppress(psutil.Error):
+                process.terminate()
+        _, alive = psutil.wait_procs(holders, timeout=5)
+        for process in alive:
+            with contextlib.suppress(psutil.Error):
+                process.kill()
+        psutil.wait_procs(alive, timeout=5)
+        stopped += len(holders)
+    return stopped
 
 
 class StagehandDriver:
@@ -45,10 +112,11 @@ class StagehandDriver:
         port = available_port()
         executable = executable_path or find_browser()
         user_agent_args = await asyncio.to_thread(headless_user_agent_args, executable)
+        await asyncio.to_thread(clear_saved_tabs, profile)
         browser = await local_browser.launch(
             headless=True, port=port, user_data_dir=profile, preserve_user_data_dir=True,
             executable_path=executable, chromium_sandbox=True,
-            args=["--remote-debugging-address=127.0.0.1", *user_agent_args],
+            args=["--remote-debugging-address=127.0.0.1", *user_agent_args, *PROFILE_ARGS, owner_argument()],
             viewport_width=1280, viewport_height=720, accept_downloads=False,
         )
         try:

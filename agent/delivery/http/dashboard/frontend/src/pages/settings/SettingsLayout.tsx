@@ -84,7 +84,7 @@ const settingsNavGroups: SettingsNavGroup[] = [
     id: "system",
     label: "System",
     items: [
-      { href: "/settings/browser", label: "Browser", icon: () => <Globe size={15} />, description: "Install, check & configure", keywords: "browser chrome chromium install automation executable" },
+      { href: "/settings/browser", label: "Browser", icon: () => <Globe size={15} />, description: "Login profiles, defaults & browser setup", keywords: "browser chrome chromium install automation executable login profiles default" },
       { href: "/settings/config", label: "Server Runtime", icon: () => <Cog size={15} />, description: "Host, port, DB & bootstrap", keywords: "bootstrap config env runtime server database host port" },
     ],
   },

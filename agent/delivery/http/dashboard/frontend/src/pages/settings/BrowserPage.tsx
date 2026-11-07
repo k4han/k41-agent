@@ -2,6 +2,7 @@ import { batch, createMemo, createSignal, For, onCleanup, onMount, Show } from "
 import { Download, Globe, RefreshCw, RotateCcw, ShieldCheck } from "lucide-solid";
 
 import { DataGate } from "@/components/State";
+import { BrowserProfiles } from "@/components/BrowserProfiles";
 import { apiFetch, postJson } from "@/lib/api";
 import { SettingsLayout } from "./SettingsLayout";
 import { SettingRow, SettingsPendingBar, SettingsSection, useSettingsData } from "./shared";
@@ -194,6 +195,8 @@ export function BrowserPage() {
             </>}</Show>
           </div>
         </section>
+
+        <BrowserProfiles />
 
         <DataGate data={data()} error={error()} onRetry={load}>{(payload) => <>
           <SettingsSection title="Live viewer" actions={

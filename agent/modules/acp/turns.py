@@ -178,7 +178,6 @@ class AcpTurn:
         self.tools = tools
         # Commits this turn when it was stopped and no graph run can do it.
         self.commit_stopped = commit_stopped
-        self.created_at = time.monotonic()
         self.finished_at: float | None = None
         self.stop_reason: str | None = None
         self.error: BaseException | None = None
@@ -188,7 +187,6 @@ class AcpTurn:
         self.transcript = TurnTranscript(turn_id, thread_id=thread_id, provider_label=agent_id)
         self._lock = threading.Lock()
         self._events: list[dict[str, Any]] = []
-        self._cursor = 0
         self._pending: OrderedDict[str, PendingPermission | PendingHandoff] = OrderedDict()
         self._waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
         self._done = threading.Event()
@@ -304,8 +302,7 @@ class AcpTurn:
 
     def take_events(self) -> list[dict[str, Any]]:
         with self._lock:
-            events = self._events[self._cursor:]
-            self._cursor = len(self._events)
+            events, self._events = self._events, []
             return events
 
     def next_pending(self) -> PendingPermission | PendingHandoff | None:
@@ -380,7 +377,7 @@ class AcpTurn:
         event = asyncio.Event()
         entry = (asyncio.get_running_loop(), event)
         with self._lock:
-            if self._cursor < len(self._events) or self._pending or self.done:
+            if self._events or self._pending or self.done:
                 return
             self._waiters.append(entry)
         try:

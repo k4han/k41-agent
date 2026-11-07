@@ -13,15 +13,46 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
 
-from agent.modules.browser.driver import StagehandDriver
+from sqlalchemy import URL, make_url
+
+from agent.modules.browser.driver import StagehandDriver, terminate_profile_processes
+from agent.modules.browser.models import BrowserAccessDenied
 from agent.modules.browser.repository import BrowserRepository
 
 
 logger = logging.getLogger(__name__)
 
+CREDENTIAL_QUERY_KEYS = frozenset({"user", "username", "password", "passwd", "pwd", "sslpassword"})
+
+
+def storage_namespace(database_url: str) -> str:
+    """Identify a database without its credentials, so rotating them keeps saved logins."""
+    url = make_url(database_url)
+    query = {key: value for key, value in url.query.items() if key.casefold() not in CREDENTIAL_QUERY_KEYS}
+    identity = database_url
+    if url.username is not None or url.password is not None or len(query) != len(url.query):
+        identity = URL.create(url.drivername, host=url.host, port=url.port,
+                              database=url.database, query=query).render_as_string()
+    return hashlib.sha256(identity.encode()).hexdigest()[:16]
+
+
+def storage_root(base: Path, database_url: str) -> Path:
+    """Locate a database's browser storage, adopting the location used by earlier versions."""
+    current = base / storage_namespace(database_url)
+    legacy = base / hashlib.sha256(database_url.encode()).hexdigest()[:16]
+    if legacy != current and legacy.is_dir() and not current.exists():
+        try:
+            legacy.rename(current)
+        except OSError:
+            logger.warning("Could not move saved browser logins to their new location; retrying at the next start.", exc_info=True)
+            # Creating the new location now would end the retries and hide the saved logins.
+            return legacy
+    return current
+
 
 # Waiting past the deadline by this much guarantees the record counts as expired.
 HANDOFF_EXPIRY_GRACE_SECONDS = 1.0
+DISCARDED_PREFIX = ".discarded-"
 HANDOFF_CANCELLED ={"handoff_status": "cancelled", "snapshot_status": "skipped",
                      "content": "HANDOFF CANCELLED: Browser handoff was cancelled by the user. The manual interaction was aborted. Browser control is now with you (the agent). Acknowledge that the user cancelled this browser task and do not continue the cancelled action. Ask the user what they would like to do next. Do not say you failed to transfer control."}
 
@@ -49,6 +80,7 @@ class BrowserSession:
     revision: int = 0
     subscribers: set[asyncio.Event] = field(default_factory=set)
     observer: asyncio.Task | None = None
+    inherited_profile: bool = False
 
     def notify(self):
         self.revision += 1
@@ -61,8 +93,8 @@ class BrowserService:
         self.container = container
         self.repository = BrowserRepository(container)
         configured = container.config_service.get("browser.storage_root", "")
-        namespace = hashlib.sha256(container.database_url.encode()).hexdigest()[:16]
-        self.root = root or ((Path(configured).expanduser() if configured else Path.home() / ".k41-agent" / "browser") / namespace)
+        self.root = root or storage_root(Path(configured).expanduser() if configured else Path.home() / ".k41-agent" / "browser",
+                                         container.database_url)
         self.launcher = launcher or StagehandDriver.launch
         self.sessions: dict[str, BrowserSession] = {}
         self.operation_locks: dict[str, asyncio.Lock] = {}
@@ -71,6 +103,7 @@ class BrowserService:
         self.tickets = {}
         self.sweeper = None
         self.closing = False
+        self.undeleted: set[str] = set()
 
     @property
     def timeout(self):
@@ -108,28 +141,58 @@ class BrowserService:
             return current
         if await self.repository.pending_handoff(thread_id):
             raise BrowserError("handoff_expired", "Continue or cancel the expired handoff before opening another browser session.")
-        profile_key = binding["profile_id"] or self.storage_key(thread_id)
+        profile_id, inherited = await self._session_profile(thread_id, owner_id, binding)
+        profile_key = profile_id or self.storage_key(thread_id)
         # Reserve only this profile during launch; unrelated conversations stay usable.
         async with self.operation_scope(f"profile:{profile_key}"):
-            if binding["profile_id"]:
-                await self.repository.profile(binding["profile_id"], owner_id)
-            if any(item.profile_key == profile_key for item in self.sessions.values()):
-                raise BrowserError("profile_busy", "This login profile is open in another conversation. Close that browser first.")
+            if profile_id:
+                await self.repository.profile(profile_id, owner_id)
+            holder = next((item for item in self.sessions.values() if item.profile_key == profile_key), None)
+            if holder and not inherited:
+                raise BrowserError("profile_busy", f"This login profile is open in another conversation ({holder.thread_id}). Close that browser first.")
+            if holder:
+                # The parent's open browser keeps the login; the helper works in its own profile.
+                profile_key, inherited = self.storage_key(thread_id), False
             profile = self.root / "profiles" / profile_key
             artifact_root = self.root / "run-artifacts" / self.storage_key(thread_id)
-            profile.mkdir(parents=True, exist_ok=True, mode=0o700)
-            artifact_root.mkdir(parents=True, exist_ok=True, mode=0o700)
             try:
-                driver = await asyncio.wait_for(self.launcher(profile, artifact_root,
-                    self.container.config_service.get_str("browser.executable_path", "")), self.timeout)
+                profile.mkdir(parents=True, exist_ok=True, mode=0o700)
+                artifact_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+                driver = await self._launch(profile, artifact_root)
             except Exception as exc:
                 logger.exception("Could not start the local browser")
                 raise BrowserError("browser_unavailable", "Could not start Chrome. Run 'k41 browser install' on the agent host to install and check Chrome, or 'k41 browser check' to diagnose an existing installation. Check browser.executable_path, profile locks, and server logs for the original error.") from exc
-            current = BrowserSession(thread_id, owner_id, profile_key, driver)
+            current = BrowserSession(thread_id, owner_id, profile_key, driver, inherited_profile=inherited)
             self.sessions[thread_id] = current
             if hasattr(driver, "watch_tabs"):
                 current.observer = asyncio.create_task(self._observe_tabs(current))
             return current
+
+    async def _session_profile(self, thread_id, owner_id, binding):
+        """Return the named profile a session should use and whether it comes from the parent."""
+        if binding["profile_id"] or ":sub:" not in thread_id:
+            return binding["profile_id"], False
+        parent = thread_id.split(":sub:", 1)[0]
+        parent_binding = await self.repository.binding(parent)
+        if parent_binding is None:
+            inherited = await self.repository.project_default(parent, owner_id)
+        else:
+            inherited = parent_binding["profile_id"] if parent_binding["owner_id"] == owner_id else None
+        return inherited, bool(inherited)
+
+    async def _launch(self, profile, artifact_root):
+        executable = self.container.config_service.get_str("browser.executable_path", "")
+        loop = asyncio.get_running_loop()
+        # Both attempts share one deadline, because the profile stays reserved throughout.
+        deadline = loop.time() + self.timeout
+        try:
+            return await asyncio.wait_for(self.launcher(profile, artifact_root, executable), self.timeout)
+        except Exception:
+            stopped = await asyncio.to_thread(terminate_profile_processes, profile)
+            if not stopped or loop.time() >= deadline:
+                raise
+        logger.warning("Stopped a leftover browser that was holding a login profile.")
+        return await asyncio.wait_for(self.launcher(profile, artifact_root, executable), deadline - loop.time())
 
     async def _observe_tabs(self, current):
         while not current.closed:
@@ -159,9 +222,10 @@ class BrowserService:
     async def _status(self, thread_id, owner_id):
         binding = await self.repository.binding(thread_id)
         if binding and binding["owner_id"] != owner_id:
-            raise PermissionError("This browser belongs to another authenticated account.")
+            raise BrowserAccessDenied("This browser belongs to another authenticated account.")
         await self._expire_handoffs(thread_id)
-        binding = binding or {"thread_id": thread_id, "owner_id": owner_id, "profile_id": None}
+        binding = binding or {"thread_id": thread_id, "owner_id": owner_id,
+                              "profile_id": await self.repository.project_default(thread_id, owner_id)}
         current = self.sessions.get(thread_id)
         tabs = []
         if current:
@@ -177,7 +241,7 @@ class BrowserService:
         """Read viewer state without waiting behind an agent's browser operation."""
         binding = await self.repository.binding(current.thread_id)
         if not binding or binding["owner_id"] != current.owner_id:
-            raise PermissionError("This browser belongs to another authenticated account.")
+            raise BrowserAccessDenied("This browser belongs to another authenticated account.")
         tabs = await current.driver.tabs() if not current.closed else []
         return await self._status_snapshot(current.thread_id, current.owner_id, binding,
                                           None if current.closed else current, tabs)
@@ -203,18 +267,53 @@ class BrowserService:
             else:
                 await self.repository.select_profile(thread_id, owner_id, profile_id)
 
-    async def delete_profile(self, owner_id, profile_id):
+    async def profiles(self, owner_id):
+        holders = {item.profile_key: item.thread_id for item in self.sessions.values()}
+        projects = await self.repository.profile_projects(owner_id)
+        return [{**profile, "open_thread_id": holders.get(profile["profile_id"]),
+                 "projects": projects.get(profile["profile_id"], [])}
+                for profile in await self.repository.profiles(owner_id)]
+
+    @contextlib.asynccontextmanager
+    async def _available_profile_name(self, owner_id, name, profile_id=None):
+        async with self.operation_scope(f"profile-names:{owner_id}"):
+            if any(item["name"].casefold() == name.casefold() and item["profile_id"] != profile_id
+                   for item in await self.repository.profiles(owner_id)):
+                raise BrowserError("profile_name_taken", "A login profile with this name already exists.")
+            yield
+
+    async def create_profile(self, owner_id, name):
+        async with self._available_profile_name(owner_id, name):
+            return await self.repository.create_profile(owner_id, name)
+
+    async def rename_profile(self, owner_id, profile_id, name):
+        async with self._available_profile_name(owner_id, name, profile_id):
+            return await self.repository.rename_profile(owner_id, profile_id, name)
+
+    async def delete_profile(self, owner_id, profile_id) -> bool:
+        """Delete a profile and report whether its saved logins have already left the disk."""
         async with self.operation_scope(f"profile:{profile_id}"):
             await self.repository.profile(profile_id, owner_id)
             if any(item.profile_key == profile_id for item in self.sessions.values()):
                 raise BrowserError("profile_busy", "Close the browser before deleting its profile.")
-            await self._remove_directory("profiles", profile_id)
+            removed = await self._remove_directory("profiles", profile_id)
             await self.repository.delete_profile(owner_id, profile_id)
+            return removed
 
     async def close(self, thread_id, owner_id, *, allow_human=True):
         thread_id = self.canonical(thread_id)
         async with self.thread_scope(thread_id):
             await self._close(thread_id, owner_id, allow_human=allow_human)
+
+    async def release_inherited_profile(self, thread_id):
+        """Return a finished helper's borrowed login profile to its parent."""
+        thread_id = self.canonical(thread_id)
+        if thread_id not in self.sessions:
+            return
+        async with self.thread_scope(thread_id):
+            current = self.sessions.get(thread_id)
+            if current and current.inherited_profile:
+                await self._close_session(current)
 
     async def _close(self, thread_id, owner_id, *, allow_human=True):
         await self.repository.bind(thread_id, owner_id)
@@ -237,8 +336,10 @@ class BrowserService:
             await asyncio.wait_for(current.driver.close(), 15)
         except Exception:
             # Stagehand owns process cleanup; never expose launch arguments or page data.
-            import logging
-            logging.getLogger(__name__).warning("Browser cleanup failed for session %s", current.generation)
+            logger.warning("Browser cleanup failed for session %s", current.generation)
+            # The session is about to release its lease, so the profile must really be free.
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(terminate_profile_processes, self.root / "profiles" / current.profile_key)
         finally:
             if self.sessions.get(current.thread_id) is current:
                 self.sessions.pop(current.thread_id, None)
@@ -255,15 +356,57 @@ class BrowserService:
     def matches_thread(candidate: str, thread_id: str) -> bool:
         return candidate == thread_id or candidate.startswith(f"{thread_id}:sub:")
 
-    async def _remove_directory(self, directory: str, key: str) -> None:
+    async def _remove_directory(self, directory: str, key: str) -> bool:
+        """Return False while the removed data is still on disk waiting to be purged."""
+        discarded = await self._discard(directory, key)
+        if discarded is None:
+            return True
+        await self.purge_discarded()
+        return not discarded.exists()
+
+    async def _discard(self, directory: str, key: str) -> Path | None:
+        """Set a managed directory aside for purging and return its new location, if it existed."""
         parent = self.root / directory
         target = parent / key
         if target.is_symlink() or target.is_junction() or target.resolve().parent != parent.resolve():
             raise BrowserError("invalid_storage", "The directory is not a managed browser directory.")
         if target.is_dir():
-            await asyncio.to_thread(shutil.rmtree, target)
-        elif target.exists():
+            if directory == "profiles":
+                # Only a login profile can be a browser's user data directory.
+                await asyncio.to_thread(terminate_profile_processes, target)
+            return await asyncio.to_thread(self._discard_directory, parent, target)
+        if target.exists():
             raise BrowserError("invalid_storage", "The directory is not a managed browser directory.")
+        return None
+
+    @staticmethod
+    def _discard_directory(parent: Path, target: Path) -> Path:
+        # Moving first means a file still in use leaves the directory complete instead of half deleted.
+        discarded = parent / f"{DISCARDED_PREFIX}{uuid4().hex}"
+        try:
+            target.rename(discarded)
+        except OSError as exc:
+            raise BrowserError("profile_busy", "Browser files are still in use. Try again in a moment.") from exc
+        return discarded
+
+    async def purge_discarded(self) -> None:
+        """Remove data set aside for deletion, retrying periodically whatever is still in use."""
+        async with self.operation_scope("purge-discarded"):
+            await asyncio.to_thread(self._purge_discarded)
+        if self.undeleted:
+            self._start_sweeper()
+
+    def _purge_discarded(self) -> None:
+        undeleted = set()
+        for directory in ("profiles", "run-artifacts"):
+            for leftover in (self.root / directory).glob(f"{DISCARDED_PREFIX}*"):
+                try:
+                    shutil.rmtree(leftover)
+                except OSError:
+                    undeleted.add(leftover.name)
+                    if leftover.name not in self.undeleted:
+                        logger.warning("Could not remove discarded browser data yet.", exc_info=True)
+        self.undeleted = undeleted
 
     async def delete_thread(self, thread_id: str) -> None:
         """Delete conversation data, retaining only explicitly named login profiles."""
@@ -289,10 +432,13 @@ class BrowserService:
                         if path.is_symlink() or path.resolve().parent != parent.resolve():
                             raise BrowserError("invalid_storage", "The image is not a managed browser artifact.")
                         await asyncio.to_thread(path.unlink, missing_ok=True)
-                    for target in targets:
-                        key = self.storage_key(target)
-                        await self._remove_directory("profiles", key)
-                        await self._remove_directory("run-artifacts", key)
+                    try:
+                        for target in targets:
+                            key = self.storage_key(target)
+                            await self._discard("profiles", key)
+                            await self._discard("run-artifacts", key)
+                    finally:
+                        await self.purge_discarded()
                     await self.repository.delete_thread(thread_id)
             finally:
                 self.deleting_threads.discard(thread_id)
@@ -322,9 +468,12 @@ class BrowserService:
         async with self.operation_scope(f"thread:{thread_id}"):
             if self.closing or any(self.matches_thread(thread_id, target) for target in self.deleting_threads):
                 raise BrowserError("session_lost", "The browser service is shutting down or the conversation is being deleted.")
-            if self.sweeper is None:
-                self.sweeper = asyncio.create_task(self._sweep())
+            self._start_sweeper()
             yield
+
+    def _start_sweeper(self):
+        if self.sweeper is None and not self.closing:
+            self.sweeper = asyncio.create_task(self._sweep())
 
     async def execute(self, thread_id, owner_id, call_id, name, values):
         thread_id = self.canonical(thread_id)
@@ -633,15 +782,18 @@ class BrowserService:
     def consume_ticket(self, token):
         ticket = self.tickets.pop(token, None)
         if not ticket or ticket[3] < time.monotonic():
-            raise PermissionError("Viewer ticket is invalid or expired.")
+            raise BrowserAccessDenied("Viewer ticket is invalid or expired.")
         current = self.sessions.get(ticket[0])
         if not current or current.closed or current.owner_id != ticket[1] or current.generation != ticket[2]:
-            raise PermissionError("Browser session no longer exists.")
+            raise BrowserAccessDenied("Browser session no longer exists.")
         return current
 
     async def _sweep(self):
         while True:
             await asyncio.sleep(min(30, self.idle_ttl))
+            # Startup and every deletion purge by themselves; only their leftovers need retries.
+            if self.undeleted:
+                await self.purge_discarded()
             await self.reap_idle()
 
     async def reap_idle(self):

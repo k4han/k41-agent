@@ -174,6 +174,12 @@ class AppRuntime:
             except Exception as exc:
                 logger.warning("Failed to clean up orphaned temp workspaces: %s", exc)
 
+            logger.info("Removing discarded browser data...")
+            try:
+                await self.container.browser_service.purge_discarded()
+            except Exception as exc:
+                logger.warning("Failed to remove discarded browser data: %s", exc)
+
             logger.info("Starting workspace background services...")
             from agent.modules.workspaces import start_enabled_workspace_background_services
 

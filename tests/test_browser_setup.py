@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 
 from agent.bootstrap import browser
 from agent.bootstrap.cli import app
-from agent.modules.browser import StagehandDriver
+from agent.modules.browser import StagehandDriver, driver
 from agent.shared.infrastructure import browser as discovery
 
 
@@ -283,6 +283,66 @@ async def test_runtime_launch_runs_headless_with_regular_user_agent(monkeypatch,
     assert captured["headless"] is True
     assert captured["args"][0] == "--remote-debugging-address=127.0.0.1"
     assert "Chrome/157.0.0.0" in captured["args"][1] and captured["args"][1].startswith("--user-agent=")
+    assert "--restore-last-session" in captured["args"]
+    assert driver.owner_argument() in captured["args"]
+
+
+def test_saved_tabs_are_cleared_and_login_data_is_kept(tmp_path):
+    sessions = tmp_path / "Default" / "Sessions"
+    sessions.mkdir(parents=True)
+    (sessions / "Tabs_1").write_text("https://old.example/", encoding="utf-8")
+    (tmp_path / "Default" / "Cookies").write_text("saved", encoding="utf-8")
+    driver.clear_saved_tabs(tmp_path)
+    assert not sessions.exists() and (tmp_path / "Default" / "Cookies").exists()
+    driver.clear_saved_tabs(tmp_path)
+
+
+def holder_process(profile, *arguments):
+    process = SimpleNamespace(info={"cmdline": ["chrome", f"--user-data-dir={profile}", *arguments]}, stopped=False)
+    process.terminate = lambda: setattr(process, "stopped", True)
+    process.kill = process.terminate
+    return process
+
+
+def run_termination(monkeypatch, processes):
+    monkeypatch.setattr(driver.psutil, "process_iter", lambda attrs: [item for item in processes if not item.stopped])
+    monkeypatch.setattr(driver.psutil, "wait_procs", lambda items, timeout: (items, []))
+
+
+def other_runtime(pid, started):
+    def process(requested):
+        if requested != pid:
+            raise driver.psutil.NoSuchProcess(requested)
+        return SimpleNamespace(create_time=lambda: started)
+    return process
+
+
+@pytest.mark.parametrize("marker,expected", [
+    ("--k41-owner=4242:1000", False),  # another running K41
+    ("--k41-owner=4242:1001", False),  # the same one, with a clock adjustment
+    ("--k41-owner=4242:900", True),  # its process ID was reused after it exited
+    ("--k41-owner=4243:1000", True),  # its process has exited
+    ("--k41-owner=invalid", False),
+])
+def test_leftover_browser_is_identified_by_its_owner(monkeypatch, tmp_path, marker, expected):
+    monkeypatch.setattr(driver.psutil, "Process", other_runtime(4242, 1000.5))
+    holders = [holder_process(tmp_path, marker), holder_process(tmp_path, "--type=renderer")]
+    run_termination(monkeypatch, holders)
+    assert (driver.terminate_profile_processes(tmp_path) > 0) is expected
+    assert [item.stopped for item in holders] == [expected, expected]
+
+
+def test_browser_owned_by_this_process_is_stopped(monkeypatch, tmp_path):
+    holder = holder_process(tmp_path, driver.owner_argument())
+    run_termination(monkeypatch, [holder])
+    assert driver.terminate_profile_processes(tmp_path) == 1 and holder.stopped
+
+
+def test_browser_started_outside_k41_is_left_alone(monkeypatch, tmp_path):
+    holders = [holder_process(tmp_path), holder_process(tmp_path, "--type=renderer")]
+    run_termination(monkeypatch, holders)
+    assert driver.terminate_profile_processes(tmp_path) == 0
+    assert not any(item.stopped for item in holders)
 
 
 def test_missing_sudo_fails_before_download(monkeypatch):

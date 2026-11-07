@@ -1,12 +1,14 @@
 import { ArrowLeft, ArrowRight, Camera, ChevronDown, Globe, LoaderCircle, Power, RefreshCw, Settings2, ShieldCheck } from "lucide-solid";
+import { A } from "@solidjs/router";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack } from "solid-js";
 import { apiFetch, postJson } from "@/lib/api";
 import { browserModifiers, browserPointer, connectBrowserViewer, createBrowserFrameRenderer, createBrowserInputSender,
   type BrowserConnectionState, type BrowserHandoffResume, type BrowserViewerConnection } from "@/lib/browserViewer";
+import { API_PATHS } from "@/lib/endpoints";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
+import type { BrowserProfile } from "@/types";
 import "@/styles/browser.css";
 
-type Profile = { profile_id: string; name: string };
 type BrowserStatus = {
   open: boolean;
   profile_id: string | null;
@@ -29,8 +31,7 @@ export function BrowserPanel(props: {
   onSessionChange?: (active: boolean, threadId: string | null) => void;
 }) {
   const [status, setStatus] = createSignal<BrowserStatus | null>(null);
-  const [profiles, setProfiles] = createSignal<Profile[]>([]);
-  const [profileName, setProfileName] = createSignal("");
+  const [profiles, setProfiles] = createSignal<BrowserProfile[]>([]);
   const [error, setError] = createSignal("");
   const [working, setWorking] = createSignal(false);
   const [hasFrame, setHasFrame] = createSignal(false);
@@ -51,6 +52,7 @@ export function BrowserPanel(props: {
   const [selectedTab, setSelectedTab] = createSignal("");
   const [url, setUrl] = createSignal("");
   const [profilesOpen, setProfilesOpen] = createSignal(false);
+  const selectedProfileId = createMemo(() => status()?.profile_id || "");
   const sessionGeneration = createMemo(() => status()?.generation);
   const sessionActive = createMemo(() => Boolean(status()?.open));
   const currentPageUrl = createMemo(() => status()?.tabs.find((tab) => tab.id === selectedTab())?.url || "");
@@ -64,6 +66,7 @@ export function BrowserPanel(props: {
   let screen: HTMLCanvasElement | undefined;
   let viewport: HTMLDivElement | undefined;
   let keyboard: HTMLTextAreaElement | undefined;
+  let profileSelect: HTMLSelectElement | undefined;
   let width = 1280;
   let height = 720;
   let announcedHandoff = "";
@@ -158,13 +161,19 @@ export function BrowserPanel(props: {
   createEffect(() => props.onSessionChange?.(sessionActive(), props.threadId));
 
   createEffect(() => {
-    if (!props.open) return;
+    // Opening the settings shows which conversations hold each profile now.
+    props.threadId;
+    if (!props.open || !profilesOpen()) return;
     let disposed = false;
-    void apiFetch<{ profiles: Profile[] }>("/dashboard-api/browser/profiles")
+    void apiFetch<{ profiles: BrowserProfile[] }>(API_PATHS.browserProfiles)
       .then((data) => { if (!disposed) setProfiles(data.profiles); })
       .catch((cause) => { if (!disposed) setError(String(cause)); });
     onCleanup(() => { disposed = true; });
   });
+
+  const showSelectedProfile = () => { if (profileSelect) profileSelect.value = selectedProfileId(); };
+  // Replacing the options makes the select fall back to its first one, so apply the value afterwards.
+  createEffect(on([profilesOpen, profiles, selectedProfileId], showSelectedProfile));
 
   createEffect(() => {
     const visible = props.open;
@@ -326,24 +335,18 @@ export function BrowserPanel(props: {
       <Show when={profilesOpen()}><section class="browser-profiles" id="browser-profiles" aria-label="Login profile settings">
         <div class="browser-profiles-heading"><strong>Login profiles</strong><span>Reuse a saved login across conversations.</span></div>
         <div class="browser-actions">
-        <label class="browser-profile-select">Login profile <select aria-label="Login profile" value={status()?.profile_id || ""} disabled={!props.threadId || status()?.open || props.busy || working()}
-          onChange={(event) => void action(() => apiFetch(endpoint(), { method: "PUT", json: { profile_id: event.currentTarget.value || null } }))}>
+        <label class="browser-profile-select">Login profile <select ref={profileSelect} aria-label="Login profile" disabled={!props.threadId || status()?.open || props.busy || working()}
+          onChange={(event) => {
+            const profileId = event.currentTarget.value || null;
+            // A rejected choice changes no state, so nothing else would restore the saved option.
+            void action(() => apiFetch(endpoint(), { method: "PUT", json: { profile_id: profileId } })).then(showSelectedProfile);
+          }}>
           <option value="">This conversation only</option>
-          <For each={profiles()}>{(profile) => <option value={profile.profile_id}>{profile.name}</option>}</For>
+          <For each={profiles()}>{(profile) => <option value={profile.profile_id}>{profile.open_thread_id && profile.open_thread_id !== props.threadId ? `${profile.name} (open in another conversation)` : profile.name}</option>}</For>
         </select></label>
-        <input aria-label="New login profile name" placeholder="New profile name" value={profileName()} onInput={(event) => setProfileName(event.currentTarget.value)} />
-        <button class="btn btn-sm" disabled={!profileName().trim() || working()} onClick={() => void action(async () => {
-          const profile = await postJson<Profile>("/dashboard-api/browser/profiles", { name: profileName().trim() });
-          setProfiles((values) => [...values, profile]); setProfileName("");
-        }, false)}>Create profile</button>
-        <Show when={status()?.profile_id}><button class="btn btn-sm" disabled={status()?.open || props.busy || working()} onClick={() => void action(async () => {
-          const profileId = status()?.profile_id;
-          await apiFetch(`/dashboard-api/browser/profiles/${profileId}`, { method: "DELETE" });
-          setProfiles((values) => values.filter((profile) => profile.profile_id !== profileId));
-          setStatus((previous) => previous && previous.profile_id === profileId ? { ...previous, profile_id: null } : previous);
-        }, false)}>Delete profile</button></Show>
+        <A class="btn btn-sm" href="/settings/browser#login-profiles">Manage login profiles</A>
         </div>
-        <p class="browser-profile-hint">Close the browser before changing or deleting its profile.</p>
+        <p class="browser-profile-hint">This choice applies only to this conversation. Close the browser before changing its profile.</p>
       </section></Show>
       <div class="browser-chrome">
         <div class="browser-navigation" role="group" aria-label="Browser navigation">

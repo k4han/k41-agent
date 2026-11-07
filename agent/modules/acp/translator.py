@@ -102,7 +102,6 @@ class ToolItem:
     locations: list[Any] = field(default_factory=list)
     announced: bool = False
     finished: bool = False
-    dropped: bool = False
 
 
 class TurnTranscript:
@@ -184,7 +183,7 @@ class TurnTranscript:
         return self._tool_events(item)
 
     def _tool_events(self, item: ToolItem) -> list[dict[str, Any]]:
-        if item.dropped or item.finished:
+        if item.finished:
             return []
         if item.status == "pending":
             # Pending calls wait for input or approval, and tool cards have no
@@ -192,7 +191,8 @@ class TurnTranscript:
             return []
         terminal = item.status in TERMINAL_STATUSES
         if terminal and not item.announced and item.raw_output == NEVER_EXECUTED_OUTPUT:
-            item.dropped = True
+            # Finished without ever being announced, so it never appears in the transcript.
+            item.finished = True
             return []
         events: list[dict[str, Any]] = []
         if not item.announced:
@@ -280,7 +280,7 @@ class TurnTranscript:
             if isinstance(item, TextItem):
                 output.append(AIMessage(content=item.text, id=self._stable_id(f"text:{index}"), additional_kwargs=flags))
                 continue
-            if item.dropped or not item.announced:
+            if not item.announced:
                 continue
             public_id = self.public_tool_id(item)
             output.append(AIMessage(

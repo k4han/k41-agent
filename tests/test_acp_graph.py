@@ -23,7 +23,8 @@ from agent.modules.acp.turns import SIGN_IN_NOTICE, STOP_TURN_OPTION_ID
 from agent.modules.agent_runtime import runner as runner_module
 from agent.modules.agents.models import AcpAgentSettings, AgentConfig
 from agent.modules.agents.parser import parse_agent_markdown_content, serialize_agent_config
-from agent.modules.browser.models import BrowserArtifact, BrowserBinding, BrowserInvocation, BrowserProfile
+from agent.modules.browser.models import BrowserArtifact, BrowserBinding, BrowserInvocation, BrowserProfile, BrowserProjectProfile
+from agent.modules.workspaces.models import ThreadWorkspace
 from agent.modules.browser.service import BrowserService
 from agent.modules.tools.coding.models import PermissionResume
 from agent.modules.workflows import delete_workflow_thread_tree
@@ -915,7 +916,7 @@ async def test_a_tool_problem_only_costs_the_tools(env, monkeypatch, error):
     async def broken(self):
         raise error
 
-    monkeypatch.setattr("agent.modules.workflows.graphs.acp_agent.CardToolProvider.list_tools", broken)
+    monkeypatch.setattr("agent.modules.workflows.graphs.acp_agent.CardToolProvider.tool_names", broken)
     events = await env.collect("scenario:text")
     assert "K41 tools are unavailable for this message" in texts(events) and "Hello world" in texts(events)
 
@@ -967,7 +968,7 @@ class HandoffDriver:
 @pytest_asyncio.fixture
 async def browser(env, isolated_container, tmp_path):
     metadata = MetaData()
-    for model in (BrowserArtifact, BrowserBinding, BrowserInvocation, BrowserProfile):
+    for model in (BrowserArtifact, BrowserBinding, BrowserInvocation, BrowserProfile, BrowserProjectProfile, ThreadWorkspace):
         model.__table__.to_metadata(metadata)
     await initialize_async_engine(metadata=metadata, container=isolated_container)
 

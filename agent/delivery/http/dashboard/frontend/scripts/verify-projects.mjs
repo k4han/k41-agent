@@ -44,6 +44,12 @@ let delaySecrets = false;
 let finishSecrets;
 const secretRequests = [];
 const projectSecrets = new Map();
+const browserProfiles = [];
+const browserProjectProfiles = new Map();
+const browserProjectModes = new Map();
+let defaultBrowserProfile = null;
+let rejectDefaultProfile = false;
+let rejectProjectProfile = false;
 let instructionDocument = { path: 'AGENTS.md', exists: false, content: '', version: null };
 const skillRequests = [];
 const makeSkill = (id, scope, extra = {}) => ({ id, name: 'demo', description: `A ${scope} skill`, enabled: true,
@@ -51,6 +57,8 @@ const makeSkill = (id, scope, extra = {}) => ({ id, name: 'demo', description: `
 const skillPackages = [makeSkill('project-demo', 'project'), makeSkill('shared-demo', 'global'),
   makeSkill('invalid-demo', 'project', { name: 'broken', enabled: false, diagnostics: [{ message: 'Invalid document', severity: 'error' }] })];
 const fixtures = {
+  '/dashboard-api/browser/configuration': { settings: {}, by_category: { browser: {} }, settings_sources: {} },
+  '/dashboard-api/browser/setup': { installed: true, installation_supported: false, installation_unavailable_reason: 'Test browser', job: null },
   '/dashboard-api/catalog': { backends: [{ name: 'local', title: 'Local', enabled: true }] },
   '/dashboard-api/agents/cards': { cards: [{ name: 'default', valid: true, display_name: 'Default', provider: 'test', model: 'demo' }] },
   '/dashboard-api/agents/providers': { provider_names: ['test'], default_provider: 'test', default_model: 'demo', model_catalogs: [] },
@@ -81,6 +89,53 @@ const server = http.createServer(async (req, res) => {
     for await (const chunk of req) raw += chunk;
     const body = raw ? JSON.parse(raw) : {};
     const send = data => res.end(JSON.stringify(data));
+    if (url.pathname === '/dashboard-api/browser/default-profile') {
+      if (req.method === 'PUT' && rejectDefaultProfile) {
+        res.writeHead(403); send({ detail: 'Default profile rejected.' }); return;
+      }
+      if (req.method === 'PUT') defaultBrowserProfile = body.profile_id;
+      send({ profile_id: defaultBrowserProfile }); return;
+    }
+    const projectProfileRoute = url.pathname.match(/^\/dashboard-api\/browser\/projects\/(\d+)\/profile$/);
+    if (projectProfileRoute) {
+      const id = Number(projectProfileRoute[1]);
+      if (req.method === 'PUT' && rejectProjectProfile) {
+        res.writeHead(403); send({ detail: 'Browser profile not found for this account.' }); return;
+      }
+      if (req.method === 'PUT') {
+        browserProjectProfiles.set(id, body.profile_id);
+        browserProjectModes.set(id, body.mode);
+      }
+      const mode = browserProjectModes.get(id) ?? 'separate';
+      const profile_id = browserProjectProfiles.get(id) ?? null;
+      send({ mode, profile_id, default_profile_id: defaultBrowserProfile,
+        effective_profile_id: mode === 'inherit' ? defaultBrowserProfile : profile_id });
+      return;
+    }
+    const browserProfileRoute = url.pathname.match(/^\/dashboard-api\/browser\/profiles(?:\/([a-f0-9]+))?$/);
+    if (browserProfileRoute) {
+      const profile = browserProfiles.find(entry => entry.profile_id === browserProfileRoute[1]);
+      if (req.method === 'POST' || req.method === 'PATCH') {
+        if (browserProfiles.some(entry => entry !== profile && entry.name.toLowerCase() === body.name.toLowerCase())) {
+          res.writeHead(409); send({ detail: { code: 'profile_name_taken', message: 'A login profile with this name already exists.' } }); return;
+        }
+      }
+      if (req.method === 'POST') {
+        const created = { profile_id: `a${browserProfiles.length}`.padEnd(32, '0'), name: body.name, open_thread_id: null };
+        browserProfiles.push(created); send(created); return;
+      }
+      if (req.method === 'PATCH') { profile.name = body.name; send(profile); return; }
+      if (req.method === 'DELETE') {
+        browserProfiles.splice(browserProfiles.indexOf(profile), 1);
+        for (const [id, value] of browserProjectProfiles) if (value === profile.profile_id) browserProjectProfiles.delete(id);
+        for (const [id, mode] of browserProjectModes) if (mode === 'profile' && !browserProjectProfiles.has(id)) browserProjectModes.delete(id);
+        if (defaultBrowserProfile === profile.profile_id) defaultBrowserProfile = null;
+        send({ deleted: true, saved_data_removed: false }); return;
+      }
+      send({ profiles: browserProfiles.map(profile => ({ ...profile, projects: projects.filter(project =>
+        browserProjectModes.get(project.id) === 'inherit' ? defaultBrowserProfile === profile.profile_id
+          : browserProjectProfiles.get(project.id) === profile.profile_id).map(project => ({ id: project.id, label: project.label })) })) }); return;
+    }
     const secretRoute = url.pathname.match(/^\/dashboard-api\/projects\/(\d+)\/secrets(?:\/([A-Z_][A-Z0-9_]*))?$/);
     if (secretRoute) {
       const id = Number(secretRoute[1]);
@@ -494,6 +549,7 @@ try {
   await clickText('Save secret');
   await until(() => js(`!document.querySelector('[aria-label="Secret value"]')`), 'empty replacement preserves value');
   assert.equal(projectSecrets.get(1)[0].value, 'browser-private-token');
+  await until(() => js(`document.querySelector('[aria-label="Edit DEPLOY_TOKEN"]')?.disabled === false`), 'secret save finishes before editing again');
   await js(`document.querySelector('[aria-label="Edit DEPLOY_TOKEN"]').click()`);
   await input('[aria-label="Secret value"]', 'replaced-private-token');
   secretProject.persistence.last_saved_at = '2026-01-04T00:00:00Z';
@@ -541,6 +597,77 @@ try {
   await clickText('Add secret');
   assert.equal(await js(`document.querySelector('[aria-label="Secret value"]').value`), '');
   await clickText('Cancel');
+  const profileSelect = `document.querySelector('[aria-label="Profile for new conversations"]')`;
+  const profilePanel = `document.querySelector('[aria-label="Browser login profiles"]')`;
+  await js(`document.querySelector('.project-resource-tabs a[href$="tab=browser"]').click()`);
+  await until(() => js(`${profileSelect} && !${profileSelect}.disabled`), 'project login selection loaded');
+  assert.equal(await js(`${profileSelect}.value`), 'separate', 'existing projects keep separate logins');
+  assert.equal(await js(`!!document.querySelector('[aria-label="New profile name"]')`), false, 'project does not manage shared profiles');
+  assert.equal(await js(`location.search`), '?tab=browser');
+  await js(`document.querySelector('a[href="/settings/browser#login-profiles"]').click()`);
+  await until(() => js(`${profilePanel}?.textContent.includes('You have no login profiles.')`), 'profile management opens in settings');
+  assert.equal(await js('location.pathname'), '/settings/browser');
+  await input('[aria-label="New profile name"]', 'Work');
+  await clickText('Create profile');
+  await until(() => js(`!!document.querySelector('[aria-label="Rename Work"]')`), 'login profile created');
+  assert.equal(await js(`document.querySelector('[aria-label="New profile name"]').value`), '');
+  await input('[aria-label="New profile name"]', 'work');
+  await clickText('Create profile');
+  await until(() => js(`${profilePanel}.querySelector('[role="alert"]')?.textContent.includes('already exists')`), 'duplicate profile name reports the server message');
+  assert.equal(browserProfiles.length, 1);
+  await input('[aria-label="New profile name"]', '');
+  const defaultSelect = `document.querySelector('[aria-label="Default login profile"]')`;
+  rejectDefaultProfile = true;
+  await js(`{ const select = ${defaultSelect}; select.value = select.options[1].value; select.dispatchEvent(new Event('change', { bubbles: true })); }`);
+  await until(() => js(`${profilePanel}.querySelector('[role="alert"]')?.textContent.includes('Default profile rejected.') && !${defaultSelect}.disabled`), 'rejected account default reported');
+  assert.equal(await js(`${defaultSelect}.value`), '', 'failed default save restores the saved option');
+  rejectDefaultProfile = false;
+  await js(`{ const select = ${defaultSelect}; select.value = select.options[1].value; select.dispatchEvent(new Event('change', { bubbles: true })); }`);
+  await until(() => js(`${profilePanel}.textContent.includes('Account default login profile updated.') && !${defaultSelect}.disabled`), 'account default saved');
+  assert.equal(defaultBrowserProfile, browserProfiles[0].profile_id);
+  await call('Page.navigate', { url: `${base}/projects/1?tab=browser` });
+  await until(() => js(`${profileSelect} && !${profileSelect}.disabled`), 'return to project profile selection');
+  assert.equal(await js(`${profileSelect}.value`), 'separate', 'account default does not change a separate project');
+  await js(`{ const select = ${profileSelect}; select.value = 'inherit'; select.dispatchEvent(new Event('change', { bubbles: true })); }`);
+  await until(() => js(`${profileSelect}.value === 'inherit' && !${profileSelect}.disabled && ${profilePanel}.textContent.includes('Effective profile: Work')`), 'project inherits account default');
+  assert.equal(browserProjectModes.get(1), 'inherit');
+  await js(`{ const select = ${profileSelect}; select.value = 'separate'; select.dispatchEvent(new Event('change', { bubbles: true })); }`);
+  await until(() => js(`${profileSelect}.value === 'separate' && !${profileSelect}.disabled && ${profilePanel}.textContent.includes('Effective profile: Separate')`), 'project selects isolated logins');
+  await js(`{ const select = ${profileSelect}; select.value = select.options[2].value; select.dispatchEvent(new Event('change', { bubbles: true })); }`);
+  await until(() => browserProjectProfiles.get(1) === browserProfiles[0].profile_id, 'project login profile saved');
+  await until(() => js(`${profilePanel}.textContent.includes('Project login profile updated.') && ${profileSelect}.value === '${browserProfiles[0].profile_id}' && !${profileSelect}.disabled`), 'project login profile shown');
+  assert.equal(browserProjectProfiles.get(2), undefined, 'selecting a profile affects only this project');
+  rejectProjectProfile = true;
+  await js(`{ const select = ${profileSelect}; select.value = 'separate'; select.dispatchEvent(new Event('change', { bubbles: true })); }`);
+  await until(() => js(`${profilePanel}.querySelector('[role="alert"]')?.textContent.includes('not found') && !${profileSelect}.disabled`), 'rejected project profile reported');
+  assert.equal(await js(`${profileSelect}.value`), browserProfiles[0].profile_id, 'a rejected selection restores the saved profile');
+  assert.equal(browserProjectProfiles.get(1), browserProfiles[0].profile_id);
+  rejectProjectProfile = false;
+  await js(`document.querySelector('a[href="/settings/browser#login-profiles"]').click()`);
+  await until(() => js(`!!document.querySelector('[aria-label="Rename Work"]')`), 'settings shows project profile usage');
+  assert.ok(await js(`${profilePanel}.querySelector('a[href="/projects/1?tab=browser"]')`), 'profile links to the project using it');
+  await js(`document.querySelector('[aria-label="Rename Work"]').click()`);
+  await until(() => js(`!!document.querySelector('[aria-label="New name for Work"]')`), 'rename form');
+  await input('[aria-label="New name for Work"]', 'Office');
+  await clickText('Save name');
+  await until(() => js(`!!document.querySelector('[aria-label="Rename Office"]')`), 'login profile renamed');
+  browserProfiles[0].open_thread_id = 'open-conversation';
+  await clickText('Reload profiles');
+  await until(() => js(`${profilePanel}.textContent.includes('Open in conversation open-conversation') && document.querySelector('[aria-label="Delete Office"]').disabled`), 'open profile cannot be deleted');
+  browserProfiles[0].open_thread_id = null;
+  await clickText('Reload profiles');
+  await until(() => js(`!document.querySelector('[aria-label="Delete Office"]').disabled`), 'closed profile can be deleted');
+  await js(`window.confirm = () => false; document.querySelector('[aria-label="Delete Office"]').click()`);
+  assert.equal(browserProfiles.length, 1, 'declining the confirmation keeps the profile');
+  await js(`window.confirm = () => true; document.querySelector('[aria-label="Delete Office"]').click()`);
+  await until(() => js(`${profilePanel}.textContent.includes('You have no login profiles.') && ${defaultSelect}.value === ''`), 'deleted login profile clears the account default');
+  assert.ok(await js(`${profilePanel}.textContent.includes('K41 removes them automatically')`), 'files still in use are reported after deleting a profile');
+  assert.equal(browserProjectProfiles.get(1), undefined);
+  assert.equal(defaultBrowserProfile, null);
+  await call('Page.navigate', { url: `${base}/projects/1?tab=browser` });
+  await until(() => js(`${profileSelect} && !${profileSelect}.disabled && ${profileSelect}.value === 'separate'`), 'deleted profile resets project selection');
+  await js(`document.querySelector('.project-resource-tabs a[href$="tab=secrets"]').click()`);
+  await until(() => js(`!!document.querySelector('[aria-label="Project secrets"]')`), 'return to project secrets');
   projects.find(project => project.id === 1).runtime.status = 'stopped';
   failInstructions = true;
   const beforeSecretReload = await js('performance.timeOrigin');

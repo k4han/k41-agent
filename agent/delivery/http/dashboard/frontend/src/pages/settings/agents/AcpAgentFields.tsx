@@ -1,12 +1,11 @@
 import { createResource, For, Show } from "solid-js";
 
 import { SelectControl } from "@/components/SelectControl";
-import type { AcpConfigOption } from "@/lib/acp";
+import type { AcpAgentStatus } from "@/lib/acp";
 import { apiFetch } from "@/lib/api";
+import { API_PATHS } from "@/lib/endpoints";
 
 import type { AgentForm } from "./agentForm";
-
-type AgentStatus = { display_name: string; auth: { signed_in: boolean; config_options: AcpConfigOption[] } };
 
 const AGENT_DEFAULT = "";
 
@@ -18,7 +17,7 @@ export function AcpAgentFields(props: {
   const settings = () => props.form.acp ?? { agent: "antigravity-acp", permission_mode: "ask" as const, config_options: {} };
   const [status] = createResource(
     () => settings().agent,
-    (agent) => apiFetch<AgentStatus>(`/dashboard-api/acp/agents/${encodeURIComponent(agent)}`),
+    (agent) => apiFetch<AcpAgentStatus>(API_PATHS.acpAgent(agent)),
   );
 
   const setOption = (id: string, value: string) => {

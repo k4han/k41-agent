@@ -26,6 +26,9 @@ export function acpPermissionRequestId(questionId: string): string | null {
     : null;
 }
 
+/** The part of an agent's status that session settings read. */
+export type AcpAgentStatus = { display_name: string; auth: { signed_in: boolean; config_options: AcpConfigOption[] } };
+
 export type AcpConfigOption = {
   id: string;
   name: string;

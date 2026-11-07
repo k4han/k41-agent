@@ -40,8 +40,11 @@ The **Skills** tab lists project and shared packages together, retaining source
 precedence, disabled states, shadowing and diagnostics. Packages and their paged
 resource directories are read-only here. Documents can be previewed as Markdown
 or source, and resources can be read or downloaded. Use Skills settings for
-package management. The selected tab survives reloads through
-`?tab=instructions` or `?tab=skills`.
+package management. The **Browser** tab selects the login profile for the project's
+new conversations, with account default, specific profile, or separate logins.
+Create, rename, delete, and manage account defaults in **Settings > Browser**; see the
+[browser guide](browser-use.md). The selected tab survives reloads through
+`?tab=instructions`, `?tab=skills`, or `?tab=browser`.
 
 Resource access applies to all catalog statuses and never changes catalog status.
 Instruction and skill reads can use the last saved copy when execution is

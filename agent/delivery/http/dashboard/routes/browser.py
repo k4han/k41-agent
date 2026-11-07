@@ -3,24 +3,26 @@
 import asyncio
 import contextlib
 import json
+import logging
 import os
 from itertools import count
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Path as PathParam, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from agent.bootstrap.container import get_container
 from agent.bootstrap.browser import find_browser, installation_unavailable_reason
 from agent.bootstrap.browser_setup import BrowserSetupBusyError, BrowserSetupManager
 from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
 from agent.modules.admin_auth import get_current_admin
-from agent.modules.browser import BrowserError, CDPViewer
+from agent.modules.browser import BrowserAccessDenied, BrowserError, CDPViewer
 from agent.delivery.http.dashboard.routes.helpers.browser_stream import SEND_TIMEOUT, BrowserStreamState, stream_tab
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard-api/browser")
 viewer_router = APIRouter()
 
@@ -91,8 +93,12 @@ def owner(admin: str) -> str:
 async def checked(operation):
     try:
         return await operation
-    except PermissionError as exc:
+    except BrowserAccessDenied as exc:
         raise HTTPException(403, str(exc)) from None
+    except PermissionError:
+        # The text of a file system error contains server paths.
+        logger.warning("Browser storage operation failed.", exc_info=True)
+        raise HTTPException(500, "Browser storage is not accessible. Check the server logs.") from None
     except BrowserError as exc:
         raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from None
 
@@ -105,22 +111,71 @@ class BindingBody(BaseModel):
     profile_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
 
+class ProjectProfileBody(BindingBody):
+    mode: Literal["inherit", "separate", "profile"] | None = None
+
+    @model_validator(mode="after")
+    def validate_choice(self):
+        self.mode = self.mode or ("profile" if self.profile_id else "separate")
+        if (self.mode == "profile") != (self.profile_id is not None):
+            raise ValueError("Select a profile only when the project uses a specific profile.")
+        return self
+
+
+def profile_name(body: ProfileBody) -> str:
+    if not body.name.strip():
+        raise HTTPException(422, "Profile name is required.")
+    return body.name.strip()
+
+
 @router.get("/profiles")
 async def profiles(admin: str = Depends(get_current_admin), browser=Depends(service)):
-    return {"profiles": await browser.repository.profiles(owner(admin))}
+    return {"profiles": await browser.profiles(owner(admin))}
 
 
 @router.post("/profiles")
 async def create_profile(body: ProfileBody, admin: str = Depends(get_current_admin), browser=Depends(service)):
-    if not body.name.strip():
-        raise HTTPException(422, "Profile name is required.")
-    return await browser.repository.create_profile(owner(admin), body.name.strip())
+    return await checked(browser.create_profile(owner(admin), profile_name(body)))
+
+
+@router.patch("/profiles/{profile_id}")
+async def rename_profile(profile_id: str, body: ProfileBody, admin: str = Depends(get_current_admin), browser=Depends(service)):
+    return await checked(browser.rename_profile(owner(admin), profile_id, profile_name(body)))
 
 
 @router.delete("/profiles/{profile_id}")
 async def delete_profile(profile_id: str, admin: str = Depends(get_current_admin), browser=Depends(service)):
-    await checked(browser.delete_profile(owner(admin), profile_id))
-    return {"deleted": True}
+    removed = await checked(browser.delete_profile(owner(admin), profile_id))
+    return {"deleted": True, "saved_data_removed": removed}
+
+
+@router.get("/projects/{project_id}/profile")
+async def project_profile(project_id: int = PathParam(ge=1), admin: str = Depends(get_current_admin), browser=Depends(service)):
+    try:
+        return await browser.repository.project_profile_settings(project_id, owner(admin))
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from None
+
+
+@router.put("/projects/{project_id}/profile")
+async def set_project_profile(body: ProjectProfileBody, project_id: int = PathParam(ge=1), admin: str = Depends(get_current_admin), browser=Depends(service)):
+    try:
+        await checked(browser.repository.set_project_profile(project_id, owner(admin), body.profile_id, body.mode))
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from None
+    return await browser.repository.project_profile_settings(project_id, owner(admin))
+
+
+@router.get("/default-profile")
+async def default_profile(admin: str = Depends(get_current_admin), browser=Depends(service)):
+    return {"profile_id": await browser.repository.default_profile(owner(admin))}
+
+
+@router.put("/default-profile")
+async def set_default_profile(body: BindingBody, admin: str = Depends(get_current_admin), browser=Depends(service)):
+    async with browser.operation_scope(f"profile:{body.profile_id}"):
+        await checked(browser.repository.set_default_profile(owner(admin), body.profile_id))
+    return {"profile_id": body.profile_id}
 
 
 @router.get("/threads/{thread_id}")

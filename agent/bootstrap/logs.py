@@ -8,7 +8,7 @@ import signal
 import subprocess
 import sys
 import traceback
-from contextlib import closing
+from contextlib import closing, suppress
 from pathlib import Path
 
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
@@ -36,20 +36,59 @@ class RotatingLogWriter:
         self.path = path
         self.max_bytes = max_bytes
         self.backup_count = backup_count
+        self.dropped = 0
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.stream = path.open("ab")
+        self._recover_rotation()
+        self._open()
+
+    def _open(self) -> None:
+        self.stream = self.path.open("ab")
         self.size = self.stream.tell()
+
+    def _archive_rotation(self, rotating: Path) -> None:
+        for index in range(self.backup_count, 1, -1):
+            source = Path(f"{self.path}.{index - 1}")
+            if source.exists():
+                source.replace(Path(f"{self.path}.{index}"))
+        rotating.replace(Path(f"{self.path}.1"))
+
+    def _recover_rotation(self) -> None:
+        rotating = Path(f"{self.path}.rotating")
+        if rotating.exists():
+            if self.path.exists():
+                self._archive_rotation(rotating)
+            else:
+                rotating.replace(self.path)
 
     def _rollover(self) -> None:
         self.stream.close()
-        for index in range(self.backup_count, 0, -1):
-            source = self.path if index == 1 else Path(f"{self.path}.{index - 1}")
-            if source.exists():
-                source.replace(Path(f"{self.path}.{index}"))
-        self.stream = self.path.open("ab")
-        self.size = 0
+        rotating = Path(f"{self.path}.rotating")
+        try:
+            # Preserve staging left by a crash or a failed rollback before reusing its name.
+            self._recover_rotation()
+            # Moved first, so a locked file does not shift the backups away on every retry.
+            self.path.replace(rotating)
+            try:
+                self._archive_rotation(rotating)
+            except OSError:
+                rotating.replace(self.path)
+                raise
+        finally:
+            self._open()
 
     def write(self, data: bytes) -> None:
+        """Store output when possible; a logging failure must never stop the logged process."""
+        try:
+            if self.stream.closed:
+                self._open()
+            if self.dropped:
+                self._store(f"[{self.dropped} bytes of output dropped: log file unavailable]\n".encode())
+                self.dropped = 0
+            self._store(data)
+        except OSError:
+            self.dropped += len(data)
+
+    def _store(self, data: bytes) -> None:
         while data:
             if self.size >= self.max_bytes:
                 self._rollover()
@@ -68,7 +107,8 @@ class RotatingLogWriter:
         self.stream.flush()
 
     def close(self) -> None:
-        self.stream.close()
+        with suppress(OSError):
+            self.stream.close()
 
 
 def logged_command(

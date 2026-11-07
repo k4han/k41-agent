@@ -25,7 +25,7 @@ import {
   X,
   Zap,
 } from "lucide-solid";
-import { batch, createEffect, createMemo, createResource, createSelector, createSignal, For, on, onCleanup, onMount, Show, Suspense, untrack } from "solid-js";
+import { batch, createEffect, createMemo, createResource, createSelector, createSignal, For, Match, on, onCleanup, onMount, Show, Suspense, Switch, untrack } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { Portal } from "solid-js/web";
 
@@ -274,8 +274,11 @@ export function WorkspaceExplorer(props: {
     typeof window !== "undefined" ? window.innerWidth : 640
   );
   const [treeCollapsed, setTreeCollapsed] = createSignal(false);
-  const [fileExpanded, setFileExpanded] = createSignal(false);
-  const [fileCollapsed, setFileCollapsed] = createSignal(false);
+  const [fileView, setFileView] = createSignal<"split" | "expanded" | "collapsed">("split");
+  const fileExpanded = () => fileView() === "expanded";
+  const fileCollapsed = () => fileView() === "collapsed";
+  const toggleFileExpanded = () => setFileView(fileExpanded() ? "split" : "expanded");
+  const showCollapsedFile = () => { if (fileCollapsed()) setFileView("split"); };
   const WORKSPACE_SIDEBAR_WIDTH_KEY = "k41-workspace-sidebar-width";
   const WORKSPACE_TREE_HEIGHT_KEY = "k41-workspace-tree-height";
   const [sidebarWidth, setSidebarWidth] = createSignal(220);
@@ -289,6 +292,7 @@ export function WorkspaceExplorer(props: {
     if (!props.splitView) return false;
     return fileTabs().length > 0 || activeTab().startsWith("file:");
   });
+  const splitLayout = () => isSplit() && !isCompact();
 
   const startInnerResize = (event: PointerEvent) => {
     if (!explorerRef) return;
@@ -845,7 +849,7 @@ export function WorkspaceExplorer(props: {
     if (!tab.startsWith("file:")) {
       setLastPrimaryTab(tab);
     } else {
-      setFileCollapsed(false);
+      showCollapsedFile();
       if (browserActive()) {
         setOpenTabs((current) => current.includes("files") ? current : ["files", ...current]);
         setLastPrimaryTab("files");
@@ -860,10 +864,7 @@ export function WorkspaceExplorer(props: {
     setOpenTabs(nextTabs);
 
     const remainingFileTabs = nextTabs.filter((t) => t.startsWith("file:"));
-    if (remainingFileTabs.length === 0) {
-      setFileExpanded(false);
-      setFileCollapsed(false);
-    }
+    if (remainingFileTabs.length === 0) setFileView("split");
 
     if (lastPrimaryTab() === tab) {
       setLastPrimaryTab(nextTabs.find((value) => !value.startsWith("file:")) || "files");
@@ -894,7 +895,7 @@ export function WorkspaceExplorer(props: {
   };
 
   const openFile = (path: string) => {
-    setFileCollapsed(false);
+    showCollapsedFile();
     const tab = fileTabId(path);
     openTab(tab);
   };
@@ -1309,7 +1310,7 @@ export function WorkspaceExplorer(props: {
   return (
     <aside
       ref={explorerRef}
-      class={`workspace-explorer ${isCompact() ? "is-compact" : ""} ${isSplit() ? "is-split" : ""} ${props.fullscreen ? "is-fullscreen" : ""} ${activeTab().startsWith("file:") && !browserActive() ? "has-file-open" : ""} ${isSplit() && !isCompact() && fileExpanded() ? "file-expanded" : ""} ${isSplit() && !isCompact() && fileCollapsed() ? "file-collapsed" : ""}`}
+      class={`workspace-explorer ${isCompact() ? "is-compact" : ""} ${isSplit() ? "is-split" : ""} ${props.fullscreen ? "is-fullscreen" : ""} ${activeTab().startsWith("file:") && !browserActive() ? "has-file-open" : ""} ${splitLayout() && fileExpanded() ? "file-expanded" : ""} ${splitLayout() && fileCollapsed() ? "file-collapsed" : ""}`}
       style={`--workspace-split-sidebar-width: ${sidebarWidth()}px; --workspace-compact-tree-height: ${treeHeight()}px;`}
     >
       <div class="workspace-tabs-bar workspace-primary-tabs-bar">
@@ -1344,13 +1345,13 @@ export function WorkspaceExplorer(props: {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
                       setLastPrimaryTab(tab);
-                      if (fileExpanded()) setFileExpanded(false);
+                      if (fileExpanded()) setFileView("split");
                       if (!activeTab().startsWith("file:")) setActiveTab(tab);
                     }
                   }}
                   onClick={() => {
                     setLastPrimaryTab(tab);
-                    if (fileExpanded()) setFileExpanded(false);
+                    if (fileExpanded()) setFileView("split");
                     if (!activeTab().startsWith("file:")) {
                       setActiveTab(tab);
                     }
@@ -1528,13 +1529,13 @@ export function WorkspaceExplorer(props: {
 
       <Show when={fileTabs().length > 0 && !browserActive()}>
         <div class="workspace-file-tabs-bar">
-          <Show when={isSplit() && !isCompact() && fileExpanded()}>
+          <Show when={splitLayout() && fileExpanded()}>
             <button
               class="workspace-icon-btn workspace-file-tab-action-btn workspace-sidebar-toggle-btn"
               type="button"
               title="Show file tree (restore split view)"
               aria-label="Show file tree"
-              onClick={() => setFileExpanded(false)}
+              onClick={() => setFileView("split")}
             >
               <PanelLeftOpen size={14} />
             </button>
@@ -1564,14 +1565,11 @@ export function WorkspaceExplorer(props: {
                     aria-selected={isActiveTab(tab)}
                     onClick={() => {
                       setActiveTab(tab);
-                      if (fileCollapsed()) setFileCollapsed(false);
+                      showCollapsedFile();
                     }}
                     onDblClick={(event) => {
                       event.stopPropagation();
-                      if (isSplit() && !isCompact()) {
-                        setFileExpanded(!fileExpanded());
-                        setFileCollapsed(false);
-                      }
+                      if (splitLayout()) toggleFileExpanded();
                     }}
                     onAuxClick={(event) => {
                       if (event.button === 1) {
@@ -1605,64 +1603,52 @@ export function WorkspaceExplorer(props: {
             </For>
           </div>
 
-          <Show when={isSplit() && !isCompact()}>
+          <Show when={splitLayout()}>
             <div class="workspace-file-tabs-actions">
-              <Show
-                when={fileExpanded()}
-                fallback={
-                  <Show
-                    when={fileCollapsed()}
-                    fallback={
-                      <>
-                        <button
-                          class="workspace-icon-btn workspace-file-tab-action-btn"
-                          type="button"
-                          title="Expand file view (hide tree)"
-                          aria-label="Expand file view"
-                          onClick={() => {
-                            setFileExpanded(true);
-                            setFileCollapsed(false);
-                          }}
-                        >
-                          <Maximize2 size={13} />
-                        </button>
-                        <button
-                          class="workspace-icon-btn workspace-file-tab-action-btn"
-                          type="button"
-                          title="Collapse file view (hide preview)"
-                          aria-label="Collapse file view"
-                          onClick={() => {
-                            setFileCollapsed(true);
-                            setFileExpanded(false);
-                          }}
-                        >
-                          <PanelRightClose size={13} />
-                        </button>
-                      </>
-                    }
+              <Switch>
+                <Match when={fileExpanded()}>
+                  <button
+                    class="workspace-icon-btn workspace-file-tab-action-btn"
+                    type="button"
+                    title="Restore split view"
+                    aria-label="Restore split view"
+                    onClick={() => setFileView("split")}
                   >
-                    <button
-                      class="workspace-icon-btn workspace-file-tab-action-btn"
-                      type="button"
-                      title="Expand file view"
-                      aria-label="Expand file view"
-                      onClick={() => setFileCollapsed(false)}
-                    >
-                      <PanelRightOpen size={13} />
-                    </button>
-                  </Show>
-                }
-              >
-                <button
-                  class="workspace-icon-btn workspace-file-tab-action-btn"
-                  type="button"
-                  title="Restore split view"
-                  aria-label="Restore split view"
-                  onClick={() => setFileExpanded(false)}
-                >
-                  <Minimize2 size={13} />
-                </button>
-              </Show>
+                    <Minimize2 size={13} />
+                  </button>
+                </Match>
+                <Match when={fileCollapsed()}>
+                  <button
+                    class="workspace-icon-btn workspace-file-tab-action-btn"
+                    type="button"
+                    title="Expand file view"
+                    aria-label="Expand file view"
+                    onClick={() => setFileView("split")}
+                  >
+                    <PanelRightOpen size={13} />
+                  </button>
+                </Match>
+                <Match when={fileView() === "split"}>
+                  <button
+                    class="workspace-icon-btn workspace-file-tab-action-btn"
+                    type="button"
+                    title="Expand file view (hide tree)"
+                    aria-label="Expand file view"
+                    onClick={() => setFileView("expanded")}
+                  >
+                    <Maximize2 size={13} />
+                  </button>
+                  <button
+                    class="workspace-icon-btn workspace-file-tab-action-btn"
+                    type="button"
+                    title="Collapse file view (hide preview)"
+                    aria-label="Collapse file view"
+                    onClick={() => setFileView("collapsed")}
+                  >
+                    <PanelRightClose size={13} />
+                  </button>
+                </Match>
+              </Switch>
             </div>
           </Show>
         </div>
@@ -1825,14 +1811,14 @@ export function WorkspaceExplorer(props: {
                   display: "flex",
                   "align-items": "center",
                   gap: "4px",
-                  cursor: (isCompact() && activeTab().startsWith("file:")) || (isSplit() && !isCompact() && activeTab().startsWith("file:")) ? "pointer" : "default",
+                  cursor: activeTab().startsWith("file:") && (isCompact() || isSplit()) ? "pointer" : "default",
                   "user-select": "none",
                 }}
                 onClick={() => {
                   if (isCompact() && activeTab().startsWith("file:")) {
                     setTreeCollapsed(!treeCollapsed());
-                  } else if (isSplit() && !isCompact() && activeTab().startsWith("file:")) {
-                    setFileExpanded(!fileExpanded());
+                  } else if (splitLayout() && activeTab().startsWith("file:")) {
+                    toggleFileExpanded();
                   }
                 }}
               >
@@ -1852,7 +1838,7 @@ export function WorkspaceExplorer(props: {
                     </Show>
                   </button>
                 </Show>
-                <Show when={isSplit() && !isCompact() && activeTab().startsWith("file:")}>
+                <Show when={splitLayout() && activeTab().startsWith("file:")}>
                   <button
                     class="workspace-icon-btn workspace-tree-toolbar-btn"
                     type="button"
@@ -1860,7 +1846,7 @@ export function WorkspaceExplorer(props: {
                     aria-label={fileExpanded() ? "Expand file tree" : "Collapse file tree"}
                     onClick={(e) => {
                       e.stopPropagation();
-                      setFileExpanded(!fileExpanded());
+                      toggleFileExpanded();
                     }}
                   >
                     <Show when={fileExpanded()} fallback={<PanelLeftClose size={14} />}>
@@ -1966,10 +1952,7 @@ export function WorkspaceExplorer(props: {
                     downloadUrl={`/dashboard-api/workspace/download?${workspaceQuery(props.threadId, queryWorkspace(), { path: activeFilePath() })}`}
                     renderSource={() => <FileCodeView content={activeFilePayload()?.content || ""} path={activeFilePath()} dark={dark()} />}
                     isExpanded={fileExpanded()}
-                    onToggleExpand={isSplit() && !isCompact() ? () => {
-                      setFileExpanded(!fileExpanded());
-                      setFileCollapsed(false);
-                    } : undefined}
+                    onToggleExpand={splitLayout() ? toggleFileExpanded : undefined}
                   />
                 </Show>
               </Show>
@@ -1991,16 +1974,11 @@ export function WorkspaceExplorer(props: {
           </section>
         </Show>
 
-        <Show when={!browserActive() && !fileExpanded() && !fileCollapsed() && ((isSplit() && !isCompact()) || (isCompact() && activeTab().startsWith("file:") && !treeCollapsed()))}>
+        <Show when={!browserActive() && !fileExpanded() && !fileCollapsed() && ((splitLayout()) || (isCompact() && activeTab().startsWith("file:") && !treeCollapsed()))}>
           <div
             class="workspace-inner-resizer"
             onPointerDown={startInnerResize}
-            onDblClick={() => {
-              if (isSplit() && !isCompact()) {
-                setFileExpanded(!fileExpanded());
-                setFileCollapsed(false);
-              }
-            }}
+            onDblClick={() => { if (splitLayout()) toggleFileExpanded(); }}
             title={isCompact() ? "Drag to resize tree height" : "Drag to resize / double-click to toggle expand"}
             aria-label={isCompact() ? "Drag to resize tree height" : "Drag to resize / double-click to toggle expand"}
           />

@@ -61,10 +61,10 @@ def _spawn(command: AgentCommand) -> subprocess.Popen[bytes]:
 class AgentProcess:
     """A running agent. Stderr can hold OAuth values, so it is never logged or kept on disk."""
 
-    def __init__(self, command: AgentCommand, *, on_stderr_line: Callable[[str], None] | None = None) -> None:
+    def __init__(self, command: AgentCommand) -> None:
         command.cwd.mkdir(parents=True, exist_ok=True)
         self.popen = _spawn(command)
-        self.on_stderr_line = on_stderr_line
+        self.on_stderr_line: Callable[[str], None] | None = None
         self._stderr_thread = threading.Thread(target=self._drain_stderr, name="acp-stderr", daemon=True)
         self._stderr_thread.start()
 

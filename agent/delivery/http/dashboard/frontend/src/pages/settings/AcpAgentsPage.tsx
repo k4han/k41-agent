@@ -4,6 +4,7 @@ import { Bot, Download, RefreshCw } from "lucide-solid";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson } from "@/lib/api";
 import { type AcpInstallJob, installProgressLabel } from "@/lib/acp";
+import { API_PATHS } from "@/lib/endpoints";
 import { SettingsLayout } from "./SettingsLayout";
 
 type AuthMethod = { id: string; name: string; description: string };
@@ -53,7 +54,7 @@ export function AcpAgentsPage() {
   const load = async (refresh = false) => {
     clearTimeout(timer);
     try {
-      const payload = await apiFetch<{ agents: AcpAgent[] }>(`/dashboard-api/acp/agents${refresh ? "?refresh=true" : ""}`);
+      const payload = await apiFetch<{ agents: AcpAgent[] }>(`${API_PATHS.acpAgents}${refresh ? "?refresh=true" : ""}`);
       if (disposed) return;
       setAgents(payload.agents);
       setLoadError("");
@@ -101,7 +102,7 @@ function AcpAgentPanel(props: {
   const [busy, setBusy] = createSignal(false);
   const [apiKey, setApiKey] = createSignal("");
   const [callbackUrl, setCallbackUrl] = createSignal("");
-  const base = () => `/dashboard-api/acp/agents/${encodeURIComponent(props.agent.id)}`;
+  const base = () => API_PATHS.acpAgent(props.agent.id);
   const installing = () => props.agent.job?.state === "running";
   const signIn = () => (props.agent.sign_in?.status === "pending" ? props.agent.sign_in : null);
   const methods = createMemo(() => props.agent.auth.methods);

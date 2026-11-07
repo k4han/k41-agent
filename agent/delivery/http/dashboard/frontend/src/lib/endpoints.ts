@@ -1,4 +1,9 @@
 export const API_PATHS = {
+  acpAgents: "/dashboard-api/acp/agents",
+  acpAgent: (agentId: string) => `/dashboard-api/acp/agents/${encodeURIComponent(agentId)}`,
+  browserProfiles: "/dashboard-api/browser/profiles",
+  browserDefaultProfile: "/dashboard-api/browser/default-profile",
+  browserProjectProfile: (projectId: number) => `/dashboard-api/browser/projects/${projectId}/profile`,
   projects: "/dashboard-api/projects",
   catalog: "/dashboard-api/catalog",
   config: "/dashboard-api/config",

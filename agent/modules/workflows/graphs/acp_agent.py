@@ -26,18 +26,15 @@ from pydantic import ValidationError
 from agent.modules.acp import (
     ACP_LIVE_EVENT,
     ACP_LIVE_KWARG,
-    SIGN_IN_NOTICE,
     STOP_TURN_OPTION_ID,
     AcpError,
     AcpNotInstalled,
-    AcpRpcError,
     AcpTurn,
     PendingHandoff,
     ToolOutput,
     TurnRequest,
     describe_failure,
     get_acp_service,
-    not_installed_notice,
     tool_output,
 )
 from agent.modules.browser import BROWSER_HANDOFF_WAIT_KEY, BrowserHandoffResume, abandon_thread_handoffs
@@ -67,9 +64,13 @@ def _notice_message(turn_id: str, label: str, text: str) -> AIMessage:
     )
 
 
+def _emit(writer: Any, event: dict[str, Any]) -> None:
+    writer({"type": ACP_LIVE_EVENT, "event": event})
+
+
 def _emit_notice(writer: Any, text: str) -> None:
-    writer({"type": ACP_LIVE_EVENT, "event": {"type": "message", "content": text}})
-    writer({"type": ACP_LIVE_EVENT, "event": {"type": "final", "content": text, "already_streamed": True}})
+    _emit(writer, {"type": "message", "content": text})
+    _emit(writer, {"type": "final", "content": text, "already_streamed": True})
 
 
 def _end_with_notice(writer: Any, turn_id: str, label: str, text: str) -> dict[str, Any]:
@@ -81,7 +82,7 @@ def _last_human_message(state: AcpState) -> HumanMessage | None:
     return next((message for message in reversed(state["messages"]) if isinstance(message, HumanMessage)), None)
 
 
-def prompt_blocks(message: HumanMessage, *, images_supported: bool = True) -> list[dict[str, Any]]:
+def prompt_blocks(message: HumanMessage) -> list[dict[str, Any]]:
     """Convert a stored user message to ACP content blocks."""
     if isinstance(message.content, str):
         return [{"type": "text", "text": message.content}]
@@ -91,7 +92,7 @@ def prompt_blocks(message: HumanMessage, *, images_supported: bool = True) -> li
             blocks.append({"type": "text", "text": part})
         elif part.get("type") == "text":
             blocks.append({"type": "text", "text": str(part.get("text") or "")})
-        elif part.get("type") == "image" and images_supported and part.get("base64"):
+        elif part.get("type") == "image" and part.get("base64"):
             blocks.append({"type": "image", "data": part["base64"], "mimeType": part.get("mime_type") or "image/png"})
     return blocks
 
@@ -120,18 +121,25 @@ class CardToolProvider:
             "metadata": dict(config.get("metadata") or {}),
         }
         self._browser_lock = asyncio.Lock()
+        self._tools: list[Any] | None = None
 
     async def _wait_for_handoff(self, payload: dict[str, Any]) -> str:
         turn = get_acp_service().turn(self._turn_id)
         return await turn.wait_for_handoff(payload) if turn is not None else "cancel"
 
-    async def _resolve(self):
-        resolver = ToolResolver()
-        tools = await resolver.aresolve_for_agent(
-            self._context.get_agent_name(),
-            override_tool_names=self._context.get_allowed_tool_names(),
-        )
-        return resolver.for_workspace(tools, self._context.get_workspace())
+    async def _resolve(self) -> list[Any]:
+        """The card's tools for this turn. tool_node still enforces policy on every call."""
+        if self._tools is None:
+            resolver = ToolResolver()
+            tools = await resolver.aresolve_for_agent(
+                self._context.get_agent_name(),
+                override_tool_names=self._context.get_allowed_tool_names(),
+            )
+            self._tools = list(resolver.for_workspace(tools, self._context.get_workspace()))
+        return self._tools
+
+    async def tool_names(self) -> frozenset[str]:
+        return frozenset(tool.name for tool in await self._resolve())
 
     async def list_tools(self) -> list[dict[str, Any]]:
         return [
@@ -145,7 +153,7 @@ class CardToolProvider:
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolOutput:
         # Checked here because the node restores control tools named by a pending call.
-        if name not in {tool.name for tool in await self._resolve()}:
+        if name not in await self.tool_names():
             return ToolOutput(f"Tool '{name}' is not available to this agent.", is_error=True)
         if name == "browser_handoff" and not self._can_interrupt:
             return ToolOutput("Nobody can take over the browser from this surface. Use a dashboard conversation.", is_error=True)
@@ -262,18 +270,18 @@ async def acp_turn_node(state: AcpState, config: RunnableConfig, runtime: Runtim
         try:
             turn = await _start_turn(state, config, runtime, turn_id)
         except AcpNotInstalled as exc:
-            return _end_with_notice(writer, turn_id, "setup", str(exc) or not_installed_notice("agent"))
-        except AcpRpcError as exc:
-            text = SIGN_IN_NOTICE if exc.auth_required else describe_failure(exc)
-            return _end_with_notice(writer, turn_id, "setup", text)
+            return _end_with_notice(writer, turn_id, "setup", str(exc))
         except AcpError as exc:
             return _end_with_notice(writer, turn_id, "setup", describe_failure(exc))
     turn.attached = True
     try:
         while True:
+            # Read before draining, so a turn seen as done has no events left behind.
+            done = turn.done
+            paused = not done and turn.next_pending() is not None
             for event in turn.take_events():
-                writer({"type": ACP_LIVE_EVENT, "event": event})
-            if turn.done or turn.next_pending() is not None:
+                _emit(writer, event)
+            if done or paused:
                 break
             await turn.wait_for_progress()
     except BaseException:
@@ -286,21 +294,44 @@ async def acp_turn_node(state: AcpState, config: RunnableConfig, runtime: Runtim
         "acp_session_id": turn.session_id,
         "acp_session_cwd": str(Path(runtime.context.get_working_dir()).resolve()),
     }
-    if not turn.done:
+    if paused:
         turn.attached = False
         update.update(messages=turn.messages(), acp_pending=True)
         return update
-    for event in turn.take_events():
-        writer({"type": ACP_LIVE_EVENT, "event": event})
     notice = turn.result_notice()
     if notice:
-        writer({"type": ACP_LIVE_EVENT, "event": {"type": "message", "content": notice}})
+        _emit(writer, {"type": "message", "content": notice})
     final_text = turn.final_text(notice)
     if final_text:
-        writer({"type": ACP_LIVE_EVENT, "event": {"type": "final", "content": final_text, "already_streamed": True}})
+        _emit(writer, {"type": "final", "content": final_text, "already_streamed": True})
     update.update(messages=turn.messages(notice=notice), acp_pending=False)
     turn.committed = True
     return update
+
+
+def _apply_answer(turn: AcpTurn, pending: Any, response: Any) -> bool:
+    """Apply a resume value. False means the question has to be asked again."""
+    if isinstance(pending, PendingHandoff):
+        try:
+            handoff = BrowserHandoffResume.model_validate(response)
+        except ValidationError:
+            return False
+        if handoff.handoff_id != pending.request_id:
+            return False
+        turn.answer_handoff(pending.request_id, handoff.decision)
+        return True
+    try:
+        decision = AcpPermissionResume.model_validate(response)
+    except ValidationError:
+        return False
+    # A resume value for another request, or for an option that was not
+    # offered, authorizes nothing, so the question is asked again.
+    if decision.request_id != pending.request_id:
+        return False
+    if decision.option_id == STOP_TURN_OPTION_ID:
+        turn.cancel()
+        return True
+    return turn.answer(pending.request_id, decision.option_id) or turn.next_pending() is None or turn.done
 
 
 async def acp_permission_node(state: AcpState, config: RunnableConfig) -> dict[str, Any]:
@@ -312,32 +343,9 @@ async def acp_permission_node(state: AcpState, config: RunnableConfig) -> dict[s
     if pending is None:
         # The turn ended while paused, or the server restarted. acp_turn reports it.
         return {"acp_pending": False}
-    while True:
-        response = interrupt(pending.interrupt_value())
-        if isinstance(pending, PendingHandoff):
-            try:
-                handoff = BrowserHandoffResume.model_validate(response)
-            except ValidationError:
-                continue
-            if handoff.handoff_id != pending.request_id:
-                continue
-            turn.answer_handoff(pending.request_id, handoff.decision)
-            return {"acp_pending": False}
-        try:
-            decision = AcpPermissionResume.model_validate(response)
-        except ValidationError:
-            continue
-        # A resume value for another request, or for an option that was not
-        # offered, authorizes nothing, so the question is asked again.
-        if decision.request_id != pending.request_id:
-            continue
-        if decision.option_id == STOP_TURN_OPTION_ID:
-            turn.cancel()
-            return {"acp_pending": False}
-        if turn.answer(pending.request_id, decision.option_id):
-            return {"acp_pending": False}
-        if turn.next_pending() is None or turn.done:
-            return {"acp_pending": False}
+    while not _apply_answer(turn, pending, interrupt(pending.interrupt_value())):
+        pass
+    return {"acp_pending": False}
 
 
 def _after_turn(state: AcpState) -> str:

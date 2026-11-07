@@ -5,13 +5,13 @@ import {
   readAcpOptionChoices,
   resolveAcpOptionValues,
   writeAcpOptionChoices,
+  type AcpAgentStatus,
   type AcpConfigOption,
   type AcpOptionValues,
 } from "@/lib/acp";
 import { apiFetch } from "@/lib/api";
+import { API_PATHS } from "@/lib/endpoints";
 import type { AgentCard } from "@/types";
-
-type AgentStatus = { auth: { config_options: AcpConfigOption[] } };
 
 export function useAcpSessionOptions(card: Accessor<AgentCard | undefined>) {
   const [options, setOptions] = createSignal<AcpConfigOption[]>([]);
@@ -26,7 +26,7 @@ export function useAcpSessionOptions(card: Accessor<AgentCard | undefined>) {
   createEffect(on(agentId, (agent) => {
     setOptions([]);
     if (!agent) return;
-    apiFetch<AgentStatus>(`/dashboard-api/acp/agents/${encodeURIComponent(agent)}`)
+    apiFetch<AcpAgentStatus>(API_PATHS.acpAgent(agent))
       .then((status) => {
         if (agentId() === agent) setOptions(status.auth.config_options);
       })

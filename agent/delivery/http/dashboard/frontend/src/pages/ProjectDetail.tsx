@@ -4,6 +4,7 @@ import { AppShell } from "@/components/AppShell";
 import { ProjectInstructions } from "@/components/ProjectInstructions";
 import { ProjectSkills } from "@/components/ProjectSkills";
 import { ProjectSecrets } from "@/components/ProjectSecrets";
+import { ProjectBrowserProfiles } from "@/components/ProjectBrowserProfiles";
 import { ProjectLocalSync } from "@/components/ProjectLocalSync";
 import { WorkspaceHostMirror } from "@/components/WorkspaceHostMirror";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
@@ -14,6 +15,13 @@ import { apiFetch, postJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
 import { projectChatState, prepareProjectChatWorkspace } from "@/lib/projects";
 import type { ProjectSummary } from "@/types";
+
+const RESOURCE_TABS = [
+  { id: "instructions", label: "AGENTS.md" },
+  { id: "skills", label: "Skills" },
+  { id: "secrets", label: "Secrets" },
+  { id: "browser", label: "Browser" },
+];
 
 export function ProjectDetailPage() {
   const params = useParams<{ projectId: string }>();
@@ -26,7 +34,7 @@ export function ProjectDetailPage() {
   const [opening, setOpening] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
   let revision = 0;
-  const tab = () => query.tab === "skills" ? "skills" : query.tab === "secrets" ? "secrets" : "instructions";
+  const tab = () => RESOURCE_TABS.find((item) => item.id === query.tab)?.id ?? "instructions";
   const load = async (keepProject = false) => {
     const version = ++revision;
     if (!keepProject) setProject(null);
@@ -123,15 +131,16 @@ export function ProjectDetailPage() {
           </section>
         </Show>
         <nav class="project-resource-tabs" aria-label="Project resources">
-          <A class="btn" classList={{ "btn-primary": tab() === "instructions" }} aria-current={tab() === "instructions" ? "page" : undefined} href={`/projects/${current().id}?tab=instructions`}>AGENTS.md</A>
-          <A class="btn" classList={{ "btn-primary": tab() === "skills" }} aria-current={tab() === "skills" ? "page" : undefined} href={`/projects/${current().id}?tab=skills`}>Skills</A>
-          <A class="btn" classList={{ "btn-primary": tab() === "secrets" }} aria-current={tab() === "secrets" ? "page" : undefined} href={`/projects/${current().id}?tab=secrets`}>Secrets</A>
+          <For each={RESOURCE_TABS}>{(item) => (
+            <A class="btn" classList={{ "btn-primary": tab() === item.id }} aria-current={tab() === item.id ? "page" : undefined} href={`/projects/${current().id}?tab=${item.id}`}>{item.label}</A>
+          )}</For>
         </nav>
         <Show when={tab() === "instructions"}>
           <ProjectInstructions projectId={current().id} workspaceId={current().workspace.project_workspace_id} />
         </Show>
         <Show when={tab() === "skills"}><ProjectSkills workspace={current().workspace.execution} /></Show>
         <Show when={tab() === "secrets"}><ProjectSecrets projectId={current().id} /></Show>
+        <Show when={tab() === "browser"}><ProjectBrowserProfiles projectId={current().id} /></Show>
       </>}</Show>
     </div>
   </AppShell>;

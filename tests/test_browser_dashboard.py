@@ -15,6 +15,7 @@ from agent.bootstrap.app import ContainerActivationMiddleware
 from agent.delivery.http.dashboard.routes import browser as routes
 from agent.modules.admin_auth import get_current_admin
 from agent.modules.browser.service import BrowserService
+from agent.modules.projects.models import Project
 from agent.shared.infrastructure.csrf_protection import CSRFProtectionMiddleware
 from agent.shared.infrastructure.db.engine import initialize_async_engine, close_async_engine
 from test_browser_sessions import FakeDriver, make_browser_metadata
@@ -126,6 +127,115 @@ def test_browser_profile_api_enforces_authentication_csrf_and_ownership(browser_
     assert client.get("/dashboard-api/browser/artifacts/missing").status_code == 404
     client.headers.pop("X-Test-Admin")
     assert client.get("/dashboard-api/browser/profiles").status_code == 401
+
+
+def test_browser_profile_delete_reports_whether_saved_data_is_gone(browser_client, monkeypatch):
+    client, browser = browser_client
+    url = "/dashboard-api/browser/profiles"
+    profile = client.post(url, json={"name": "Removed"}).json()
+    assert client.delete(f"{url}/{profile['profile_id']}").json() == {"deleted": True, "saved_data_removed": True}
+
+    profile = client.post(url, json={"name": "In use"}).json()
+    (browser.root / "profiles" / profile["profile_id"]).mkdir(parents=True)
+
+    def locked(path, *args, **kwargs):
+        raise PermissionError(32, "in use", str(path))
+
+    monkeypatch.setattr("agent.modules.browser.service.shutil.rmtree", locked)
+    assert client.delete(f"{url}/{profile['profile_id']}").json() == {"deleted": True, "saved_data_removed": False}
+
+
+def test_browser_profile_rename_and_duplicate_names(browser_client):
+    client, browser = browser_client
+    work = client.post("/dashboard-api/browser/profiles", json={"name": " Work "}).json()
+    assert work["name"] == "Work"
+    assert client.post("/dashboard-api/browser/profiles", json={"name": "work"}).status_code == 409
+    assert client.post("/dashboard-api/browser/profiles", json={"name": "   "}).status_code == 422
+    assert client.patch(f"/dashboard-api/browser/profiles/{work['profile_id']}", json={"name": "Office"}).json()["name"] == "Office"
+    client.headers["X-Test-Admin"] = "2"
+    assert client.patch(f"/dashboard-api/browser/profiles/{work['profile_id']}", json={"name": "Stolen"}).status_code == 403
+
+
+def test_browser_profile_list_reports_open_conversation(browser_client):
+    client, browser = browser_client
+    profile = client.post("/dashboard-api/browser/profiles", json={"name": "Work"}).json()
+    assert client.get("/dashboard-api/browser/profiles").json()["profiles"][0]["open_thread_id"] is None
+    client.put("/dashboard-api/browser/threads/first", json={"profile_id": profile["profile_id"]})
+    client.post("/dashboard-api/browser/threads/first")
+    assert client.get("/dashboard-api/browser/profiles").json()["profiles"][0]["open_thread_id"] == "first"
+
+
+def test_browser_project_profile_api(browser_client):
+    client, browser = browser_client
+
+    async def add_project():
+        async with browser.repository.session() as session:
+            project = Project(key="local:one", label="One", workspace_json="{}")
+            session.add(project)
+            await session.commit()
+            return project.id
+
+    project_id = client.portal.call(add_project)
+    url = f"/dashboard-api/browser/projects/{project_id}/profile"
+    profile = client.post("/dashboard-api/browser/profiles", json={"name": "Work"}).json()
+    separate = {"mode": "separate", "profile_id": None, "default_profile_id": None, "effective_profile_id": None}
+    named = {**separate, "mode": "profile", "profile_id": profile["profile_id"], "effective_profile_id": profile["profile_id"]}
+    assert client.get(url).json() == separate
+    assert client.put(url, json={"profile_id": profile["profile_id"]}).json() == named
+    assert client.get(url).json() == named
+    assert client.put(url, json={"profile_id": None}).json() == separate
+    assert client.get(url).json() == separate
+    assert client.put(f"/dashboard-api/browser/projects/{project_id + 1}/profile", json={"profile_id": profile["profile_id"]}).status_code == 404
+    assert client.put(url, json={"profile_id": "not-a-profile"}).status_code == 422
+    assert client.get(f"/dashboard-api/browser/projects/{project_id + 1}/profile").status_code == 404
+    for body in ({"mode": "profile"}, {"mode": "inherit", "profile_id": profile["profile_id"]},
+                 {"mode": "separate", "profile_id": profile["profile_id"]}, {"mode": "unknown"}):
+        assert client.put(url, json=body).status_code == 422
+    default_url = "/dashboard-api/browser/default-profile"
+    assert client.put(default_url, json={"profile_id": profile["profile_id"]}).status_code == 200
+    inherited = client.put(url, json={"mode": "inherit"}).json()
+    assert inherited == {**separate, "mode": "inherit", "default_profile_id": profile["profile_id"],
+                         "effective_profile_id": profile["profile_id"]}
+    assert client.get("/dashboard-api/browser/profiles").json()["profiles"][0]["projects"] == [{"id": project_id, "label": "One"}]
+    client.headers["X-Test-Admin"] = "2"
+    assert client.put(url, json={"profile_id": profile["profile_id"]}).status_code == 403
+    assert client.get(url).json() == separate
+    client.headers.pop("X-Test-Admin")
+    assert client.get(url).status_code == 401
+
+
+def test_browser_account_default_requires_authentication_csrf_and_ownership(browser_client):
+    client, _ = browser_client
+    url = "/dashboard-api/browser/default-profile"
+    profile = client.post("/dashboard-api/browser/profiles", json={"name": "Work"}).json()
+    assert client.get(url).json() == {"profile_id": None}
+    client.headers.pop("X-CSRF-Token")
+    assert client.put(url, json={"profile_id": profile["profile_id"]}).status_code == 403
+    client.headers["X-CSRF-Token"] = client.cookies["csrf_token"]
+    assert client.put(url, json={"profile_id": "invalid"}).status_code == 422
+    assert client.put(url, json={"profile_id": profile["profile_id"]}).json() == {"profile_id": profile["profile_id"]}
+    assert client.get("/dashboard-api/browser/threads/new").json()["profile_id"] == profile["profile_id"]
+    client.headers["X-Test-Admin"] = "2"
+    assert client.get(url).json() == {"profile_id": None}
+    assert client.put(url, json={"profile_id": profile["profile_id"]}).status_code == 403
+    client.headers["X-Test-Admin"] = "1"
+    assert client.delete(f"/dashboard-api/browser/profiles/{profile['profile_id']}").status_code == 200
+    assert client.get(url).json() == {"profile_id": None}
+    client.headers.pop("X-Test-Admin")
+    assert client.get(url).status_code == 401
+    assert client.put(url, json={"profile_id": None}).status_code == 401
+
+
+def test_browser_storage_errors_do_not_reveal_server_paths(browser_client, monkeypatch):
+    client, browser = browser_client
+    profile = client.post("/dashboard-api/browser/profiles", json={"name": "Work"}).json()
+
+    async def denied(*args):
+        raise PermissionError(13, "Permission denied", "/secret/server/path")
+
+    monkeypatch.setattr(browser, "delete_profile", denied)
+    response = client.delete(f"/dashboard-api/browser/profiles/{profile['profile_id']}")
+    assert response.status_code == 500 and "/secret/server/path" not in response.text
 
 
 class FakeViewer:

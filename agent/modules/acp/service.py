@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import logging
 import os
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ DEFAULT_IDLE_SECONDS = 600.0
 FINISHED_TURN_TTL_SECONDS = 3600.0
 STOP_COMMIT_TIMEOUT_SECONDS = 10.0
 SUPERSEDE_TIMEOUT_SECONDS = 10.0
+SESSION_LOST_NOTICE = "The earlier agent session could not be restored, so this one starts without earlier context."
 
 CommandResolver = Callable[[str], AgentCommand]
 
@@ -68,7 +70,6 @@ class AcpService:
         self.boot_id = uuid.uuid4().hex
         self._clients: dict[str, AcpClient] = {}
         self._client_locks: dict[str, asyncio.Lock] = {}
-        self._live_sessions: dict[int, set[str]] = {}
         self._turns: dict[str, AcpTurn] = {}
         self._started_turn_ids: set[str] = set()
         self._active_by_thread: dict[str, str] = {}
@@ -91,7 +92,7 @@ class AcpService:
 
     # Client lifetime --------------------------------------------------------
 
-    async def client_for(self, agent_id: str, *, on_stderr_line: Callable[[str], None] | None = None) -> AcpClient:
+    async def client_for(self, agent_id: str) -> AcpClient:
         self._loop = asyncio.get_running_loop()
         lock = self._client_locks.setdefault(agent_id, asyncio.Lock())
         async with lock:
@@ -101,17 +102,15 @@ class AcpService:
                 return client
             if client is not None:
                 # It died by itself. Stopping it still releases its job and pipes.
-                self._live_sessions.pop(id(client), None)
                 await asyncio.to_thread(client.stop)
             command = self._resolve_command(agent_id)
-            client = await asyncio.to_thread(AcpClient, command, on_stderr_line=on_stderr_line)
+            client = await asyncio.to_thread(AcpClient, command)
             try:
                 await client.initialize()
             except BaseException:
                 await asyncio.to_thread(client.stop)
                 raise
             self._clients[agent_id] = client
-            self._live_sessions[id(client)] = set()
             return client
 
     async def restart_client(self, agent_id: str) -> None:
@@ -120,7 +119,6 @@ class AcpService:
         async with lock:
             client = self._clients.pop(agent_id, None)
             if client is not None:
-                self._live_sessions.pop(id(client), None)
                 await asyncio.to_thread(client.stop)
 
     def agent_is_busy(self, agent_id: str) -> bool:
@@ -167,7 +165,6 @@ class AcpService:
         await asyncio.gather(*commits, return_exceptions=True)
         clients = list(self._clients.values())
         self._clients.clear()
-        self._live_sessions.clear()
         await asyncio.gather(*(asyncio.to_thread(client.stop) for client in clients), return_exceptions=True)
         await self._tool_bridge.close()
 
@@ -236,18 +233,17 @@ class AcpService:
     async def _prepare_session(self, client: AcpClient, request: TurnRequest) -> tuple[str, list[dict[str, Any]], list[str]]:
         notices: list[str] = []
         tool_names = await self._wanted_tool_names(client, request, notices)
-        live = self._live_sessions.setdefault(id(client), set())
         session_id = ""
         result: dict[str, Any] = {}
         if request.session_id and request.session_cwd == request.cwd:
-            if request.session_id in live and self._attached_tools_match(request.session_id, tool_names):
+            if request.session_id in client.live_sessions and self._attached_tools_match(request.session_id, tool_names):
                 session_id = request.session_id
             else:
                 # A live session also takes this path when the card's tools changed or
                 # their endpoint moved: session/resume makes the agent connect again.
-                session_id, result, notice = await self._reattach(client, request, tool_names)
-                if notice:
-                    notices.append(notice)
+                session_id, result = await self._reattach(client, request, tool_names)
+                if not session_id:
+                    notices.append(SESSION_LOST_NOTICE)
         elif request.session_id:
             notices.append("The workspace changed, so the agent started a new session without earlier context.")
         if request.session_id and session_id != request.session_id:
@@ -262,17 +258,13 @@ class AcpService:
             elif prompt_text.strip():
                 blocks.insert(0, {"type": "text", "text": f"<system_instructions>\n{prompt_text}\n</system_instructions>"})
             tools = self._tool_bridge.open_session(tool_names, request.tools) if tool_names else None
-            try:
+            with self._revoke_on_failure(tools):
                 result = await client.new_session(request.cwd, meta=meta, mcp_servers=self._mcp_servers(tools))
                 session_id = str(result.get("sessionId") or "")
                 if not session_id:
                     raise AcpError("The agent did not return a session id.")
-            except BaseException:
-                if tools is not None:
-                    self._tool_bridge.revoke(tools)
-                raise
             self._bind_tools(session_id, tools)
-        live.add(session_id)
+        client.live_sessions.add(session_id)
         notices.extend(await self._apply_config_options(client, session_id, result, request.config_options))
         return session_id, blocks, notices
 
@@ -284,7 +276,7 @@ class AcpService:
             notices.append("This agent cannot connect to K41 tools, so it runs with its own tools only.")
             return frozenset()
         try:
-            names = frozenset(tool["name"] for tool in await request.tools.list_tools())
+            names = await request.tools.tool_names()
             if names:
                 await self._tool_bridge.ensure_started()
             return names
@@ -298,6 +290,15 @@ class AcpService:
         if tools is None:
             return not wanted
         return tools.names == wanted and self._tool_bridge.is_reachable(tools)
+
+    @contextlib.contextmanager
+    def _revoke_on_failure(self, tools: SessionTools | None) -> Iterator[None]:
+        try:
+            yield
+        except BaseException:
+            if tools is not None:
+                self._tool_bridge.revoke(tools)
+            raise
 
     def _mcp_servers(self, tools: SessionTools | None) -> list[dict[str, Any]]:
         return [self._tool_bridge.server_entry(tools)] if tools is not None else []
@@ -315,8 +316,8 @@ class AcpService:
         self._bind_tools(session_id, None)
         self._applied_options.pop(session_id, None)
         self._option_categories.pop(session_id, None)
-        for live in self._live_sessions.values():
-            live.discard(session_id)
+        for client in self._clients.values():
+            client.live_sessions.discard(session_id)
 
     def forget_thread(self, thread_id: str) -> None:
         """End what a deleted conversation still holds. The agent's session itself just stays unused."""
@@ -328,31 +329,27 @@ class AcpService:
         if session_id:
             self._forget_session(session_id)
 
-    async def _reattach(self, client: AcpClient, request: TurnRequest, tool_names: frozenset[str]) -> tuple[str, dict[str, Any], str]:
-        lost = "The earlier agent session could not be restored, so this one starts without earlier context."
-        if not client.supports_resume() and not client.supports_load():
-            return "", {}, lost
+    async def _reattach(self, client: AcpClient, request: TurnRequest, tool_names: frozenset[str]) -> tuple[str, dict[str, Any]]:
+        """Return the restored session and the agent's answer; an empty id means the session is lost."""
+        if client.supports_resume():
+            restore = client.resume_session
+        elif client.supports_load():
+            restore = client.load_session
+        else:
+            return "", {}
         tools = self._tool_bridge.open_session(tool_names, request.tools) if tool_names else None
         try:
-            # No listener is subscribed yet, so history replayed by session/load
-            # is dropped instead of being shown again.
-            if client.supports_resume():
-                result = await client.resume_session(request.session_id, request.cwd, mcp_servers=self._mcp_servers(tools))
-            else:
-                result = await client.load_session(request.session_id, request.cwd, mcp_servers=self._mcp_servers(tools))
+            with self._revoke_on_failure(tools):
+                # No listener is subscribed yet, so history replayed by session/load
+                # is dropped instead of being shown again.
+                result = await restore(request.session_id, request.cwd, mcp_servers=self._mcp_servers(tools))
         except AcpRpcError as exc:
-            if tools is not None:
-                self._tool_bridge.revoke(tools)
             if exc.auth_required:
                 raise
             logger.info("ACP session could not be restored (code %s).", exc.code)
-            return "", {}, lost
-        except BaseException:
-            if tools is not None:
-                self._tool_bridge.revoke(tools)
-            raise
+            return "", {}
         self._bind_tools(request.session_id, tools)
-        return request.session_id, result, ""
+        return request.session_id, result
 
     async def _apply_config_options(
         self,
@@ -471,10 +468,6 @@ class AcpService:
             await self.restart_client(turn.agent_id)
 
 
-def active_turn_threads(service: AcpService | None, thread_ids: Iterable[str]) -> set[str]:
-    return {thread_id for thread_id in thread_ids if service is not None and service.has_active_turn(thread_id)}
-
-
 def get_acp_service(container: Any | None = None) -> AcpService:
     """Return the container-scoped service, creating it on first use."""
     if container is None:
@@ -506,7 +499,6 @@ __all__ = [
     "AcpService",
     "TurnRequest",
     "acp_data_root",
-    "active_turn_threads",
     "get_acp_service",
     "not_installed_notice",
     "peek_acp_service",

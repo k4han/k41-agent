@@ -1,6 +1,8 @@
 import asyncio
 import base64
+import hashlib
 import json
+import shutil
 from types import SimpleNamespace
 
 import pytest
@@ -8,11 +10,14 @@ import pytest_asyncio
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import START, END, StateGraph
 from langgraph.types import Command
-from sqlalchemy import MetaData
+from sqlalchemy import MetaData, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent.modules.browser.models import BrowserArtifact, BrowserBinding, BrowserHandoffResume, BrowserInvocation, BrowserProfile
-from agent.modules.browser.service import BrowserError, BrowserService
+from agent.modules.browser.models import BrowserAccountProfile, BrowserArtifact, BrowserBinding, BrowserHandoffResume, BrowserInvocation, BrowserProfile, BrowserProjectProfile
+from agent.modules.browser.service import BrowserError, BrowserService, storage_namespace, storage_root
+from agent.modules.projects.models import Project
 from agent.modules.tools.builtin.browser import browser_batch_error
+from agent.modules.workspaces.models import ThreadWorkspace
 from agent.shared.infrastructure.db.engine import initialize_async_engine, close_async_engine
 
 
@@ -53,7 +58,8 @@ class FakeDriver:
 
 def make_browser_metadata():
     metadata = MetaData()
-    for model in (BrowserArtifact, BrowserBinding, BrowserInvocation, BrowserProfile):
+    for model in (BrowserAccountProfile, BrowserArtifact, BrowserBinding, BrowserInvocation, BrowserProfile, BrowserProjectProfile,
+                  Project, ThreadWorkspace):
         model.__table__.to_metadata(metadata)
     return metadata
 
@@ -143,6 +149,480 @@ async def test_isolation_profile_leases_and_ownership(browser):
         await browser.delete_profile("admin:1", profile["profile_id"])
     await browser.close("first", "admin:1")
     assert (await browser.ensure("second", "admin:1")).profile_key == active.profile_key
+
+
+async def add_project_thread(browser, thread_id, project_id=None):
+    async with browser.repository.session() as session:
+        if project_id is None:
+            project = Project(key=f"local:{thread_id}", label=thread_id, workspace_json="{}")
+            session.add(project)
+            await session.flush()
+            project_id = project.id
+        session.add(ThreadWorkspace(thread_id=thread_id, project_id=project_id))
+        await session.commit()
+    return project_id
+
+
+@pytest.mark.asyncio
+async def test_project_profile_applies_once_to_new_conversations(browser):
+    profile = await browser.create_profile("admin:1", "Work")
+    project_id = await add_project_thread(browser, "existing")
+    await browser.bind("existing", "admin:1")
+    await browser.repository.set_project_profile(project_id, "admin:1", profile["profile_id"])
+    await add_project_thread(browser, "new", project_id)
+    await add_project_thread(browser, "isolated", project_id)
+    await add_project_thread(browser, "other-owner", project_id)
+    await browser.repository.bind("other-owner", "admin:2")
+    await add_project_thread(browser, "unrelated", await add_project_thread(browser, "unrelated-seed"))
+
+    assert (await browser.status("new", "admin:1"))["profile_id"] == profile["profile_id"]
+    assert (await browser.ensure("new", "admin:1")).profile_key == profile["profile_id"]
+    await browser.close("new", "admin:1")
+    assert (await browser.ensure("existing", "admin:1")).profile_key != profile["profile_id"]
+    await browser.close("existing", "admin:1")
+    assert (await browser.repository.binding("other-owner"))["profile_id"] is None
+    assert (await browser.ensure("unrelated", "admin:1")).profile_key != profile["profile_id"]
+
+    await browser.bind("isolated", "admin:1")
+    await browser.select_profile("isolated", "admin:1", None)
+    await browser.repository.set_project_profile(project_id, "admin:1", profile["profile_id"])
+    assert (await browser.ensure("isolated", "admin:1")).profile_key != profile["profile_id"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_project_profile_selection_keeps_one_default(browser, monkeypatch):
+    first = await browser.create_profile("admin:1", "Work")
+    second = await browser.create_profile("admin:1", "Personal")
+    project_id = await add_project_thread(browser, "concurrent-default")
+    both_read = asyncio.Event()
+    reads = 0
+    original_scalar = AsyncSession.scalar
+
+    async def synchronized_scalar(session, statement, *args, **kwargs):
+        nonlocal reads
+        result = await original_scalar(session, statement, *args, **kwargs)
+        # Force both legacy read-then-insert requests to observe the missing row.
+        if statement.column_descriptions[0].get("entity") is BrowserProjectProfile:
+            reads += 1
+            if reads == 2:
+                both_read.set()
+            await asyncio.wait_for(both_read.wait(), 5)
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(AsyncSession, "scalar", synchronized_scalar)
+        await asyncio.gather(*(browser.repository.set_project_profile(project_id, "admin:1", profile["profile_id"])
+                               for profile in (first, second)))
+
+    async with browser.repository.session() as session:
+        rows = (await session.scalars(select(BrowserProjectProfile).where(
+            BrowserProjectProfile.project_id == project_id, BrowserProjectProfile.owner_id == "admin:1"))).all()
+    assert len(rows) == 1
+    assert rows[0].profile_id in {first["profile_id"], second["profile_id"]}
+    await browser.repository.set_project_profile(project_id, "admin:1", second["profile_id"])
+    assert await browser.repository.project_profile(project_id, "admin:1") == second["profile_id"]
+
+
+@pytest.mark.asyncio
+async def test_account_default_and_project_modes_preserve_existing_bindings(browser):
+    first = await browser.create_profile("admin:1", "First")
+    second = await browser.create_profile("admin:1", "Second")
+    await browser.bind("existing-standalone", "admin:1")
+    project_id = await add_project_thread(browser, "existing-project")
+    await browser.bind("existing-project", "admin:1")
+    await browser.repository.set_default_profile("admin:1", first["profile_id"])
+
+    assert (await browser.bind("standalone", "admin:1"))["profile_id"] == first["profile_id"]
+    assert (await browser.bind("existing-standalone", "admin:1"))["profile_id"] is None
+    assert (await browser.status("other-owner", "admin:2"))["profile_id"] is None
+    await add_project_thread(browser, "legacy-project", project_id)
+    assert (await browser.bind("legacy-project", "admin:1"))["profile_id"] is None
+
+    await browser.repository.set_project_profile(project_id, "admin:1", None, "inherit")
+    await add_project_thread(browser, "inherits-first", project_id)
+    assert (await browser.status("inherits-first", "admin:1"))["profile_id"] == first["profile_id"]
+    assert (await browser.bind("inherits-first", "admin:1"))["profile_id"] == first["profile_id"]
+    assert (await browser.bind("existing-project", "admin:1"))["profile_id"] is None
+    await browser.repository.set_default_profile("admin:1", second["profile_id"])
+    assert (await browser.bind("inherits-first", "admin:1"))["profile_id"] == first["profile_id"]
+    await add_project_thread(browser, "inherits-second", project_id)
+    assert (await browser.bind("inherits-second", "admin:1"))["profile_id"] == second["profile_id"]
+
+    await browser.repository.set_project_profile(project_id, "admin:1", first["profile_id"], "profile")
+    await add_project_thread(browser, "specific", project_id)
+    assert (await browser.bind("specific", "admin:1"))["profile_id"] == first["profile_id"]
+    await browser.repository.set_project_profile(project_id, "admin:1", None, "separate")
+    await add_project_thread(browser, "separate", project_id)
+    assert (await browser.bind("separate", "admin:1"))["profile_id"] is None
+    await browser.select_profile("isolated", "admin:1", None)
+    assert (await browser.bind("isolated", "admin:1"))["profile_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_default_profile_deletion_clears_defaults_without_rebinding_conversations(browser):
+    profile = await browser.create_profile("admin:1", "Default")
+    await browser.repository.set_default_profile("admin:1", profile["profile_id"])
+    project_id = await add_project_thread(browser, "inherited")
+    await browser.repository.set_project_profile(project_id, "admin:1", None, "inherit")
+    await browser.bind("inherited", "admin:1")
+    await browser.delete_profile("admin:1", profile["profile_id"])
+    assert await browser.repository.default_profile("admin:1") is None
+    assert (await browser.repository.project_profile_settings(project_id, "admin:1"))["mode"] == "inherit"
+    replacement = await browser.create_profile("admin:1", "Replacement")
+    await browser.repository.set_default_profile("admin:1", replacement["profile_id"])
+    assert (await browser.bind("inherited", "admin:1"))["profile_id"] is None
+    await add_project_thread(browser, "new-inherited", project_id)
+    assert (await browser.bind("new-inherited", "admin:1"))["profile_id"] == replacement["profile_id"]
+
+
+@pytest.mark.asyncio
+async def test_sub_agent_borrows_account_default_and_busy_defaults_still_report_conflicts(browser):
+    profile = await browser.create_profile("admin:1", "Default")
+    await browser.repository.set_default_profile("admin:1", profile["profile_id"])
+    child = await browser.ensure("parent:sub:helper:1", "admin:1")
+    assert child.profile_key == profile["profile_id"] and child.inherited_profile
+    with pytest.raises(BrowserError, match="another conversation"):
+        await browser.ensure("another", "admin:1")
+    await browser.release_inherited_profile("parent:sub:helper:1")
+    assert (await browser.ensure("parent", "admin:1")).profile_key == profile["profile_id"]
+
+
+@pytest.mark.asyncio
+async def test_project_profile_requires_owned_profile_and_existing_project(browser):
+    profile = await browser.create_profile("admin:1", "Work")
+    project_id = await add_project_thread(browser, "chat")
+    with pytest.raises(PermissionError):
+        await browser.repository.set_project_profile(project_id, "admin:2", profile["profile_id"])
+    with pytest.raises(LookupError):
+        await browser.repository.set_project_profile(project_id + 1, "admin:1", profile["profile_id"])
+    await browser.repository.set_project_profile(project_id, "admin:1", profile["profile_id"])
+    await browser.repository.set_project_profile(project_id, "admin:1", None)
+    assert await browser.repository.project_profile(project_id, "admin:1") is None
+
+
+@pytest.mark.asyncio
+async def test_deleting_profile_clears_project_default(browser):
+    profile = await browser.create_profile("admin:1", "Work")
+    project_id = await add_project_thread(browser, "chat")
+    await browser.repository.set_project_profile(project_id, "admin:1", profile["profile_id"])
+    await browser.delete_profile("admin:1", profile["profile_id"])
+    assert await browser.repository.project_profile(project_id, "admin:1") is None
+    assert (await browser.ensure("chat", "admin:1")).profile_key == browser.storage_key("chat")
+
+
+@pytest.mark.asyncio
+async def test_sub_agent_borrows_parent_profile_until_delegation_ends(browser):
+    profile = await browser.create_profile("admin:1", "Work")
+    await browser.select_profile("chat", "admin:1", profile["profile_id"])
+    child = await browser.ensure("chat:sub:helper:1", "admin:1")
+    assert child.profile_key == profile["profile_id"] and child.inherited_profile
+    assert (await browser.profiles("admin:1"))[0]["open_thread_id"] == "chat:sub:helper:1"
+    await browser.release_inherited_profile("chat:sub:helper:1")
+    assert child.driver.closed and "chat:sub:helper:1" not in browser.sessions
+    assert (await browser.ensure("chat", "admin:1")).profile_key == profile["profile_id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_delegation_returns_borrowed_profile_when_it_ends(browser, monkeypatch, fails):
+    from agent.modules.tools.builtin.delegation.delegate_task import delegate_task
+    from agent.modules.tools.result import ToolError
+
+    profile = await browser.create_profile("admin:1", "Work")
+    await browser.select_profile("chat", "admin:1", profile["profile_id"])
+    borrowed = []
+
+    async def run_agent(*, thread_id, browser_owner_id, **_values):
+        borrowed.append(await browser.ensure(thread_id, browser_owner_id))
+        if fails:
+            raise RuntimeError("helper failed")
+        return "done"
+
+    catalog = SimpleNamespace(validate_call=lambda *args: True, get_agent=lambda name: object())
+    monkeypatch.setattr("agent.modules.agent_runtime.run_agent_full", run_agent)
+    monkeypatch.setattr("agent.modules.agents.get_catalog_service", lambda: catalog)
+    runtime = SimpleNamespace(config={"configurable": {"thread_id": "chat"}},
+                              context={"browser_owner_id": "admin:1", "agent_name": "default"})
+    if fails:
+        with pytest.raises(ToolError):
+            await delegate_task.coroutine(task="work", sub_agent="helper", runtime=runtime)
+    else:
+        assert await delegate_task.coroutine(task="work", sub_agent="helper", runtime=runtime) == "done"
+    assert borrowed[0].profile_key == profile["profile_id"] and borrowed[0].driver.closed
+    assert (await browser.ensure("chat", "admin:1")).profile_key == profile["profile_id"]
+
+
+@pytest.mark.asyncio
+async def test_failed_release_does_not_fail_delegation(browser, monkeypatch):
+    from agent.modules.browser import release_delegated_browser
+
+    async def fail(thread_id):
+        raise RuntimeError("cleanup failed")
+
+    monkeypatch.setattr(browser, "release_inherited_profile", fail)
+    await release_delegated_browser("chat:sub:helper:1")
+
+
+@pytest.mark.asyncio
+async def test_sub_agent_keeps_own_profile_while_parent_browser_is_open(browser):
+    profile = await browser.create_profile("admin:1", "Work")
+    await browser.select_profile("chat", "admin:1", profile["profile_id"])
+    await browser.ensure("chat", "admin:1")
+    child = await browser.ensure("chat:sub:helper:1", "admin:1")
+    assert child.profile_key == browser.storage_key("chat:sub:helper:1") and not child.inherited_profile
+    await browser.release_inherited_profile("chat:sub:helper:1")
+    assert "chat:sub:helper:1" in browser.sessions
+
+
+@pytest.mark.asyncio
+async def test_sub_agent_starts_on_project_profile_before_parent_opens_browser(browser):
+    profile = await browser.create_profile("admin:1", "Work")
+    project_id = await add_project_thread(browser, "chat")
+    await browser.repository.set_project_profile(project_id, "admin:1", profile["profile_id"])
+    assert (await browser.ensure("chat:sub:helper:1", "admin:1")).profile_key == profile["profile_id"]
+    assert (await browser.repository.binding("chat:sub:helper:1"))["profile_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_sub_agent_does_not_borrow_another_accounts_profile(browser):
+    profile = await browser.create_profile("admin:1", "Work")
+    await browser.select_profile("chat", "admin:1", profile["profile_id"])
+    child = await browser.ensure("chat:sub:helper:1", "admin:2")
+    assert child.profile_key == browser.storage_key("chat:sub:helper:1")
+
+
+@pytest.mark.asyncio
+async def test_busy_profile_names_the_conversation_holding_it(browser):
+    profile = await browser.create_profile("admin:1", "Work")
+    for thread in ("first", "second"):
+        await browser.select_profile(thread, "admin:1", profile["profile_id"])
+    await browser.ensure("first", "admin:1")
+    with pytest.raises(BrowserError, match=r"another conversation \(first\)"):
+        await browser.ensure("second", "admin:1")
+    assert (await browser.profiles("admin:1"))[0]["open_thread_id"] == "first"
+
+
+@pytest.mark.asyncio
+async def test_profile_names_are_unique_per_account_and_renamable(browser):
+    first = await browser.create_profile("admin:1", "Work")
+    second = await browser.create_profile("admin:1", "Shop")
+    await browser.create_profile("admin:2", "work")
+    with pytest.raises(BrowserError, match="already exists") as caught:
+        await browser.create_profile("admin:1", "WORK")
+    assert caught.value.code == "profile_name_taken"
+    with pytest.raises(BrowserError, match="already exists"):
+        await browser.rename_profile("admin:1", second["profile_id"], "work")
+    assert (await browser.rename_profile("admin:1", first["profile_id"], "WORK"))["name"] == "WORK"
+    assert (await browser.rename_profile("admin:1", first["profile_id"], "Office"))["name"] == "Office"
+    with pytest.raises(PermissionError):
+        await browser.rename_profile("admin:2", first["profile_id"], "Stolen")
+
+
+@pytest.mark.asyncio
+async def test_launch_retries_after_stopping_leftover_browser(browser, monkeypatch):
+    attempts = []
+
+    async def launch(*args):
+        attempts.append(args)
+        if len(attempts) == 1:
+            raise RuntimeError("Chrome exited before its debugging port was ready with code 21")
+        return FakeDriver()
+
+    stopped = []
+    browser.launcher = launch
+    monkeypatch.setattr("agent.modules.browser.service.terminate_profile_processes", lambda path: stopped.append(path) or 1)
+    current = await browser.ensure("chat", "admin:1")
+    assert len(attempts) == 2 and stopped == [browser.root / "profiles" / current.profile_key]
+
+
+@pytest.mark.asyncio
+async def test_launch_does_not_retry_without_leftover_browser(browser, monkeypatch):
+    attempts = []
+
+    async def launch(*args):
+        attempts.append(args)
+        raise RuntimeError("no browser")
+
+    browser.launcher = launch
+    monkeypatch.setattr("agent.modules.browser.service.terminate_profile_processes", lambda path: 0)
+    with pytest.raises(BrowserError) as caught:
+        await browser.ensure("chat", "admin:1")
+    assert caught.value.code == "browser_unavailable" and len(attempts) == 1
+
+
+@pytest.mark.asyncio
+async def test_timed_out_launch_is_cleaned_up_but_not_repeated(browser, monkeypatch):
+    attempts = []
+
+    async def launch(*args):
+        attempts.append(args)
+        await asyncio.sleep(30)
+
+    stopped = []
+    browser.launcher = launch
+    monkeypatch.setattr(BrowserService, "timeout", 0.01)
+    monkeypatch.setattr("agent.modules.browser.service.terminate_profile_processes", lambda path: stopped.append(path) or 1)
+    with pytest.raises(BrowserError) as caught:
+        await browser.ensure("chat", "admin:1")
+    assert caught.value.code == "browser_unavailable"
+    assert len(attempts) == 1 and len(stopped) == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_close_stops_browser_before_releasing_profile(browser, monkeypatch):
+    class StuckDriver(FakeDriver):
+        async def close(self):
+            raise RuntimeError("stuck")
+
+    async def launch(*args):
+        return StuckDriver()
+
+    stopped = []
+    browser.launcher = launch
+    monkeypatch.setattr("agent.modules.browser.service.terminate_profile_processes", lambda path: stopped.append(path) or 1)
+    current = await browser.ensure("chat", "admin:1")
+    await browser.close("chat", "admin:1")
+    assert stopped == [browser.root / "profiles" / current.profile_key]
+    assert "chat" not in browser.sessions
+
+
+@pytest.mark.asyncio
+async def test_profile_in_use_stays_complete_and_retryable(browser, monkeypatch):
+    profile = await browser.create_profile("admin:1", "Work")
+    directory = browser.root / "profiles" / profile["profile_id"]
+    directory.mkdir(parents=True)
+    (directory / "Cookies").write_text("saved", encoding="utf-8")
+    original = type(directory).rename
+
+    def locked(self, target):
+        raise PermissionError(32, "in use", str(self))
+
+    monkeypatch.setattr(type(directory), "rename", locked)
+    with pytest.raises(BrowserError, match="still in use") as caught:
+        await browser.delete_profile("admin:1", profile["profile_id"])
+    assert caught.value.code == "profile_busy"
+    assert (directory / "Cookies").read_text(encoding="utf-8") == "saved"
+    assert await browser.repository.profile(profile["profile_id"], "admin:1") == profile
+
+    monkeypatch.setattr(type(directory), "rename", original)
+    await browser.delete_profile("admin:1", profile["profile_id"])
+    assert not list((browser.root / "profiles").iterdir())
+    assert await browser.repository.profiles("admin:1") == []
+
+
+@pytest.mark.asyncio
+async def test_deleted_profile_reports_and_purges_files_still_in_use(browser, monkeypatch):
+    profile = await browser.create_profile("admin:1", "Work")
+    directory = browser.root / "profiles" / profile["profile_id"]
+    directory.mkdir(parents=True)
+    (directory / "Cookies").write_text("saved", encoding="utf-8")
+    profiles = browser.root / "profiles"
+    original = shutil.rmtree
+
+    def locked(path, *args, **kwargs):
+        raise PermissionError(32, "in use", str(path))
+
+    monkeypatch.setattr("agent.modules.browser.service.shutil.rmtree", locked)
+    assert await browser.delete_profile("admin:1", profile["profile_id"]) is False
+    assert await browser.repository.profiles("admin:1") == []
+    assert not directory.exists() and len(list(profiles.iterdir())) == 1
+    # The periodic retry runs even when nothing has used a browser since the failure.
+    assert browser.sweeper is not None
+
+    await browser.purge_discarded()
+    assert len(list(profiles.iterdir())) == 1 and browser.undeleted
+
+    monkeypatch.setattr("agent.modules.browser.service.shutil.rmtree", original)
+    await browser.purge_discarded()
+    assert not list(profiles.iterdir()) and not browser.undeleted
+
+
+@pytest.mark.asyncio
+async def test_deleted_profile_reports_when_nothing_remains(browser):
+    profile = await browser.create_profile("admin:1", "Work")
+    (browser.root / "profiles" / profile["profile_id"]).mkdir(parents=True)
+    assert await browser.delete_profile("admin:1", profile["profile_id"]) is True
+    other = await browser.create_profile("admin:1", "Unused")
+    assert await browser.delete_profile("admin:1", other["profile_id"]) is True
+
+
+@pytest.mark.asyncio
+async def test_startup_purges_data_a_previous_run_could_not_remove(browser):
+    leftover = browser.root / "run-artifacts" / ".discarded-earlier"
+    (leftover / "nested").mkdir(parents=True)
+    restarted = BrowserService(browser.container, root=browser.root, launcher=browser.launcher)
+    await restarted.purge_discarded()
+    assert not leftover.exists() and restarted.sweeper is None
+
+
+@pytest.mark.asyncio
+async def test_only_login_profiles_are_checked_for_running_browsers(browser, monkeypatch):
+    stopped = []
+    monkeypatch.setattr("agent.modules.browser.service.terminate_profile_processes", lambda path: stopped.append(path) or 0)
+    await browser.ensure("chat", "admin:1")
+    await browser.delete_thread("chat")
+    key = browser.storage_key("chat")
+    assert stopped == [browser.root / "profiles" / key]
+    assert not (browser.root / "run-artifacts" / key).exists()
+
+
+@pytest.mark.parametrize("first,second", [
+    ("postgresql+asyncpg://user:old@db:5432/k41", "postgresql+asyncpg://user:new@db:5432/k41"),
+    ("postgresql+asyncpg://user:old@db:5432/k41", "postgresql+asyncpg://other:old@db:5432/k41"),
+    ("postgresql+asyncpg://db:5432/k41?user=one&password=old", "postgresql+asyncpg://db:5432/k41?user=two&password=new"),
+    ("postgresql+asyncpg://user:old@db:5432/k41?PASSWORD=old", "postgresql+asyncpg://db:5432/k41?pwd=new"),
+    ("postgresql+asyncpg://user:old@db:5432/k41?ssl=require", "postgresql+asyncpg://user:new@db:5432/k41?ssl=require"),
+])
+def test_storage_namespace_ignores_credentials(first, second):
+    assert storage_namespace(first) == storage_namespace(second)
+
+
+@pytest.mark.parametrize("other", [
+    "postgresql+asyncpg://user:old@db:5432/other",
+    "postgresql+asyncpg://user:old@other:5432/k41",
+    "postgresql+asyncpg://user:old@db:5432/k41?ssl=require",
+])
+def test_storage_namespace_separates_databases(other):
+    assert storage_namespace("postgresql+asyncpg://user:old@db:5432/k41") != storage_namespace(other)
+
+
+def test_storage_namespace_keeps_location_without_credentials():
+    url = "sqlite+aiosqlite:///D:/data/k41.db"
+    assert storage_namespace(url) == hashlib.sha256(url.encode()).hexdigest()[:16]
+
+
+def test_storage_root_adopts_earlier_location(tmp_path):
+    url = "postgresql+asyncpg://user:secret@db:5432/k41"
+    legacy = tmp_path / hashlib.sha256(url.encode()).hexdigest()[:16]
+    (legacy / "profiles" / "saved").mkdir(parents=True)
+    root = storage_root(tmp_path, url)
+    assert root.name == storage_namespace(url) and (root / "profiles" / "saved").is_dir() and not legacy.exists()
+
+
+def test_storage_root_retries_a_failed_move_and_keeps_logins_reachable(tmp_path, monkeypatch):
+    url = "postgresql+asyncpg://user:secret@db:5432/k41"
+    legacy = tmp_path / hashlib.sha256(url.encode()).hexdigest()[:16]
+    (legacy / "profiles" / "saved").mkdir(parents=True)
+    original = type(legacy).rename
+
+    def locked(self, target):
+        raise PermissionError(32, "in use", str(self))
+
+    monkeypatch.setattr(type(legacy), "rename", locked)
+    assert storage_root(tmp_path, url) == legacy
+    assert not (tmp_path / storage_namespace(url)).exists()
+
+    monkeypatch.setattr(type(legacy), "rename", original)
+    root = storage_root(tmp_path, url)
+    assert root.name == storage_namespace(url) and (root / "profiles" / "saved").is_dir() and not legacy.exists()
+
+
+def test_storage_root_prefers_current_location(tmp_path):
+    url = "postgresql+asyncpg://user:secret@db:5432/k41"
+    legacy = tmp_path / hashlib.sha256(url.encode()).hexdigest()[:16]
+    legacy.mkdir()
+    (tmp_path / storage_namespace(url)).mkdir()
+    assert storage_root(tmp_path, url).name == storage_namespace(url) and legacy.is_dir()
 
 
 @pytest.mark.asyncio

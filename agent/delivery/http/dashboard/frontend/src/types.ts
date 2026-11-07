@@ -1033,3 +1033,11 @@ export interface SandboxDeleteResult {
   cloud_status: string;
   detached_threads: string[];
 }
+
+export type BrowserProfile = { profile_id: string; name: string; open_thread_id?: string | null; projects?: { id: number; label: string }[] };
+export type BrowserProjectProfile = {
+  mode: "inherit" | "separate" | "profile";
+  profile_id: string | null;
+  default_profile_id: string | null;
+  effective_profile_id: string | null;
+};

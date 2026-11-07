@@ -29,6 +29,7 @@ from agent.modules.acp.errors import AcpError, AcpNotInstalled
 from agent.modules.acp.process import AgentCommand
 from agent.modules.acp.registry import AgentRelease, fetch_release
 from agent.modules.acp.service import acp_data_root, not_installed_notice
+from agent.modules.tools.coding.storage import atomic_json
 
 logger = logging.getLogger(__name__)
 
@@ -281,11 +282,9 @@ class AcpInstaller:
         if target.exists():
             shutil.rmtree(target)
         os.replace(extracted, target)
-        pointer = root / f".{POINTER_FILE}.{uuid.uuid4().hex}"
-        pointer.write_text(json.dumps({
+        atomic_json(root / POINTER_FILE, {
             "version": release.version, "command": release.command, "args": list(release.args), "license": release.license,
-        }), encoding="utf-8")
-        os.replace(pointer, root / POINTER_FILE)
+        })
 
     @staticmethod
     def _remove_old_versions(root: Path, keep: str) -> None:

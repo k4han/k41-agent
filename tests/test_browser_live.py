@@ -2,10 +2,12 @@
 
 import asyncio
 import base64
+import contextlib
 import io
 import json
 import os
 import selectors
+import subprocess
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,8 +16,11 @@ from threading import Thread
 import pytest
 from PIL import Image
 
-from agent.modules.browser.driver import CDPViewer, StagehandDriver
-from agent.modules.browser.service import BrowserSession
+from agent.modules.browser.driver import CDPViewer, StagehandDriver, terminate_profile_processes
+from agent.modules.browser.service import BrowserService, BrowserSession
+from agent.shared.infrastructure.browser import find_browser
+from agent.shared.infrastructure.db.engine import close_async_engine, initialize_async_engine
+from test_browser_sessions import add_project_thread, make_browser_metadata
 
 pytestmark = [
     pytest.mark.live,
@@ -30,12 +35,17 @@ def frame_image(frame):
 
 
 class PageHandler(BaseHTTPRequestHandler):
+    requested: list[str] = []
+
     def log_message(self, *args):
         pass
 
     def do_GET(self):
+        self.requested.append(self.path)
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        if self.path == "/login":
+            self.send_header("Set-Cookie", "server_session=yes; Path=/; HttpOnly")
         self.end_headers()
         self.wfile.write(b'''<!doctype html><title>Browser fixture</title>
         <label>Name<input id="name" autocomplete="off"></label>
@@ -86,6 +96,121 @@ async def test_local_chrome_snapshot_actions_viewer_and_persistent_login(tmp_pat
         server.shutdown()
         server.server_close()
         worker.join(timeout=5)
+
+
+@pytest.fixture
+def fixture_url():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), PageHandler)
+    worker = Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+    server.server_close()
+    worker.join(timeout=5)
+
+
+async def cookie_names(driver, url):
+    return json.loads(await driver.facade.run(code=(
+        f"await page.goto('{url}/check'); return JSON.stringify((await context.cookies()).map(c => c.name));")))
+
+
+@pytest.mark.asyncio
+async def test_session_login_survives_restart_on_one_blank_tab(tmp_path, fixture_url):
+    profile, artifacts = tmp_path / "profile", tmp_path / "artifacts"
+    artifacts.mkdir()
+    driver = await StagehandDriver.launch(profile, artifacts)
+    try:
+        await driver.facade.run(code=f"await page.goto('{fixture_url}/login'); const other = await context.newPage(); await other.goto('{fixture_url}/second');")
+        for _ in range(3):
+            await driver.close()
+            PageHandler.requested.clear()
+            driver = await StagehandDriver.launch(profile, artifacts)
+            assert [tab["url"] for tab in await driver.tabs()] == ["about:blank"]
+            assert PageHandler.requested == [], "a restored tab sent its request again"
+            assert "server_session" in await cookie_names(driver, fixture_url)
+            await driver.facade.run(code=f"const other = await context.newPage(); await other.goto('{fixture_url}/second');")
+    finally:
+        await driver.close()
+
+
+@pytest.mark.asyncio
+async def test_leftover_browser_is_found_and_stopped(tmp_path, fixture_url):
+    profile, artifacts = tmp_path / "profile", tmp_path / "artifacts"
+    artifacts.mkdir()
+    driver = await StagehandDriver.launch(profile, artifacts)
+    try:
+        await driver.facade.run(code=f"await page.goto('{fixture_url}/login');")
+        # Chrome writes cookies in batches, so only a clean exit guarantees they reached the disk.
+        await driver.close()
+        driver = await StagehandDriver.launch(profile, artifacts)
+        assert terminate_profile_processes(tmp_path / "other") == 0
+        with pytest.raises(RuntimeError):
+            await StagehandDriver.launch(profile, artifacts)
+        assert terminate_profile_processes(profile) > 0
+        assert terminate_profile_processes(profile) == 0
+        replacement = await StagehandDriver.launch(profile, artifacts)
+        try:
+            assert "server_session" in await cookie_names(replacement, fixture_url)
+        finally:
+            await replacement.close()
+    finally:
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(driver.close(), 20)
+
+
+@pytest.mark.asyncio
+async def test_browser_outside_k41_keeps_running(tmp_path):
+    profile = tmp_path / "profile"
+    process = subprocess.Popen([find_browser(), "--headless=new", "--no-first-run", f"--user-data-dir={profile}", "about:blank"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.monotonic() + 20
+        while not (profile / "Default").exists():
+            assert time.monotonic() < deadline
+            await asyncio.sleep(0.1)
+        assert terminate_profile_processes(profile) == 0
+        assert process.poll() is None
+    finally:
+        process.terminate()
+        process.wait(timeout=20)
+
+
+@pytest.mark.asyncio
+async def test_project_conversations_share_a_login_and_leftover_browser_is_recovered(isolated_container, tmp_path, fixture_url):
+    await initialize_async_engine(metadata=make_browser_metadata(), container=isolated_container)
+    browser = BrowserService(isolated_container, root=tmp_path / "browser")
+    isolated_container._browser_service = browser
+    try:
+        profile = await browser.create_profile("admin:1", "Work")
+        project_id = await add_project_thread(browser, "first")
+        await browser.repository.set_project_profile(project_id, "admin:1", profile["profile_id"])
+        await add_project_thread(browser, "second", project_id)
+        await add_project_thread(browser, "other")
+
+        await browser.execute("first", "admin:1", "login", "browser_run", {"code": f"await page.goto('{fixture_url}/login');"})
+        await browser.close("first", "admin:1")
+        current = await browser.ensure("second", "admin:1")
+        assert "server_session" in await cookie_names(current.driver, fixture_url)
+        separate = await browser.ensure("other", "admin:1")
+        assert await cookie_names(separate.driver, fixture_url) == []
+        await browser.close("other", "admin:1")
+
+        # A browser the service no longer tracks keeps the profile locked until it is stopped.
+        leftover = browser.sessions.pop("second")
+        leftover.observer.cancel()
+        await asyncio.gather(leftover.observer, return_exceptions=True)
+        current = await browser.ensure("second", "admin:1")
+        assert "server_session" in await cookie_names(current.driver, fixture_url)
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(leftover.driver.close(), 20)
+
+        await browser.close("second", "admin:1")
+        await browser.delete_profile("admin:1", profile["profile_id"])
+        assert not (browser.root / "profiles" / profile["profile_id"]).exists()
+        assert await browser.repository.project_profile(project_id, "admin:1") is None
+    finally:
+        await browser.shutdown()
+        await close_async_engine(container=isolated_container)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows selector-loop compatibility")

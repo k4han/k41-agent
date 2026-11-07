@@ -58,6 +58,9 @@ const fixtures = {
 };
 const inputs = [], resumes = [], viewers = new Set();
 const profiles = [], checkpointLoads = [], invalidThreadRequests = [];
+let profileLoads = 0, rejectProfileSelection = false;
+let holdProfileSelection = false, releaseProfileSelection;
+let browserStatusLoads = 0;
 const sessionMutations = [];
 const frameAcknowledgements = [], frameSequences = new WeakMap();
 const viewerOptions = new WeakMap(), visibilityEvents = [], resizeEvents = [];
@@ -113,6 +116,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ type: 'final', content: 'Browser task resumed' }) + '\n'); return;
   }
   if (url.pathname.startsWith('/dashboard-api/') || url.pathname === '/health') {
+    res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'application/json'); res.setHeader('X-CSRF-Token', 'browser-csrf');
     if (url.pathname === '/dashboard-api/browser/threads/browser-test/viewer-ticket' && ++ticketRequests === 1) {
       res.writeHead(503); res.end(JSON.stringify({ detail: 'Temporary viewer ticket failure' })); return;
@@ -130,7 +134,7 @@ const server = http.createServer(async (req, res) => {
         let raw = ''; for await (const data of req) raw += data;
         const profile = { profile_id: crypto.randomBytes(16).toString('hex'), name: JSON.parse(raw).name };
         profiles.push(profile); res.end(JSON.stringify(profile));
-      } else res.end(JSON.stringify({ profiles }));
+      } else { profileLoads += 1; res.end(JSON.stringify({ profiles })); }
       return;
     }
     if (url.pathname.startsWith('/dashboard-api/browser/profiles/') && req.method === 'DELETE') {
@@ -145,6 +149,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/dashboard-api/browser/threads/browser-test' && req.method === 'PUT') {
       let raw = ''; for await (const data of req) raw += data;
+      if (holdProfileSelection) await new Promise(resolve => { releaseProfileSelection = resolve; });
+      if (rejectProfileSelection) {
+        res.writeHead(409); res.end(JSON.stringify({ detail: { code: 'profile_busy', message: 'Profile selection rejected.' } })); return;
+      }
       status.profile_id = JSON.parse(raw).profile_id;
     }
     if (url.pathname === '/dashboard-api/browser/threads/browser-test' && ['POST', 'DELETE'].includes(req.method)) {
@@ -158,6 +166,7 @@ const server = http.createServer(async (req, res) => {
       releaseBrowserStatus = () => res.end(previous);
       return;
     }
+    if (url.pathname === '/dashboard-api/browser/threads/browser-test' && req.method === 'GET') browserStatusLoads++;
     res.end(JSON.stringify(fixtures[url.pathname] || { sessions: [], threads: [], tools: [] })); return;
   }
   const relative = url.pathname.startsWith('/dashboard-assets/') ? url.pathname.slice('/dashboard-assets/'.length) : 'index.html';
@@ -413,15 +422,44 @@ try {
   await until(() => js(`!document.querySelector('.chat-header-right [aria-label="Open browser"]')`), 'explicit browser close hides the shortcut');
   await js(`document.querySelector('[aria-label="Login profiles"]').click()`);
   await until(() => js('!document.querySelector(".browser-panel select").disabled'), 'closed browser allows profile selection');
-  await js(`document.querySelector('[aria-label="New login profile name"]').focus()`);
-  await call('Input.insertText', { text: 'Temporary profile' });
-  await js('[...document.querySelectorAll("button")].find(button => button.textContent === "Create profile").click()');
-  await until(() => js('[...document.querySelectorAll(".browser-panel option")].some(option => option.textContent === "Temporary profile")'), 'profile created');
+  assert.equal(await js(`!!document.querySelector('[aria-label="New login profile name"]')`), false, 'conversation does not manage shared profiles');
+  assert.equal(await js(`document.querySelector('.browser-panel a[href="/settings/browser#login-profiles"]')?.textContent`), 'Manage login profiles');
+  profiles.push({ profile_id: 'a'.repeat(32), name: 'Temporary profile', open_thread_id: null });
+  await js(`document.querySelector('[aria-label="Login profiles"]').click()`);
+  await js(`document.querySelector('[aria-label="Login profiles"]').click()`);
+  await until(() => js('[...document.querySelectorAll(".browser-panel option")].some(option => option.textContent === "Temporary profile")'), 'shared profile loaded');
+  holdProfileSelection = true;
   await js('const select = document.querySelector(".browser-panel select"); select.value = [...select.options].find(option => option.textContent === "Temporary profile").value; select.dispatchEvent(new Event("change", { bubbles: true }));');
-  await until(() => js('[...document.querySelectorAll("button")].some(button => button.textContent === "Delete profile" && !button.disabled)'), 'profile selected');
-  await js('[...document.querySelectorAll("button")].find(button => button.textContent === "Delete profile").click()');
-  await until(() => js('![...document.querySelectorAll(".browser-panel option")].some(option => option.textContent === "Temporary profile")'), 'deleted profile removed locally');
-  assert.equal(await js('document.querySelector(".browser-panel select").value'), '', 'deleting the selected profile clears its binding in the panel');
+  await until(() => Boolean(releaseProfileSelection), 'profile save is in flight');
+  const pendingProfile = await js('document.querySelector(".browser-panel select").value');
+  const loadsBeforeRefresh = browserStatusLoads;
+  await js('window.dispatchEvent(new CustomEvent("k41:thread-stop-running", { detail: { threadId: "browser-test" } }))');
+  await until(() => browserStatusLoads > loadsBeforeRefresh, 'old browser status refreshed during profile save');
+  await delay(200);
+  assert.equal(await js('document.querySelector(".browser-panel select").value'), pendingProfile, 'refreshing unchanged status preserves the pending profile choice');
+  holdProfileSelection = false;
+  releaseProfileSelection();
+  await until(() => js('!document.querySelector(".browser-panel select").disabled'), 'profile selected');
+  const selectedProfile = await js('document.querySelector(".browser-panel select").value');
+  assert.ok(selectedProfile, 'the selected profile is shown');
+  const loadsBeforeClosing = profileLoads;
+  await js(`document.querySelector('[aria-label="Login profiles"]').click()`);
+  await until(() => js('!document.querySelector(".browser-panel select")'), 'profile settings closed');
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal(profileLoads, loadsBeforeClosing, 'closing the settings does not reload the profiles');
+  await js(`document.querySelector('[aria-label="Login profiles"]').click()`);
+  await until(() => profileLoads === loadsBeforeClosing + 1, 'opening the settings reloads the profiles');
+  await until(() => js('!!document.querySelector(".browser-panel select")'), 'profile settings reopened');
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.equal(await js('document.querySelector(".browser-panel select").value'), selectedProfile, 'reloading the profiles keeps the selection');
+  rejectProfileSelection = true;
+  await js('{ const select = document.querySelector(".browser-panel select"); select.value = ""; select.dispatchEvent(new Event("change", { bubbles: true })); }');
+  await until(() => js('document.querySelector(".browser-panel [role=alert]")?.textContent.includes("Profile selection rejected.") && !document.querySelector(".browser-panel select").disabled'), 'rejected profile selection reported');
+  assert.equal(await js('document.querySelector(".browser-panel select").value'), selectedProfile, 'a rejected selection restores the saved profile');
+  rejectProfileSelection = false;
+  assert.equal(await js('[...document.querySelectorAll(".browser-panel button")].some(button => button.textContent === "Delete profile")'), false, 'profile deletion belongs in settings');
+  await js('{ const select = document.querySelector(".browser-panel select"); select.value = ""; select.dispatchEvent(new Event("change", { bubbles: true })); }');
+  await until(() => js('!document.querySelector(".browser-panel select").disabled && document.querySelector(".browser-panel select").value === ""'), 'conversation can explicitly select separate logins');
   for (const decision of ['return', 'cancel']) {
     const handoff = { handoff_id: `timeout-${decision}`, reason: 'Complete a manual sign in' };
     Object.assign(status, { open: true, generation: `timeout-session-${decision}`, mode: 'human',
@@ -449,13 +487,13 @@ try {
   }
   await js(`document.querySelector('[aria-label="Login profiles"][aria-expanded="false"]')?.click()`);
   await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
+  const loadsBeforeThreadChange = profileLoads;
   await js('[...document.querySelectorAll("a")].find(link => link.getAttribute("href") === "/chat").click()');
   await until(() => js('location.pathname === "/chat" && document.querySelector(".browser-panel select")?.disabled'), 'new chat while browser panel stays open');
+  await until(() => profileLoads > loadsBeforeThreadChange, 'switching conversations refreshes profile availability');
   assert.equal(await js(`!!document.querySelector('.chat-header-right [aria-label="Open browser"]')`), false, 'new conversations have no browser shortcut');
-  await js(`document.querySelector('[aria-label="New login profile name"]').focus()`);
-  await call('Input.insertText', { text: 'New chat profile' });
-  await js('[...document.querySelectorAll("button")].find(button => button.textContent === "Create profile").click()');
-  await until(() => js('[...document.querySelectorAll(".browser-panel option")].some(option => option.textContent === "New chat profile")'), 'profile created without a conversation');
+  assert.equal(await js(`!!document.querySelector('[aria-label="New login profile name"]')`), false);
+  assert.equal(await js(`document.querySelector('.browser-panel a[href="/settings/browser#login-profiles"]')?.textContent`), 'Manage login profiles', 'new chats link to account profile management');
   assert.deepEqual(invalidThreadRequests, [], 'profile operations must not fetch an empty thread endpoint');
   assert.equal(await js('document.querySelector(".browser-panel [role=alert]")?.textContent || ""'), '');
   assert.deepEqual(exceptions, []);

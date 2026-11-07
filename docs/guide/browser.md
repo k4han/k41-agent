@@ -93,9 +93,41 @@ asks whether to restart before repeating a timed out browser task.
 
 ## Reuse a login profile
 
-Open **Login profiles** in the Browser toolbar to create or select a named
-profile. Close the browser before changing profiles. A named profile can be
-open in only one conversation at a time.
+Sign-ins stay in the profile after the browser closes, including sign-ins a site
+keeps only for the browser session. A site can still end a session on its own
+schedule. A sign-in made just before a crash may be lost, because Chrome writes
+cookies to disk in batches.
+
+Open **Settings > Browser > Login profiles** to create, rename, and delete saved
+profiles, choose an optional account default, and see projects using a profile
+and the conversation holding it. Profiles belong to your account and can serve
+several projects. Deleting a profile removes its saved logins everywhere.
+
+In a project's **Browser** tab, choose **Use account default**, a specific profile,
+or **Separate login for each conversation**. Projects without an explicit choice
+keep separate logins, including existing projects after an account default is
+set. Conversations outside projects use the account default, if selected.
+
+A conversation takes this choice once, when its browser binding is created,
+even if the conversation started earlier. Changing the account default or a
+project's choice does not change existing bindings. Deleting their selected
+profile resets them to separate logins; it does not switch them to another
+account's sign-ins. An inheriting project continues to follow the account default
+for conversations without bindings.
+
+To choose for a single conversation, open **Login profiles** in the Browser
+toolbar. Close the browser before changing profiles. **This conversation only**
+keeps that conversation's sign-ins separate, even when its project has a profile.
+Profile management is available through **Manage login profiles** in Settings.
+
+A named profile can be open in only one browser at a time. A sub-agent uses its
+parent conversation's profile if that browser is closed, and returns the profile
+when its task ends. If the browser is open, the sub-agent uses a separate profile
+without those sign-ins, so close the browser first when a sub-agent needs them.
+
+Any agent with Browser tools in a conversation using a profile can act with its
+sign-ins, and a malicious page could try to direct that agent. Keep important
+accounts in profiles that only the projects needing them can use.
 
 Profiles belong to the authenticated dashboard account. Use a dashboard
 conversation for browser tasks; channel and scheduler runs do not supply that

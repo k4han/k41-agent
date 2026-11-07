@@ -51,6 +51,7 @@ async def delegate_task(
     """
     from agent.modules.agent_runtime import run_agent_full
     from agent.modules.agents import get_catalog_service
+    from agent.modules.browser import release_delegated_browser
 
     caller_agent_name = get_context_value(runtime.context, "agent_name", "default")
     inherited_workspace = get_context_value(runtime.context, "workspace", None)
@@ -105,3 +106,5 @@ async def delegate_task(
             ToolErrorCode.UPSTREAM,
             f"sub-agent '{sub_agent}' failed: {e}",
         ) from e
+    finally:
+        await release_delegated_browser(sub_thread_id)

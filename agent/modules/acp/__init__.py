@@ -13,6 +13,7 @@ _EXPORTS = {
     "AGENT_DEFINITIONS": "agent.modules.acp.agents",
     "AcpAuthError": "agent.modules.acp.auth",
     "CallbackRejected": "agent.modules.acp.auth",
+    "auth_status": "agent.modules.acp.auth",
     "AcpError": "agent.modules.acp.errors",
     "AcpNotInstalled": "agent.modules.acp.errors",
     "AcpRpcError": "agent.modules.acp.errors",

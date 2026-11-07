@@ -41,9 +41,10 @@ class AcpClient:
         command: AgentCommand,
         *,
         on_closed: Callable[[], None] | None = None,
-        on_stderr_line: Callable[[str], None] | None = None,
     ) -> None:
-        self.process = AgentProcess(command, on_stderr_line=on_stderr_line)
+        self.process = AgentProcess(command)
+        # Sessions this process knows about; they end with it.
+        self.live_sessions: set[str] = set()
         self._listeners: dict[str, SessionListener] = {}
         self._lock = threading.Lock()
         self.initialize_result: dict[str, Any] = {}
