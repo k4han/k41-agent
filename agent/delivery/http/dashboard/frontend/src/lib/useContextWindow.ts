@@ -278,6 +278,7 @@ export function useContextWindow(params: UseContextWindowParams) {
 
   return {
     contextWindowData,
+    threadUsage,
     refreshThreadUsage: fetchThreadUsage,
     updateContextUsage,
     clearContextUsage,

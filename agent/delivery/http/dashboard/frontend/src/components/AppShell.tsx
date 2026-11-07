@@ -6,6 +6,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Download,
   Folder,
   GitBranch,
   GitPullRequest,
@@ -31,6 +32,7 @@ import { Portal } from "solid-js/web";
 import { unwrap } from "solid-js/store";
 
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
+import { ExportChatDialog } from "@/components/ExportChatDialog";
 import { ProjectActions } from "@/components/ProjectActions";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { UpdateDialog } from "@/components/UpdateDialog";
@@ -112,6 +114,7 @@ export function AppShell(props: {
   const [editingHistoryThreadId, setEditingHistoryThreadId] = createSignal<string | null>(null);
   const [editingHistoryTitle, setEditingHistoryTitle] = createSignal("");
   const [deleteTarget, setDeleteTarget] = createSignal<ThreadSummary | null>(null);
+  const [exportTarget, setExportTarget] = createSignal<ThreadSummary | null>(null);
   const [deleting, setDeleting] = createSignal(false);
   const { sessions: activeSessions, invalidate: invalidateSessions } = useSessions();
   const {
@@ -536,7 +539,7 @@ export function AppShell(props: {
     const menuWidth = 160;
     const thread = historyMenuThread();
     const isRunning = thread ? runningThreadIds().has(thread.thread_id) : false;
-    const estimatedHeight = isRunning ? 140 : 104;
+    const estimatedHeight = isRunning ? 176 : 140;
     const spaceBelow = window.innerHeight - targetRect.bottom;
     const spaceAbove = targetRect.top;
     const opensUp = spaceBelow < estimatedHeight + 8 && spaceAbove > spaceBelow;
@@ -1083,6 +1086,14 @@ export function AppShell(props: {
                 <Pencil size={13} />
                 <span>Rename</span>
               </button>
+              <button class="nav-history-menu-item" type="button" onClick={() => {
+                setExportTarget(thread());
+                setHistoryMenuThreadId(null);
+                historyMenuAnchor = null;
+              }}>
+                <Download size={13} />
+                <span>Export</span>
+              </button>
               <button
                 class="nav-history-menu-item nav-history-menu-danger"
                 type="button"
@@ -1095,6 +1106,7 @@ export function AppShell(props: {
           </Portal>
         )}
       </Show>
+      <ExportChatDialog target={exportTarget()} onClose={() => setExportTarget(null)} />
       <DeleteThreadDialog
         open={deleteTarget() !== null}
         thread={deleteTarget()}

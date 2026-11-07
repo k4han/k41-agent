@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import platform
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
 from agent.delivery.http.dashboard.routes.helpers.identities import paired_identities
-from agent.modules.usage import DEFAULT_USAGE_LIMIT, get_usage_service, normalize_usage_query
+from agent.delivery.http.dashboard.routes.helpers.deps import get_app_container
+from agent.modules.usage import DEFAULT_USAGE_LIMIT, estimate_usage_cost, get_usage_service, normalize_usage_query
 from agent.shared.timezone import resolve_display_timezone
 
 
@@ -147,8 +149,13 @@ async def get_dashboard_usage(
 
 
 @router.get("/dashboard-api/usage/thread/{thread_id:path}")
-async def get_thread_usage(thread_id: str) -> dict[str, Any]:
-    return await get_usage_service().get_thread_usage(thread_id)
+async def get_thread_usage(thread_id: str, request: Request) -> dict[str, Any]:
+    payload = await get_usage_service().get_thread_usage(thread_id)
+    return {
+        **payload,
+        **estimate_usage_cost(payload.get("models", []), get_app_container(request).provider_service.get_provider),
+        "host_platform": platform.system() or "Unknown",
+    }
 
 
 @router.get("/dashboard-api/usage/workspace")

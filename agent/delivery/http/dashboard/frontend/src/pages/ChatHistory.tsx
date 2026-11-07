@@ -1,10 +1,11 @@
 import { A, useSearchParams } from "@solidjs/router";
-import { Folder, Folders, FolderOpen, GitBranch, MessageSquare, Pencil, PlaySquare, Trash2 } from "lucide-solid";
+import { Download, Folder, Folders, FolderOpen, GitBranch, MessageSquare, Pencil, PlaySquare, Trash2 } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { DashboardTable } from "@/components/DashboardTable";
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
+import { ExportChatDialog } from "@/components/ExportChatDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { SelectControl } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
@@ -27,6 +28,7 @@ export function ChatHistoryListPage() {
   const [editingThreadId, setEditingThreadId] = createSignal<string | null>(null);
   const [editingTitle, setEditingTitle] = createSignal("");
   const [deleteTarget, setDeleteTarget] = createSignal<ThreadSummary | null>(null);
+  const [exportTarget, setExportTarget] = createSignal<ThreadSummary | null>(null);
   const [bulkDeleteOpen, setBulkDeleteOpen] = createSignal(false);
   const [deleting, setDeleting] = createSignal(false);
   const [selectedThreadIds, setSelectedThreadIds] = createSignal<Set<string>>(new Set());
@@ -419,6 +421,10 @@ export function ChatHistoryListPage() {
                               >
                                 Chat
                               </A>
+                              <button class="btn btn-sm" type="button" title="Export conversation" aria-label="Export conversation"
+                                onClick={() => setExportTarget(thread)}>
+                                <Download size={12} />
+                              </button>
                               <button
                                 class="btn btn-sm"
                                 type="button"
@@ -446,6 +452,7 @@ export function ChatHistoryListPage() {
         )}
       </DataGate>
 
+      <ExportChatDialog target={exportTarget()} onClose={() => setExportTarget(null)} />
       <DeleteThreadDialog
         open={deleteTarget() !== null}
         thread={deleteTarget()}

@@ -1,4 +1,5 @@
 from agent.modules.usage.models import LLMUsageEvent
+from agent.modules.usage.costs import estimate_usage_cost
 from agent.modules.usage.repository import LLMUsageRepository, UsageEventInput, UsageQuery
 from agent.modules.usage.service import (
     DEFAULT_USAGE_LIMIT,
@@ -51,6 +52,7 @@ __all__ = [
     "attach_usage_context",
     "build_usage_context",
     "extract_usage",
+    "estimate_usage_cost",
     "get_usage_service",
     "load_usage_context",
     "normalize_usage_query",

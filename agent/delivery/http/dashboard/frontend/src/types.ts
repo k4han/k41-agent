@@ -953,6 +953,9 @@ export function parseContextBreakdown(value: unknown): ContextBreakdown | undefi
 }
 
 export interface ThreadUsagePayload {
+  estimated_cost_usd?: number | null;
+  cost_complete?: boolean;
+  host_platform?: string;
   pool_name?: string | null;
   thread_id: string;
   total_tokens: number;

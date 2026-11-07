@@ -1,6 +1,5 @@
 import { useLocation, useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import {
-  Globe,
   Menu,
   PanelRightClose,
   PanelRightOpen,
@@ -10,8 +9,11 @@ import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMo
 
 import { AppShell } from "@/components/AppShell";
 import { ChatComposer } from "@/components/ChatComposer";
+import { ChatActionsMenu } from "@/components/ChatActionsMenu";
 import { ComposerWorkspacePicker } from "@/components/ComposerWorkspacePicker";
 import { Dialog } from "@/components/Dialog";
+import { ExportChatDialog } from "@/components/ExportChatDialog";
+import { RenameChatDialog } from "@/components/RenameChatDialog";
 import { Markdown } from "@/components/Markdown";
 import { ChatThreadBadges } from "@/components/ChatThreadBadges";
 import { ChatTranscript } from "@/components/ChatTranscript";
@@ -34,6 +36,7 @@ import {
   toThreadTranscript,
 } from "@/lib/chatThreads";
 import type { NewChatNavigationState, ThreadMessagesPayload } from "@/lib/chatThreads";
+import type { ChatExportTarget } from "@/lib/chatExport";
 import {
   localWorkspaceRef,
   sandboxWorkspaceRef,
@@ -205,6 +208,8 @@ export function ChatPage() {
   const forking = () => forkRequest()?.threadId === currentThreadId();
   const [activeCheckpointId, setActiveCheckpointId] = createSignal("");
   const [threadTitleOverride, setThreadTitleOverride] = createSignal("");
+  const [exportTarget, setExportTarget] = createSignal<ChatExportTarget | null>(null);
+  const [renameTarget, setRenameTarget] = createSignal<{ thread_id: string; title?: string } | null>(null);
   const isDrawerActive = createMediaQuery(DRAWER_MEDIA_QUERY);
   const isMobileViewport = createMediaQuery(MOBILE_MEDIA_QUERY);
 
@@ -458,7 +463,7 @@ export function ChatPage() {
   });
   const { attachments, addFiles, addTextContent, removeAttachment, clearAttachments, clearAllAttachments } = attach;
 
-  const { contextWindowData, refreshThreadUsage, updateContextUsage, updateCompactedContextUsage } = useContextWindow({
+  const { contextWindowData, threadUsage, refreshThreadUsage, updateContextUsage, updateCompactedContextUsage } = useContextWindow({
     getCurrentThreadId: currentThreadId,
     getStreaming: streaming,
     getSelectedCard: selectedCard,
@@ -2064,21 +2069,27 @@ export function ChatPage() {
                     onAbandonBackend={workspaceRuntime.abandon}
                     onSelectionChange={setWorkspaceDraft}
                   />
-                  <Show when={currentThreadId() && browserSessionThreadId() === currentThreadId()}>
-                    <button class="chat-header-workspace-btn" type="button"
-                      onClick={openBrowserWorkspace} title="Open browser workspace tab" aria-label="Open browser"><Globe size={19} /></button>
-                  </Show>
-                  <Show when={!explorer.open()}>
-                    <button
-                      class="chat-header-workspace-btn"
-                      type="button"
-                      onClick={explorer.toggle}
-                      title="Open workspace"
-                      aria-label="Open workspace"
-                    >
-                      <PanelRightOpen size={19} />
-                    </button>
-                  </Show>
+                  <ChatActionsMenu
+                    threadId={currentThreadId()}
+                    actionsDisabled={!currentThreadId() || conversationBusy() || compacting() || threadData()?.thread_id !== currentThreadId()}
+                    userMessages={items().filter((item) => item.type === "message" && item.role === "user").length}
+                    contextTokens={contextWindowData().hasReportedUsage || contextWindowData().estimated ? contextWindowData().totalTokens : null}
+                    usage={threadUsage()}
+                    backend={workspaceRef()?.backend}
+                    browserAvailable={Boolean(currentThreadId() && browserSessionThreadId() === currentThreadId())}
+                    onOpen={() => { if (currentThreadId()) void refreshThreadUsage(currentThreadId()); }}
+                    onRename={() => setRenameTarget({ thread_id: currentThreadId(), title: threadTitleOverride() || threadData()?.title })}
+                    onExport={() => setExportTarget({
+                      thread_id: currentThreadId(), title: threadTitleOverride() || threadData()?.title,
+                      checkpoint_id: activeCheckpointId() || undefined,
+                    })}
+                    onOpenBrowser={openBrowserWorkspace}
+                  />
+                  <button class="chat-header-workspace-btn" type="button" onClick={explorer.toggle}
+                    title={explorer.open() ? "Close workspace" : "Open workspace"}
+                    aria-label={explorer.open() ? "Close workspace" : "Open workspace"} aria-expanded={explorer.open()}>
+                    <Show when={explorer.open()} fallback={<PanelRightOpen size={19} />}><PanelRightClose size={19} /></Show>
+                  </button>
                 </div>
               </div>
               <Show when={threadError() || backgroundStreamError()}>
@@ -2239,6 +2250,8 @@ export function ChatPage() {
         )}
       </DataGate>
     </AppShell>
+    <ExportChatDialog target={exportTarget()} onClose={() => setExportTarget(null)} />
+    <RenameChatDialog target={renameTarget()} onClose={() => setRenameTarget(null)} />
     <Dialog
       open={viewingMessage() !== null}
       title={`${viewingMessage()?.role || "Message"} Message`}

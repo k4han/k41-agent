@@ -830,6 +830,7 @@ async def test_latest_call_without_usage_invalidates_previous_context_and_compac
     assert payload["context_updated_at"] == latest.isoformat()
     assert payload["reserved_tokens"] == 6000
     assert payload["total_tokens"] == 8100
+    assert payload["models"][0]["missing_usage_count"] == 2
     assert await repository.latest_context_breakdown("missing_usage") == breakdown
 
 
