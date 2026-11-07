@@ -1,7 +1,8 @@
-import { createSignal, onCleanup, onMount, Show, For } from "solid-js";
+import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { Check, Clock, Eye, MessageSquare, Monitor, Moon, Sun } from "lucide-solid";
 
 import { useToast } from "@/components/Toast";
+import { FormSelect } from "@/components/FormSelect";
 import { apiFetch, putJson } from "@/lib/api";
 import { STORAGE_KEYS, THEME_OPTIONS } from "@/lib/uiConstants";
 import type { SettingsPayload } from "@/types";
@@ -259,18 +260,14 @@ export function AppearancePage() {
                 <label class="form-label" for="setting-timezone">
                   Display Timezone
                 </label>
-                <select
+                <FormSelect
                   id="setting-timezone"
-                  class="select"
+                  ariaLabel="Display Timezone"
                   disabled={loadingConfig() || savingTimezone()}
                   value={timezone()}
-                  onChange={(e) => handleTimezoneChange(e.currentTarget.value)}
-                  style={{ width: "100%" }}
-                >
-                  <For each={timezoneOptions()}>
-                    {(opt) => <option value={opt}>{opt}</option>}
-                  </For>
-                </select>
+                  options={timezoneOptions().map((value) => ({ value, label: value }))}
+                  onChange={handleTimezoneChange}
+                />
                 <div class="hint" style={{ "font-size": "0.75rem" }}>
                   Used to format timestamps across session history, logs, and tables.
                 </div>

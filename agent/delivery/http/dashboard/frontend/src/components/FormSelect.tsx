@@ -212,6 +212,7 @@ export function FormSelect(props: FormSelectProps) {
         ref={controlRef}
       >
         <button
+          id={local.id}
           class="form-select-trigger"
           type="button"
           disabled={local.disabled}
