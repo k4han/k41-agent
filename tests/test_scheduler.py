@@ -77,6 +77,88 @@ def test_interval_trigger_rejects_empty_duration():
         )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entrypoint", ["tool", "dashboard"])
+@pytest.mark.parametrize("trigger_type", ["cron", "date"])
+async def test_new_jobs_use_updated_timezone_without_restart(
+    isolated_container, entrypoint, trigger_type
+):
+    import asyncio
+    from types import SimpleNamespace
+
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    from agent.delivery.http.dashboard.routes.scheduler import (
+        CreateJobBody,
+        UpdateJobBody,
+        create_scheduler_job,
+        update_scheduler_job,
+    )
+    from agent.delivery.http.dashboard.routes.settings import UpdateSettingsBody, update_settings
+    from agent.modules.tools.builtin.schedule.schedule import schedule_task
+    from agent.shared.config import ConfigService
+    from agent.shared.config.database_source import DatabaseConfigSource
+    from agent.shared.config.default_source import DefaultConfigSource
+
+    source = DatabaseConfigSource(isolated_container.database_url)
+    service = ConfigService([DefaultConfigSource(), source])
+    isolated_container.config_service = service
+    service.update_setting("display.timezone", "UTC")
+    scheduler = AsyncIOScheduler(timezone=ZoneInfo("UTC"))
+    isolated_container._scheduler = scheduler
+    scheduler.start(paused=True)
+
+    try:
+        old_job = scheduler.add_job(lambda: None, "cron", hour=6, minute=0)
+        old_next_run = old_job.next_run_time
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(config_service=service))
+        )
+        await update_settings(
+            UpdateSettingsBody(values={"display.timezone": "Asia/Ho_Chi_Minh"}), request
+        )
+        trigger_args = (
+            {"hour": "6", "minute": "0"}
+            if trigger_type == "cron"
+            else {"run_date": "2099-11-08 06:00:00"}
+        )
+
+        if entrypoint == "tool":
+            runtime = SimpleNamespace(config={
+                "configurable": {"thread_id": "new-conversation"},
+                "metadata": {"usage_context": {"platform": "telegram", "user_id": "123"}},
+            })
+            result = schedule_task.func("Remind me to eat.", trigger_type, trigger_args, runtime)
+            assert "Successfully scheduled" in result
+            assert "UTC" not in result
+            job = next(job for job in scheduler.get_jobs() if job.id != old_job.id)
+        else:
+            result = await create_scheduler_job(CreateJobBody(
+                task="Remind me to eat.", platform="telegram", user_id="123",
+                trigger_type=trigger_type, trigger_args=trigger_args,
+            ))
+            job = scheduler.get_job(result["job"]["id"])
+
+        zone = ZoneInfo("Asia/Ho_Chi_Minh")
+        anchor = datetime(2099, 11, 8, tzinfo=zone)
+        expected = datetime(2099, 11, 8, 6, tzinfo=zone)
+        assert job.trigger.get_next_fire_time(None, anchor) == expected
+        assert job.next_run_time.utcoffset() == timedelta(hours=7)
+        assert str(old_job.trigger.timezone) == "UTC"
+        assert old_job.next_run_time == old_next_run
+
+        if entrypoint == "dashboard":
+            await update_scheduler_job(old_job.id, UpdateJobBody(
+                trigger_type="cron", trigger_args={"hour": "6", "minute": "0"},
+            ))
+            assert old_job.trigger.get_next_fire_time(None, anchor) == expected
+    finally:
+        scheduler.shutdown(wait=False)
+        await asyncio.sleep(0)
+        isolated_container._scheduler = None
+        source.close()
+
+
 def test_migrates_legacy_scheduler_job_references():
     from agent.modules.scheduler.service import (
         CURRENT_EXECUTE_TASK_REF,

@@ -89,12 +89,16 @@ async def execute_scheduled_task(platform: str, user_id: str, task: str):
 
 
 def get_scheduler(container=None) -> AsyncIOScheduler:
-    """Return container-scoped scheduler."""
+    """Return the scheduler with the current configured default timezone."""
     from agent.bootstrap.container import require_active_container
 
     active = require_active_container(container)
     if active._scheduler is None:
         raise RuntimeError("Scheduler not initialized. Call initialize_scheduler() first.")
+
+    # Refresh defaults without restarting or changing existing job triggers.
+    _, scheduler_tz = resolve_display_timezone()
+    active._scheduler.timezone = scheduler_tz
     return active._scheduler
 
 

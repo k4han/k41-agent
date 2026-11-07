@@ -32,6 +32,9 @@ destination, and the trigger settings shown by the form.
 Check the scheduler timezone when entering a date or recurring time. Use the
 job controls to edit, pause, resume, or remove an existing schedule.
 
+Timezone changes apply to new or rescheduled jobs without restarting the runtime.
+Existing jobs keep their saved trigger timezone until they are rescheduled.
+
 ## Keep the runtime available
 
 The machine and runtime must be available for scheduled work. On Linux, the
