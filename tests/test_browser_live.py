@@ -115,6 +115,61 @@ async def cookie_names(driver, url):
 
 
 @pytest.mark.asyncio
+async def test_shared_profile_scopes_tabs_and_logins(isolated_container, tmp_path, fixture_url):
+    await initialize_async_engine(metadata=make_browser_metadata(), container=isolated_container)
+    browser = BrowserService(isolated_container, root=tmp_path / "browser")
+    isolated_container._browser_service = browser
+    try:
+        first, second = await asyncio.gather(*(browser.ensure(thread, "admin:1") for thread in ("first", "second")))
+        assert first.profile_key == second.profile_key
+        assert first.driver.port == second.driver.port
+        assert len(browser.browsers) == 1
+        first_tab = (await first.driver.tabs())[0]["id"]
+        second_tab = (await second.driver.tabs())[0]["id"]
+        assert first_tab != second_tab
+        with pytest.raises(PermissionError):
+            await second.driver.target_url(first_tab)
+        await first.driver.facade.run(code=f"await page.goto('{fixture_url}/login');")
+        assert "server_session" in await cookie_names(second.driver, fixture_url)
+        assert await second.driver.facade.run(code="return context.pages().map(p => p.pageId);") == [second_tab]
+        assert await second.driver.facade.run(code="return typeof raw;") == "undefined"
+        await asyncio.gather(*(
+            session.driver.facade.run(code=f"await page.evaluate(() => {{ document.body.insertAdjacentHTML('afterbegin', '<h1>{title}</h1>'); }});")
+            for session, title in ((first, "First conversation"), (second, "Second conversation"))
+        ))
+        first_snapshot, second_snapshot = await asyncio.gather(first.driver.facade.snapshot(), second.driver.facade.snapshot())
+        assert "First conversation" in first_snapshot and "Second conversation" not in first_snapshot
+        assert "Second conversation" in second_snapshot and "First conversation" not in second_snapshot
+        await first.driver.facade.run(code=f"const other = await context.newPage(); await other.goto('{fixture_url}/first-extra');")
+        assert len(await first.driver.tabs()) == 2
+        assert len(await second.driver.tabs()) == 1
+        assert await second.driver.facade.run(code="return context.pages().length;") == 1
+        await first.driver.facade.run(code=f"""await page.evaluate(() => {{
+            const button = document.createElement('button'); button.id = 'popup';
+            button.textContent = 'Open popup'; button.onclick = () => window.open('{fixture_url}/popup');
+            document.body.append(button);
+        }}); await page.locator('#popup').click();""")
+        deadline = time.monotonic() + 10
+        while len(await first.driver.tabs()) != 3:
+            assert time.monotonic() < deadline, await first.driver.tabs()
+            await asyncio.sleep(0.1)
+        assert len(await second.driver.tabs()) == 1
+        await first.driver.facade.run(code="await browser.close();")
+        assert len(await first.driver.tabs()) == 1
+        assert (await second.driver.tabs())[0]["id"] == second_tab
+        await browser.close("first", "admin:1")
+        assert not second.closed and len(browser.browsers) == 1
+        assert "server_session" in await cookie_names(second.driver, fixture_url)
+        await browser.close("second", "admin:1")
+        assert not browser.browsers
+        reopened = await browser.ensure("second", "admin:1")
+        assert "server_session" in await cookie_names(reopened.driver, fixture_url)
+    finally:
+        await browser.shutdown()
+        await close_async_engine(container=isolated_container)
+
+
+@pytest.mark.asyncio
 async def test_session_login_survives_restart_on_one_blank_tab(tmp_path, fixture_url):
     profile, artifacts = tmp_path / "profile", tmp_path / "artifacts"
     artifacts.mkdir()
@@ -197,12 +252,13 @@ async def test_project_conversations_share_a_login_and_leftover_browser_is_recov
 
         # A browser the service no longer tracks keeps the profile locked until it is stopped.
         leftover = browser.sessions.pop("second")
+        untracked = browser.browsers.pop((leftover.owner_id, leftover.profile_key))
         leftover.observer.cancel()
         await asyncio.gather(leftover.observer, return_exceptions=True)
         current = await browser.ensure("second", "admin:1")
         assert "server_session" in await cookie_names(current.driver, fixture_url)
         with contextlib.suppress(Exception):
-            await asyncio.wait_for(leftover.driver.close(), 20)
+            await asyncio.wait_for(untracked.driver.close(), 20)
 
         await browser.close("second", "admin:1")
         await browser.delete_profile("admin:1", profile["profile_id"])
@@ -219,10 +275,34 @@ def test_windows_server_selector_loop_can_drive_chrome(tmp_path):
         driver = await StagehandDriver.launch(tmp_path / "profile", tmp_path / "artifacts")
         try:
             assert isinstance(await driver.facade.run(code="return await page.title();"), str)
+            first = await driver.create_session(tmp_path / "first")
+            second = await driver.create_session(tmp_path / "second")
+            assert first.port == second.port
+            assert await first.tabs() != await second.tabs()
+            await first.close()
+            assert len(await second.tabs()) == 1
+            assert await second.facade.run(code="return context.pages().length;") == 1
         finally:
             await driver.close()
 
     asyncio.run(check(), loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()))
+
+
+@pytest.mark.asyncio
+async def test_scoped_driver_on_browser_owning_loop(tmp_path):
+    # Exercise the path used on non-Windows hosts without the thread adapter.
+    driver = await StagehandDriver._launch(tmp_path / "profile", tmp_path / "artifacts")
+    try:
+        first = await driver.create_session(tmp_path / "first")
+        second = await driver.create_session(tmp_path / "second")
+        first_tab = (await first.tabs())[0]["id"]
+        assert await first.facade.run(code="return context.pages().map(page => page.pageId);") == [first_tab]
+        with pytest.raises(PermissionError):
+            await second.target_url(first_tab)
+        await first.close()
+        assert len(await second.tabs()) == 1
+    finally:
+        await driver.close()
 
 
 @pytest.mark.asyncio

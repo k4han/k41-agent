@@ -13,7 +13,7 @@ export function ProjectBrowserProfiles(props: { projectId: number }) {
   const [notice, setNotice] = createSignal("");
   const projectId = createMemo(() => props.projectId);
   const busy = () => loading() || saving();
-  const selection = () => settings()?.mode === "profile" ? settings()?.profile_id ?? "separate" : settings()?.mode ?? "separate";
+  const selection = () => settings()?.mode === "profile" ? settings()?.profile_id ?? "inherit" : "inherit";
   const profileName = (id: string | null | undefined) => profiles().find(profile => profile.profile_id === id)?.name;
   let generation = 0;
 
@@ -37,7 +37,7 @@ export function ProjectBrowserProfiles(props: { projectId: number }) {
     if (busy() || !settings()) return;
     const current = generation;
     const value = select.value;
-    const mode = value === "inherit" || value === "separate" ? value : "profile";
+    const mode = value === "inherit" ? "inherit" : "profile";
     setSaving(true); setError(""); setNotice("");
     try {
       const result = await putJson<BrowserProjectProfile>(API_PATHS.browserProjectProfile(projectId()), {
@@ -62,22 +62,21 @@ export function ProjectBrowserProfiles(props: { projectId: number }) {
       <h2>Browser login profile</h2>
       <button class="btn" disabled={busy()} onClick={() => void load()}>Reload profiles</button>
     </div>
-    <p>Choose the login profile for conversations that do not have a browser binding yet. Existing browser bindings keep their current choice.</p>
-    <p class="hint">A profile can serve several projects, but only one browser can use it at a time. Change a conversation's choice from Login profiles in its Browser tab.</p>
+    <p>Choose the login profile inherited by this project's conversations. Changes apply the next time their browser opens.</p>
+    <p class="hint">Conversations share saved logins while keeping their own tabs. A conversation can override this choice from Login profiles in its Browser tab.</p>
     <Show when={error()}><div class="project-error" role="alert">{error()}</div></Show>
     <Show when={notice()}><p role="status">{notice()}</p></Show>
     <Show when={loading()}><p role="status">Loading profiles...</p></Show>
-    <label class="field">Profile for new conversations
-      <select class="input" aria-label="Profile for new conversations" disabled={busy() || !settings()}
+    <label class="field">Profile for conversations
+      <select class="input" aria-label="Profile for conversations" disabled={busy() || !settings()}
         onChange={(event) => void selectProfile(event.currentTarget)}>
-        <option value="inherit" selected={selection() === "inherit"}>Use account default ({profileName(settings()?.default_profile_id) ?? "separate logins"})</option>
-        <option value="separate" selected={selection() === "separate"}>Separate login for each conversation</option>
+        <option value="inherit" selected={selection() === "inherit"}>Use account default ({profileName(settings()?.default_profile_id) ?? "Default"})</option>
         <For each={profiles()}>{(profile) => <option value={profile.profile_id} selected={selection() === profile.profile_id}>
           {profile.name}{profile.open_thread_id ? " (currently in use)" : ""}
         </option>}</For>
       </select>
     </label>
-    <p class="hint">Effective profile: {profileName(settings()?.effective_profile_id) ?? "Separate login for each conversation"}.</p>
+    <p class="hint">Effective profile: {profileName(settings()?.effective_profile_id) ?? "Default"}.</p>
     <A class="btn" href="/settings/browser#login-profiles">Manage login profiles</A>
   </section>;
 }

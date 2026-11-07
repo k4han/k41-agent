@@ -153,7 +153,10 @@ const server = http.createServer(async (req, res) => {
       if (rejectProfileSelection) {
         res.writeHead(409); res.end(JSON.stringify({ detail: { code: 'profile_busy', message: 'Profile selection rejected.' } })); return;
       }
-      status.profile_id = JSON.parse(raw).profile_id;
+      const choice = JSON.parse(raw);
+      status.profile_mode = choice.mode;
+      status.selected_profile_id = choice.profile_id;
+      status.profile_id = choice.profile_id ?? 'd'.repeat(32);
     }
     if (url.pathname === '/dashboard-api/browser/threads/browser-test' && ['POST', 'DELETE'].includes(req.method)) {
       sessionMutations.push(req.method);
@@ -459,7 +462,7 @@ try {
   rejectProfileSelection = false;
   assert.equal(await js('[...document.querySelectorAll(".browser-panel button")].some(button => button.textContent === "Delete profile")'), false, 'profile deletion belongs in settings');
   await js('{ const select = document.querySelector(".browser-panel select"); select.value = ""; select.dispatchEvent(new Event("change", { bubbles: true })); }');
-  await until(() => js('!document.querySelector(".browser-panel select").disabled && document.querySelector(".browser-panel select").value === ""'), 'conversation can explicitly select separate logins');
+  await until(() => js('!document.querySelector(".browser-panel select").disabled && document.querySelector(".browser-panel select").value === ""'), 'conversation can return to inherited profile selection');
   for (const decision of ['return', 'cancel']) {
     const handoff = { handoff_id: `timeout-${decision}`, reason: 'Complete a manual sign in' };
     Object.assign(status, { open: true, generation: `timeout-session-${decision}`, mode: 'human',

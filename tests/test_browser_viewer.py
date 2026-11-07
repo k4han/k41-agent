@@ -140,6 +140,17 @@ async def test_ack_failure_notifies_viewer(viewer_socket):
 
 
 @pytest.mark.asyncio
+async def test_static_background_tab_gets_an_initial_frame_without_screencast_events(viewer_socket):
+    viewer, socket = viewer_socket
+    async with viewer:
+        frame = await asyncio.wait_for(viewer.frames.get(), 2)
+        assert frame["priority"] and frame["data"]
+        assert sum(command["method"] == "Page.captureScreenshot" for command in socket.commands) == 1
+        await asyncio.sleep(0.1)
+        assert viewer.frames.empty()
+
+
+@pytest.mark.asyncio
 async def test_idle_source_flushes_final_paint_once_without_restarting_static_capture(viewer_socket):
     viewer, socket = viewer_socket
     async with viewer:

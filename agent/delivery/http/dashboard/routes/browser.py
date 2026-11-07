@@ -112,11 +112,11 @@ class BindingBody(BaseModel):
 
 
 class ProjectProfileBody(BindingBody):
-    mode: Literal["inherit", "separate", "profile"] | None = None
+    mode: Literal["inherit", "profile"] | None = None
 
     @model_validator(mode="after")
     def validate_choice(self):
-        self.mode = self.mode or ("profile" if self.profile_id else "separate")
+        self.mode = self.mode or ("profile" if self.profile_id else "inherit")
         if (self.mode == "profile") != (self.profile_id is not None):
             raise ValueError("Select a profile only when the project uses a specific profile.")
         return self
@@ -160,7 +160,8 @@ async def project_profile(project_id: int = PathParam(ge=1), admin: str = Depend
 @router.put("/projects/{project_id}/profile")
 async def set_project_profile(body: ProjectProfileBody, project_id: int = PathParam(ge=1), admin: str = Depends(get_current_admin), browser=Depends(service)):
     try:
-        await checked(browser.repository.set_project_profile(project_id, owner(admin), body.profile_id, body.mode))
+        async with browser.operation_scope(f"profile:{body.profile_id}"):
+            await checked(browser.repository.set_project_profile(project_id, owner(admin), body.profile_id, body.mode))
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from None
     return await browser.repository.project_profile_settings(project_id, owner(admin))
@@ -168,6 +169,7 @@ async def set_project_profile(body: ProjectProfileBody, project_id: int = PathPa
 
 @router.get("/default-profile")
 async def default_profile(admin: str = Depends(get_current_admin), browser=Depends(service)):
+    await browser.initialize_profiles([owner(admin)])
     return {"profile_id": await browser.repository.default_profile(owner(admin))}
 
 
@@ -175,7 +177,20 @@ async def default_profile(admin: str = Depends(get_current_admin), browser=Depen
 async def set_default_profile(body: BindingBody, admin: str = Depends(get_current_admin), browser=Depends(service)):
     async with browser.operation_scope(f"profile:{body.profile_id}"):
         await checked(browser.repository.set_default_profile(owner(admin), body.profile_id))
-    return {"profile_id": body.profile_id}
+    return {"profile_id": await browser.repository.default_profile(owner(admin))}
+
+
+@router.get("/temporary-profile")
+async def temporary_profile(admin: str = Depends(get_current_admin), browser=Depends(service)):
+    await browser.initialize_profiles([owner(admin)])
+    return {"profile_id": await browser.repository.default_profile(owner(admin), temporary=True)}
+
+
+@router.put("/temporary-profile")
+async def set_temporary_profile(body: BindingBody, admin: str = Depends(get_current_admin), browser=Depends(service)):
+    async with browser.operation_scope(f"profile:{body.profile_id}"):
+        await checked(browser.repository.set_default_profile(owner(admin), body.profile_id, temporary=True))
+    return {"profile_id": await browser.repository.default_profile(owner(admin), temporary=True)}
 
 
 @router.get("/threads/{thread_id}")
@@ -184,7 +199,7 @@ async def status(thread_id: str, admin: str = Depends(get_current_admin), browse
 
 
 @router.put("/threads/{thread_id}")
-async def select_profile(thread_id: str, body: BindingBody, admin: str = Depends(get_current_admin), browser=Depends(service)):
+async def select_profile(thread_id: str, body: ProjectProfileBody, admin: str = Depends(get_current_admin), browser=Depends(service)):
     await checked(browser.select_profile(thread_id, owner(admin), body.profile_id))
     return await checked(browser.status(thread_id, owner(admin)))
 

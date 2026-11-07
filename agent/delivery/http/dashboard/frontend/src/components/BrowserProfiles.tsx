@@ -8,6 +8,7 @@ import type { BrowserProfile } from "@/types";
 export function BrowserProfiles() {
   const [profiles, setProfiles] = createSignal<BrowserProfile[]>([]);
   const [selected, setSelected] = createSignal<string | null>(null);
+  const [temporarySelected, setTemporarySelected] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
   const [loaded, setLoaded] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
@@ -23,11 +24,15 @@ export function BrowserProfiles() {
     const current = ++generation;
     setLoading(true); setError("");
     try {
-      const [list, binding] = await Promise.all([
+      const [list, binding, temporary] = await Promise.all([
         apiFetch<{ profiles: BrowserProfile[] }>(API_PATHS.browserProfiles, { cache: "no-store" }),
         apiFetch<{ profile_id: string | null }>(API_PATHS.browserDefaultProfile, { cache: "no-store" }),
+        apiFetch<{ profile_id: string | null }>(API_PATHS.browserTemporaryProfile, { cache: "no-store" }),
       ]);
-      if (current === generation) { setProfiles(list.profiles); setSelected(binding.profile_id); setLoaded(true); }
+      if (current === generation) {
+        setProfiles(list.profiles); setSelected(binding.profile_id);
+        setTemporarySelected(temporary.profile_id); setLoaded(true);
+      }
     } catch (cause) {
       if (current === generation) setError(cause instanceof Error ? cause.message : "Failed to load login profiles.");
     } finally {
@@ -74,16 +79,17 @@ export function BrowserProfiles() {
       });
     }
   };
-  const selectProfile = async (select: HTMLSelectElement) => {
+  const selectProfile = async (select: HTMLSelectElement, temporary = false) => {
     const profileId = select.value || null;
     const saved = await mutate(async () => {
-      await putJson(API_PATHS.browserDefaultProfile, { profile_id: profileId });
-      if (!disposed) setSelected(profileId);
-      return "Account default login profile updated.";
+      const result = await putJson<{ profile_id: string }>(temporary ? API_PATHS.browserTemporaryProfile : API_PATHS.browserDefaultProfile, { profile_id: profileId });
+      if (!disposed) (temporary ? setTemporarySelected : setSelected)(result.profile_id);
+      return temporary ? "Temporary conversation login profile updated." : "Account default login profile updated.";
     });
     // A rejected choice changes no state, so nothing else would restore the saved option.
-    if (!saved) select.value = selected() ?? "";
+    if (!saved) select.value = (temporary ? temporarySelected() : selected()) ?? "";
   };
+  const openThreads = (profile: BrowserProfile) => profile.open_thread_ids ?? (profile.open_thread_id ? [profile.open_thread_id] : []);
 
   let disposed = false;
   onMount(() => void load());
@@ -95,16 +101,21 @@ export function BrowserProfiles() {
       <button class="btn btn-secondary btn-sm" disabled={busy()} onClick={() => void load()}>Reload profiles</button>
     </div>
     <div class="panel-body stack">
-    <p>Manage saved logins for your account. Profiles can serve several projects, but only one browser can use a profile at a time.</p>
-    <p class="hint">The account default applies to conversations outside projects and projects set to use it. Existing browser bindings keep their profile.</p>
+    <p>Manage saved logins for your account. Conversations using the same profile share one browser and saved logins, with their own tabs.</p>
+    <p class="hint">The account default applies to projects that inherit it. Temporary conversations have an independent setting. Changes apply when a browser next opens; conversation overrides keep their choice.</p>
     <Show when={error()}><div class="browser-setup-error" role="alert">{error()}</div></Show>
     <Show when={notice()}><p role="status">{notice()}</p></Show>
     <Show when={loading()}><p role="status">Loading profiles...</p></Show>
     <label class="field">Default login profile
       <select class="input" aria-label="Default login profile" disabled={busy() || !loaded()}
         onChange={(event) => void selectProfile(event.currentTarget)}>
-        <option value="" selected={!selected()}>Separate login for each conversation</option>
         <For each={profiles()}>{(profile) => <option value={profile.profile_id} selected={profile.profile_id === selected()}>{profile.name}</option>}</For>
+      </select>
+    </label>
+    <label class="field">Temporary conversation login profile
+      <select class="input" aria-label="Temporary conversation login profile" disabled={busy() || !loaded()}
+        onChange={(event) => void selectProfile(event.currentTarget, true)}>
+        <For each={profiles()}>{(profile) => <option value={profile.profile_id} selected={profile.profile_id === temporarySelected()}>{profile.name}</option>}</For>
       </select>
     </label>
     <form class="row-wrap" autocomplete="off" onSubmit={(event) => void create(event)}>
@@ -118,24 +129,24 @@ export function BrowserProfiles() {
     <div class="browser-profile-list">
       <For each={profiles()}>{(profile) => <div class="browser-profile-row">
         <Show when={renaming() === profile.profile_id} fallback={<>
-          <div class="browser-profile-info"><strong>{profile.name}{selected() === profile.profile_id ? " (default)" : ""}</strong>
-            <Show when={profile.open_thread_id} fallback={<span>Not open</span>}>{(threadId) =>
-              <A href={chatThreadHref(threadId())}>Open in conversation {threadId()}</A>
-            }</Show>
+          <div class="browser-profile-info"><strong>{profile.name}{profile.is_builtin ? " (built-in)" : ""}{selected() === profile.profile_id ? " (default)" : ""}</strong>
+            <Show when={openThreads(profile).length} fallback={<span>Not open</span>}>
+              <For each={openThreads(profile)}>{threadId => <A href={chatThreadHref(threadId)}>Open in conversation {threadId}</A>}</For>
+            </Show>
             <Show when={profile.projects?.length} fallback={<span>No projects currently select this profile.</span>}>
               <div class="row-wrap"><span>Used by:</span><For each={profile.projects}>{(project) =>
                 <A href={`/projects/${project.id}?tab=browser`}>{project.label}</A>
               }</For></div>
             </Show>
           </div>
-          <div class="row-wrap">
+          <Show when={!profile.is_builtin}><div class="row-wrap">
             <button class="btn" disabled={busy()} aria-label={`Rename ${profile.name}`} onClick={() => {
               setRenamed(profile.name); setRenaming(profile.profile_id); setError("");
             }}>Rename</button>
-            <button class="btn" disabled={busy() || !!profile.open_thread_id} aria-label={`Delete ${profile.name}`}
-              title={profile.open_thread_id ? "Close the browser before deleting this profile." : undefined}
+            <button class="btn" disabled={busy() || !!openThreads(profile).length} aria-label={`Delete ${profile.name}`}
+              title={openThreads(profile).length ? "Close every conversation using this profile before deleting it." : undefined}
               onClick={() => remove(profile)}>Delete</button>
-          </div>
+          </div></Show>
         </>}>
           <form class="row-wrap" autocomplete="off" onSubmit={(event) => void rename(event, profile)}>
             <input class="input" aria-label={`New name for ${profile.name}`} maxlength={100} value={renamed()} disabled={saving()}

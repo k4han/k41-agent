@@ -65,3 +65,24 @@ def test_failed_browser_migration_rolls_back_and_can_be_retried(tmp_path, monkey
             assert connection.execute(text("SELECT mode, profile_id FROM browser_project_profiles")).one() == ("profile", "keep-logins")
     finally:
         engine.dispose()
+
+
+def test_browser_choices_migrate_to_inheritance_without_losing_overrides(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'choices.db').as_posix()}"
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE browser_bindings (id INTEGER PRIMARY KEY, thread_id TEXT, owner_id TEXT, profile_id TEXT)"))
+            connection.execute(text("INSERT INTO browser_bindings VALUES (1, 'automatic', 'admin:1', NULL), (2, 'custom', 'admin:1', 'saved')"))
+            connection.execute(text("CREATE TABLE browser_account_profiles (id INTEGER PRIMARY KEY, owner_id TEXT, profile_id TEXT)"))
+            connection.execute(text("INSERT INTO browser_account_profiles VALUES (1, 'admin:1', 'saved')"))
+            connection.execute(text("CREATE TABLE browser_project_profiles (id INTEGER PRIMARY KEY, mode TEXT, profile_id TEXT)"))
+            connection.execute(text("INSERT INTO browser_project_profiles VALUES (1, 'separate', NULL), (2, 'profile', 'saved'), (3, 'inherit', NULL)"))
+        migrate_browser_tables(url)
+        migrate_browser_tables(url)
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT mode, profile_id FROM browser_bindings ORDER BY id")).all() == [("inherit", None), ("profile", "saved")]
+            assert connection.execute(text("SELECT profile_id, temporary_profile_id FROM browser_account_profiles")).one() == ("saved", None)
+            assert connection.execute(text("SELECT mode, profile_id FROM browser_project_profiles ORDER BY id")).all() == [("inherit", None), ("profile", "saved"), ("inherit", None)]
+    finally:
+        engine.dispose()

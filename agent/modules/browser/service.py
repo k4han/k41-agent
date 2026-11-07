@@ -88,15 +88,24 @@ class BrowserSession:
             event.set()
 
 
+@dataclass
+class ProfileBrowser:
+    owner_id: str
+    profile_id: str
+    driver: object
+    threads: set[str] = field(default_factory=set)
+
+
 class BrowserService:
     def __init__(self, container, *, root: Path | None = None, launcher=None):
         self.container = container
         self.repository = BrowserRepository(container)
-        configured = container.config_service.get("browser.storage_root", "")
+        configured = container.config_service.get_str("browser.storage_root", "")
         self.root = root or storage_root(Path(configured).expanduser() if configured else Path.home() / ".k41-agent" / "browser",
                                          container.database_url)
         self.launcher = launcher or StagehandDriver.launch
         self.sessions: dict[str, BrowserSession] = {}
+        self.browsers: dict[tuple[str, str], ProfileBrowser] = {}
         self.operation_locks: dict[str, asyncio.Lock] = {}
         self.operation_users: dict[str, int] = {}
         self.deleting_threads: set[str] = set()
@@ -104,6 +113,23 @@ class BrowserService:
         self.sweeper = None
         self.closing = False
         self.undeleted: set[str] = set()
+
+    async def initialize_profiles(self, owner_ids=None):
+        """Provision saved defaults without launching Chrome."""
+        if owner_ids is None:
+            from sqlalchemy import select
+            from agent.modules.admin_auth.models import AdminCredential
+            from agent.modules.browser.models import BrowserAccountProfile, BrowserBinding, BrowserProfile, BrowserProjectProfile
+
+            async with self.repository.session() as session:
+                admins = await session.scalars(select(AdminCredential.id))
+                owners = await session.scalars(select(BrowserProfile.owner_id).union(
+                    select(BrowserAccountProfile.owner_id), select(BrowserBinding.owner_id),
+                    select(BrowserProjectProfile.owner_id)))
+                owner_ids = {*(f"admin:{admin}" for admin in admins), *owners}
+        for owner_id in owner_ids:
+            profile_id = await self.repository.ensure_default_profile(owner_id)
+            (self.root / "profiles" / profile_id).mkdir(parents=True, exist_ok=True, mode=0o700)
 
     @property
     def timeout(self):
@@ -142,43 +168,50 @@ class BrowserService:
         if await self.repository.pending_handoff(thread_id):
             raise BrowserError("handoff_expired", "Continue or cancel the expired handoff before opening another browser session.")
         profile_id, inherited = await self._session_profile(thread_id, owner_id, binding)
-        profile_key = profile_id or self.storage_key(thread_id)
+        profile_key = profile_id
         # Reserve only this profile during launch; unrelated conversations stay usable.
         async with self.operation_scope(f"profile:{profile_key}"):
-            if profile_id:
-                await self.repository.profile(profile_id, owner_id)
-            holder = next((item for item in self.sessions.values() if item.profile_key == profile_key), None)
-            if holder and not inherited:
-                raise BrowserError("profile_busy", f"This login profile is open in another conversation ({holder.thread_id}). Close that browser first.")
-            if holder:
-                # The parent's open browser keeps the login; the helper works in its own profile.
-                profile_key, inherited = self.storage_key(thread_id), False
+            await self.repository.profile(profile_id, owner_id)
+            shared_key = (owner_id, profile_id)
+            shared = self.browsers.get(shared_key)
             profile = self.root / "profiles" / profile_key
             artifact_root = self.root / "run-artifacts" / self.storage_key(thread_id)
             try:
                 profile.mkdir(parents=True, exist_ok=True, mode=0o700)
                 artifact_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-                driver = await self._launch(profile, artifact_root)
-            except Exception as exc:
+                if shared is None:
+                    shared = ProfileBrowser(owner_id, profile_id, await self._launch(profile, artifact_root))
+                    self.browsers[shared_key] = shared
+                driver = await asyncio.wait_for(shared.driver.create_session(artifact_root), self.timeout)
+            except BaseException as exc:
+                if shared is not None and not shared.threads:
+                    self.browsers.pop(shared_key, None)
+                    with contextlib.suppress(Exception):
+                        await asyncio.shield(shared.driver.close())
+                if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+                    raise
                 logger.exception("Could not start the local browser")
                 raise BrowserError("browser_unavailable", "Could not start Chrome. Run 'k41 browser install' on the agent host to install and check Chrome, or 'k41 browser check' to diagnose an existing installation. Check browser.executable_path, profile locks, and server logs for the original error.") from exc
             current = BrowserSession(thread_id, owner_id, profile_key, driver, inherited_profile=inherited)
             self.sessions[thread_id] = current
+            shared.threads.add(thread_id)
             if hasattr(driver, "watch_tabs"):
                 current.observer = asyncio.create_task(self._observe_tabs(current))
             return current
 
     async def _session_profile(self, thread_id, owner_id, binding):
         """Return the named profile a session should use and whether it comes from the parent."""
-        if binding["profile_id"] or ":sub:" not in thread_id:
+        if binding.get("profile_mode") == "profile" and binding["profile_id"]:
             return binding["profile_id"], False
-        parent = thread_id.split(":sub:", 1)[0]
-        parent_binding = await self.repository.binding(parent)
-        if parent_binding is None:
-            inherited = await self.repository.project_default(parent, owner_id)
-        else:
-            inherited = parent_binding["profile_id"] if parent_binding["owner_id"] == owner_id else None
-        return inherited, bool(inherited)
+        if ":sub:" in thread_id:
+            parent = thread_id.split(":sub:", 1)[0]
+            active = self.sessions.get(parent)
+            if active is not None:
+                if active.owner_id != owner_id:
+                    raise BrowserAccessDenied("This browser belongs to another authenticated account.")
+                return active.profile_key, True
+            return await self.repository.project_default(thread_id, owner_id), True
+        return await self.repository.project_default(thread_id, owner_id), False
 
     async def _launch(self, profile, artifact_root):
         executable = self.container.config_service.get_str("browser.executable_path", "")
@@ -225,7 +258,7 @@ class BrowserService:
             raise BrowserAccessDenied("This browser belongs to another authenticated account.")
         await self._expire_handoffs(thread_id)
         binding = binding or {"thread_id": thread_id, "owner_id": owner_id,
-                              "profile_id": await self.repository.project_default(thread_id, owner_id)}
+                              "profile_id": None, "profile_mode": "inherit"}
         current = self.sessions.get(thread_id)
         tabs = []
         if current:
@@ -233,7 +266,7 @@ class BrowserService:
                 tabs = await current.driver.tabs()
             except Exception:
                 if not current.lock.locked():
-                    await self._close(thread_id, owner_id)
+                    await self._dispose(current, fatal=True)
                     current = None
         return await self._status_snapshot(thread_id, owner_id, binding, current, tabs)
 
@@ -248,7 +281,9 @@ class BrowserService:
 
     async def _status_snapshot(self, thread_id, owner_id, binding, current, tabs):
         pending = await self.repository.pending_handoff(thread_id, include_expired=True)
-        return {**binding, "open": current is not None,
+        effective = current.profile_key if current else (await self._session_profile(thread_id, owner_id, binding))[0]
+        return {**binding, "selected_profile_id": binding["profile_id"], "profile_id": effective,
+                "open": current is not None,
                 "generation": current.generation if current else None,
                 "revision": current.revision if current else 0,
                 "mode": "human" if current and current.handoff_id else "agent",
@@ -268,9 +303,16 @@ class BrowserService:
                 await self.repository.select_profile(thread_id, owner_id, profile_id)
 
     async def profiles(self, owner_id):
-        holders = {item.profile_key: item.thread_id for item in self.sessions.values()}
+        await self.initialize_profiles([owner_id])
+        holders: dict[str, list[str]] = {}
+        for item in self.sessions.values():
+            if item.owner_id == owner_id:
+                holders.setdefault(item.profile_key, []).append(item.thread_id)
+        default = await self.repository.default_profile(owner_id)
         projects = await self.repository.profile_projects(owner_id)
-        return [{**profile, "open_thread_id": holders.get(profile["profile_id"]),
+        return [{**profile, "open_thread_ids": holders.get(profile["profile_id"], []),
+                 "open_thread_id": next(iter(holders.get(profile["profile_id"], [])), None),
+                 "is_default": profile["profile_id"] == default,
                  "projects": projects.get(profile["profile_id"], [])}
                 for profile in await self.repository.profiles(owner_id)]
 
@@ -283,17 +325,19 @@ class BrowserService:
             yield
 
     async def create_profile(self, owner_id, name):
+        await self.initialize_profiles([owner_id])
         async with self._available_profile_name(owner_id, name):
             return await self.repository.create_profile(owner_id, name)
 
     async def rename_profile(self, owner_id, profile_id, name):
-        async with self._available_profile_name(owner_id, name, profile_id):
+        async with self.operation_scope(f"profile:{profile_id}"), self._available_profile_name(owner_id, name, profile_id):
             return await self.repository.rename_profile(owner_id, profile_id, name)
 
     async def delete_profile(self, owner_id, profile_id) -> bool:
         """Delete a profile and report whether its saved logins have already left the disk."""
         async with self.operation_scope(f"profile:{profile_id}"):
             await self.repository.profile(profile_id, owner_id)
+            self.repository.assert_custom_profile(owner_id, profile_id)
             if any(item.profile_key == profile_id for item in self.sessions.values()):
                 raise BrowserError("profile_busy", "Close the browser before deleting its profile.")
             removed = await self._remove_directory("profiles", profile_id)
@@ -306,13 +350,13 @@ class BrowserService:
             await self._close(thread_id, owner_id, allow_human=allow_human)
 
     async def release_inherited_profile(self, thread_id):
-        """Return a finished helper's borrowed login profile to its parent."""
+        """Release a finished helper's tabs while preserving its parent's session."""
         thread_id = self.canonical(thread_id)
         if thread_id not in self.sessions:
             return
         async with self.thread_scope(thread_id):
             current = self.sessions.get(thread_id)
-            if current and current.inherited_profile:
+            if current and ":sub:" in thread_id:
                 await self._close_session(current)
 
     async def _close(self, thread_id, owner_id, *, allow_human=True):
@@ -324,7 +368,7 @@ class BrowserService:
                     self.assert_agent(current)
                 await self._dispose(current)
 
-    async def _dispose(self, current):
+    async def _detach(self, current):
         current.closed = True
         current.controller = None
         current.notify()
@@ -332,17 +376,42 @@ class BrowserService:
             current.observer.cancel()
             await asyncio.gather(current.observer, return_exceptions=True)
             current.observer = None
-        try:
-            await asyncio.wait_for(current.driver.close(), 15)
-        except Exception:
-            # Stagehand owns process cleanup; never expose launch arguments or page data.
-            logger.warning("Browser cleanup failed for session %s", current.generation)
-            # The session is about to release its lease, so the profile must really be free.
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(terminate_profile_processes, self.root / "profiles" / current.profile_key)
-        finally:
-            if self.sessions.get(current.thread_id) is current:
-                self.sessions.pop(current.thread_id, None)
+        if self.sessions.get(current.thread_id) is current:
+            self.sessions.pop(current.thread_id, None)
+        self.tickets = {token: ticket for token, ticket in self.tickets.items()
+                        if ticket[0] != current.thread_id or ticket[2] != current.generation}
+
+    async def _dispose(self, current, *, fatal=False):
+        async with self.operation_scope(f"profile:{current.profile_key}"):
+            key = (current.owner_id, current.profile_key)
+            shared = self.browsers.get(key)
+            if shared is None:
+                if not current.closed:
+                    await self._detach(current)
+                    await current.driver.close()
+                return
+            if not fatal:
+                try:
+                    # The scoped driver starts its cleanup deadline after it
+                    # acquires Chrome's lock, so another thread's healthy action
+                    # cannot make an ordinary close kill the shared browser.
+                    await current.driver.close()
+                except Exception:
+                    logger.warning("Browser tab cleanup failed for session %s", current.generation)
+                    fatal = True
+            affected = [item for item in self.sessions.values()
+                        if (item.owner_id, item.profile_key) == key] if fatal else [current]
+            for item in affected:
+                await self._detach(item)
+                shared.threads.discard(item.thread_id)
+            if not shared.threads:
+                self.browsers.pop(key, None)
+                try:
+                    await asyncio.wait_for(shared.driver.close(), 15)
+                except Exception:
+                    logger.warning("Browser cleanup failed for profile %s", current.profile_key)
+                    with contextlib.suppress(Exception):
+                        await asyncio.to_thread(terminate_profile_processes, self.root / "profiles" / current.profile_key)
 
     async def _close_session(self, current):
         async with current.lock:
@@ -526,7 +595,7 @@ class BrowserService:
                             raise BrowserError("invalid_input", "Unknown browser operation.")
                 except (TimeoutError, asyncio.CancelledError):
                     # Cancelling the RPC alone does not cancel browser-side JavaScript.
-                    await asyncio.shield(self._dispose(current))
+                    await asyncio.shield(self._dispose(current, fatal=True))
                     raise
                 except Exception as exc:
                     if journaled:
@@ -703,10 +772,10 @@ class BrowserService:
                                 await current.driver.reset_facade(self.root / "run-artifacts" / self.storage_key(thread_id),
                                                                   current.active_tab_id)
                         except asyncio.CancelledError:
-                            await asyncio.shield(self._dispose(current))
+                            await asyncio.shield(self._dispose(current, fatal=True))
                             raise
                         except Exception:
-                            await self._dispose(current)
+                            await self._dispose(current, fatal=True)
                 current.active_tab_id = None
                 if decision == "cancel":
                     result = HANDOFF_CANCELLED
@@ -744,10 +813,10 @@ class BrowserService:
             async with asyncio.timeout(self.timeout):
                 snapshot = await current.driver.facade.snapshot(include_iframes=True)
         except asyncio.CancelledError:
-            await asyncio.shield(self._dispose(current))
+            await asyncio.shield(self._dispose(current, fatal=True))
             raise
         except TimeoutError:
-            await self._dispose(current)
+            await self._dispose(current, fatal=True)
             result.update(handoff_status="session_lost",
                           content="Browser control returned, but the fresh snapshot timed out and the browser was closed. Start a new browser session and inspect it before continuing.",
                           snapshot_error={"code": "timeout", "message": "The post-handoff snapshot timed out."})

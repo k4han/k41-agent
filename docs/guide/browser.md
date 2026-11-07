@@ -98,32 +98,32 @@ keeps only for the browser session. A site can still end a session on its own
 schedule. A sign-in made just before a crash may be lost, because Chrome writes
 cookies to disk in batches.
 
-Open **Settings > Browser > Login profiles** to create, rename, and delete saved
-profiles, choose an optional account default, and see projects using a profile
-and the conversation holding it. Profiles belong to your account and can serve
-several projects. Deleting a profile removes its saved logins everywhere.
+Every account starts with a **Default** profile. Open **Settings > Browser > Login
+profiles** to create custom profiles, choose the account default for projects,
+and select an independent profile for temporary conversations. Both initially
+use Default. The built-in profile cannot be renamed or deleted. The list shows
+projects and all conversations using each profile.
 
-In a project's **Browser** tab, choose **Use account default**, a specific profile,
-or **Separate login for each conversation**. Projects without an explicit choice
-keep separate logins, including existing projects after an account default is
-set. Conversations outside projects use the account default, if selected.
+In a project's **Browser** tab, choose **Use account default** or a specific saved
+profile. Projects without an explicit choice inherit the account default.
+Conversations outside projects use the temporary-conversation setting, which
+stays independent when the account default changes.
 
-A conversation takes this choice once, when its browser binding is created,
-even if the conversation started earlier. Changing the account default or a
-project's choice does not change existing bindings. Deleting their selected
-profile resets them to separate logins; it does not switch them to another
-account's sign-ins. An inheriting project continues to follow the account default
-for conversations without bindings.
+Changes take effect when an inherited conversation's browser next opens.
+An open browser retains its current profile. Deleting an unused custom profile
+returns its references to inheritance or Default. Upgrades retain existing
+named-profile choices as conversation overrides and preserve old login files.
 
 To choose for a single conversation, open **Login profiles** in the Browser
-toolbar. Close the browser before changing profiles. **This conversation only**
-keeps that conversation's sign-ins separate, even when its project has a profile.
+toolbar. Close the browser before changing profiles. Select a saved profile to
+override the setting, or return to the project or temporary-conversation setting.
 Profile management is available through **Manage login profiles** in Settings.
 
-A named profile can be open in only one browser at a time. A sub-agent uses its
-parent conversation's profile if that browser is closed, and returns the profile
-when its task ends. If the browser is open, the sub-agent uses a separate profile
-without those sign-ins, so close the browser first when a sub-agent needs them.
+Conversations using the same profile share one browser and its saved logins,
+with their own tabs and human control. A sub-agent shares its parent's profile
+and releases only its own tabs when it finishes. Closing one conversation leaves
+the others open. A fatal browser failure or operation timeout ends all sessions
+sharing that physical browser.
 
 Any agent with Browser tools in a conversation using a profile can act with its
 sign-ins, and a malicious page could try to direct that agent. Keep important

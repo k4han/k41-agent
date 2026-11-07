@@ -676,6 +676,7 @@ class AppContainer:
         try:
             migrate_workspace_tables(database_url)
             migrate_browser_tables(database_url)
+            await self.browser_service.initialize_profiles()
             migrate_github_tables(database_url)
             migrate_mcp_tables(database_url)
             migrate_conversation_tables(database_url)

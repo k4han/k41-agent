@@ -98,6 +98,31 @@ class StagehandDriver:
         self.stagehand = stagehand
         self.facade = facade
         self.port = port
+        self.scope_lock = asyncio.Lock()
+        self.scopes = {}
+        self.page_owners = {}
+        self.closed = False
+        self.browser_ws_url = None
+
+    async def create_session(self, artifacts):
+        from agent.modules.browser.scoped import ScopedDriver
+
+        return await ScopedDriver.create(self, artifacts)
+
+    async def target_infos(self):
+        if self.browser_ws_url is None:
+            async with httpx.AsyncClient(trust_env=False, timeout=5) as client:
+                response = await client.get(f"http://127.0.0.1:{self.port}/json/version")
+                response.raise_for_status()
+                self.browser_ws_url = response.json()["webSocketDebuggerUrl"]
+        async with connect(self.browser_ws_url) as connection:
+            await connection.send(json.dumps({"id": 1, "method": "Target.getTargets"}))
+            async with asyncio.timeout(5):
+                async for raw in connection:
+                    message = json.loads(raw)
+                    if message.get("id") == 1:
+                        return [target for target in message["result"]["targetInfos"] if target["type"] == "page"]
+        raise ConnectionError("Could not read browser targets.")
 
     @classmethod
     async def launch(cls, profile: Path, artifacts: Path, executable_path: str = ""):
@@ -132,6 +157,7 @@ class StagehandDriver:
             raise
 
     async def close(self):
+        self.closed = True
         # Browser.close flushes origin storage and also interrupts browser-side
         # JavaScript. Do this before waiting for any extension RPC cleanup.
         try:
@@ -176,6 +202,11 @@ class StagehandDriver:
             async for raw in connection:
                 message = json.loads(raw)
                 if message.get("method") in {"Target.targetCreated", "Target.targetInfoChanged", "Target.targetDestroyed"}:
+                    info = message.get("params", {}).get("targetInfo", {})
+                    owner = self.page_owners.get(info.get("openerId"))
+                    scope = self.scopes.get(owner)
+                    if scope is not None and info.get("type") == "page":
+                        scope.claim(info["targetId"])
                     notify()
         raise ConnectionError("Browser target observer disconnected.")
 
@@ -263,10 +294,15 @@ class ThreadedDriver:
         return await self.submit(self.inner.active_tab_id())
 
     async def watch_tabs(self, notify):
-        await StagehandDriver.watch_tabs(self, notify)
+        loop = asyncio.get_running_loop()
+        await self.submit(self.inner.watch_tabs(lambda: loop.call_soon_threadsafe(notify)))
 
     async def reset_facade(self, artifacts, active_tab_id=None):
         await self.submit(self.inner.reset_facade(artifacts, active_tab_id))
+
+    async def create_session(self, artifacts):
+        inner = await self.submit(self.inner.create_session(artifacts))
+        return ThreadedSessionDriver(self, inner)
 
     async def stop(self):
         if not self.loop.is_closed():
@@ -282,6 +318,21 @@ class ThreadedDriver:
             await self.submit(self.inner.close())
         finally:
             await self.stop()
+
+
+class ThreadedSessionDriver(ThreadedDriver):
+    """A conversation facade on the physical browser's existing Windows loop."""
+
+    def __init__(self, root, inner):
+        self.root = root
+        self.inner = inner
+        self.loop = root.loop
+        self.thread = root.thread
+        self.facade = ThreadedFacade(self)
+
+    async def close(self):
+        if not self.loop.is_closed():
+            await self.submit(self.inner.close())
 
 
 class CDPViewer:
@@ -505,6 +556,13 @@ class CDPViewer:
 
     async def _capture_idle_frame(self):
         try:
+            # A background tab can stay completely static and never send its
+            # first screencast event. Publish one initial image in that case.
+            try:
+                await asyncio.wait_for(self.frame_received.wait(), 1)
+            except TimeoutError:
+                if self.visible and self.snapshots == 0:
+                    await self.capture_frame()
             while True:
                 await self.frame_received.wait()
                 while True:

@@ -96,6 +96,9 @@ class AdminAuthService:
 
                 await session.commit()
                 await session.refresh(admin)
+                from agent.modules.browser import get_browser_service
+
+                await get_browser_service().initialize_profiles([f"admin:{admin.id}"])
                 return admin
             except Exception:
                 await session.rollback()

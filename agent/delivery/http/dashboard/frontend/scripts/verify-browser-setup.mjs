@@ -34,7 +34,7 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'browser-setup-csrf');
     if (url.pathname === '/dashboard-api/browser/profiles') { res.end(JSON.stringify({ profiles: [] })); return; }
-    if (url.pathname === '/dashboard-api/browser/default-profile') { res.end(JSON.stringify({ profile_id: null })); return; }
+    if (['/dashboard-api/browser/default-profile', '/dashboard-api/browser/temporary-profile'].includes(url.pathname)) { res.end(JSON.stringify({ profile_id: null })); return; }
     if (url.pathname === '/dashboard-api/browser/configuration') {
       res.end(JSON.stringify({ settings, by_category: { browser: settings }, settings_sources: {} })); return;
     }

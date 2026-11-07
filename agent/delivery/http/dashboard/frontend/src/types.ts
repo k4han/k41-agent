@@ -1034,9 +1034,10 @@ export interface SandboxDeleteResult {
   detached_threads: string[];
 }
 
-export type BrowserProfile = { profile_id: string; name: string; open_thread_id?: string | null; projects?: { id: number; label: string }[] };
+export type BrowserProfile = { profile_id: string; name: string; is_builtin?: boolean; is_default?: boolean;
+  open_thread_id?: string | null; open_thread_ids?: string[]; projects?: { id: number; label: string }[] };
 export type BrowserProjectProfile = {
-  mode: "inherit" | "separate" | "profile";
+  mode: "inherit" | "profile";
   profile_id: string | null;
   default_profile_id: string | null;
   effective_profile_id: string | null;

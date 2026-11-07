@@ -28,7 +28,7 @@ async def delete_thread_browsers(thread_id: str) -> None:
 
 
 async def release_delegated_browser(thread_id: str) -> None:
-    """Free a login profile borrowed by a finished sub-agent; delegation succeeds regardless."""
+    """Release a finished sub-agent's browser tabs; delegation succeeds regardless."""
     from agent.bootstrap.container import get_active_container
 
     container = get_active_container()

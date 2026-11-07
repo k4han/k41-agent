@@ -12,6 +12,8 @@ import "@/styles/browser.css";
 type BrowserStatus = {
   open: boolean;
   profile_id: string | null;
+  profile_mode?: "inherit" | "profile";
+  selected_profile_id?: string | null;
   generation: string | null;
   revision?: number;
   mode: "agent" | "human";
@@ -52,7 +54,7 @@ export function BrowserPanel(props: {
   const [selectedTab, setSelectedTab] = createSignal("");
   const [url, setUrl] = createSignal("");
   const [profilesOpen, setProfilesOpen] = createSignal(false);
-  const selectedProfileId = createMemo(() => status()?.profile_id || "");
+  const selectedProfileId = createMemo(() => status()?.profile_mode === "inherit" ? "" : status()?.selected_profile_id ?? status()?.profile_id ?? "");
   const sessionGeneration = createMemo(() => status()?.generation);
   const sessionActive = createMemo(() => Boolean(status()?.open));
   const currentPageUrl = createMemo(() => status()?.tabs.find((tab) => tab.id === selectedTab())?.url || "");
@@ -339,14 +341,14 @@ export function BrowserPanel(props: {
           onChange={(event) => {
             const profileId = event.currentTarget.value || null;
             // A rejected choice changes no state, so nothing else would restore the saved option.
-            void action(() => apiFetch(endpoint(), { method: "PUT", json: { profile_id: profileId } })).then(showSelectedProfile);
+            void action(() => apiFetch(endpoint(), { method: "PUT", json: { mode: profileId ? "profile" : "inherit", profile_id: profileId } })).then(showSelectedProfile);
           }}>
-          <option value="">This conversation only</option>
-          <For each={profiles()}>{(profile) => <option value={profile.profile_id}>{profile.open_thread_id && profile.open_thread_id !== props.threadId ? `${profile.name} (open in another conversation)` : profile.name}</option>}</For>
+          <option value="">Use project or temporary conversation setting</option>
+          <For each={profiles()}>{(profile) => <option value={profile.profile_id}>{profile.name}</option>}</For>
         </select></label>
         <A class="btn btn-sm" href="/settings/browser#login-profiles">Manage login profiles</A>
         </div>
-        <p class="browser-profile-hint">This choice applies only to this conversation. Close the browser before changing its profile.</p>
+        <p class="browser-profile-hint">Current profile: {profiles().find(profile => profile.profile_id === status()?.profile_id)?.name ?? "Default"}. Close the browser before changing this conversation's choice.</p>
       </section></Show>
       <div class="browser-chrome">
         <div class="browser-navigation" role="group" aria-label="Browser navigation">

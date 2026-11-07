@@ -121,7 +121,9 @@ def test_browser_profile_api_enforces_authentication_csrf_and_ownership(browser_
     assert client.post("/dashboard-api/browser/threads/first").status_code == 200
     assert client.delete(f"/dashboard-api/browser/profiles/{profile['profile_id']}").status_code == 409
     client.headers["X-Test-Admin"] = "2"
-    assert client.get("/dashboard-api/browser/profiles").json() == {"profiles": []}
+    profiles = client.get("/dashboard-api/browser/profiles").json()["profiles"]
+    assert len(profiles) == 1 and profiles[0]["is_builtin"]
+    assert profiles[0]["profile_id"] != profile["profile_id"]
     assert client.get("/dashboard-api/browser/threads/first").status_code == 403
     assert client.post("/dashboard-api/browser/threads/first/viewer-ticket").status_code == 403
     assert client.get("/dashboard-api/browser/artifacts/missing").status_code == 404
@@ -162,7 +164,8 @@ def test_browser_profile_list_reports_open_conversation(browser_client):
     assert client.get("/dashboard-api/browser/profiles").json()["profiles"][0]["open_thread_id"] is None
     client.put("/dashboard-api/browser/threads/first", json={"profile_id": profile["profile_id"]})
     client.post("/dashboard-api/browser/threads/first")
-    assert client.get("/dashboard-api/browser/profiles").json()["profiles"][0]["open_thread_id"] == "first"
+    listed = next(p for p in client.get("/dashboard-api/browser/profiles").json()["profiles"] if p["profile_id"] == profile["profile_id"])
+    assert listed["open_thread_id"] == "first" and listed["open_thread_ids"] == ["first"]
 
 
 def test_browser_project_profile_api(browser_client):
@@ -178,7 +181,8 @@ def test_browser_project_profile_api(browser_client):
     project_id = client.portal.call(add_project)
     url = f"/dashboard-api/browser/projects/{project_id}/profile"
     profile = client.post("/dashboard-api/browser/profiles", json={"name": "Work"}).json()
-    separate = {"mode": "separate", "profile_id": None, "default_profile_id": None, "effective_profile_id": None}
+    builtin = browser.repository.builtin_profile_id("admin:1")
+    separate = {"mode": "inherit", "profile_id": None, "default_profile_id": builtin, "effective_profile_id": builtin}
     named = {**separate, "mode": "profile", "profile_id": profile["profile_id"], "effective_profile_id": profile["profile_id"]}
     assert client.get(url).json() == separate
     assert client.put(url, json={"profile_id": profile["profile_id"]}).json() == named
@@ -196,34 +200,79 @@ def test_browser_project_profile_api(browser_client):
     inherited = client.put(url, json={"mode": "inherit"}).json()
     assert inherited == {**separate, "mode": "inherit", "default_profile_id": profile["profile_id"],
                          "effective_profile_id": profile["profile_id"]}
-    assert client.get("/dashboard-api/browser/profiles").json()["profiles"][0]["projects"] == [{"id": project_id, "label": "One"}]
+    listed = next(p for p in client.get("/dashboard-api/browser/profiles").json()["profiles"] if p["profile_id"] == profile["profile_id"])
+    assert listed["projects"] == [{"id": project_id, "label": "One"}]
     client.headers["X-Test-Admin"] = "2"
     assert client.put(url, json={"profile_id": profile["profile_id"]}).status_code == 403
-    assert client.get(url).json() == separate
+    other_builtin = browser.repository.builtin_profile_id("admin:2")
+    assert client.get(url).json() == {**separate, "default_profile_id": other_builtin, "effective_profile_id": other_builtin}
     client.headers.pop("X-Test-Admin")
     assert client.get(url).status_code == 401
 
 
 def test_browser_account_default_requires_authentication_csrf_and_ownership(browser_client):
-    client, _ = browser_client
+    client, browser = browser_client
     url = "/dashboard-api/browser/default-profile"
     profile = client.post("/dashboard-api/browser/profiles", json={"name": "Work"}).json()
-    assert client.get(url).json() == {"profile_id": None}
+    builtin = browser.repository.builtin_profile_id("admin:1")
+    assert client.get(url).json() == {"profile_id": builtin}
     client.headers.pop("X-CSRF-Token")
     assert client.put(url, json={"profile_id": profile["profile_id"]}).status_code == 403
     client.headers["X-CSRF-Token"] = client.cookies["csrf_token"]
     assert client.put(url, json={"profile_id": "invalid"}).status_code == 422
     assert client.put(url, json={"profile_id": profile["profile_id"]}).json() == {"profile_id": profile["profile_id"]}
-    assert client.get("/dashboard-api/browser/threads/new").json()["profile_id"] == profile["profile_id"]
+    assert client.get("/dashboard-api/browser/threads/new").json()["profile_id"] == builtin
     client.headers["X-Test-Admin"] = "2"
-    assert client.get(url).json() == {"profile_id": None}
+    assert client.get(url).json() == {"profile_id": browser.repository.builtin_profile_id("admin:2")}
     assert client.put(url, json={"profile_id": profile["profile_id"]}).status_code == 403
     client.headers["X-Test-Admin"] = "1"
     assert client.delete(f"/dashboard-api/browser/profiles/{profile['profile_id']}").status_code == 200
-    assert client.get(url).json() == {"profile_id": None}
+    assert client.get(url).json() == {"profile_id": builtin}
     client.headers.pop("X-Test-Admin")
     assert client.get(url).status_code == 401
     assert client.put(url, json={"profile_id": None}).status_code == 401
+
+
+def test_temporary_profile_api_is_independent_and_checks_ownership(browser_client):
+    client, browser = browser_client
+    base = "/dashboard-api/browser"
+    builtin = browser.repository.builtin_profile_id("admin:1")
+    work = client.post(f"{base}/profiles", json={"name": "Work"}).json()["profile_id"]
+    personal = client.post(f"{base}/profiles", json={"name": "Personal"}).json()["profile_id"]
+    client.put(f"{base}/default-profile", json={"profile_id": work})
+    assert client.get(f"{base}/temporary-profile").json() == {"profile_id": builtin}
+    assert client.put(f"{base}/temporary-profile", json={"profile_id": personal}).json() == {"profile_id": personal}
+    assert client.get(f"{base}/default-profile").json() == {"profile_id": work}
+    status = client.get(f"{base}/threads/temp").json()
+    assert status["profile_id"] == personal and status["profile_mode"] == "inherit"
+    assert status["selected_profile_id"] is None
+    assert client.put(f"{base}/threads/temp", json={"profile_id": work, "mode": "profile"}).json()["profile_id"] == work
+    assert client.put(f"{base}/threads/temp", json={"mode": "inherit"}).json()["profile_id"] == personal
+    assert client.put(f"{base}/threads/temp", json={"mode": "separate"}).status_code == 422
+    client.headers.pop("X-CSRF-Token")
+    assert client.put(f"{base}/temporary-profile", json={"profile_id": work}).status_code == 403
+    client.headers["X-CSRF-Token"] = client.cookies["csrf_token"]
+    client.headers["X-Test-Admin"] = "2"
+    assert client.put(f"{base}/temporary-profile", json={"profile_id": work}).status_code == 403
+    client.headers["X-Test-Admin"] = "1"
+    assert client.put(f"{base}/default-profile", json={"profile_id": None}).json() == {"profile_id": builtin}
+    assert client.get(f"{base}/temporary-profile").json() == {"profile_id": personal}
+    assert client.put(f"{base}/temporary-profile", json={"profile_id": None}).json() == {"profile_id": builtin}
+    client.headers.pop("X-Test-Admin")
+    assert client.get(f"{base}/temporary-profile").status_code == 401
+    assert client.put(f"{base}/temporary-profile", json={"profile_id": None}).status_code == 401
+
+
+def test_builtin_profile_is_present_without_launching_chrome_and_is_protected(browser_client):
+    client, browser = browser_client
+    profile = client.get("/dashboard-api/browser/profiles").json()["profiles"][0]
+    assert profile["name"] == "Default" and profile["is_builtin"] and profile["is_default"]
+    assert profile["open_thread_ids"] == []
+    assert (browser.root / "profiles" / profile["profile_id"]).is_dir()
+    assert not browser.browsers
+    url = f"/dashboard-api/browser/profiles/{profile['profile_id']}"
+    assert client.patch(url, json={"name": "Renamed"}).json()["detail"]["code"] == "protected_profile"
+    assert client.delete(url).json()["detail"]["code"] == "protected_profile"
 
 
 def test_browser_storage_errors_do_not_reveal_server_paths(browser_client, monkeypatch):

@@ -21,7 +21,7 @@ class BrowserProfile(BaseModel):
 
 
 class BrowserProjectProfile(BaseModel):
-    """The login profile an account's new conversations in a project start with."""
+    """The login profile inherited by an account's project conversations."""
 
     __tablename__ = "browser_project_profiles"
 
@@ -34,12 +34,13 @@ class BrowserProjectProfile(BaseModel):
 
 
 class BrowserAccountProfile(BaseModel):
-    """Optional default login profile for an authenticated account."""
+    """Independent project and temporary-conversation defaults for an account."""
 
     __tablename__ = "browser_account_profiles"
 
     owner_id = Column(String(255), nullable=False, unique=True)
     profile_id = Column(String(64), nullable=True, index=True)
+    temporary_profile_id = Column(String(64), nullable=True)
 
 
 class BrowserBinding(BaseModel):
@@ -48,6 +49,7 @@ class BrowserBinding(BaseModel):
     thread_id = Column(String(512), unique=True, nullable=False)
     owner_id = Column(String(255), nullable=False, index=True)
     profile_id = Column(String(64), nullable=True)
+    mode = Column(String(16), nullable=False, default="inherit", server_default="inherit")
 
 
 class BrowserInvocation(BaseModel):

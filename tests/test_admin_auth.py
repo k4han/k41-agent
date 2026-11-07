@@ -9,12 +9,15 @@ from agent.shared.infrastructure.db.models import load_orm_models
 
 
 class _StubConfigService:
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, database_url: str, browser_root: str) -> None:
         self._database_url = database_url
+        self._browser_root = browser_root
 
     def get_str(self, key: str, default: str = "") -> str:
         if key == "database.url":
             return self._database_url
+        if key == "browser.storage_root":
+            return self._browser_root
         return default
 
 
@@ -25,7 +28,7 @@ async def admin_auth_db(monkeypatch: pytest.MonkeyPatch, tmp_path):
     db_path = tmp_path / "admin-auth.sqlite"
     db_url = f"sqlite+aiosqlite:///{db_path.resolve().as_posix()}"
     monkeypatch.setattr(db_engine, "DEFAULT_DATABASE_URL", db_url)
-    set_active_container(AppContainer(config_service=_StubConfigService("")))
+    set_active_container(AppContainer(config_service=_StubConfigService("", str(tmp_path / "browser"))))
 
     load_orm_models()
     await initialize_async_engine(metadata=Base.metadata)
