@@ -352,7 +352,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "browser.executable_path": "",
     "browser.storage_root": "",
     "browser.idle_ttl_seconds": 600,
-    "browser.operation_timeout_seconds": 60,
+    "browser.operation_timeout_seconds": 75,
     "browser.stream_quality": 50,
     "browser.stream_max_width": 1280,
     "browser.stream_max_height": 720,
@@ -492,8 +492,8 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
     },
     "browser.operation_timeout_seconds": {
         "type": "number", "category": "browser", "label": "Browser operation timeout (seconds)",
-        "description": "Close a browser if an operation exceeds this limit. Inspect the page before retrying an interrupted action.",
-        "min": 1, "max": 300, "step": 1,
+        "description": "Close a browser if an operation exceeds this limit. Lower values are raised to 75, because a single run already stops at 60 seconds without closing the browser. Inspect the page before retrying an interrupted action.",
+        "min": 75, "max": 300, "step": 1,
     },
     "channels.zalo.context_trim_threshold": {
         "type": "number", "category": "channels", "label": "Context Trim Threshold (tokens)",

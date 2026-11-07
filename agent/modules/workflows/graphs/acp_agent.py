@@ -42,7 +42,7 @@ from agent.modules.tools import AcpPermissionResume, ToolResolver, coding_messag
 from agent.modules.workflows.checkpoint import get_checkpointer
 from agent.modules.workflows.constants import ACP_AGENT_GRAPH_TYPE
 from agent.modules.workflows.nodes.tool import tool_node
-from agent.modules.workflows.prompt_builders import resolve_prompt_variables
+from agent.modules.workflows.prompt_builders import resolve_prompt_variables, with_browser_reporting_rules
 from agent.modules.workflows.registry import GraphRegistry
 from agent.modules.workflows.run_config import WorkflowContext
 from agent.modules.workflows.state.acp import AcpState
@@ -209,12 +209,19 @@ async def _start_turn(state: AcpState, config: RunnableConfig, runtime: Runtime[
     cwd_path.mkdir(parents=True, exist_ok=True)
     cwd = str(cwd_path)
     user_message = _last_human_message(state)
+    tools = CardToolProvider(ctx, config, turn_id) if agent_config.tools else None
 
     async def system_prompt() -> str:
         template = agent_config.system_prompt or ""
-        if not template.strip():
-            return ""
-        return resolve_prompt_variables(template, await get_runtime_prompt_variable_values(workspace, thread_id=thread_id))
+        prompt = ""
+        if template.strip():
+            prompt = resolve_prompt_variables(template, await get_runtime_prompt_variable_values(workspace, thread_id=thread_id))
+        try:
+            tool_names = await tools.tool_names() if tools else frozenset()
+        except Exception:
+            # The service already tells the user when the tools cannot be offered.
+            tool_names = frozenset()
+        return with_browser_reporting_rules(prompt, tool_names)
 
     return await get_acp_service().begin_turn(TurnRequest(
         turn_id=turn_id,
@@ -228,7 +235,7 @@ async def _start_turn(state: AcpState, config: RunnableConfig, runtime: Runtime[
         can_interrupt=bool(config.get("configurable", {}).get("acp_can_interrupt")),
         config_options={**settings.config_options, **(ctx.acp_config_options or {})},
         system_prompt=system_prompt,
-        tools=CardToolProvider(ctx, config, turn_id) if agent_config.tools else None,
+        tools=tools,
         commit_stopped=_commit_stopped_turn,
     ))
 

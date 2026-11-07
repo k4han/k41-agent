@@ -4,8 +4,10 @@ import asyncio
 import base64
 import contextlib
 import io
+import itertools
 import json
 import os
+import re
 import selectors
 import subprocess
 import sys
@@ -14,10 +16,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 import pytest
+import pytest_asyncio
 from PIL import Image
 
 from agent.modules.browser.driver import CDPViewer, StagehandDriver, terminate_profile_processes
-from agent.modules.browser.service import BrowserService, BrowserSession
+from agent.modules.browser.service import BrowserError, BrowserService, BrowserSession
+from agent.modules.browser.snapshot import NO_CHANGES
 from agent.shared.infrastructure.browser import find_browser
 from agent.shared.infrastructure.db.engine import close_async_engine, initialize_async_engine
 from test_browser_sessions import add_project_thread, make_browser_metadata
@@ -112,6 +116,79 @@ def fixture_url():
 async def cookie_names(driver, url):
     return json.loads(await driver.facade.run(code=(
         f"await page.goto('{url}/check'); return JSON.stringify((await context.cookies()).map(c => c.name));")))
+
+
+@pytest_asyncio.fixture
+async def live_browser(isolated_container, tmp_path):
+    await initialize_async_engine(metadata=make_browser_metadata(), container=isolated_container)
+    browser = BrowserService(isolated_container, root=tmp_path / "browser")
+    isolated_container._browser_service = browser
+    yield browser
+    await browser.shutdown()
+    await close_async_engine(container=isolated_container)
+
+
+@pytest.mark.asyncio
+async def test_run_failures_explain_themselves_and_snapshots_track_changes(live_browser, fixture_url):
+    calls = itertools.count()
+
+    async def execute(name, **values):
+        return (await live_browser.execute("chat", "admin:1", f"call-{next(calls)}", name, values))["content"]
+
+    async def failure(**values):
+        with pytest.raises(BrowserError) as caught:
+            await execute("browser_run", **values)
+        return caught.value
+
+    await execute("browser_run", code=f"await page.goto('{fixture_url}/login');")
+
+    invalid = await failure(code="const = 1;")
+    assert invalid.code == "invalid_input" and "Nothing was executed" in str(invalid)
+    no_snapshot = await failure(actions=[{"op": "click", "id": "0-1"}])
+    assert no_snapshot.code == "invalid_input" and "call browser_snapshot first" in str(no_snapshot)
+    # The failure comes after the mark is set, so only the real cause explains the page state.
+    outside_page = await failure(code="await page.evaluate(() => { window.mark = 1; }); return document.title;")
+    assert outside_page.code == "unknown_outcome" and "document is not defined" in str(outside_page)
+    assert await execute("browser_run", code="return await page.evaluate(() => window.mark);") == "1"
+    unsupported = await failure(code="await page.waitForFunction(() => true);")
+    assert "does not implement page.waitForFunction" in str(unsupported)
+
+    tree = await execute("browser_snapshot")
+    login = re.search(r"\[([^\]]+)\] button: Login", tree)[1]
+    stale = await failure(actions=[{"op": "click", "id": "9-9999"}])
+    assert stale.code == "invalid_input" and 'Snapshot ID "9-9999"' in str(stale)
+
+    assert await execute("browser_snapshot") == NO_CHANGES
+    changes = await execute("browser_run", actions=[{"op": "click", "id": login}])
+    assert '"completed": 1' in changes and "Signed in" in changes
+    assert await execute("browser_snapshot") == NO_CHANGES
+    assert "Signed in" in await execute("browser_snapshot", full=True)
+
+    await execute("browser_run", code="await page.evaluate(() => history.pushState({}, '', '/moved'));")
+    navigated = await failure(actions=[{"op": "click", "id": login}])
+    assert navigated.code == "invalid_input" and "call browser_snapshot again" in str(navigated)
+
+    await execute("browser_snapshot")
+    await execute("browser_run", code="await page.evaluate(() => document.querySelector('button').remove());")
+    missing = await failure(actions=[{"op": "click", "id": login}])
+    assert missing.code == "unknown_outcome" and "Cause:" in str(missing)
+
+    dump = await execute("browser_run", code="return await page.evaluate(() => 'x'.repeat(20000));")
+    assert "20000 bytes" in dump and len(dump) < 2000
+
+
+@pytest.mark.asyncio
+async def test_run_past_its_deadline_fails_without_closing_the_browser(live_browser, fixture_url):
+    first, second = await asyncio.gather(*(live_browser.ensure(thread, "admin:1") for thread in ("first", "second")))
+    await live_browser.execute("second", "admin:1", "open", "browser_run", {"code": f"await page.goto('{fixture_url}/login');"})
+    with pytest.raises(BrowserError, match="timed out") as caught:
+        await live_browser.execute("first", "admin:1", "slow", "browser_run", {"code": "await new Promise(done => setTimeout(done, 90000));"})
+    assert caught.value.code == "unknown_outcome"
+    assert not first.closed and not second.closed
+    title = await live_browser.execute("first", "admin:1", "after", "browser_run", {"code": "return await page.title();"})
+    assert title["content"] == ""
+    other = await live_browser.execute("second", "admin:1", "other", "browser_run", {"code": "return await page.title();"})
+    assert other["content"] == "Browser fixture"
 
 
 @pytest.mark.asyncio

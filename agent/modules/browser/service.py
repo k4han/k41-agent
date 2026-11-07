@@ -18,11 +18,25 @@ from sqlalchemy import URL, make_url
 from agent.modules.browser.driver import StagehandDriver, terminate_profile_processes
 from agent.modules.browser.models import BrowserAccessDenied
 from agent.modules.browser.repository import BrowserRepository
+from agent.modules.browser.snapshot import compact_snapshot, diff_snapshot
 
 
 logger = logging.getLogger(__name__)
 
 CREDENTIAL_QUERY_KEYS = frozenset({"user", "username", "password", "passwd", "pwd", "sslpassword"})
+# Stays above the facade's 60 second run deadline. That deadline fails one call and leaves
+# the browser usable, while this watchdog closes every conversation sharing the browser.
+MIN_OPERATION_TIMEOUT_SECONDS = 75
+MAX_FAILURE_CAUSE_CHARS = 2000
+# Far below the general tool output limit, because a page dump this size is markup and
+# script data. Keeping its first bytes would still mislead, so only a short preview remains.
+MAX_RUN_RESULT_BYTES = 8 * 1024
+RUN_RESULT_PREVIEW_CHARS = 1000
+# Reading the page after actions shares the watchdog with the run itself: 60 + 0.5 + 10 < 75.
+ACTION_SETTLE_SECONDS = 0.5
+ACTION_OBSERVE_TIMEOUT_SECONDS = 10
+ACTION_OBSERVE_FAILED = ("The actions completed, but the page could not be read afterwards. "
+                         "Call browser_snapshot before relying on the page or its IDs.")
 
 
 def storage_namespace(database_url: str) -> str:
@@ -63,6 +77,41 @@ class BrowserError(Exception):
         self.code = code
 
 
+def run_failure(exc: Exception) -> BrowserError:
+    """Tell the agent why a browser_run failed, and whether anything can have executed."""
+    from stagehand.rpc_client import RPCError
+    from stagehand_middleware.facade import StagehandFacadeExecutionError, StagehandFacadeInputError
+    from stagehand_middleware.facade.tools import sanitize_error_message
+
+    message = str(exc)
+    # Syntax and input checks, and the snapshot ID checks that precede the first action.
+    if isinstance(exc, SyntaxError) or (isinstance(exc, StagehandFacadeInputError) and (
+            "call snapshot" in message or message.startswith("Invalid run input:"))):
+        return BrowserError("invalid_input", f"{message.replace('call snapshot', 'call browser_snapshot')} Nothing was executed.")
+    notice = "The browser action failed and may have partially executed. Inspect the page before creating a new action."
+    if isinstance(exc, StagehandFacadeExecutionError):
+        cause = f"{exc.name}: {message}"
+    elif isinstance(exc, StagehandFacadeInputError):
+        cause = message
+    elif isinstance(exc, RPCError):
+        cause = sanitize_error_message(message)
+    else:
+        return BrowserError("unknown_outcome", notice)
+    return BrowserError("unknown_outcome", f"{notice} Cause: {cause[:MAX_FAILURE_CAUSE_CHARS]}")
+
+
+def bounded_run_result(content: str) -> str:
+    """Replace an oversized code result with instructions for reading less."""
+    size = len(content.encode("utf-8", "replace"))
+    if size <= MAX_RUN_RESULT_BYTES:
+        return content
+    return (f"The result was {size} bytes, over the {MAX_RUN_RESULT_BYTES} byte limit, so it was not returned. "
+            "The code did run, so do not repeat steps that change the page. Read again with a narrower query: "
+            "return only the fields you need, leave out script and style elements, and avoid outerHTML. "
+            "Use browser_snapshot to find elements. For long text, return it in parts with slice().\n"
+            f"Preview:\n{content[:RUN_RESULT_PREVIEW_CHARS]}")
+
+
 @dataclass
 class BrowserSession:
     thread_id: str
@@ -81,6 +130,7 @@ class BrowserSession:
     subscribers: set[asyncio.Event] = field(default_factory=set)
     observer: asyncio.Task | None = None
     inherited_profile: bool = False
+    snapshot_tree: str | None = None
 
     def notify(self):
         self.revision += 1
@@ -133,7 +183,7 @@ class BrowserService:
 
     @property
     def timeout(self):
-        return max(1, min(300, self.container.config_service.get_int("browser.operation_timeout_seconds", 60)))
+        return max(MIN_OPERATION_TIMEOUT_SECONDS, min(300, self.container.config_service.get_int("browser.operation_timeout_seconds", MIN_OPERATION_TIMEOUT_SECONDS)))
 
     @property
     def idle_ttl(self):
@@ -544,12 +594,31 @@ class BrowserService:
         if self.sweeper is None and not self.closing:
             self.sweeper = asyncio.create_task(self._sweep())
 
-    async def execute(self, thread_id, owner_id, call_id, name, values):
+    async def execute(self, thread_id, owner_id, call_id, name, values, authorize_snapshot=None):
         thread_id = self.canonical(thread_id)
         async with self.thread_scope(thread_id):
-            return await self._execute(thread_id, owner_id, call_id, name, values)
+            return await self._execute(thread_id, owner_id, call_id, name, values, authorize_snapshot)
 
-    async def _execute(self, thread_id, owner_id, call_id, name, values):
+    async def _read_tree(self, current, options, *, full=False):
+        """Read the page and keep its tree as the base of the next comparison."""
+        tree = compact_snapshot(await current.driver.facade.snapshot(**options))
+        changes = diff_snapshot(current.snapshot_tree, tree) if current.snapshot_tree and not full else None
+        current.snapshot_tree = tree
+        return changes or tree
+
+    async def _observe_actions(self, current, authorize_snapshot):
+        """Report what completed actions changed; failing to read the page does not undo them."""
+        try:
+            if authorize_snapshot is not None:
+                authorize_snapshot()
+            await asyncio.sleep(ACTION_SETTLE_SECONDS)
+            async with asyncio.timeout(ACTION_OBSERVE_TIMEOUT_SECONDS):
+                return await self._read_tree(current, {"include_iframes": True})
+        except Exception as exc:
+            logger.info("Could not read the page after browser actions: %s", type(exc).__name__)
+            return ACTION_OBSERVE_FAILED
+
+    async def _execute(self, thread_id, owner_id, call_id, name, values, authorize_snapshot=None):
         await self.repository.bind(thread_id, owner_id)
         # Serialize replay checks as well as driver calls, including across session replacement.
         key = self.repository.invocation_key(thread_id, call_id)
@@ -583,9 +652,14 @@ class BrowserService:
                         facade = current.driver.facade
                         if name == "browser_run":
                             value = await facade.run(**values)
-                            result = {"content": value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)}
+                            content = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+                            if "code" in values:
+                                result = {"content": bounded_run_result(content)}
+                            else:
+                                result = {"content": f"{content}\n{await self._observe_actions(current, authorize_snapshot)}"}
                         elif name == "browser_snapshot":
-                            result = {"content": await facade.snapshot(**values)}
+                            options = {key: value for key, value in values.items() if key != "full"}
+                            result = {"content": await self._read_tree(current, options, full=values.get("full", False))}
                         elif name == "browser_screenshot":
                             image = await facade.screenshot(**values)
                             artifact = await self.save_image(owner_id, thread_id, image)
@@ -599,7 +673,7 @@ class BrowserService:
                     raise
                 except Exception as exc:
                     if journaled:
-                        raise BrowserError("unknown_outcome", "The browser action failed and may have partially executed. Inspect the page before creating a new action.") from exc
+                        raise run_failure(exc) from exc
                     raise
                 finally:
                     current.last_activity = time.monotonic()
@@ -811,7 +885,8 @@ class BrowserService:
             if authorize_snapshot is not None:
                 authorize_snapshot()
             async with asyncio.timeout(self.timeout):
-                snapshot = await current.driver.facade.snapshot(include_iframes=True)
+                snapshot = compact_snapshot(await current.driver.facade.snapshot(include_iframes=True))
+            current.snapshot_tree = snapshot
         except asyncio.CancelledError:
             await asyncio.shield(self._dispose(current, fatal=True))
             raise

@@ -9,14 +9,20 @@ import pytest
 import pytest_asyncio
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import START, END, StateGraph
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.types import Command
 from sqlalchemy import MetaData, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from stagehand.rpc_client import RPCError
+from stagehand_middleware.facade import StagehandFacadeExecutionError, StagehandFacadeInputError, contract_error
+from stagehand_middleware.facade.tools import RUN_BATCH_TIMEOUT_MS
 
 from agent.modules.browser.models import BrowserAccountProfile, BrowserArtifact, BrowserBinding, BrowserHandoffResume, BrowserInvocation, BrowserProfile, BrowserProjectProfile
-from agent.modules.browser.service import BrowserError, BrowserService, storage_namespace, storage_root
+from agent.modules.browser import service as browser_service
+from agent.modules.browser.service import ACTION_OBSERVE_FAILED, MAX_RUN_RESULT_BYTES, MIN_OPERATION_TIMEOUT_SECONDS, BrowserError, BrowserService, storage_namespace, storage_root
+from agent.modules.browser.snapshot import NO_CHANGES
 from agent.modules.projects.models import Project
-from agent.modules.tools.builtin.browser import browser_batch_error
+from agent.modules.tools.builtin.browser import BROWSER_TOOLS, browser_batch_error
 from agent.modules.workspaces.models import ThreadWorkspace
 from agent.shared.infrastructure.db.engine import initialize_async_engine, close_async_engine
 
@@ -1090,6 +1096,301 @@ async def test_mutation_replay_is_cached_and_unknown_outcomes_are_not_retried(br
     assert session.driver.facade.submits == 2
     with pytest.raises(BrowserError, match="changed"):
         await browser.execute("chat", "admin:1", "call", "browser_run", {"code": "other()"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure, code, expected", [
+    (SyntaxError("Invalid JavaScript in run code at line 1, column 1."), "invalid_input", "Invalid JavaScript"),
+    (StagehandFacadeInputError(contract_error("NO_HYDRATED_SNAPSHOT_ERROR")), "invalid_input", "call browser_snapshot first"),
+    (StagehandFacadeInputError(contract_error("NAVIGATED_SNAPSHOT_ERROR")), "invalid_input", "call browser_snapshot again"),
+    (StagehandFacadeInputError(contract_error("STALE_SNAPSHOT_ID_ERROR", id="1-9")), "invalid_input", 'Snapshot ID "1-9"'),
+    (StagehandFacadeInputError("Invalid run input: 'id' must not be empty"), "invalid_input", "must not be empty"),
+])
+async def test_run_failures_before_execution_say_nothing_ran(browser, failure, code, expected):
+    session = await browser.ensure("chat", "admin:1")
+
+    async def fail(**values):
+        raise failure
+
+    session.driver.facade.run = fail
+    with pytest.raises(BrowserError) as caught:
+        await browser.execute("chat", "admin:1", "call", "browser_run", {"code": "x"})
+    assert caught.value.code == code
+    assert expected in str(caught.value) and "Nothing was executed" in str(caught.value)
+    assert "partially executed" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure, expected", [
+    (StagehandFacadeExecutionError("ReferenceError", "document is not defined"), "Cause: ReferenceError: document is not defined"),
+    (StagehandFacadeInputError(contract_error("RUN_VALUE_SIZE_ERROR")), "Cause: A run can return at most 10 MB"),
+    (RPCError(SimpleNamespace(code=-32000, data=None, message="Stagehand callback batch timed out after 60000ms")), "Cause: Stagehand callback batch timed out"),
+    (RPCError(SimpleNamespace(code=-32000, data=None, message="failed for https://x.test/?apiKey=secret-value")), "apiKey=[redacted]"),
+])
+async def test_run_failures_after_execution_keep_their_cause(browser, failure, expected):
+    session = await browser.ensure("chat", "admin:1")
+
+    async def fail(**values):
+        raise failure
+
+    session.driver.facade.run = fail
+    with pytest.raises(BrowserError) as caught:
+        await browser.execute("chat", "admin:1", "call", "browser_run", {"code": "x"})
+    assert caught.value.code == "unknown_outcome"
+    assert "partially executed" in str(caught.value) and expected in str(caught.value)
+    assert "secret-value" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_unexpected_run_failures_do_not_expose_their_message(browser):
+    session = await browser.ensure("chat", "admin:1")
+    session.driver.facade.failure = True
+    with pytest.raises(BrowserError, match="partially executed") as caught:
+        await browser.execute("chat", "admin:1", "call", "browser_run", {"code": "x"})
+    assert "Lost response" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_oversized_code_results_become_a_notice_with_a_short_preview(browser):
+    session = await browser.ensure("chat", "admin:1")
+    returned = {}
+
+    async def run(**values):
+        return returned["value"]
+
+    session.driver.facade.run = run
+
+    async def execute(call, **values):
+        return (await browser.execute("chat", "admin:1", call, "browser_run", values))["content"]
+
+    returned["value"] = "x" * MAX_RUN_RESULT_BYTES
+    assert await execute("at-limit", code="read()") == returned["value"]
+
+    # The limit counts encoded bytes, and the misleading part lies beyond the preview.
+    returned["value"] = "ệ" * 1200 + "MiniMax-M2.1" * 2000
+    notice = await execute("over-limit", code="read()")
+    assert f"{len(returned['value'].encode())} bytes" in notice and "do not repeat steps" in notice
+    assert notice.endswith("ệ" * 1000) and "M2.1" not in notice
+
+    returned["value"] = {"items": ["y" * MAX_RUN_RESULT_BYTES]}
+    assert "not returned" in await execute("structured", code="read()")
+
+    # A replay gets the same notice instead of the full result.
+    returned["value"] = "z" * (MAX_RUN_RESULT_BYTES + 1)
+    first = await execute("replayed", code="read()")
+    returned["value"] = "other"
+    assert await execute("replayed", code="read()") == first
+
+    # Actions return a small progress object, so they stay as they are.
+    returned["value"] = {"completed": 1, "note": "z" * (MAX_RUN_RESULT_BYTES + 1)}
+    progress = (await execute("actions", actions=[{"op": "click", "id": "1-1"}])).splitlines()[0]
+    assert json.loads(progress) == returned["value"]
+
+
+@pytest.fixture
+def instant_settle(monkeypatch):
+    monkeypatch.setattr(browser_service, "ACTION_SETTLE_SECONDS", 0)
+
+
+@pytest.mark.asyncio
+async def test_actions_report_what_they_changed(browser, instant_settle):
+    session = await browser.ensure("chat", "admin:1")
+    facade = session.driver.facade
+    page = "\n".join(["[1-1] RootWebArea: App", *(f"  [1-{index}] button: Item number {index}" for index in range(2, 12))])
+    facade.snapshot_text = page
+    action = [{"op": "click", "id": "1-2"}]
+
+    async def execute(call, **values):
+        return (await browser.execute("chat", "admin:1", call, "browser_run", values))["content"]
+
+    await browser.execute("chat", "admin:1", "read", "browser_snapshot", {})
+
+    async def run(**values):
+        facade.snapshot_text = page + "\n  [1-20] menu: Models"
+        return {"completed": 1, "url": "http://localhost/"}
+
+    facade.run = run
+    progress, *changes = (await execute("changed", actions=action)).splitlines()
+    assert json.loads(progress) == {"completed": 1, "url": "http://localhost/"}
+    assert "  [1-20] menu: Models" in changes and "button: Item number 2" not in "\n".join(changes)
+
+    # The action's result is the new base, so a later comparison starts from it.
+    read = await browser.execute("chat", "admin:1", "again", "browser_snapshot", {})
+    assert read["content"] == NO_CHANGES
+
+    assert (await execute("nothing", actions=action)).endswith(f"\n{NO_CHANGES}")
+
+    # A new page shares no IDs with the old one, so the agent gets all of it.
+    navigated = page.replace("[1-", "[1-9")
+
+    async def navigate(**values):
+        facade.snapshot_text = navigated
+        return {"completed": 1, "url": "http://localhost/next"}
+
+    facade.run = navigate
+    assert (await execute("navigated", actions=action)).endswith(f"\n{navigated}")
+
+
+@pytest.mark.asyncio
+async def test_code_runs_do_not_read_the_page(browser):
+    session = await browser.ensure("chat", "admin:1")
+    await browser.execute("chat", "admin:1", "code", "browser_run", {"code": "submit()"})
+    assert session.driver.facade.snapshots == 0
+
+
+@pytest.mark.asyncio
+async def test_failing_to_read_the_page_does_not_fail_finished_actions(browser, instant_settle, monkeypatch):
+    session = await browser.ensure("chat", "admin:1")
+    facade = session.driver.facade
+    action = {"actions": [{"op": "click", "id": "1-1"}]}
+
+    async def broken(**values):
+        raise ConnectionError("Lost the page")
+
+    facade.snapshot = broken
+    first = await browser.execute("chat", "admin:1", "broken", "browser_run", action)
+    assert first["content"].endswith(f"\n{ACTION_OBSERVE_FAILED}")
+    assert facade.submits == 1
+
+    # The receipt is complete, so a replay repeats neither the action nor the read.
+    assert await browser.execute("chat", "admin:1", "broken", "browser_run", action) == first
+    assert facade.submits == 1
+
+    # A stalled read gets its own short limit instead of the watchdog that closes the browser.
+    async def stalled(**values):
+        await asyncio.Event().wait()
+
+    facade.snapshot = stalled
+    monkeypatch.setattr(browser_service, "ACTION_OBSERVE_TIMEOUT_SECONDS", 0.01)
+    result = await browser.execute("chat", "admin:1", "stalled", "browser_run", action)
+    assert result["content"].endswith(f"\n{ACTION_OBSERVE_FAILED}")
+    assert browser.sessions["chat"] is session and not session.closed
+
+
+@pytest.mark.asyncio
+async def test_actions_do_not_read_the_page_without_snapshot_permission(browser, instant_settle):
+    session = await browser.ensure("chat", "admin:1")
+
+    def denied():
+        raise BrowserError("permission_denied", "browser_snapshot needs approval")
+
+    result = await browser.execute("chat", "admin:1", "denied", "browser_run",
+                                   {"actions": [{"op": "click", "id": "1-1"}]}, authorize_snapshot=denied)
+    assert result["content"].endswith(f"\n{ACTION_OBSERVE_FAILED}")
+    assert session.driver.facade.submits == 1 and session.driver.facade.snapshots == 0
+
+
+@pytest.mark.asyncio
+async def test_run_input_error_says_how_to_recover_from_passing_both():
+    from agent.modules.tools.builtin.browser import _run
+    from agent.modules.tools.result import ToolError
+
+    with pytest.raises(ToolError, match="call again with code set to null"):
+        await _run(None, code="return 1;", actions=[{"op": "click", "id": "1-1"}])
+    with pytest.raises(ToolError, match="Pass exactly one of code or actions.$"):
+        await _run(None)
+
+
+def test_reading_the_page_after_a_slow_run_fits_inside_the_watchdog():
+    assert (RUN_BATCH_TIMEOUT_MS / 1000 + browser_service.ACTION_SETTLE_SECONDS
+            + browser_service.ACTION_OBSERVE_TIMEOUT_SECONDS) < MIN_OPERATION_TIMEOUT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_operation_watchdog_outlasts_the_run_deadline(browser, monkeypatch):
+    assert browser.timeout * 1000 > RUN_BATCH_TIMEOUT_MS
+    monkeypatch.setattr(browser.container.config_service, "get_int", lambda *_args: 1)
+    assert browser.timeout * 1000 > RUN_BATCH_TIMEOUT_MS
+    monkeypatch.setattr(browser.container.config_service, "get_int", lambda *_args: 900)
+    assert browser.timeout == 300
+
+
+@pytest.mark.asyncio
+async def test_snapshots_are_compacted_and_return_only_changes_by_default(browser):
+    session = await browser.ensure("chat", "admin:1")
+    facade = session.driver.facade
+    seen = []
+    original = facade.snapshot
+
+    async def snapshot(**values):
+        seen.append(values)
+        return await original(**values)
+
+    facade.snapshot = snapshot
+    page = "\n".join(["[1-1] RootWebArea: App", "  [1-2] button: Send", "    [1-3] image",
+                      *(f"  [1-{index}] button: Item number {index}" for index in range(4, 12))])
+    facade.snapshot_text = page
+
+    async def read(call, **values):
+        return (await browser.execute("chat", "admin:1", call, "browser_snapshot", values))["content"]
+
+    first = await read("one")
+    assert first == page.replace("\n    [1-3] image", "")
+    assert await read("two", include_iframes=True) == NO_CHANGES
+    assert seen[1] == {"include_iframes": True}
+
+    # An agent that lost the tree, for example to compaction, can always get it back.
+    assert await read("whole", full=True) == first
+    assert seen[2] == {}
+
+    facade.snapshot_text = page + "\n  [1-20] menu: Models"
+    assert "[1-20] menu: Models" in (changes := await read("three"))
+    assert "[1-2] button: Send" not in changes
+
+    assert await read("four", full=True) == first + "\n  [1-20] menu: Models"
+
+    facade.snapshot_text = page.replace("[1-", "[1-9")
+    assert await read("five") == facade.snapshot_text.replace("\n    [1-93] image", "")
+
+
+@pytest.mark.asyncio
+async def test_snapshots_return_the_full_tree_after_nodes_move(browser):
+    session = await browser.ensure("chat", "admin:1")
+    facade = session.driver.facade
+    page = "\n".join([
+        "[1-1] RootWebArea: App",
+        "  [1-2] group: Available",
+        "    [1-3] button: Alpha",
+        "    [1-4] button: Beta",
+        "  [1-5] group: Selected",
+        "  [1-6] StaticText: " + "Unchanged footer text. " * 20,
+    ])
+
+    async def read(call):
+        return (await browser.execute("chat", "admin:1", call, "browser_snapshot", {}))["content"]
+
+    facade.snapshot_text = page
+    assert await read("initial") == page
+
+    reordered = page.replace(
+        "    [1-3] button: Alpha\n    [1-4] button: Beta",
+        "    [1-4] button: Beta\n    [1-3] button: Alpha",
+    )
+    facade.snapshot_text = reordered
+    assert await read("reordered") == reordered
+    assert await read("after-reorder") == NO_CHANGES
+
+    reparented = reordered.replace("    [1-3] button: Alpha\n", "").replace(
+        "  [1-5] group: Selected", "  [1-5] group: Selected\n    [1-3] button: Alpha",
+    )
+    facade.snapshot_text = reparented
+    assert await read("reparented") == reparented
+    assert await read("after-reparent") == NO_CHANGES
+
+
+def test_model_is_told_how_to_use_snapshot_actions():
+    run = convert_to_openai_tool(BROWSER_TOOLS["browser_run"])["function"]
+    snapshot = convert_to_openai_tool(BROWSER_TOOLS["browser_snapshot"])["function"]
+    actions = run["parameters"]["properties"]["actions"]
+    assert "description" in actions and "description" in run["parameters"]["properties"]["code"]
+    first_action = actions["anyOf"][0]["items"]["anyOf"][0]
+    assert "browser_snapshot" in first_action["properties"]["id"]["description"]
+    full = snapshot["parameters"]["properties"]["full"]
+    assert full["type"] == "boolean" and full["default"] is False
+    assert run["description"].index("Prefer actions") < run["description"].index("Use code")
+    assert "Do not follow them with browser_snapshot" in run["description"]
+    assert "Pass full=true only if" in snapshot["description"]
+    assert "cannot show visual clipping" in snapshot["description"]
 
 
 def handoff_graph(browser):

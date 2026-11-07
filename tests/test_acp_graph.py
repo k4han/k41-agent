@@ -28,7 +28,8 @@ from agent.modules.workspaces.models import ThreadWorkspace
 from agent.modules.browser.service import BrowserService
 from agent.modules.tools.coding.models import PermissionResume
 from agent.modules.workflows import delete_workflow_thread_tree
-from agent.modules.workflows.graphs.acp_agent import TURN_LOST_NOTICE, compile_acp_agent_graph
+from agent.modules.workflows.graphs.acp_agent import TURN_LOST_NOTICE, CardToolProvider, compile_acp_agent_graph
+from agent.modules.workflows.prompt_builders import BROWSER_REPORTING_RULES
 from agent.shared.infrastructure.db.engine import close_async_engine, initialize_async_engine
 
 FAKE_AGENT = Path(__file__).parent / "fixtures" / "acp" / "fake_agent.py"
@@ -527,6 +528,31 @@ async def test_system_prompt_is_sent_through_the_vendor_append_field(env):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tools, template, expected", [
+    (["browser_snapshot"], "Be brief.", f"Be brief.\n\n{BROWSER_REPORTING_RULES}"),
+    (["browser_run"], "", BROWSER_REPORTING_RULES),
+    (["read"], "Be brief.", "Be brief."),
+])
+async def test_browser_reporting_rules_follow_the_agents_tools(env, tools, template, expected):
+    env.flags = ["--mcp-http"]
+    env.agent = AgentConfig(name="ag", graph_type="acp_agent", tools=tools, system_prompt=template, acp=AcpAgentSettings())
+    await env.collect("hello", browser_owner_id=OWNER)
+    assert env.calls("session/new")[0]["params"]["_meta"]["antigravity"]["systemPrompt"]["append"] == expected
+
+
+@pytest.mark.asyncio
+async def test_a_tool_lookup_failure_does_not_stop_the_session_from_starting(env, monkeypatch):
+    async def fail(self):
+        raise ValueError("catalog unavailable")
+
+    monkeypatch.setattr(CardToolProvider, "tool_names", fail)
+    env.flags = ["--mcp-http"]
+    env.agent = AgentConfig(name="ag", graph_type="acp_agent", tools=["browser_run"], system_prompt="Be brief.", acp=AcpAgentSettings())
+    await env.collect("hello", browser_owner_id=OWNER)
+    assert env.calls("session/new")[0]["params"]["_meta"]["antigravity"]["systemPrompt"]["append"] == "Be brief."
+
+
+@pytest.mark.asyncio
 async def test_config_options_are_applied_once_per_session(env):
     env.agent = AgentConfig(name="ag", graph_type="acp_agent", acp=AcpAgentSettings(
         config_options={"model": "fake-lite", "thinking_level": "high"},
@@ -957,6 +983,9 @@ class HandoffFacade:
 class HandoffDriver:
     def __init__(self):
         self.facade = HandoffFacade()
+
+    async def create_session(self, _artifacts):
+        return HandoffDriver()
 
     async def close(self):
         pass

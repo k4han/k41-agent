@@ -17,7 +17,7 @@ const settings = Object.fromEntries([
   ['executable_path', 'Chrome executable', '', 'text'],
   ['storage_root', 'Browser storage root', '', 'text'],
   ['idle_ttl_seconds', 'Browser idle timeout (seconds)', 600, 'number'],
-  ['operation_timeout_seconds', 'Browser operation timeout (seconds)', 60, 'number'],
+  ['operation_timeout_seconds', 'Browser operation timeout (seconds)', 75, 'number'],
   ['stream_quality', 'Live image quality', 50, 'number'],
   ['stream_max_width', 'Maximum live image width', 1280, 'number'],
   ['stream_max_height', 'Maximum live image height', 720, 'number'],

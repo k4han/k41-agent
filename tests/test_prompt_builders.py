@@ -18,6 +18,13 @@ def _build(tools: list[SimpleNamespace]) -> str:
     )
 
 
+def test_browser_reporting_rules_inject_only_with_browser_tools() -> None:
+    for tool_name in ("browser_run", "browser_snapshot", "browser_screenshot", "browser_handoff"):
+        assert prompt_builders.BROWSER_REPORTING_RULES in _build([SimpleNamespace(name=tool_name)]), tool_name
+    assert prompt_builders.BROWSER_REPORTING_RULES not in _build([SimpleNamespace(name="web_fetch")])
+    assert prompt_builders.BROWSER_REPORTING_RULES not in _build([])
+
+
 def test_workspace_storage_prompt_injects_for_filesystem_tools() -> None:
     for tool_name in ("list_dir", "read", "write", "edit", "glob", "grep"):
         prompt = _build([SimpleNamespace(name=tool_name)])
