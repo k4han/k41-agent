@@ -1,4 +1,5 @@
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createStore, reconcile } from "solid-js/store";
 import { Bot, Download, RefreshCw } from "lucide-solid";
 
 import { useToast } from "@/components/Toast";
@@ -45,7 +46,7 @@ function errorText(err: unknown, fallback: string): string {
 }
 
 export function AcpAgentsPage() {
-  const [agents, setAgents] = createSignal<AcpAgent[]>();
+  const [agents, setAgents] = createStore<{ items: AcpAgent[] | undefined }>({ items: undefined });
   const [loadError, setLoadError] = createSignal("");
   const [refreshing, setRefreshing] = createSignal(false);
   let disposed = false;
@@ -56,12 +57,13 @@ export function AcpAgentsPage() {
     try {
       const payload = await apiFetch<{ agents: AcpAgent[] }>(`${API_PATHS.acpAgents}${refresh ? "?refresh=true" : ""}`);
       if (disposed) return;
-      setAgents(payload.agents);
+      // Keep panels and their form state mounted across polling snapshots.
+      setAgents("items", reconcile(payload.agents, { key: "id" }));
       setLoadError("");
     } catch (err) {
       if (!disposed) setLoadError(errorText(err, "Could not load ACP agents."));
     }
-    const active = agents()?.some((agent) => agent.job?.state === "running" || agent.sign_in?.status === "pending");
+    const active = agents.items?.some((agent) => agent.job?.state === "running" || agent.sign_in?.status === "pending");
     if (!disposed && active) timer = setTimeout(() => void load(), POLL_MS);
   };
 
@@ -82,8 +84,8 @@ export function AcpAgentsPage() {
           </p>
         </div>
         <Show when={loadError()}><p class="hint" role="alert">{loadError()}</p></Show>
-        <Show when={agents()} fallback={<Show when={!loadError()}><p class="hint" role="status">Starting the agent to check its status…</p></Show>}>
-          <For each={agents()}>{(agent) => <AcpAgentPanel agent={agent} refreshing={refreshing()} onRefresh={refresh} onChanged={() => load(true)} onPoll={() => load()} />}</For>
+        <Show when={agents.items} fallback={<Show when={!loadError()}><p class="hint" role="status">Starting the agent to check its status…</p></Show>}>
+          <For each={agents.items}>{(agent) => <AcpAgentPanel agent={agent} refreshing={refreshing()} onRefresh={refresh} onChanged={() => load(true)} onPoll={() => load()} />}</For>
         </Show>
       </div>
     </SettingsLayout>
@@ -108,6 +110,12 @@ function AcpAgentPanel(props: {
   const methods = createMemo(() => props.agent.auth.methods);
   const browserMethods = createMemo(() => methods().filter((method) => method.id !== API_KEY_METHOD));
   const acceptsApiKey = createMemo(() => methods().some((method) => method.id === API_KEY_METHOD));
+
+  createEffect(() => {
+    // A callback belongs only to the current sign-in attempt.
+    signIn()?.attempt_id;
+    setCallbackUrl("");
+  });
 
   const run = async (action: () => Promise<unknown>, fallback: string) => {
     setBusy(true);
