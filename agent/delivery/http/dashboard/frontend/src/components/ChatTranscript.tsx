@@ -20,7 +20,7 @@ export function ChatWelcomeHero() {
         </div>
         <h1 class="chat-welcome-hero-title">How can Kai help you today?</h1>
         <p class="chat-welcome-hero-desc">
-          Write a message below. Use the project picker beside the + button to choose a project and backend, or start with a temporary workspace.
+          Write a message below. Use the project picker beside the + button to choose a project and backend, or start with No workspace.
         </p>
       </div>
     </div>

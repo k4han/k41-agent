@@ -54,6 +54,7 @@ export default defineConfig({
       "/channels/identities": fastApiTarget,
       "/settings": fastApiTarget,
       "/scheduler/jobs": fastApiTarget,
+      "/scheduler/runs": fastApiTarget,
       "/tasks/list": fastApiTarget,
       "/tasks": fastApiTarget,
       "/login": fastApiTarget,

@@ -118,7 +118,7 @@ function workspaceSelectionReady(selection: WorkspaceSelectionDraft | null): boo
   if (!selection) {
     return false;
   }
-  if (selection.source === "temp") {
+  if (selection.source === "no-workspace") {
     return true;
   }
   if (selection.source === "path") {
@@ -131,7 +131,7 @@ function workspaceSelectionReady(selection: WorkspaceSelectionDraft | null): boo
 }
 
 function workspaceSelectionLocator(selection: WorkspaceSelectionDraft): string {
-  if (selection.source === "temp") {
+  if (selection.source === "no-workspace") {
     return "";
   }
   if (selection.source === "path") {
@@ -653,7 +653,7 @@ export function ChatPage() {
     }
 
     const selection = workspaceSelection();
-    if (selection?.source === "temp") {
+    if (selection?.source === "no-workspace") {
       // Explicitly opted into a temporary workspace. The backend provisions a
       // hidden temporary workspace for the thread automatically.
       return null;
@@ -841,7 +841,7 @@ export function ChatPage() {
   const pageSubtitle = createMemo(() => (
     currentThreadId()
       ? "Continue this thread."
-      : "Start a conversation — a temporary workspace is created automatically when you send a message. Link a project if you want to work with real files."
+      : "Start a conversation with No workspace. Files stay in a private session folder, or you can select a project."
   ));
   const isBackgroundThread = createMemo(() => threadData()?.kind === "background");
   // Background and scheduled runs execute outside the chat stream manager, so there is no stream to rejoin.

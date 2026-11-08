@@ -897,7 +897,7 @@ class HostMirrorService:
                         revision = applied["merged_revision"]
                         state.update(path=destination, revision=revision, remote_revision=revision)
                         host_status = "synced"
-                    target = WorkspaceRef(locator=state["path"], metadata={"temp": True})
+                    target = WorkspaceRef(locator=state["path"], metadata={"no_workspace": True})
                     await record_target(target)
                     await phase("verifying")
                     await self.service.transfer.verify(target, self.temporary_storage, key, revision)
@@ -913,7 +913,7 @@ class HostMirrorService:
                         raise
                 target.metadata.update({name: value for name, value in ref.metadata.items()
                                         if name not in {"root", "status", "last_used_at", "_require_running"}})
-                target.metadata["temp"] = True
+                target.metadata["no_workspace"] = True
                 target.metadata.update(files_restored=True, environment_state="unknown")
                 state.update(generation=hashlib.sha256(uuid4().bytes).hexdigest(), status=host_status, backend_status="started")
                 if host_status == "synced":

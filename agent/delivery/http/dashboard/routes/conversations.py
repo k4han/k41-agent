@@ -21,8 +21,6 @@ from agent.delivery.http.dashboard.routes.helpers.sse import (
 from agent.delivery.http.dashboard.routes.helpers.workspace import (
     NO_WORKSPACE_KEY,
     NO_WORKSPACE_LABEL,
-    TEMP_WORKSPACE_KEY,
-    TEMP_WORKSPACE_LABEL,
     workspace_ref_for_thread,
 )
 from agent.modules.agent_runtime import (
@@ -105,14 +103,11 @@ def _workspace_summary(workspace: Any | None) -> dict[str, Any]:
         }
     binding = bind_workspace_ref(workspace)
     if is_temp_workspace(workspace):
-        # Temporary workspaces are provisioned per thread, so each one would
-        # otherwise get its own scope. Group them under a single shared key so
-        # the UI renders one "Temp workspace" section for all of them. The
-        # underlying binding stays per-thread so storage stays isolated.
+        # Group session-owned directories without sharing their bindings.
         return {
             "workspace": binding.model_dump(),
-            "workspace_key": TEMP_WORKSPACE_KEY,
-            "workspace_label": TEMP_WORKSPACE_LABEL,
+            "workspace_key": NO_WORKSPACE_KEY,
+            "workspace_label": NO_WORKSPACE_LABEL,
         }
     return {
         "workspace": binding.model_dump(),

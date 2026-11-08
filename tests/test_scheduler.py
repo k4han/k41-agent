@@ -290,7 +290,7 @@ async def test_new_jobs_use_updated_timezone_without_restart(
                 "configurable": {"thread_id": "new-conversation"},
                 "metadata": {"usage_context": {"platform": "telegram", "user_id": "123"}},
             })
-            result = schedule_task.func("Remind me to eat.", trigger_type, trigger_args, runtime)
+            result = await schedule_task.coroutine("Remind me to eat.", trigger_type, trigger_args, runtime)
             assert "Successfully scheduled" in result
             assert "UTC" not in result
             assert "Remind me to eat." not in result
@@ -381,37 +381,34 @@ def test_scheduler_job_reference_migration_skips_missing_table():
 
 
 @pytest.mark.asyncio
-async def test_execute_scheduled_task_uses_scheduled_thread_for_usage(monkeypatch):
+async def test_execute_scheduled_task_uses_scheduled_thread_for_usage(monkeypatch, tmp_path):
     import agent.modules.conversations as conversations_module
-    import agent.modules.workflows as workflows_module
+    import agent.modules.workspaces as workspaces_module
     from agent.modules.scheduler import service as scheduler_service
+    from unittest.mock import AsyncMock
 
-    captured: dict = {}
-
-    class FakeGraph:
-        async def aupdate_state(self, config, values, *, as_node):
-            captured["state_config"] = config
-            captured["state_values"] = values
-            captured["state_node"] = as_node
+    captured: dict = {"upserts": []}
+    workspace = workspaces_module.WorkspaceRef(locator=str(tmp_path), metadata={"no_workspace": True})
 
     async def fake_run_agent_full(**kwargs):
         captured["run"] = kwargs
         return "done"
 
     async def fake_upsert_conversation_thread(**kwargs):
-        captured["upsert"] = kwargs
+        captured["upserts"].append(kwargs)
 
     async def fake_send_notification(*args, **kwargs):
         captured["notification"] = {"args": args, "kwargs": kwargs}
         return True
 
     monkeypatch.setattr(scheduler_service, "run_agent_full", fake_run_agent_full)
-    monkeypatch.setattr(workflows_module, "get_workflow_graph", lambda name: FakeGraph())
-    monkeypatch.setattr(
-        workflows_module,
-        "make_run_config",
-        lambda *, thread_id: {"configurable": {"thread_id": thread_id}},
-    )
+    monkeypatch.setattr(scheduler_service, "_record_run_start", AsyncMock(return_value=False))
+    create = AsyncMock(return_value=workspace)
+    remember = AsyncMock()
+    monkeypatch.setattr(workspaces_module, "create_no_workspace", create)
+    monkeypatch.setattr(workspaces_module, "remember_thread_workspace_ref", remember)
+    inject = AsyncMock(side_effect=AssertionError("Scheduler results must stay in their own session."))
+    monkeypatch.setattr(conversations_module, "inject_agent_message_pair", inject)
     monkeypatch.setattr(scheduler_service, "_send_notification", fake_send_notification)
     monkeypatch.setattr(
         conversations_module,
@@ -425,19 +422,16 @@ async def test_execute_scheduled_task_uses_scheduled_thread_for_usage(monkeypatc
         "daily summary",
     )
 
-    from agent.modules.agent_runtime.session import SessionManager
-
-    assert "agent_name" not in captured["upsert"]
     run = captured["run"]
+    assert len(captured["upserts"]) == 1
+    assert captured["upserts"][0]["kind"] == "scheduled"
+    assert captured["upserts"][0]["thread_id"] == run["thread_id"]
+    assert run["workspace"] == workspace
+    create.assert_awaited_once_with(run["thread_id"])
+    remember.assert_awaited_once_with(run["thread_id"], workspace)
+    inject.assert_not_awaited()
     assert len(run["thread_id"]) == 32
     assert run["usage_context"]["platform"] == "bg"
     assert run["usage_context"]["user_id"] == "6197833678"
-    assert captured["state_config"] == {
-        "configurable": {"thread_id": SessionManager.make_thread_id("telegram", "6197833678", "6197833678")}
-    }
-    assert captured["state_node"] == "llm"
-    messages = captured["state_values"]["messages"]
-    assert messages[0].content == "[Scheduled Task]\ndaily summary"
-    assert messages[1].content == "done"
     assert captured["notification"]["args"][:2] == ("telegram", "6197833678")
     assert captured["notification"]["args"][2] == "**Scheduled task:** daily summary\n\ndone"

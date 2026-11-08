@@ -21,9 +21,13 @@ from agent.modules.scheduler.history import (
     DEFAULT_RUN_LIST_LIMIT,
     MAX_RUN_LIST_LIMIT,
     TRIGGER_SOURCE_MANUAL,
+    delete_run,
     delete_runs,
     list_runs,
 )
+from agent.modules.scheduler.service import resolve_scheduled_project
+from agent.modules.projects import ProjectWorkspaceError
+from agent.delivery.http.dashboard.routes.helpers.workspace import workspace_http_error
 
 
 router = APIRouter()
@@ -58,6 +62,18 @@ async def clear_scheduler_runs(
     return {"status": "deleted", "deleted": deleted}
 
 
+@router.delete("/scheduler/runs/{run_id}")
+async def delete_scheduler_run(run_id: str) -> dict[str, str]:
+    """Delete a single finished execution from run history."""
+    try:
+        deleted = await delete_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found.")
+    return {"status": "deleted", "run_id": run_id}
+
+
 class CreateJobBody(BaseModel):
     """Request body for creating a new scheduled job."""
 
@@ -66,6 +82,7 @@ class CreateJobBody(BaseModel):
     user_id: str = Field(..., description="User ID to execute the task as.")
     trigger_type: TriggerType = Field(..., description="APScheduler trigger type (e.g. 'cron', 'interval', 'date').")
     trigger_args: dict[str, Any] = Field(..., description="Trigger arguments (e.g. for cron: hour, minute, day_of_week).")
+    project_id: int | None = Field(default=None, ge=1, description="Explicit project selection; otherwise each run uses No workspace.")
 
 
 class UpdateJobBody(BaseModel):
@@ -76,6 +93,7 @@ class UpdateJobBody(BaseModel):
     user_id: str | None = Field(default=None, description="New user ID.")
     trigger_type: TriggerType | None = Field(default=None, description="New trigger type.")
     trigger_args: dict[str, Any] | None = Field(default=None, description="New trigger arguments.")
+    project_id: int | None = Field(default=None, ge=1, description="Project selection; null resets to No workspace.")
 
 
 @router.post("/scheduler/jobs")
@@ -84,6 +102,7 @@ async def create_scheduler_job(body: CreateJobBody) -> dict[str, Any]:
     scheduler = get_scheduler_or_503()
 
     try:
+        await resolve_scheduled_project(body.project_id)
         trigger_type, trigger_args = normalize_trigger(
             body.trigger_type,
             body.trigger_args,
@@ -96,23 +115,31 @@ async def create_scheduler_job(body: CreateJobBody) -> dict[str, Any]:
             task=body.task,
             trigger_type=trigger_type,
             trigger_args=trigger_args,
+            project_id=body.project_id,
         )
+    except (KeyError, ProjectWorkspaceError) as exc:
+        raise workspace_http_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Failed to create job: {exc}") from exc
 
     return {"status": "created", "job": serialize_job(job)}
+
+
 @router.put("/scheduler/jobs/{job_id}")
 async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, Any]:
     """Update an existing scheduled job's task, platform, user, or trigger."""
     job = get_job_or_404(job_id)
 
-    if body.task is None and body.platform is None and body.user_id is None and body.trigger_type is None:
+    project_changed = "project_id" in body.model_fields_set
+    if body.task is None and body.platform is None and body.user_id is None and body.trigger_type is None and not project_changed:
         raise HTTPException(status_code=400, detail="No fields to update.")
 
     try:
-        if body.task is not None or body.platform is not None or body.user_id is not None:
+        if project_changed:
+            await resolve_scheduled_project(body.project_id)
+        if body.task is not None or body.platform is not None or body.user_id is not None or project_changed:
             new_kwargs = dict(job.kwargs)
             if body.task is not None:
                 new_kwargs["task"] = body.task
@@ -120,6 +147,8 @@ async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, An
                 new_kwargs["platform"] = body.platform
             if body.user_id is not None:
                 new_kwargs["user_id"] = body.user_id
+            if project_changed:
+                new_kwargs["project_id"] = body.project_id
             job.modify(kwargs=new_kwargs)
 
         if body.trigger_type is not None and body.trigger_args is not None:
@@ -132,6 +161,8 @@ async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, An
             job.reschedule(trigger_type, **trigger_args)
     except HTTPException:
         raise
+    except (KeyError, ProjectWorkspaceError) as exc:
+        raise workspace_http_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -188,5 +219,6 @@ async def run_scheduler_job_now(
         task=task,
         scheduler_job_id=job.id,
         trigger_source=TRIGGER_SOURCE_MANUAL,
+        project_id=job.kwargs.get("project_id"),
     )
     return {"status": "queued", "job_id": job_id}

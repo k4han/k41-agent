@@ -20,7 +20,7 @@ const local = { backend: 'local', locator: '/projects/flask-test', label: 'flask
 const github = { backend: 'daytona', locator: 'cloudflare-sandbox', label: 'cloudflare', metadata: {
   source: 'github', repository_id: 42, repository_full_name: 'team/cloudflare', root: '/workspace', status: 'started',
 } };
-const temporary = { backend: 'local', locator: '/scratch/thread-old', label: 'Temp workspace', metadata: { temp: true, thread_id: 'old' } };
+const temporary = { backend: 'local', locator: '/scratch/thread-old', label: 'No workspace', metadata: { temp: true, thread_id: 'old' } };
 const binding = (key, label, execution) => ({ scope: { key, label, kind: key.split(':')[0], metadata: {} }, execution });
 const threads = [
   ...Array.from({ length: 27 }, (_, index) => ({ thread_id: `local-${index}`,
@@ -28,7 +28,7 @@ const threads = [
     workspace: binding('local:/projects/flask-test', 'flask test', local) })),
   { thread_id: 'github-0', title: 'Cloudflare agent setup with Telegram integration', workspace: binding('github:42', 'cloudflare', github) },
   ...Array.from({ length: 6 }, (_, index) => ({ thread_id: `temp-${index}`, title: `Temporary chat ${index}`,
-    workspace_key: 'temp', workspace_label: 'Temp workspace', workspace: binding(`local:/scratch/thread-${index}`, 'Temp workspace', { ...temporary, locator: `/scratch/thread-${index}` }) })),
+    workspace_key: 'no-workspace', workspace_label: 'No workspace', workspace: binding(`local:/scratch/thread-${index}`, 'No workspace', { ...temporary, locator: `/scratch/thread-${index}` }) })),
 ].map(thread => ({ latest_checkpoint_id: '', checkpoint_count: 1, platform: 'dashboard',
   user_id: 'dashboard', channel_id: '', agent_name: 'default', kind: 'interactive', ...thread }));
 const byLatest = (left, right) => Date.parse(right.updated_at || '1970-01-01T00:00:00Z')
@@ -105,7 +105,7 @@ const server = http.createServer(async (req, res) => {
     const thread = threads.find(item => url.pathname === `/dashboard-api/chat-history/${item.thread_id}`);
     res.end(JSON.stringify(thread ? { ...thread, messages: [{ id: 'old-message', role: 'user', content: 'Existing conversation' }] }
       : fixtures[url.pathname] || { tools: [], agents: [], sessions: [], threads: [], packages: [],
-        settings: {}, by_category: {}, backends: [], providers: [], entries: [], changes: [], current_version: 'test' }));
+        settings: {}, by_category: {}, backends: [], providers: [], entries: [], changes: [], tabs: [], images: [], open: false, current_version: 'test' }));
     return;
   }
   const relative = url.pathname.startsWith('/dashboard-assets/') ? url.pathname.slice('/dashboard-assets/'.length) : 'index.html';
@@ -271,7 +271,7 @@ try {
   assert.equal(await js(`document.querySelector('.chat-prompt-input').value`), '', 'same-project action clears the previous draft');
   await js(`document.querySelector('.nav-project-add[aria-label="New chat in cloudflare"]').click()`);
   await send(github);
-  await js(`document.querySelector('.nav-project-add[aria-label="New chat in Temp workspace"]').click()`);
+  await js(`document.querySelector('.nav-project-add[aria-label="New chat in No workspace"]').click()`);
   await send(undefined);
   console.log('PASS: project actions start fresh conversations and preserve local paths, sandbox locators, and GitHub metadata.');
 
@@ -290,7 +290,7 @@ try {
   assert.equal(projectThreadRequests.at(-1).searchParams.get('offset'), '20');
   assert.equal(await js(`!!document.querySelector('${localProject} .nav-project-view-all')`), false, 'exhausted project hides load action');
   assert.equal(await js('location.pathname'), previousPath, 'inline loading preserves the current conversation');
-  assert.equal(await js(`document.querySelectorAll('.nav-history-workspace[aria-label="Temp workspace"] .nav-history-item').length`), 4, 'other projects stay collapsed to previews');
+  assert.equal(await js(`document.querySelectorAll('.nav-history-workspace[aria-label="No workspace"] .nav-history-item').length`), 4, 'other projects stay collapsed to previews');
   await js(`window.dispatchEvent(new CustomEvent('k41:thread-start-running', { detail: { threadId: 'local-26' } }))`);
   await js(`window.dispatchEvent(new CustomEvent('k41:thread-title-updated', { detail: { threadId: 'local-0', title: 'Updated idle conversation' } }))`);
   assert.equal(await js(`document.querySelector('${localProject} .nav-history-link').getAttribute('href')`), '/c/local-26', 'running conversations stay first in expanded projects after idle conversation updates');
@@ -309,8 +309,8 @@ try {
   assert.equal(await js(`!!document.querySelector('.sidebar-resize-handle')`), false);
   await until(() => js(`getComputedStyle(document.querySelector('.nav-project-add')).opacity === '1'`), 'visible mobile project action');
   assert.equal(await js(`document.documentElement.scrollWidth <= innerWidth`), true);
-  await js(`document.querySelector('.nav-history-workspace[aria-label="Temp workspace"] .nav-project-view-all').click()`);
-  await until(() => js(`document.querySelectorAll('.nav-history-workspace[aria-label="Temp workspace"] .nav-history-item').length === 6`), 'mobile inline conversations');
+  await js(`document.querySelector('.nav-history-workspace[aria-label="No workspace"] .nav-project-view-all').click()`);
+  await until(() => js(`document.querySelectorAll('.nav-history-workspace[aria-label="No workspace"] .nav-history-item').length === 6`), 'mobile inline conversations');
   assert.equal(await js(`document.querySelector('.app-layout').classList.contains('app-layout--drawer-open')`), true, 'inline loading keeps the mobile drawer open');
   assert.equal(await js('location.pathname'), '/history');
   await js(`document.querySelector('.nav-project-add').click()`);

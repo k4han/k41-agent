@@ -15,7 +15,8 @@ const dependencies = {
   '@/lib/chatThreads': { threadWorkspaceKey: thread => thread.workspace_key || thread.workspace?.scope.key || 'no-workspace' },
   '@/lib/endpoints': { API_PATHS: { navProjects: '/dashboard-api/nav-projects', navProjectThreads: '/dashboard-api/nav-projects/threads' } },
   '@/lib/uiConstants': { HISTORY_PAGE_SIZE: 20, NAV_PROJECT_THREAD_LIMIT: 4 },
-  '@/lib/workspace': { isTempWorkspace: workspace => workspace?.metadata?.temp === true || workspace?.metadata?.source?.trim().toLowerCase() === 'temp' },
+  '@/lib/workspace': { isNoWorkspace: workspace => workspace?.metadata?.no_workspace === true || workspace?.metadata?.temp === true || workspace?.metadata?.source?.trim().toLowerCase() === 'temp' },
+  '@/lib/workspaceConstants': { NO_WORKSPACE_KEY: 'no-workspace' },
 };
 const exports = {};
 compileFunction(outputText, ['exports', 'require', 'URLSearchParams'])(exports, name => {
@@ -106,13 +107,16 @@ test('removal while inline conversations load discards the response and releases
   assert.equal(store.projectState('old'), undefined);
 });
 
-test('new temporary chats omit the previous execution while real projects keep their workspace', () => {
+test('new No workspace chats omit previous and legacy execution while real projects retain it', () => {
   const execution = { backend: 'local', locator: '/scratch/old', metadata: { temp: true } };
   assert.equal(newProjectWorkspace({ ...project('temp'), threads: [{ workspace: { execution } }] }), null);
   assert.equal(newProjectWorkspace({ ...project('local:/scratch/old'), threads: [{ workspace: { execution } }] }), null);
   const real = { ...execution, metadata: {} };
   assert.equal(newProjectWorkspace({ ...project('real'), threads: [{ workspace: { execution: real } }] }), real);
   assert.equal(newProjectWorkspace(project('no-workspace')), null);
+  const current = { ...execution, metadata: { no_workspace: true } };
+  assert.equal(newProjectWorkspace({ ...project('local:/scratch/old'), workspace: { execution: current } }), null);
+  assert.equal(newProjectWorkspace({ ...project('no-workspace'), workspace: { execution: real } }), null);
 });
 
 test('changes during a pending request coalesce into a refresh and reject the stale response', async () => {

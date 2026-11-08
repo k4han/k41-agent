@@ -54,7 +54,7 @@ type WorkspaceBrowsePayload = {
   truncated: boolean;
 };
 
-export type WorkspaceSourceKey = "path" | "sandbox" | "github" | "temp";
+export type WorkspaceSourceKey = "path" | "sandbox" | "github" | "no-workspace";
 
 export type WorkspaceSelectionDraft = {
   backend: WorkspaceBackendKey;
@@ -81,7 +81,7 @@ export interface WorkspaceSelectorProps {
 
 function sourceForBackend(backendName: string): WorkspaceSourceKey[] {
   if (!isSandboxBackend(backendName)) {
-    return ["path", "temp", "github"];
+    return ["path", "no-workspace", "github"];
   }
   const info = getBackends().find((b) => b.name === backendName);
   const caps = new Set(info?.capabilities ?? []);
@@ -112,7 +112,7 @@ function sourceFromWorkspace(
     return "github";
   }
   if (isTempWorkspace(workspace)) {
-    return "temp";
+    return "no-workspace";
   }
   return defaultSourceForBackend(backend);
 }
@@ -123,7 +123,7 @@ function sourceIcon(source: WorkspaceSourceKey) {
       return <GitBranch size={14} />;
     case "sandbox":
       return <Cloud size={14} />;
-    case "temp":
+    case "no-workspace":
       return <Sparkles size={14} />;
     default:
       return <FolderOpen size={14} />;
@@ -136,8 +136,8 @@ function sourceTitle(source: WorkspaceSourceKey): string {
       return "GitHub";
     case "sandbox":
       return "Cloud Sandbox";
-    case "temp":
-      return "Temporary";
+    case "no-workspace":
+      return "No workspace";
     default:
       return "Local Folder";
   }
@@ -149,8 +149,8 @@ function sourceBadgeLabel(source: WorkspaceSourceKey): string {
       return "GitHub Repository";
     case "sandbox":
       return "Cloud Sandbox";
-    case "temp":
-      return "Temporary Scratchpad";
+    case "no-workspace":
+      return "No workspace";
     default:
       return "Local Directory";
   }
@@ -163,14 +163,14 @@ function getTailPath(fullPath: string): string {
 }
 
 export function WorkspaceSelector(props: WorkspaceSelectorProps) {
-  const availableSources = (name: string) => sourceForBackend(name).filter((source) => props.allowTemporary !== false || source !== "temp");
+  const availableSources = (name: string) => sourceForBackend(name).filter((source) => props.allowTemporary !== false || source !== "no-workspace");
   let selectorRef: HTMLDivElement | undefined;
   const { showToast } = useToast();
   const [backend, setBackend] = createSignal<WorkspaceBackendKey>("local");
   const [source, setSource] = createSignal<WorkspaceSourceKey>(
     props.workspace || props.selection
       ? defaultSourceForBackend(backendFromWorkspace(props.workspace))
-      : props.allowTemporary === false ? "path" : "temp",
+      : props.allowTemporary === false ? "path" : "no-workspace",
   );
   const [localDraft, setLocalDraft] = createSignal(props.defaultWorkingDir || props.workingDir || "");
   const [sandboxId, setSandboxId] = createSignal("");
@@ -323,13 +323,13 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     if (resolvedLabel()) {
       return resolvedLabel();
     }
-    if (source() === "temp") {
-      return "Temporary workspace (auto-provisions on first message)";
+    if (source() === "no-workspace") {
+      return "No workspace (auto-provisions on first message)";
     }
     if (props.workingDir) {
       return workspaceDisplayLabelFromValues("", props.workingDir);
     }
-    return "Temporary workspace (default)";
+    return "No workspace (default)";
   });
 
   const workspaceStatusTitle = createMemo(() =>
@@ -346,7 +346,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   });
 
   const isTempActive = createMemo(() => {
-    return props.selection?.source === "temp" || (!props.selection && !props.workspace);
+    return props.selection?.source === "no-workspace" || (!props.selection && !props.workspace);
   });
 
   const resolveDisabled = createMemo(() => {
@@ -363,7 +363,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     if (src === "github") {
       return !repositoryId();
     }
-    if (src === "temp") {
+    if (src === "no-workspace") {
       return false;
     }
     return true;
@@ -496,8 +496,8 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
       ? sandboxId().trim()
       : "";
     let label = "";
-    if (src === "temp") {
-      label = "Temporary workspace";
+    if (src === "no-workspace") {
+      label = "No workspace";
     } else if (src === "github") {
       label = repository?.full_name || "GitHub repository";
     } else if (src === "path") {
@@ -639,7 +639,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
                     disabled={props.disabled}
                     onClick={() => {
                       setSource(src);
-                      if (src === "temp") {
+                      if (src === "no-workspace") {
                         commitSelection();
                       }
                     }}
@@ -763,17 +763,17 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
               </Match>
 
               {/* TEMPORARY */}
-              <Match when={source() === "temp"}>
+              <Match when={source() === "no-workspace"}>
                 <div class="workspace-panel-temp">
                   <div class="workspace-temp-card">
                     <div class="workspace-temp-icon-container">
                       <Sparkles size={20} />
                     </div>
                     <div class="workspace-temp-info">
-                      <div class="workspace-temp-title">Isolated Scratchpad</div>
+                      <div class="workspace-temp-title">No workspace</div>
                       <p class="workspace-temp-text">
-                        Start coding immediately. The agent creates files in an ephemeral session folder.
-                        No local files will be modified. All session data is discarded when the thread is deleted.
+                        Work without linking a project. Files are stored in a private folder for this session.
+                        The folder is retained with the conversation and cleaned up when it is deleted.
                       </p>
                     </div>
                     <div class="workspace-temp-action">

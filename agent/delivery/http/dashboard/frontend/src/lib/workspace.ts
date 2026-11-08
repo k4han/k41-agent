@@ -1,5 +1,6 @@
 import type { SandboxBackendKey, WorkspaceBinding, WorkspaceRef, WorkspaceScope } from "../types";
 import { isSandboxBackend, sandboxBackendDefaultRoot } from "../types";
+import { NO_WORKSPACE_LABEL } from "./workspaceConstants";
 
 function normalizePath(value: string): string {
   return value.trim().replace(/\\/g, "/").replace(/\/+$/, "");
@@ -133,7 +134,7 @@ export function isGitHubWorkspace(
   return typeof source === "string" && source.trim().toLowerCase() === "github";
 }
 
-export function isTempWorkspace(
+export function isNoWorkspace(
   workspace: WorkspaceBinding | WorkspaceRef | null | undefined,
 ): boolean {
   const execution = workspaceExecution(workspace);
@@ -141,12 +142,14 @@ export function isTempWorkspace(
     return false;
   }
   const metadata = execution.metadata;
-  if (metadata?.temp === true) {
+  if (metadata?.no_workspace === true || metadata?.temp === true) {
     return true;
   }
   const source = metadata?.source;
-  return typeof source === "string" && source.trim().toLowerCase() === "temp";
+  return typeof source === "string" && ["temp", "no-workspace"].includes(source.trim().toLowerCase());
 }
+
+export const isTempWorkspace = isNoWorkspace;
 
 export function localWorkspaceRef(locator: string): WorkspaceRef | null {
   const trimmed = locator.trim();
@@ -203,6 +206,9 @@ export function workspaceDisplayLabelFromValues(
   metadata?: Record<string, unknown>,
   backend: WorkspaceRef["backend"] = "local",
 ): string {
+  if (isNoWorkspace({ backend, locator: locator || "", label: label || "", metadata: metadata || {} })) {
+    return NO_WORKSPACE_LABEL;
+  }
   if (isSandboxBackend(backend)) {
     const repository = metadataText(metadata, "repository_full_name");
     if (repository) {
@@ -246,6 +252,7 @@ export function workspaceDisplayLabel(
   if (!workspace) {
     return "";
   }
+  if (isNoWorkspace(workspace)) return NO_WORKSPACE_LABEL;
   if ("scope" in workspace) {
     return workspace.scope.label;
   }

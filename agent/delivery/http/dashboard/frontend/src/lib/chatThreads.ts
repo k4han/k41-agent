@@ -19,6 +19,7 @@ import {
   generatedImageAttachmentFromToolResult,
 } from "@/lib/generatedImages";
 import { NO_WORKSPACE_KEY, NO_WORKSPACE_LABEL } from "@/lib/workspaceConstants";
+import { isNoWorkspace } from "@/lib/workspace";
 import type { ProjectSummary, WorkspaceBinding, WorkspaceRef } from "@/types";
 
 export type NewChatNavigationState = {
@@ -123,6 +124,7 @@ export function chatThreadHref(threadId: string): string {
 }
 
 export function threadWorkspaceKey(thread: ThreadSummary): string {
+  if (thread.workspace_key === "temp" || isNoWorkspace(thread.workspace)) return NO_WORKSPACE_KEY;
   if (thread.workspace_key) {
     return thread.workspace_key;
   }
@@ -137,6 +139,7 @@ export function threadWorkspaceKey(thread: ThreadSummary): string {
 }
 
 export function threadWorkspaceLabel(thread: ThreadSummary): string {
+  if (threadWorkspaceKey(thread) === NO_WORKSPACE_KEY) return NO_WORKSPACE_LABEL;
   if (!thread.workspace) {
     return thread.workspace_label || NO_WORKSPACE_LABEL;
   }

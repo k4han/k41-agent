@@ -24,6 +24,17 @@ const makeProject = (id, label) => ({ id, key: `local:/projects/${id}`, label, s
     created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' });
 let projects = [makeProject(1, 'Empty project'), makeProject(2, 'Other project')];
 const mutations = [];
+const schedulerJobs = [];
+const schedulerWrites = [];
+const schedulerDeletes = [];
+let failSchedulerDelete = false;
+let delaySchedulerDelete = false;
+let finishSchedulerDelete;
+const schedulerRuns = [{ run_id: 'run-1', job_id: 'job-1', task: 'Scheduled task', thread_id: 'scheduler-run-1',
+  status: 'completed', trigger_source: 'schedule', platform: 'telegram', user_id: '123', agent_name: 'scheduler-executor',
+  provider: 'test', model: 'demo', models_used: [], total_tokens: 0, response: 'Done', error: '', duration_ms: 100,
+  started_at: '2026-01-01T00:00:00Z', finished_at: '2026-01-01T00:00:01Z' }];
+let schedulerProjectPagination = false;
 const localSyncRequests = [];
 const runtimeRequests = [];
 const switchRequests = [];
@@ -83,7 +94,7 @@ const server = http.createServer(async (req, res) => {
     res.write('event: snapshot\ndata: {"sessions":[]}\n\n');
     return;
   }
-  if (url.pathname.startsWith('/dashboard-api')) {
+  if (url.pathname.startsWith('/dashboard-api') || url.pathname.startsWith('/scheduler/')) {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-CSRF-Token', 'projects-test');
@@ -91,6 +102,36 @@ const server = http.createServer(async (req, res) => {
     for await (const chunk of req) raw += chunk;
     const body = raw ? JSON.parse(raw) : {};
     const send = data => res.end(JSON.stringify(data));
+    if (url.pathname === '/dashboard-api/scheduler') {
+      send({ jobs: schedulerJobs, identities: [{ platform: 'telegram', external_id: '123' }], scheduler_timezone: 'UTC' }); return;
+    }
+    if (url.pathname === '/scheduler/runs') {
+      const filtered = schedulerRuns.filter(run => !url.searchParams.has('job_id') || run.job_id === url.searchParams.get('job_id'));
+      const offset = Number(url.searchParams.get('offset') || 0);
+      const limit = Number(url.searchParams.get('limit') || 25);
+      send({ runs: filtered.slice(offset, offset + limit), total: filtered.length, limit, offset }); return;
+    }
+    if (req.method === 'DELETE' && /^\/scheduler\/(jobs|runs)\//.test(url.pathname)) {
+      schedulerDeletes.push(url.pathname);
+      if (failSchedulerDelete) { res.writeHead(503); send({ detail: 'Scheduler deletion unavailable.' }); return; }
+      const remove = () => {
+        const entries = url.pathname.includes('/runs/') ? schedulerRuns : schedulerJobs;
+        const index = entries.findIndex(item => (item.run_id || item.id) === url.pathname.split('/').at(-1));
+        if (index < 0) { res.writeHead(404); send({ detail: 'Entry not found.' }); return; }
+        if (entries[index].status === 'running') { res.writeHead(409); send({ detail: 'Run is still running.' }); return; }
+        entries.splice(index, 1); send({ status: 'deleted' });
+      };
+      if (delaySchedulerDelete) { delaySchedulerDelete = false; finishSchedulerDelete = remove; return; }
+      remove(); return;
+    }
+    if (url.pathname.startsWith('/scheduler/jobs')) {
+      schedulerWrites.push(body);
+      const job = req.method === 'POST' ? { id: `job-${schedulerJobs.length + 1}`, paused: false, next_run_time: null }
+        : schedulerJobs.find(item => item.id === url.pathname.split('/').at(-1));
+      Object.assign(job, body);
+      if (req.method === 'POST') schedulerJobs.push(job);
+      send({ status: req.method === 'POST' ? 'created' : 'updated', job }); return;
+    }
     if (url.pathname === '/dashboard-api/browser/default-profile') {
       if (req.method === 'PUT' && rejectDefaultProfile) {
         res.writeHead(403); send({ detail: 'Default profile rejected.' }); return;
@@ -260,6 +301,10 @@ const server = http.createServer(async (req, res) => {
       send({ projects: ordered(projects.filter(project => project.status === 'active')).map(project => ({ ...project, threads: [] })), has_more: false, next_cursor: null }); return;
     }
     if (url.pathname === '/dashboard-api/projects' && req.method === 'GET') {
+      if (schedulerProjectPagination && !failCatalog) {
+        const offset = url.searchParams.has('after') ? 1 : 0;
+        send({ projects: projects.slice(offset, offset + 1), has_more: offset === 0, next_cursor: offset === 0 ? 'next-project' : null }); return;
+      }
       if (failCatalog) { res.writeHead(503); send({ detail: 'Catalog unavailable.' }); return; }
       const status = url.searchParams.get('status') || 'active';
       const needle = (url.searchParams.get('search') || '').toLowerCase();
@@ -635,10 +680,10 @@ try {
   await js(`{ const select = ${defaultSelect}; select.value = select.options[1].value; select.dispatchEvent(new Event('change', { bubbles: true })); }`);
   await until(() => js(`${profilePanel}.textContent.includes('Account default login profile updated.') && !${defaultSelect}.disabled`), 'account default saved');
   assert.equal(defaultBrowserProfile, workProfile.profile_id);
-  const temporarySelect = `document.querySelector('[aria-label="Temporary conversation login profile"]')`;
+  const temporarySelect = `document.querySelector('[aria-label="No workspace login profile"]')`;
   assert.equal(await js(`${temporarySelect}.value`), builtinBrowserProfile.profile_id, 'temporary profile stays independent of the account default');
   await js(`{ const select = ${temporarySelect}; select.value = '${workProfile.profile_id}'; select.dispatchEvent(new Event('change', { bubbles: true })); }`);
-  await until(() => js(`${profilePanel}.textContent.includes('Temporary conversation login profile updated.') && !${temporarySelect}.disabled`), 'temporary profile saved');
+  await until(() => js(`${profilePanel}.textContent.includes('No workspace login profile updated.') && !${temporarySelect}.disabled`), 'temporary profile saved');
   assert.equal(temporaryBrowserProfile, workProfile.profile_id);
   await call('Page.navigate', { url: `${base}/projects/1?tab=browser` });
   await until(() => js(`${profileSelect} && !${profileSelect}.disabled`), 'return to project profile selection');
@@ -831,6 +876,96 @@ try {
   await assertLocalChat();
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: catalog, project detail, and sidebar start new chats locally and allow explicit backend switching.');
+
+  projects = [makeProject(1, 'First scheduled project'), makeProject(2, 'Second scheduled project')];
+  schedulerProjectPagination = true;
+  await call('Page.navigate', { url: `${base}/scheduler` });
+  await until(() => js(`!!document.querySelector('#scheduler-run-history')`), 'scheduler page');
+  await clickText('New job');
+  const projectSelect = `[aria-label="Scheduled task project"]`;
+  await until(() => js(`document.querySelector('${projectSelect}')?.textContent.includes('No workspace')`), 'default No workspace selection');
+  await input('.scheduler-task-input', 'Independent scheduled task');
+  await clickText('Create job');
+  await until(() => schedulerWrites.length === 1, 'create scheduled job');
+  assert.equal(schedulerWrites[0].project_id, null);
+  await until(() => js(`!!document.querySelector('[aria-label="Edit job"]') && !document.querySelector('[role="dialog"]')`), 'created job card');
+  await js(`document.querySelector('[aria-label="Edit job"]').click()`);
+  await until(() => js(`!!document.querySelector('${projectSelect}')`), 'edit job project selector');
+  await until(() => js(`[...document.querySelectorAll('button')].some(button => button.textContent.trim() === 'Load more projects')`), 'first project page loaded');
+  failCatalog = true;
+  await clickText('Load more projects');
+  await until(() => js(`!!document.querySelector('[role="alert"]')`), 'project pagination error');
+  failCatalog = false;
+  await clickText('Retry loading projects');
+  await until(() => js(`!document.querySelector('[role="alert"]') && ![...document.querySelectorAll('button')].some(button => button.textContent.trim() === 'Loading projects…')`), 'project pagination retry');
+  await js(`document.querySelector('${projectSelect}').click()`);
+  await until(() => js(`[...document.querySelectorAll('[role="option"]')].some(option => option.textContent.trim() === 'Second scheduled project')`), 'second page project option');
+  await js(`[...document.querySelectorAll('[role="option"]')].find(option => option.textContent.trim() === 'Second scheduled project').click()`);
+  await clickText('Save Changes');
+  await until(() => schedulerWrites.length === 2, 'save selected project');
+  assert.equal(schedulerWrites[1].project_id, 2);
+  await until(() => js(`!document.querySelector('[role="dialog"]')`), 'project edit closed');
+  await js(`document.querySelector('[aria-label="Edit job"]').click()`);
+  await until(() => js(`document.querySelector('${projectSelect}')?.textContent.includes('Second scheduled project')`), 'selected project loaded outside first page');
+  await js(`document.querySelector('${projectSelect}').click()`);
+  await js(`[...document.querySelectorAll('[role="option"]')].find(option => option.textContent.trim() === 'No workspace').click()`);
+  await clickText('Save Changes');
+  await until(() => schedulerWrites.length === 3, 'reset scheduled project');
+  assert.equal(schedulerWrites[2].project_id, null);
+  await until(() => js(`!document.querySelector('[role="dialog"]')`), 'reset edit closed');
+  await clickText('View');
+  await until(() => js(`!!document.querySelector('[role="dialog"] a[href="/c/scheduler-run-1"]')`), 'run-specific conversation link');
+  assert.equal(await js(`!!document.querySelector('.nav-history-link[href="/c/scheduler-run-1"]')`), false);
+  assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
+  console.log('PASS: scheduler defaults to No workspace, paginates and retries project selection, saves and resets explicit projects, and links each run outside the sidebar.');
+  await clickText('Close');
+  schedulerRuns.push(...['failed', 'running'].map((status, index) => ({ ...schedulerRuns[0],
+    run_id: `run-${index + 2}`, status, task: `${status} task`, finished_at: status === 'running' ? null : schedulerRuns[0].finished_at })));
+  schedulerJobs.push({ ...schedulerJobs[0], id: 'job-keep', task: 'Keep this job' });
+  await call('Page.navigate', { url: `${base}/scheduler` });
+  await until(() => js(`document.querySelectorAll('[aria-label="Delete run"]').length === 3 && document.querySelectorAll('.scheduler-job-card').length === 2`), 'scheduler deletion fixtures');
+  assert.equal(await js(`document.querySelectorAll('[aria-label="Delete run"]')[2].disabled`), true);
+  await js(`document.querySelector('[aria-label="Delete run"]').click()`);
+  await until(() => js(`!!document.querySelector('.confirm-dialog-content')`), 'single run confirmation');
+  assert.equal(await js(`document.querySelector('.confirm-dialog-content').textContent.includes('Scheduled task')`), true);
+  await clickText('Cancel');
+  assert.equal(schedulerDeletes.length, 0);
+  assert.equal(schedulerRuns.length, 3);
+  await js(`document.querySelector('[aria-label="Delete run"]').click()`);
+  failSchedulerDelete = true;
+  await js(`document.querySelector('[role="dialog"] .btn-danger').click()`);
+  await until(() => js(`document.querySelector('.toast.error')?.textContent.includes('Scheduler deletion unavailable.') && !document.querySelector('[role="dialog"] .btn-danger').disabled`), 'run deletion error and retry');
+  assert.equal(schedulerRuns.length, 3);
+  failSchedulerDelete = false;
+  delaySchedulerDelete = true;
+  await js(`document.querySelector('[role="dialog"] .btn-danger').click()`);
+  await until(() => !!finishSchedulerDelete, 'pending run deletion');
+  const beforeDuplicate = schedulerDeletes.length;
+  assert.equal(await js(`document.querySelector('[role="dialog"] .btn-danger').disabled`), true);
+  await js(`document.querySelector('[role="dialog"] .btn-danger').click(); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));`);
+  assert.equal(schedulerDeletes.length, beforeDuplicate);
+  assert.equal(await js(`!!document.querySelector('.confirm-dialog-content')`), true);
+  finishSchedulerDelete();
+  await until(() => js(`!document.querySelector('[role="dialog"]') && document.querySelectorAll('[aria-label="Delete run"]').length === 2 && document.querySelector('#scheduler-run-history .panel-title').textContent.includes('2 runs')`), 'only selected run removed and count refreshed');
+  assert.deepEqual(schedulerRuns.map(run => run.run_id), ['run-2', 'run-3']);
+  assert.equal(schedulerJobs.length, 2);
+  await js(`document.querySelector('[aria-label="Delete job"]').click()`);
+  await until(() => js(`!!document.querySelector('.confirm-dialog-content')`), 'single job confirmation');
+  await clickText('Cancel');
+  assert.equal(schedulerJobs.length, 2);
+  await js(`document.querySelector('[aria-label="Delete job"]').click()`);
+  failSchedulerDelete = true;
+  const beforeSchedulerFailure = schedulerDeletes.length;
+  await js(`document.querySelector('[role="dialog"] .btn-danger').click()`);
+  await until(() => schedulerDeletes.length > beforeSchedulerFailure && js(`!!document.querySelector('[role="dialog"] .btn-danger') && !document.querySelector('[role="dialog"] .btn-danger').disabled`), 'job deletion error preserves confirmation');
+  assert.equal(schedulerJobs.length, 2);
+  failSchedulerDelete = false;
+  await js(`document.querySelector('[role="dialog"] .btn-danger').click()`);
+  await until(() => js(`!document.querySelector('[role="dialog"]') && document.querySelectorAll('.scheduler-job-card').length === 1`), 'only selected job removed');
+  assert.equal(schedulerJobs[0].id, 'job-keep');
+  assert.equal(schedulerRuns.length, 2);
+  assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
+  console.log('PASS: individual scheduler deletion, cancellation, errors, retry, duplicate prevention, running protection, and preservation of other jobs and history.');
 } finally {
   if (call && ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
   ws?.close(); browser.kill(); server.closeAllConnections();

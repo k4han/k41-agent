@@ -102,7 +102,7 @@ async def get_thread_runtime(thread_id: str):
                 return {"workspace": binding_from_record(rows[0], ref).model_dump(), "runtime": None, "host_mirror": state,
                         "transition": mirror_state(rows[0]).get("transition"),
                         "sync_policy": rows[0].sync_policy,
-                        "workspace_name": "temporary"}
+                        "workspace_name": "No workspace"}
             except KeyError:
                 return {"workspace": None, "runtime": None}
         description = await service.describe(binding.project_id)

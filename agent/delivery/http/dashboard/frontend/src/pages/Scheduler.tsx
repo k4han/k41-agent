@@ -17,6 +17,7 @@ import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import { dateTimeInTimeZone, triggerArgsFromDateInput, truncateText } from "@/lib/utils";
 import { formatRunTime, modelLabel, RunHistoryPanel } from "@/components/scheduler/RunHistoryPanel";
 import { RunningNowPanel, RunningPill } from "@/components/scheduler/RunningNowPanel";
+import { SchedulerProjectSelect } from "@/components/scheduler/SchedulerProjectSelect";
 import type {
   ActiveSession,
   Identity,
@@ -68,6 +69,7 @@ type TriggerType = "date" | "relative" | "interval" | "cron";
 
 type ScheduleForm = {
   task: string;
+  project_id: number | null;
   identity: string;
   platform: string;
   user_id: string;
@@ -89,6 +91,7 @@ const defaultScheduleForm = (timeZone?: string): ScheduleForm => {
   const date = new Date(Date.now() + 15 * 60 * 1000);
   return {
     task: "",
+    project_id: null,
     identity: "",
     platform: "telegram",
     user_id: "",
@@ -738,6 +741,7 @@ function JobFormFields(props: {
           />
         </div>
       </div>
+      <SchedulerProjectSelect value={props.form.project_id} onChange={value => props.setField("project_id", value)} />
       <Show when={props.form.identity === "__manual__"}>
         <div class="grid-2">
           <div class="field">
@@ -797,6 +801,7 @@ function JobCard(props: {
             <RunningPill />
           </Show>
           <span class="chip">{props.job.trigger_type}</span>
+          <span class="chip">{props.job.project_id ? `Project #${props.job.project_id}` : "No workspace"}</span>
         </div>
         <div class="scheduler-job-actions">
           <button class="btn btn-sm btn-ghost" type="button" title="Edit job" aria-label="Edit job" onClick={props.onEdit}>
@@ -879,6 +884,7 @@ export function SchedulerPage() {
   const [editJob, setEditJob] = createSignal<SchedulerJob | null>(null);
   const [editForm, setEditForm] = createSignal<ScheduleForm>(defaultScheduleForm());
   const [deleteTarget, setDeleteTarget] = createSignal<SchedulerJob | null>(null);
+  const [deleting, setDeleting] = createSignal(false);
   const [historyJobFilter, setHistoryJobFilter] = createSignal("");
   const [historyRefreshToken, setHistoryRefreshToken] = createSignal(0);
   const [recentRuns, setRecentRuns] = createSignal<SchedulerRun[]>([]);
@@ -974,6 +980,7 @@ export function SchedulerPage() {
       const identity = identityFromForm(current);
       await postJson("/scheduler/jobs", {
         task: current.task,
+        project_id: current.project_id,
         platform: identity.platform,
         user_id: identity.user_id,
         trigger_type: current.trigger_type,
@@ -1001,6 +1008,7 @@ export function SchedulerPage() {
 
     setEditForm({
       task: job.task,
+      project_id: job.project_id ?? null,
       identity,
       platform: job.platform,
       user_id: job.user_id,
@@ -1030,6 +1038,7 @@ export function SchedulerPage() {
       const identity = identityFromForm(current);
       await putJson(`/scheduler/jobs/${encodeURIComponent(job.id)}`, {
         task: current.task,
+        project_id: current.project_id,
         platform: identity.platform,
         user_id: identity.user_id,
         trigger_type: current.trigger_type,
@@ -1064,17 +1073,19 @@ export function SchedulerPage() {
 
   const confirmDeleteJob = async () => {
     const job = deleteTarget();
-    if (!job) {
+    if (!job || deleting()) {
       return;
     }
+    setDeleting(true);
     try {
-      await deleteJson(`/scheduler/jobs/${encodeURIComponent(job.id)}`);
-      showToast("Job delete requested.");
+      await deleteJson(API_PATHS.schedulerJob(job.id));
+      setDeleteTarget(null);
+      showToast("Job deleted.");
       await load();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Job action failed", "error");
     } finally {
-      setDeleteTarget(null);
+      setDeleting(false);
     }
   };
 
@@ -1251,10 +1262,11 @@ export function SchedulerPage() {
             <ConfirmDialog
               open={deleteTarget() !== null}
               title="Delete Job"
-              message={<p>Are you sure you want to delete job <span class="mono">{deleteTarget()?.id}</span>?</p>}
+              message={<p>Delete the scheduled job <strong>{truncateText(deleteTarget()?.task || "", 120)}</strong>? Existing run history will be kept.</p>}
               confirmLabel="Delete"
               confirmVariant="danger"
-              onClose={() => setDeleteTarget(null)}
+              loading={deleting()}
+              onClose={() => { if (!deleting()) setDeleteTarget(null); }}
               onConfirm={() => void confirmDeleteJob()}
             />
           </div>

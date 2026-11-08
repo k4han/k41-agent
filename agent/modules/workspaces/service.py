@@ -73,21 +73,21 @@ def temp_workspace_root() -> Path:
     return (THREAD_STORAGE_BASE_DIR / TEMP_WORKSPACE_DIRNAME).resolve()
 
 
-def is_temp_workspace(workspace: WorkspaceRef | dict[str, Any] | str | None) -> bool:
-    """Return ``True`` when the workspace is an ephemeral scratch workspace."""
+def is_no_workspace(workspace: WorkspaceRef | dict[str, Any] | str | None) -> bool:
+    """Identify a session-owned workspace, including legacy temporary references."""
     ref = resolve_workspace_ref(workspace)
     metadata = ref.metadata or {}
-    if bool(metadata.get("temp")):
+    if bool(metadata.get("no_workspace")) or bool(metadata.get("temp")):
         return True
-    return str(metadata.get("source") or "").strip().lower() == "temp"
+    return str(metadata.get("source") or "").strip().lower() in {"temp", "no-workspace"}
 
 
-async def create_temp_workspace(
+async def create_no_workspace(
     thread_id: str | None,
     *,
     label: str | None = None,
 ) -> WorkspaceRef:
-    """Create a temporary, hidden local workspace for an ad-hoc chat thread.
+    """Create a hidden local directory for a session without a project.
 
     The directory lives under a ``workspace-storage/temp-workspaces`` folder
     outside the configured workspace root, so it never shows up in the
@@ -108,13 +108,18 @@ async def create_temp_workspace(
         {
             "backend": LOCAL_BACKEND,
             "locator": str(target),
-            "label": label or "Temp workspace",
+            "label": label or "No workspace",
             "metadata": {
-                "temp": True,
+                "no_workspace": True,
                 "thread_id": thread_id or "",
             },
         }
     )
+
+
+# Keep existing integrations and stored references compatible.
+is_temp_workspace = is_no_workspace
+create_temp_workspace = create_no_workspace
 
 
 async def _delete_temp_workspace_directory(locator: str) -> bool:

@@ -172,8 +172,8 @@ export function AppShell(props: {
     const workspaceBinding = bindWorkspaceRef(workspace);
     const workspaceSummary = workspace !== undefined ? {
       workspace: workspaceBinding,
-      workspace_key: isTempWorkspace(workspaceBinding) ? "temp" : workspaceBinding?.scope.key,
-      workspace_label: isTempWorkspace(workspaceBinding) ? "Temp workspace" : workspaceBinding?.scope.label,
+      workspace_key: !workspaceBinding || isTempWorkspace(workspaceBinding) ? "no-workspace" : workspaceBinding.scope.key,
+      workspace_label: !workspaceBinding || isTempWorkspace(workspaceBinding) ? "No workspace" : workspaceBinding.scope.label,
     } : {};
     
     optimisticLocks.set(threadId, { state: "running", timestamp: Date.now() });

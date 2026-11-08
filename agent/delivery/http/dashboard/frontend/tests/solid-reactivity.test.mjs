@@ -606,6 +606,7 @@ function loadWorkspaceGroups() {
     '@/lib/userInputRequest': {},
     '@/lib/generatedImages': {},
     '@/lib/workspaceConstants': { NO_WORKSPACE_KEY: 'none', NO_WORKSPACE_LABEL: 'No workspace' },
+    '@/lib/workspace': { isNoWorkspace: workspace => workspace?.execution?.metadata?.no_workspace === true || workspace?.execution?.metadata?.temp === true },
   });
   return loadModule('../src/lib/useThreadWorkspaceGroups.ts', {
     '@/lib/chatThreads': threads,

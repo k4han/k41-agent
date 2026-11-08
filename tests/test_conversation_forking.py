@@ -138,7 +138,7 @@ async def test_fork_old_answer_copies_current_temp_files_and_persists(fork_setup
     assert fork["pending_requests"] == []
     assert fork["resume_error"] is None
     assert fork["workspace"]["project_id"] is None
-    assert fork["workspace"]["execution"]["metadata"]["temp"] is True
+    assert fork["workspace"]["execution"]["metadata"]["no_workspace"] is True
     target_root = Path(fork["workspace"]["execution"]["locator"])
     assert target_root != source_root
     assert (target_root / "notes.txt").read_text() == "Current files"
@@ -413,7 +413,7 @@ async def test_cloud_temp_fork_captures_current_files(fork_setup, tmp_path, monk
     assert len(captured) == 1
     assert (captured[0].backend, captured[0].locator, captured[0].metadata) == (remote.backend, remote.locator, remote.metadata)
     assert fork["workspace"]["execution"]["backend"] == "local"
-    assert fork["workspace"]["execution"]["metadata"]["temp"] is True
+    assert fork["workspace"]["execution"]["metadata"]["no_workspace"] is True
     assert (Path(fork["workspace"]["execution"]["locator"]) / "file.txt").read_text() == "Current cloud files"
     assert (await resolve_storage_file("cloud.png", thread_id=fork["thread_id"])).read_bytes() == b"cloud-image"
     stored = await get_thread_workspace_repository().get(source_id)

@@ -125,7 +125,7 @@ async def test_backfill_precedence_latest_workspace_and_idempotence(catalog_db, 
     assert archived["label"] == "Keep me" and archived["is_pinned"] is True
     assert len((await service.list_projects(status="archived", search="team/repo"))["projects"]) == 1
     assert len((await service.list_projects(status="archived", search=recent.locator))["projects"]) == 1
-    assert (await navigation.list_conversation_projects())["projects"][0]["key"] == "temp"
+    assert (await navigation.list_conversation_projects())["projects"][0]["key"] == "no-workspace"
     assert len((await navigation.list_project_threads(project_key="github:42"))["threads"]) == 2
 
 
@@ -144,7 +144,7 @@ async def test_automatic_registration_excludes_temporary_and_child_threads(catal
     await repository.upsert(thread_id="another-root", workspace=ref)
     assert (await service.list_projects())["projects"] == []
     assert len((await service.list_projects(status="archived"))["projects"]) == 1
-    with pytest.raises(ValueError, match="Temporary"):
+    with pytest.raises(ValueError, match="without a workspace"):
         await service.add_project(workspace(tmp_path / "temporary", temp=True))
 
 

@@ -1495,8 +1495,8 @@ def test_dashboard_chat_history_groups_temp_workspaces_together(
     by_id = {thread["thread_id"]: thread for thread in response.json()["threads"]}
     for thread_id, directory in temp_dirs.items():
         thread = by_id[thread_id]
-        assert thread["workspace_key"] == "temp"
-        assert thread["workspace_label"] == "Temp workspace"
+        assert thread["workspace_key"] == "no-workspace"
+        assert thread["workspace_label"] == "No workspace"
         binding = bind_workspace_ref(workspaces[thread_id])
         assert thread["workspace"] == binding.model_dump()
         # Per-thread execution scope is preserved so storage stays isolated.
@@ -2708,4 +2708,5 @@ async def test_run_scheduler_job_now_queues_existing_job(monkeypatch) -> None:
         "task": "eat",
         "scheduler_job_id": job.id,
         "trigger_source": "manual",
+        "project_id": None,
     }

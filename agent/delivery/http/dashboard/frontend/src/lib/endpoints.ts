@@ -63,6 +63,7 @@ export const API_PATHS = {
   schedulerJobAction: (jobId: string, action: "run" | "pause" | "resume") =>
     `/scheduler/jobs/${encodeURIComponent(jobId)}/${action}`,
   schedulerJobs: "/scheduler/jobs",
+  schedulerRun: (runId: string) => `/scheduler/runs/${encodeURIComponent(runId)}`,
   schedulerRuns: (params: { jobId?: string; limit?: number; offset?: number } = {}) => {
     const query = new URLSearchParams();
     if (params.jobId) query.set("job_id", params.jobId);

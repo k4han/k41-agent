@@ -68,10 +68,14 @@ export function RunHistoryPanel(props: {
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal("");
   const [selected, setSelected] = createSignal<SchedulerRun | null>(null);
+  const [deleteTarget, setDeleteTarget] = createSignal<SchedulerRun | null>(null);
+  const [deleting, setDeleting] = createSignal(false);
   const [confirmClear, setConfirmClear] = createSignal(false);
   const { showToast } = useToast();
+  let loadVersion = 0;
 
   const load = async (mode: "reset" | "more" | "refresh" = "reset") => {
+    const version = ++loadVersion;
     setLoading(true);
     const current = runs();
     const offset = mode === "more" ? current.length : 0;
@@ -80,6 +84,7 @@ export function RunHistoryPanel(props: {
       const payload = await apiFetch<SchedulerRunsPayload>(
         API_PATHS.schedulerRuns({ jobId: props.jobFilter || undefined, limit, offset }),
       );
+      if (version !== loadVersion) return;
       setRuns(mode === "more" ? [...current, ...payload.runs] : payload.runs);
       setTotal(payload.total);
       setError("");
@@ -88,9 +93,9 @@ export function RunHistoryPanel(props: {
         setSelected(payload.runs.find((run) => run.run_id === open.run_id) || open);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load run history");
+      if (version === loadVersion) setError(err instanceof Error ? err.message : "Failed to load run history");
     } finally {
-      setLoading(false);
+      if (version === loadVersion) setLoading(false);
     }
   };
 
@@ -107,14 +112,36 @@ export function RunHistoryPanel(props: {
   onCleanup(() => clearInterval(timer));
 
   const clearHistory = async () => {
+    if (deleting()) return;
+    setDeleting(true);
     try {
       await deleteJson(API_PATHS.schedulerRuns({ jobId: props.jobFilter || undefined }));
       showToast("Run history cleared.");
+      setConfirmClear(false);
       await load("reset");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to clear run history", "error");
     } finally {
-      setConfirmClear(false);
+      setDeleting(false);
+    }
+  };
+
+  const deleteRun = async () => {
+    const run = deleteTarget();
+    if (!run || deleting()) return;
+    setDeleting(true);
+    try {
+      await deleteJson(API_PATHS.schedulerRun(run.run_id));
+      setRuns((current) => current.filter((item) => item.run_id !== run.run_id));
+      setTotal((current) => Math.max(0, current - 1));
+      if (selected()?.run_id === run.run_id) setSelected(null);
+      setDeleteTarget(null);
+      showToast("Run deleted.");
+      await load("refresh");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to delete run", "error");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -147,7 +174,7 @@ export function RunHistoryPanel(props: {
           <button
             class="btn btn-sm btn-danger"
             type="button"
-            disabled={runs().length === 0}
+            disabled={deleting() || runs().length === 0}
             onClick={() => setConfirmClear(true)}
           >
             <Trash2 size={13} /> Clear
@@ -198,9 +225,21 @@ export function RunHistoryPanel(props: {
               </td>
               <td>{run.status === "running" ? <span class="hint">running…</span> : formatDuration(run.duration_ms)}</td>
               <td>
-                <button class="btn btn-sm" type="button" onClick={() => setSelected(run)}>
-                  <Eye size={13} /> View
-                </button>
+                <div class="row-wrap">
+                  <button class="btn btn-sm" type="button" onClick={() => setSelected(run)}>
+                    <Eye size={13} /> View
+                  </button>
+                  <button
+                    class="btn btn-sm btn-danger"
+                    type="button"
+                    title={run.status === "running" ? "Running executions cannot be deleted" : "Delete run"}
+                    aria-label="Delete run"
+                    disabled={run.status === "running" || deleting()}
+                    onClick={() => setDeleteTarget(run)}
+                  >
+                    <Trash2 size={13} /> Delete
+                  </button>
+                </div>
               </td>
             </tr>
           );
@@ -295,6 +334,22 @@ export function RunHistoryPanel(props: {
       </Dialog>
 
       <ConfirmDialog
+        open={deleteTarget() !== null}
+        title="Delete Run"
+        message={
+          <p>
+            Delete the run of <strong>{truncateText(deleteTarget()?.task || "", 120)}</strong>
+            {" from "}{formatRunTime(deleteTarget()?.started_at ?? null)}?
+          </p>
+        }
+        confirmLabel="Delete"
+        confirmVariant="danger"
+        loading={deleting()}
+        onClose={() => { if (!deleting()) setDeleteTarget(null); }}
+        onConfirm={() => void deleteRun()}
+      />
+
+      <ConfirmDialog
         open={confirmClear()}
         title="Clear Run History"
         message={
@@ -306,7 +361,8 @@ export function RunHistoryPanel(props: {
         }
         confirmLabel="Clear"
         confirmVariant="danger"
-        onClose={() => setConfirmClear(false)}
+        loading={deleting()}
+        onClose={() => { if (!deleting()) setConfirmClear(false); }}
         onConfirm={() => void clearHistory()}
       />
     </section>

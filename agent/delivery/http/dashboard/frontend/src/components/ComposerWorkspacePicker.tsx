@@ -33,14 +33,14 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
     return label === backend() ? titles[backend()] || label : label;
   };
   const projectLabel = createMemo(() => {
-    if (props.selection?.source === "temp" || isTempWorkspace(props.workspace)) return "Temporary";
+    if (props.selection?.source === "no-workspace" || isTempWorkspace(props.workspace)) return "No workspace";
     if (props.locked && props.runtimePayload?.workspace) return props.runtimePayload.workspace.scope.label;
     if (props.selection) {
       return props.selection.label || props.selection.repositoryFullName
-        || workspaceDisplayLabelFromValues("", props.selection.localPath) || "Temporary";
+        || workspaceDisplayLabelFromValues("", props.selection.localPath) || "No workspace";
     }
     return workspaceDisplayLabel(props.workspace)
-      || workspaceDisplayLabelFromValues("", props.workingDir) || "Temporary";
+      || workspaceDisplayLabelFromValues("", props.workingDir) || "No workspace";
   });
   const canSwitchRuntime = () => props.locked && (["shared", "session"].includes(props.runtimePayload?.kind || "")
     || (!props.runtimePayload?.workspace?.project_id && props.runtimePayload?.host_mirror)) && props.onSwitchBackend;

@@ -16,7 +16,6 @@ from agent.modules.workspaces import (
     NO_WORKSPACE_KEY,
     NO_WORKSPACE_LABEL,
     TEMP_WORKSPACE_KEY,
-    TEMP_WORKSPACE_LABEL,
 )
 from agent.modules.workspaces import ThreadWorkspace
 from agent.modules.workspaces import bind_workspace_ref, workspace_ref_from_columns
@@ -45,12 +44,14 @@ def _ranked_project_threads(
             return cast(func.json_extract(metadata, f"$.{key}"), String)
         return cast(metadata, JSON)[key].as_string()
 
-    is_temp = or_(
+    is_unassigned = or_(
+        metadata_text("no_workspace").in_(["true", "1"]),
         metadata_text("temp").in_(["true", "1"]),
-        func.lower(func.trim(metadata_text("source"))) == "temp",
+        func.lower(func.trim(metadata_text("source"))).in_(["temp", NO_WORKSPACE_KEY]),
+        workspace_column("scope_key") == TEMP_WORKSPACE_KEY,
     )
     project_key = case(
-        (is_temp, TEMP_WORKSPACE_KEY),
+        (is_unassigned, NO_WORKSPACE_KEY),
         else_=func.coalesce(func.nullif(workspace_column("scope_key"), ""), NO_WORKSPACE_KEY),
     ).collate("C" if dialect == "postgresql" else "BINARY")
     order = [ConversationThread.updated_at.desc(), ConversationThread.id.desc()]
@@ -120,7 +121,7 @@ def _serialize_project_thread(row) -> dict[str, Any]:
             backend=backend, locator=locator, label=label, metadata_json=metadata_json,
         ))
     project_label = (
-        TEMP_WORKSPACE_LABEL if key == TEMP_WORKSPACE_KEY
+        NO_WORKSPACE_LABEL if key == NO_WORKSPACE_KEY
         else binding.scope.label if binding else NO_WORKSPACE_LABEL
     )
     return {
@@ -133,6 +134,8 @@ def _serialize_project_thread(row) -> dict[str, Any]:
 
 async def list_project_threads(*, project_key: str, limit: int = 20, offset: int = 0) -> dict[str, Any]:
     """Page through one project's conversations without loading checkpoints."""
+    if project_key == TEMP_WORKSPACE_KEY:
+        project_key = NO_WORKSPACE_KEY
     session = await get_async_session()
     async with session:
         statement = _project_previews_statement(
@@ -164,10 +167,10 @@ async def list_conversation_projects(
             select(Project.id, Project.key, Project.label, Project.is_pinned, Project.workspace_json,
                    Project.status, Project.created_at, Project.updated_at).where(Project.status == "active"),
             select(literal(None), ranked.c.project_key,
-                   case((ranked.c.project_key == TEMP_WORKSPACE_KEY, TEMP_WORKSPACE_LABEL), else_=NO_WORKSPACE_LABEL),
+                   literal(NO_WORKSPACE_LABEL),
                    literal(False), literal(None), literal("active"), literal(None), literal(None))
             .where(ranked.c.position == 1,
-                   ranked.c.project_key.in_([TEMP_WORKSPACE_KEY, NO_WORKSPACE_KEY])),
+                   ranked.c.project_key == NO_WORKSPACE_KEY),
         ).cte("navigation_projects")
         key = candidates.c.key.collate("C" if dialect == "postgresql" else "BINARY")
         statement = select(candidates)

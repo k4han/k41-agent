@@ -16,6 +16,18 @@ remote execution when configured.
 New project conversations use local execution. Moving an existing conversation
 to another execution environment is an explicit session change.
 
+**No workspace** means the conversation is not linked to a project. It still
+has a private internal folder for files and tools, retained with the conversation
+and cleaned up when the conversation is deleted. Older temporary workspaces
+appear under the same name without moving their files.
+
+Scheduled tasks default to **No workspace**, including tasks scheduled from a
+project conversation. Select a project explicitly in the scheduler form or when
+requesting a schedule to use its files. Every scheduled or manual run starts a
+separate conversation; project runs share project files, not conversation history.
+Open each run from the scheduler's run history. Scheduler conversations do not
+appear in the sidebar, and results are no longer copied into a shared user chat.
+
 ## Organize your projects
 
 Open **Projects**, or **Manage** beside Projects in the sidebar. You can add,

@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from agent.modules.agent_runtime import SessionManager, run_agent_full
 from agent.modules.notifications import send_notification as _send_notification
+from agent.modules.workspaces import WorkspaceBinding
 from agent.shared.infrastructure.db.engine import (
     _normalize_url_to_sync,
 )
@@ -72,6 +73,7 @@ def add_scheduled_task_job(
     task: str,
     trigger_type: str,
     trigger_args: dict[str, Any],
+    project_id: int | None = None,
 ):
     """Add a job that runs ``task`` and remembers its own ID for run history."""
     job_id = uuid.uuid4().hex
@@ -84,9 +86,28 @@ def add_scheduled_task_job(
             "user_id": user_id,
             "task": task,
             "scheduler_job_id": job_id,
+            "project_id": project_id,
         },
         **trigger_args,
     )
+
+
+async def resolve_scheduled_project(project_id: int | None) -> WorkspaceBinding | None:
+    """Resolve an explicitly selected, active project without starting execution."""
+    if project_id is None:
+        return None
+    from agent.modules.projects import ProjectWorkspaceError, get_project_workspace_service
+
+    projects = get_project_workspace_service()
+    project, _, _ = await projects.rows(project_id)
+    if project.status != "active":
+        raise ValueError("The scheduled project is not active.")
+    if project.migration_status != "ready":
+        raise ProjectWorkspaceError("Choose the project workspace before scheduling tasks.", "migration_required")
+    binding = await projects.find_binding(project_id=project_id)
+    if binding is None:
+        raise ProjectWorkspaceError("The scheduled project workspace is unavailable.")
+    return binding
 
 
 def _backfill_job_ids(scheduler: AsyncIOScheduler) -> int:
@@ -129,15 +150,15 @@ async def execute_scheduled_task(
     task: str,
     scheduler_job_id: str = "",
     trigger_source: str = "schedule",
+    project_id: int | None = None,
 ):
-    """Execute a scheduled task: run the agent, inject results into user thread, and notify."""
+    """Execute a scheduled task in its own conversation and notify its owner."""
     from agent.modules.scheduler.history import RUN_STATUS_COMPLETED, RUN_STATUS_FAILED
 
     run_id = str(uuid.uuid4())
     background_thread_id = SessionManager.make_thread_id(BACKGROUND_THREAD_PREFIX, user_id, run_id)
-    user_thread_id = SessionManager.make_thread_id(platform, user_id, user_id)
 
-    logger.info(f"Executing scheduled task for {user_thread_id}: {task}")
+    logger.info("Executing scheduled task in %s: %s", background_thread_id, task)
 
     executor = describe_executor_model()
     recorded = await _record_run_start(
@@ -156,8 +177,9 @@ async def execute_scheduled_task(
 
     try:
         from agent.modules.conversations import (
-            THREAD_KIND_SCHEDULED, inject_agent_message_pair, upsert_conversation_thread,
+            THREAD_KIND_SCHEDULED, upsert_conversation_thread,
         )
+        from agent.modules.workspaces import create_no_workspace, remember_thread_workspace_ref
 
         await upsert_conversation_thread(
             thread_id=background_thread_id,
@@ -168,37 +190,27 @@ async def execute_scheduled_task(
             channel_id=run_id,
             title=task,
         )
+        workspace = await resolve_scheduled_project(project_id)
+        if workspace is None:
+            workspace = await create_no_workspace(background_thread_id)
+        await remember_thread_workspace_ref(background_thread_id, workspace)
         response_text = await run_agent_full(
             user_input=task,
             thread_id=background_thread_id,
             agent_name=AGENT_NAME,
+            workspace=workspace,
             usage_context={"platform": BACKGROUND_THREAD_PREFIX, "user_id": user_id, "channel_id": run_id},
         )
         agent_finished = True
         if recorded:
             await _record_run_finish(run_id, status=RUN_STATUS_COMPLETED, response=response_text)
 
-        # No agent name: the executor ran in its own thread, and the user's agent keeps this one.
-        await upsert_conversation_thread(
-            thread_id=user_thread_id,
-            title=task,
-            platform=platform,
-            user_id=user_id,
-            channel_id=user_id,
-        )
-
-        await inject_agent_message_pair(
-            thread_id=user_thread_id,
-            human_content=f"[Scheduled Task]\n{task}",
-            ai_content=response_text,
-        )
-
         # The user wrote the task; only a short title is needed to tell runs apart.
         notification = f"**Scheduled task:** {_task_title(task)}\n\n{response_text}"
         await _send_notification(platform, user_id, notification, mode="markdown")
 
     except Exception as e:
-        logger.error(f"Failed to execute scheduled task '{task}' for {user_thread_id}: {e}", exc_info=True)
+        logger.error("Failed to execute scheduled task '%s' in %s: %s", task, background_thread_id, e, exc_info=True)
         if recorded and not agent_finished:
             await _record_run_finish(run_id, status=RUN_STATUS_FAILED, error=str(e) or type(e).__name__)
         error_msg = (

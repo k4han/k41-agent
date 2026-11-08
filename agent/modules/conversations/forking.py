@@ -35,7 +35,7 @@ from agent.modules.conversations.repository import get_conversation_thread_repos
 from agent.modules.projects import get_project_workspace_service
 from agent.modules.workflows import ACP_AGENT_GRAPH_TYPE, get_workflow_graph, thread_is_acp
 from agent.modules.workspaces import (
-    TEMP_WORKSPACE_KEY,
+    NO_WORKSPACE_KEY,
     WorkspaceBinding,
     WorkspaceRef,
     bind_workspace_ref,
@@ -244,7 +244,7 @@ async def _fork_reserved(thread_id: str, checkpoint_id: str, message_index: int)
         elif task and task.get("workspace"):
             binding = (await projects.find_binding(task["workspace"])
                        or bind_workspace_ref(resolve_workspace_ref(task["workspace"])))
-    scope_key = TEMP_WORKSPACE_KEY if binding is None or is_temp_workspace(binding.execution) else binding.scope.key
+    scope_key = NO_WORKSPACE_KEY if binding is None or is_temp_workspace(binding.execution) else binding.scope.key
 
     with ExitStack() as reservations:
         if binding and binding.project_workspace_id:

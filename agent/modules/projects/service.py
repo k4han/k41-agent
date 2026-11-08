@@ -59,7 +59,7 @@ async def add_project(workspace: WorkspaceInput, *, label: str | None = None) ->
     async with session:
         record = await register_project(session, binding, label=label, restore=True)
         if record is None:
-            raise ValueError("Temporary workspaces cannot be added to the project catalog.")
+            raise ValueError("Sessions without a workspace cannot be added to the project catalog.")
         from agent.modules.projects.workspaces import register_workspace
         ready = record.migration_status == "ready"
         if ready:

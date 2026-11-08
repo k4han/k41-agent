@@ -29,6 +29,7 @@ def serialize_job(job: Job) -> dict[str, Any]:
         "task": job.kwargs.get("task", "Unknown"),
         "platform": job.kwargs.get("platform", "-"),
         "user_id": job.kwargs.get("user_id", "-"),
+        "project_id": job.kwargs.get("project_id"),
         "trigger_type": trigger_type,
         "trigger_args": trigger_args,
         "next_run_time": (

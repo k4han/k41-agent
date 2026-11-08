@@ -30,7 +30,9 @@ def test_create_temp_workspace_creates_hidden_directory(_temp_workspace_root: Pa
     assert target.is_dir()
     assert target.parent == _temp_workspace_root
     assert target.name.startswith("thread-")
-    assert bool(ref.metadata.get("temp")) is True
+    assert ref.metadata["no_workspace"] is True
+    assert "temp" not in ref.metadata
+    assert ref.label == "No workspace"
 
 
 def test_create_temp_workspace_with_thread_id_uses_safe_key(_temp_workspace_root: Path):
@@ -46,6 +48,16 @@ def test_is_temp_workspace_detection():
     plain_ref = resolve_workspace_ref({"backend": "local", "locator": "C:/work/project", "metadata": {}})
     assert is_temp_workspace(plain_ref) is False
     assert is_temp_workspace(None) is False
+
+
+@pytest.mark.parametrize("metadata", [{"temp": True}, {"source": " TEMP "}, {"no_workspace": True}, {"source": "no-workspace"}])
+def test_no_workspace_accepts_current_and_legacy_references(metadata):
+    from agent.modules.workspaces import create_no_workspace, is_no_workspace
+
+    ref = resolve_workspace_ref({"backend": "local", "locator": "C:/sessions/old", "metadata": metadata})
+    assert is_no_workspace(ref)
+    assert is_temp_workspace(ref)
+    assert create_temp_workspace is create_no_workspace
 
 
 def test_delete_temp_workspace_directory_removes_only_within_root(

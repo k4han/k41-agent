@@ -84,7 +84,7 @@ export function BrowserProfiles() {
     const saved = await mutate(async () => {
       const result = await putJson<{ profile_id: string }>(temporary ? API_PATHS.browserTemporaryProfile : API_PATHS.browserDefaultProfile, { profile_id: profileId });
       if (!disposed) (temporary ? setTemporarySelected : setSelected)(result.profile_id);
-      return temporary ? "Temporary conversation login profile updated." : "Account default login profile updated.";
+      return temporary ? "No workspace login profile updated." : "Account default login profile updated.";
     });
     // A rejected choice changes no state, so nothing else would restore the saved option.
     if (!saved) select.value = (temporary ? temporarySelected() : selected()) ?? "";
@@ -102,7 +102,7 @@ export function BrowserProfiles() {
     </div>
     <div class="panel-body stack">
     <p>Manage saved logins for your account. Conversations using the same profile share one browser and saved logins, with their own tabs.</p>
-    <p class="hint">The account default applies to projects that inherit it. Temporary conversations have an independent setting. Changes apply when a browser next opens; conversation overrides keep their choice.</p>
+    <p class="hint">The account default applies to projects that inherit it. Conversations with No workspace have an independent setting. Changes apply when a browser next opens; conversation overrides keep their choice.</p>
     <Show when={error()}><div class="browser-setup-error" role="alert">{error()}</div></Show>
     <Show when={notice()}><p role="status">{notice()}</p></Show>
     <Show when={loading()}><p role="status">Loading profiles...</p></Show>
@@ -112,8 +112,8 @@ export function BrowserProfiles() {
         <For each={profiles()}>{(profile) => <option value={profile.profile_id} selected={profile.profile_id === selected()}>{profile.name}</option>}</For>
       </select>
     </label>
-    <label class="field">Temporary conversation login profile
-      <select class="input" aria-label="Temporary conversation login profile" disabled={busy() || !loaded()}
+    <label class="field">No workspace login profile
+      <select class="input" aria-label="No workspace login profile" disabled={busy() || !loaded()}
         onChange={(event) => void selectProfile(event.currentTarget, true)}>
         <For each={profiles()}>{(profile) => <option value={profile.profile_id} selected={profile.profile_id === temporarySelected()}>{profile.name}</option>}</For>
       </select>

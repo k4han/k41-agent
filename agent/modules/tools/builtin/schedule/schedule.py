@@ -17,6 +17,7 @@ from agent.modules.scheduler import (
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
+from agent.modules.scheduler.service import resolve_scheduled_project
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,10 @@ def _parse_runtime_thread_id(runtime: ToolRuntime[Any, Any]) -> tuple[str, str]:
 
 
 class ScheduleTaskInput(BaseModel):
+    project_id: int | None = Field(
+        default=None, ge=1,
+        description="Use a project only when the user explicitly requests it. Omit for No workspace, even in a project conversation.",
+    )
     task_description: str = Field(
         ...,
         description="Detailed description of the task for the AI to perform at the scheduled time.",
@@ -79,16 +84,18 @@ class ScheduleTaskInput(BaseModel):
     tags=["scheduler"],
 )
 @tool(args_schema=ScheduleTaskInput)
-def schedule_task(
+async def schedule_task(
     task_description: str,
     trigger_type: TriggerType,
     trigger_args: dict[str, Any],
     runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg],
+    project_id: int | None = None,
 ) -> str:
     """Schedule an AI task to run in the future or periodically."""
     platform, user_id = _parse_runtime_thread_id(runtime)
 
     try:
+        await resolve_scheduled_project(project_id)
         scheduler = get_scheduler()
         normalized_trigger_type, normalized_trigger_args = normalize_trigger(
             trigger_type,
@@ -103,8 +110,9 @@ def schedule_task(
             task=task_description,
             trigger_type=normalized_trigger_type,
             trigger_args=normalized_trigger_args,
+            project_id=project_id,
         )
-    except ValueError as exc:
+    except (ValueError, KeyError, RuntimeError) as exc:
         raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from exc
 
     next_run = (

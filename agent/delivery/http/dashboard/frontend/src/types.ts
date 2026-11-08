@@ -475,6 +475,7 @@ export type SchedulerJob = {
   task: string;
   platform: string;
   user_id: string;
+  project_id: number | null;
   trigger_type: string;
   trigger_args: Record<string, unknown>;
   next_run_time: string | null;

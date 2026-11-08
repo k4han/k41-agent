@@ -210,6 +210,29 @@ async def list_runs(
     return {"runs": runs, "total": int(total or 0), "limit": limit, "offset": offset}
 
 
+async def delete_run(run_id: str) -> bool:
+    """Delete one finished run, rejecting executions that are still running."""
+    session = await get_async_session()
+    async with session:
+        result = await session.execute(
+            delete(SchedulerJobRun).where(
+                SchedulerJobRun.run_id == run_id,
+                SchedulerJobRun.status != RUN_STATUS_RUNNING,
+            )
+        )
+        if result.rowcount:
+            await session.commit()
+            return True
+        status = (
+            await session.execute(
+                select(SchedulerJobRun.status).where(SchedulerJobRun.run_id == run_id)
+            )
+        ).scalar_one_or_none()
+        if status == RUN_STATUS_RUNNING:
+            raise ValueError("Cannot delete a run while it is running.")
+        return False
+
+
 async def delete_runs(*, job_id: str | None = None) -> int:
     filters = [SchedulerJobRun.status != RUN_STATUS_RUNNING]
     if job_id:
@@ -228,6 +251,7 @@ __all__ = [
     "RUN_STATUS_RUNNING",
     "TRIGGER_SOURCE_MANUAL",
     "TRIGGER_SOURCE_SCHEDULE",
+    "delete_run",
     "delete_runs",
     "finish_run",
     "list_runs",

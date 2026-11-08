@@ -55,8 +55,10 @@ async def register_project(
     restore: bool = False, only_missing: bool = False,
 ) -> Project | None:
     """Upsert in the caller's transaction without resetting user-managed metadata."""
+    from agent.modules.workspaces import is_no_workspace
+
     metadata = binding.execution.metadata
-    if bool(metadata.get("temp")) or str(metadata.get("source") or "").strip().lower() == "temp":
+    if is_no_workspace(binding.execution):
         return None
     if binding.project_id:
         record = await session.get(Project, binding.project_id)

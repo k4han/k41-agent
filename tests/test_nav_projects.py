@@ -139,15 +139,16 @@ async def test_project_threads_paginate_independently_without_checkpoint_stats(p
 async def test_project_thread_paging_respects_temp_and_missing_workspace_groups(project_db):
     await add_project(project_db, "temp-one", 3, metadata={"temp": True})
     await add_project(project_db, "temp-two", 2, metadata={"source": " TEMP "})
+    await add_project(project_db, "current", 1, metadata={"no_workspace": True})
     await add_project(project_db, "none", 2)
     await add_project(project_db, "deleted", 1, metadata={"temp": True}, deleted=True)
     temp = await navigation.list_project_threads(project_key="temp", limit=4)
     assert len(temp["threads"]) == 4
     assert temp["has_more"] is True
-    assert all(row["workspace_key"] == "temp" for row in temp["threads"])
+    assert all(row["workspace_key"] == "no-workspace" for row in temp["threads"])
     missing = await navigation.list_project_threads(project_key="no-workspace")
-    assert len(missing["threads"]) == 2
-    assert all(row["workspace"] is None for row in missing["threads"])
+    assert len(missing["threads"]) == 8
+    assert sum(row["workspace"] is None for row in missing["threads"]) == 2
 
 
 @pytest.mark.asyncio
@@ -161,11 +162,11 @@ async def test_temp_missing_github_and_background_workspace_groups(project_db):
     await add_project(project_db, "sub", 1, kind="sub_agent")
     result = await navigation.list_conversation_projects()
     groups = {project["key"]: project for project in result["projects"]}
-    assert set(groups) == {"temp", "no-workspace", "github:42", "task"}
-    assert groups["temp"]["label"] == "Temp workspace"
-    assert len(groups["temp"]["threads"]) == 4
-    assert groups["temp"]["threads"][0]["workspace"]["scope"]["key"].startswith("local:")
-    assert groups["no-workspace"]["threads"][0]["workspace"] is None
+    assert set(groups) == {"no-workspace", "github:42", "task"}
+    assert groups["no-workspace"]["label"] == "No workspace"
+    assert len(groups["no-workspace"]["threads"]) == 4
+    scoped = [row for row in groups["no-workspace"]["threads"] if row["workspace"]]
+    assert scoped[0]["workspace"]["scope"]["key"].startswith("local:")
     assert groups["github:42"]["label"] == "team/repo"
     assert groups["task"]["threads"][0]["workspace"]["execution"]["locator"].startswith("C:/work/task")
 

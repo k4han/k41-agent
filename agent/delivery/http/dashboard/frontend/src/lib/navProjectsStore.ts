@@ -5,7 +5,8 @@ import { threadWorkspaceKey } from "@/lib/chatThreads";
 import type { ThreadSummary, ThreadWorkspaceGroup } from "@/lib/chatThreads";
 import { API_PATHS } from "@/lib/endpoints";
 import { HISTORY_PAGE_SIZE, NAV_PROJECT_THREAD_LIMIT } from "@/lib/uiConstants";
-import { isTempWorkspace } from "@/lib/workspace";
+import { isNoWorkspace } from "@/lib/workspace";
+import { NO_WORKSPACE_KEY } from "@/lib/workspaceConstants";
 
 export type NavProjectsPayload = {
   projects: ThreadWorkspaceGroup[];
@@ -55,7 +56,7 @@ export function navProjectThreads(
 
 export function newProjectWorkspace(group: ThreadWorkspaceGroup) {
   const workspace = group.workspace?.execution ?? group.threads.find((thread) => thread.workspace?.execution)?.workspace?.execution;
-  return group.key === "temp" || isTempWorkspace(workspace) ? null : workspace ?? null;
+  return ["temp", NO_WORKSPACE_KEY].includes(group.key) || isNoWorkspace(workspace) ? null : workspace ?? null;
 }
 
 /** Shared across shell mounts so delayed requests have a single state owner. */
