@@ -10,6 +10,7 @@ from agent.modules.usage import usage_context_from_config
 from agent.modules.scheduler import (
     TriggerType,
     add_scheduled_task_job,
+    describe_trigger,
     get_scheduler,
     normalize_trigger,
 )
@@ -68,7 +69,7 @@ class ScheduleTaskInput(BaseModel):
 - For 'date': {"run_date": "YYYY-MM-DD HH:MM:SS"} (Configured display timezone).
 - For 'relative': {"minutes": 2}, {"hours": 1}, {"days": 1} for one-time delays from now.
 - For 'interval': e.g., {"minutes": 10}, {"hours": 1}, {"days": 1} for recurring schedules.
-- For 'cron': e.g., {"hour": "2", "minute": "0"} for 2:00 AM daily, {"day_of_week": "mon-fri", "hour": "9"} (Configured display timezone).""",
+- For 'cron': e.g., {"hour": "2", "minute": "0"} for 2:00 AM daily, {"day_of_week": "mon-fri", "hour": "9", "minute": "0"} (Configured display timezone). Prefer weekday names for day_of_week; numbers follow crontab (0 or 7 = Sunday, 1 = Monday).""",
     )
 
 
@@ -112,8 +113,8 @@ def schedule_task(
         else "Unknown"
     )
     return (
-        f"Successfully scheduled task '{task_description}'. "
-        f"Job ID: {job.id}. Next run time: {next_run}"
+        f"Successfully scheduled. Job ID: {job.id}. "
+        f"Schedule: {describe_trigger(job.trigger)}. Next run: {next_run}"
     )
 
 
@@ -143,7 +144,10 @@ def list_scheduled_tasks(
     for job in user_jobs:
         next_run = job.next_run_time.strftime('%Y-%m-%d %H:%M:%S %Z') if job.next_run_time else 'Unknown'
         task_desc = job.kwargs.get("task", "Unknown Task")
-        lines.append(f"- ID: {job.id} | Task: {task_desc} | Next run: {next_run}")
+        lines.append(
+            f"- ID: {job.id} | Task: {task_desc} | "
+            f"Schedule: {describe_trigger(job.trigger)} | Next run: {next_run}"
+        )
 
     return "Your scheduled tasks:\n" + "\n".join(lines)
 

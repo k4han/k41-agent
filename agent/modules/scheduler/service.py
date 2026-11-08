@@ -18,7 +18,7 @@ from agent.shared.timezone import resolve_display_timezone
 
 AGENT_NAME = "scheduler-executor"
 BACKGROUND_THREAD_PREFIX = "bg"
-TASK_DESCRIPTION_MAX_LEN = 16
+TASK_TITLE_MAX_LEN = 80
 SCHEDULER_SHUTDOWN_TIMEOUT = 10
 APSCHEDULER_JOBS_TABLE = "apscheduler_jobs"
 LEGACY_EXECUTE_TASK_REF = (
@@ -27,6 +27,14 @@ LEGACY_EXECUTE_TASK_REF = (
 CURRENT_EXECUTE_TASK_REF = "agent.modules.scheduler.service:execute_scheduled_task"
 
 logger = logging.getLogger(__name__)
+
+
+def _task_title(task: str) -> str:
+    """Return the first line of ``task``, shortened for notification headers."""
+    first_line = next((line.strip() for line in task.splitlines() if line.strip()), "")
+    if len(first_line) <= TASK_TITLE_MAX_LEN:
+        return first_line
+    return first_line[: TASK_TITLE_MAX_LEN - 1].rstrip() + "…"
 
 
 def describe_executor_model() -> dict[str, str]:
@@ -185,10 +193,8 @@ async def execute_scheduled_task(
             ai_content=response_text,
         )
 
-        notification = (
-            f"**Scheduled task completed:**\n{task}\n\n"
-            f"**Result:**\n{response_text}"
-        )
+        # The user wrote the task; only a short title is needed to tell runs apart.
+        notification = f"**Scheduled task:** {_task_title(task)}\n\n{response_text}"
         await _send_notification(platform, user_id, notification, mode="markdown")
 
     except Exception as e:

@@ -77,6 +77,168 @@ def test_interval_trigger_rejects_empty_duration():
         )
 
 
+@pytest.mark.parametrize(
+    ("day_of_week", "expected"),
+    [
+        ("1-5", "mon-fri"),
+        ("1", "mon"),
+        ("0", "sun"),
+        ("7", "sun"),
+        ("0,6", "sat,sun"),
+        (1, "mon"),
+        ("MON-FRI", "mon-fri"),
+        ("*", "*"),
+    ],
+)
+def test_cron_trigger_reads_numeric_weekdays_as_crontab(day_of_week, expected):
+    from agent.modules.scheduler import normalize_trigger
+
+    _, trigger_args = normalize_trigger(
+        "cron",
+        {"minute": "0", "hour": "9", "day_of_week": day_of_week},
+        FakeScheduler(),
+    )
+
+    assert trigger_args["day_of_week"] == expected
+
+
+def test_cron_trigger_rejects_invalid_weekday_number():
+    from agent.modules.scheduler import normalize_trigger
+
+    with pytest.raises(ValueError, match="Invalid day_of_week"):
+        normalize_trigger("cron", {"day_of_week": "8"}, FakeScheduler())
+
+
+def test_serialize_trigger_args_reads_real_trigger_fields():
+    from apscheduler.triggers.cron import CronTrigger
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    from agent.modules.scheduler import describe_trigger, serialize_trigger_args
+
+    zone = FakeScheduler.timezone
+    cron = CronTrigger(minute="30", hour="7", day_of_week="mon-fri", timezone=zone)
+    assert serialize_trigger_args(cron) == {
+        "minute": "30", "hour": "7", "day": "*", "month": "*", "day_of_week": "mon-fri",
+    }
+    assert describe_trigger(cron) == "cron 30 7 * * mon-fri"
+
+    # Legacy jobs stored APScheduler numbering (0 = Monday); show what actually runs.
+    legacy = CronTrigger(minute="0", hour="9", day_of_week="1-5", timezone=zone)
+    assert serialize_trigger_args(legacy)["day_of_week"] == "tue-sat"
+
+    interval = IntervalTrigger(days=8, hours=1, minutes=30, timezone=zone)
+    assert serialize_trigger_args(interval) == {"weeks": 1, "days": 1, "hours": 1, "minutes": 30}
+    assert describe_trigger(interval) == "every 1 weeks 1 days 1 hours 30 minutes"
+
+
+@pytest.mark.parametrize("seconds", [0.5, 1.5, 60.000001, 691201.234567])
+def test_fractional_interval_survives_dashboard_round_trip(seconds):
+    from types import SimpleNamespace
+
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    from agent.delivery.http.dashboard.routes.helpers.scheduler import serialize_job
+    from agent.modules.scheduler import describe_trigger, normalize_trigger
+
+    trigger = IntervalTrigger(seconds=seconds, timezone=FakeScheduler.timezone)
+    job = SimpleNamespace(
+        id="job-1",
+        kwargs={"task": "t", "platform": "api", "user_id": "u"},
+        trigger=trigger,
+        next_run_time=None,
+    )
+
+    payload = serialize_job(job)
+    trigger_type, trigger_args = normalize_trigger(
+        payload["trigger_type"], payload["trigger_args"], FakeScheduler()
+    )
+    restored = IntervalTrigger(timezone=FakeScheduler.timezone, **trigger_args)
+
+    assert trigger_type == "interval"
+    assert restored.interval == trigger.interval
+    assert payload["trigger_args"]["seconds"] % 1 == pytest.approx(seconds % 1)
+    assert f"{payload['trigger_args']['seconds']} seconds" in describe_trigger(trigger)
+
+
+@pytest.mark.parametrize(
+    ("trigger_args", "expected"),
+    [
+        ({"week": "1", "hour": "9"}, "cron 0 9 * * * (week=1)"),
+        ({"year": "2030", "hour": "9"}, "cron 0 9 * * * (year=2030)"),
+        ({"second": "*/10"}, "cron * * * * * (second=*/10)"),
+        ({}, "cron * * * * * (second=*)"),
+        ({"minute": "*", "second": "0"}, "cron * * * * *"),
+        (
+            {"year": "2030", "week": "1", "hour": "9", "second": "30"},
+            "cron * 9 * * * (year=2030, week=1, second=30)",
+        ),
+    ],
+)
+def test_describe_cron_includes_additional_fields(trigger_args, expected):
+    from apscheduler.triggers.cron import CronTrigger
+
+    from agent.modules.scheduler import describe_trigger
+
+    trigger = CronTrigger(timezone=FakeScheduler.timezone, **trigger_args)
+
+    assert describe_trigger(trigger) == expected
+
+
+def test_describe_cron_includes_bounds_and_jitter():
+    from apscheduler.triggers.cron import CronTrigger
+
+    from agent.modules.scheduler import describe_trigger
+
+    trigger = CronTrigger(
+        hour=9,
+        start_date="2030-01-01",
+        end_date="2030-01-31",
+        jitter=5,
+        timezone=FakeScheduler.timezone,
+    )
+
+    assert describe_trigger(trigger) == (
+        "cron 0 9 * * * (start_date=2030-01-01T00:00:00+07:00, "
+        "end_date=2030-01-31T00:00:00+07:00, jitter=5)"
+    )
+
+
+def test_serialize_job_returns_cron_fields_for_dashboard():
+    from types import SimpleNamespace
+
+    from apscheduler.triggers.cron import CronTrigger
+
+    from agent.delivery.http.dashboard.routes.helpers.scheduler import serialize_job
+    from agent.modules.scheduler import normalize_trigger
+
+    trigger_type, trigger_args = normalize_trigger(
+        "cron", {"minute": "0", "hour": "9", "day_of_week": "1-5"}, FakeScheduler()
+    )
+    job = SimpleNamespace(
+        id="job-1",
+        kwargs={"task": "t", "platform": "api", "user_id": "u"},
+        trigger=CronTrigger(timezone=FakeScheduler.timezone, **trigger_args),
+        next_run_time=None,
+    )
+
+    payload = serialize_job(job)
+
+    assert trigger_type == "cron"
+    assert payload["trigger_type"] == "cron"
+    assert payload["trigger_args"] == {
+        "minute": "0", "hour": "9", "day": "*", "month": "*", "day_of_week": "mon-fri",
+    }
+
+
+def test_task_title_keeps_first_line_short():
+    from agent.modules.scheduler.service import TASK_TITLE_MAX_LEN, _task_title
+
+    assert _task_title("\n  Remind me to drink water\nmore details") == "Remind me to drink water"
+    long_title = _task_title("x" * 200)
+    assert len(long_title) == TASK_TITLE_MAX_LEN
+    assert long_title.endswith("…")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entrypoint", ["tool", "dashboard"])
 @pytest.mark.parametrize("trigger_type", ["cron", "date"])
@@ -131,6 +293,7 @@ async def test_new_jobs_use_updated_timezone_without_restart(
             result = schedule_task.func("Remind me to eat.", trigger_type, trigger_args, runtime)
             assert "Successfully scheduled" in result
             assert "UTC" not in result
+            assert "Remind me to eat." not in result
             job = next(job for job in scheduler.get_jobs() if job.id != old_job.id)
         else:
             result = await create_scheduler_job(CreateJobBody(
@@ -277,3 +440,4 @@ async def test_execute_scheduled_task_uses_scheduled_thread_for_usage(monkeypatc
     assert messages[0].content == "[Scheduled Task]\ndaily summary"
     assert messages[1].content == "done"
     assert captured["notification"]["args"][:2] == ("telegram", "6197833678")
+    assert captured["notification"]["args"][2] == "**Scheduled task:** daily summary\n\ndone"

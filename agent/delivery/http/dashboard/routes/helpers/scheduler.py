@@ -6,7 +6,7 @@ from typing import Any
 from apscheduler.job import Job
 from fastapi import HTTPException
 
-from agent.modules.scheduler import get_scheduler
+from agent.modules.scheduler import get_scheduler, serialize_trigger_args
 from agent.shared.timezone import resolve_display_timezone
 
 
@@ -19,19 +19,11 @@ def get_scheduler_or_503() -> Any:
 
 def serialize_job(job: Job) -> dict[str, Any]:
     trigger_type = type(job.trigger).__name__.lower().replace("trigger", "")
-    trigger_args: dict[str, Any] = {}
-    trigger = job.trigger
     _, display_zone = resolve_display_timezone()
-    for attr in ["run_date", "weeks", "days", "hours", "minutes", "seconds",
-                 "minute", "hour", "day", "month", "day_of_week"]:
-        if hasattr(trigger, attr):
-            val = getattr(trigger, attr)
-            if val is not None:
-                trigger_args[attr] = str(val) if not isinstance(val, (int, float, str)) else val
-    if trigger_type == "date" and hasattr(trigger, "run_date"):
-        run_date = getattr(trigger, "run_date")
-        if isinstance(run_date, datetime):
-            trigger_args["run_date"] = run_date.astimezone(display_zone).strftime("%Y-%m-%dT%H:%M")
+    trigger_args = serialize_trigger_args(job.trigger)
+    run_date = trigger_args.get("run_date")
+    if isinstance(run_date, datetime):
+        trigger_args["run_date"] = run_date.astimezone(display_zone).strftime("%Y-%m-%dT%H:%M")
     return {
         "id": job.id,
         "task": job.kwargs.get("task", "Unknown"),

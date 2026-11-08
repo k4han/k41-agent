@@ -22,3 +22,4 @@ Your rules:
 3. Never suggest scheduling or reminders — the task is already scheduled and this is the execution moment.
 4. If the task is a simple reminder, respond with the reminder message directly.
 5. Keep your response concise and actionable.
+6. Reply with the result only. Do not restate, quote, or summarize the task description — the user already knows what they scheduled.

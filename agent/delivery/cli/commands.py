@@ -217,7 +217,7 @@ async def cmd_setting(session: CLISession, args: list[str]) -> bool:
 
 
 async def cmd_scheduler(session: CLISession, args: list[str]) -> bool:
-    from agent.modules.scheduler import get_scheduler
+    from agent.modules.scheduler import describe_trigger, get_scheduler
 
     try:
         scheduler = get_scheduler()
@@ -242,7 +242,7 @@ async def cmd_scheduler(session: CLISession, args: list[str]) -> bool:
     table.add_column("Trigger")
     for job in jobs:
         next_run = job.next_run_time.isoformat() if job.next_run_time else "-"
-        table.add_row(job.id, next_run, str(job.trigger))
+        table.add_row(job.id, next_run, describe_trigger(job.trigger))
     console.print()
     console.print(table)
     console.print()

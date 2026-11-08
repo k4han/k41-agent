@@ -10,7 +10,9 @@ from agent.modules.scheduler.service import (
 from agent.modules.scheduler.triggers import (
     APSchedulerTriggerType,
     TriggerType,
+    describe_trigger,
     normalize_trigger,
+    serialize_trigger_args,
 )
 
 __all__ = [
@@ -23,5 +25,7 @@ __all__ = [
     "describe_executor_model",
     "APSchedulerTriggerType",
     "TriggerType",
+    "describe_trigger",
     "normalize_trigger",
+    "serialize_trigger_args",
 ]
