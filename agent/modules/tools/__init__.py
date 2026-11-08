@@ -303,7 +303,7 @@ from agent.modules.tools.coding import service as _coding_service_module
 def get_coding_service(*args, **kwargs):
     return _coding_service_module.get_coding_service(*args, **kwargs)
 from agent.modules.tools.coding.permissions import pending_permission_requests, permission_request_event
-from agent.modules.tools.coding.storage import bounded_text as bound_tool_text
+from agent.modules.tools.coding.storage import atomic_json, bounded_text as bound_tool_text
 from agent.modules.tools.coding.storage import conversation_key
 from agent.modules.tools.coding.processes import kill_tree as kill_process_tree, spawn_contained as spawn_contained_process
 from agent.modules.tools.runtime.output_retention import retain_tool_messages
@@ -318,6 +318,7 @@ from agent.modules.tools.coding.paths import comparable_path
 __all__ += [
     "prepare_tool_batch",
     "InvocationContext",
+    "atomic_json",
     "coding_authorization_scope",
     "kill_process_tree",
     "conversation_key",

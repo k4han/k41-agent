@@ -660,7 +660,7 @@ class AppContainer:
         attach_database_config_source(database_url, service=self.config_service)
 
         from agent.modules.agent_runtime import migrate_agent_runtime_tables
-        from agent.modules.browser.migrations import migrate_browser_tables
+        from agent.modules.browser import migrate_browser_tables
         from agent.modules.conversations import migrate_conversation_tables
         from agent.modules.github import migrate_github_tables
         from agent.modules.google_calendar import migrate_google_calendar_tables

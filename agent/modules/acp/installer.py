@@ -29,7 +29,7 @@ from agent.modules.acp.errors import AcpError, AcpNotInstalled
 from agent.modules.acp.process import AgentCommand
 from agent.modules.acp.registry import AgentRelease, fetch_release
 from agent.modules.acp.service import acp_data_root, not_installed_notice
-from agent.modules.tools.coding.storage import atomic_json
+from agent.modules.tools import atomic_json
 
 logger = logging.getLogger(__name__)
 

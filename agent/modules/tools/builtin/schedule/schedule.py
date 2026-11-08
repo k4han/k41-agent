@@ -13,11 +13,11 @@ from agent.modules.scheduler import (
     describe_trigger,
     get_scheduler,
     normalize_trigger,
+    resolve_scheduled_project,
 )
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
-from agent.modules.scheduler.service import resolve_scheduled_project
 
 logger = logging.getLogger(__name__)
 

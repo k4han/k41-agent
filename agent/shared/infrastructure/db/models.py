@@ -23,7 +23,7 @@ def load_orm_models() -> tuple[type[object], ...]:
     )
     from agent.modules.prompt_variables import PromptVariable
     from agent.modules.projects import Project, ProjectSecret, ProjectWorkspace, WorkspaceRuntime
-    from agent.modules.scheduler.models import SchedulerJobRun
+    from agent.modules.scheduler import SchedulerJobRun
     from agent.modules.usage import LLMUsageEvent
     from agent.modules.workspaces import ThreadWorkspace
     from agent.modules.users import User

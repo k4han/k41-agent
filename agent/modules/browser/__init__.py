@@ -3,6 +3,7 @@
 import logging
 
 from agent.modules.browser.driver import CDPViewer, StagehandDriver
+from agent.modules.browser.migrations import migrate_browser_tables
 from agent.modules.browser.models import BrowserAccessDenied, BrowserAccountProfile, BrowserArtifact, BrowserBinding, BrowserHandoffResume, BrowserInvocation, BrowserProfile, BrowserProjectProfile
 from agent.modules.browser.service import BrowserError, BrowserService
 
@@ -52,4 +53,4 @@ async def abandon_thread_handoffs(thread_id: str, *, expired_only: bool = False)
 
 __all__ = ["BROWSER_HANDOFF_WAIT_KEY", "BrowserAccessDenied", "BrowserAccountProfile", "BrowserArtifact", "BrowserBinding", "BrowserError", "BrowserHandoffResume",
            "BrowserInvocation", "BrowserProfile", "BrowserProjectProfile", "BrowserService", "CDPViewer", "StagehandDriver",
-           "abandon_thread_handoffs", "get_browser_service", "delete_thread_browsers", "release_delegated_browser"]
+           "abandon_thread_handoffs", "get_browser_service", "delete_thread_browsers", "migrate_browser_tables", "release_delegated_browser"]

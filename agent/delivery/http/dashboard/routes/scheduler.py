@@ -13,19 +13,17 @@ from agent.delivery.http.dashboard.routes.helpers.scheduler import (
     serialize_job,
 )
 from agent.modules.scheduler import (
-    add_scheduled_task_job,
-    execute_scheduled_task,
-    normalize_trigger,
-)
-from agent.modules.scheduler.history import (
     DEFAULT_RUN_LIST_LIMIT,
     MAX_RUN_LIST_LIMIT,
     TRIGGER_SOURCE_MANUAL,
+    add_scheduled_task_job,
     delete_run,
     delete_runs,
+    execute_scheduled_task,
     list_runs,
+    normalize_trigger,
+    resolve_scheduled_project,
 )
-from agent.modules.scheduler.service import resolve_scheduled_project
 from agent.modules.projects import ProjectWorkspaceError
 from agent.delivery.http.dashboard.routes.helpers.workspace import workspace_http_error
 

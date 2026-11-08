@@ -168,7 +168,7 @@ class BrowserService:
         """Provision saved defaults without launching Chrome."""
         if owner_ids is None:
             from sqlalchemy import select
-            from agent.modules.admin_auth.models import AdminCredential
+            from agent.modules.admin_auth import AdminCredential
             from agent.modules.browser.models import BrowserAccountProfile, BrowserBinding, BrowserProfile, BrowserProjectProfile
 
             async with self.repository.session() as session:
