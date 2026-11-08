@@ -248,22 +248,63 @@ body.sidebar-resizing * {
   text-overflow: ellipsis;
 }
 
-.nav-badge {
+.nav-link--live > svg {
+  color: var(--info);
+}
+
+.nav-live-indicator {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-width: 17px;
-  height: 17px;
+  gap: 5px;
   margin-left: auto;
+  border: 1px solid color-mix(in srgb, var(--info) 30%, transparent);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--info) 16%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--info) 35%, transparent);
+  background: color-mix(in srgb, var(--info) 12%, var(--surface));
   color: var(--info);
-  padding: 0 5px;
+  padding: 2px 7px 2px 6px;
   font-size: 0.6875rem;
-  font-weight: 650;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.live-dot,
+.nav-live-dot {
+  position: relative;
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.live-dot::after,
+.nav-live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: currentColor;
+  animation: live-dot-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes live-dot-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  80%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot::after,
+  .nav-live-dot::after {
+    animation: none;
+  }
 }
 
 .nav-history-toggle {

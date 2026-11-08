@@ -109,15 +109,18 @@
     position: relative;
   }
 
-  .nav-badge {
+  .nav-live-indicator {
     position: absolute;
-    top: -2px;
-    right: -4px;
-    min-width: 14px;
-    height: 14px;
+    top: 2px;
+    right: 0;
     margin-left: 0;
-    padding: 0 3px;
-    font-size: 0.5625rem;
+    border: 0;
+    background: transparent;
+    padding: 0;
+  }
+
+  .nav-live-text {
+    display: none;
   }
 
   .grid-sidebar,

@@ -708,6 +708,7 @@ function sessionFixture() {
   const module = loadModule('../src/lib/sessionStore.ts', {
     '@/lib/endpoints': { SSE_URLS: { sessions: '/sessions' } },
     '@/lib/eventConstants': constants,
+    '@/lib/schedulerSessions': loadModule('../src/lib/schedulerSessions.ts'),
     '@/lib/uiConstants': { SSE_RECONNECT_DELAY_MS: 10 },
   }, {
     EventSource,
@@ -738,6 +739,19 @@ test('session consumers share one connection and release it after the final clea
   assert.equal(f.connections[0].closed, false);
   second.dispose();
   assert.equal(f.connections[0].closed, true);
+});
+
+test('scheduler session updates do not announce sidebar threads', t => {
+  const f = sessionFixture();
+  const consumer = mount(t, () => f.useSessions());
+  const scheduled = { session_id: 'run', thread_id: 'thread-run', platform: 'bg', agent_name: 'scheduler' };
+  f.connections[0].emit(f.SESSION_EVENTS.SESSION_STARTED, scheduled);
+  f.connections[0].emit(f.SESSION_EVENTS.SESSION_UPDATED, { ...scheduled, current_step: 'tool' });
+  assert.equal(consumer.value.sessions().length, 1);
+  assert.equal(f.events.filter(event => event.type === f.CUSTOM_DOM_EVENTS.SESSION_UPDATED).length, 1);
+  assert.equal(f.events.filter(event => event.type === f.CUSTOM_DOM_EVENTS.THREAD_START_RUNNING).length, 0);
+  f.connections[0].emit(f.SESSION_EVENTS.SESSION_UPDATED, { session_id: 'chat', thread_id: 'thread-chat', platform: 'dashboard', agent_name: 'default' });
+  assert.equal(f.events.filter(event => event.type === f.CUSTOM_DOM_EVENTS.THREAD_START_RUNNING).length, 1);
 });
 
 test('session reconnect timers are cancelled when consumers leave', t => {

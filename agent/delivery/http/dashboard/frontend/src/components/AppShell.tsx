@@ -47,6 +47,7 @@ import {
 import type { ThreadSummary, ThreadWorkspaceGroup } from "@/lib/chatThreads";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { API_PATHS } from "@/lib/endpoints";
+import { isSchedulerSession } from "@/lib/schedulerSessions";
 import { useSessions } from "@/lib/sessionStore";
 import { updateDashboardFavicon } from "@/lib/favicon";
 import { STORAGE_KEYS } from "@/lib/uiConstants";
@@ -152,6 +153,8 @@ export function AppShell(props: {
     }
     return activeIds;
   });
+
+  const schedulerRunning = createMemo(() => activeSessions().some(isSchedulerSession));
 
   createEffect(() => {
     const isRunning = activeSessions().length > 0 || runningThreadIds().size > 0;
@@ -439,23 +442,27 @@ export function AppShell(props: {
     });
   });
 
-  const renderNavItem = (item: NavItem) => (
-    <A
-      href={item.href}
-      activeClass=""
-      inactiveClass=""
-      class={`nav-link ${isActive(item.href) ? "active" : ""}`}
-      title={item.label}
-    >
-      {item.icon()}
-      <span class="nav-label">{item.label}</span>
-      <Show when={item.href === "/chat" && runningThreadIds().size > 0}>
-        <span class="nav-badge" title={`${runningThreadIds().size} running`}>
-          {runningThreadIds().size}
-        </span>
-      </Show>
-    </A>
-  );
+  const renderNavItem = (item: NavItem) => {
+    const live = () => item.href === "/scheduler" && schedulerRunning();
+    return (
+      <A
+        href={item.href}
+        activeClass=""
+        inactiveClass=""
+        class={`nav-link ${isActive(item.href) ? "active" : ""} ${live() ? "nav-link--live" : ""}`}
+        title={live() ? `${item.label} - task running` : item.label}
+      >
+        {item.icon()}
+        <span class="nav-label">{item.label}</span>
+        <Show when={live()}>
+          <span class="nav-live-indicator">
+            <span class="nav-live-dot" aria-hidden="true" />
+            <span class="nav-live-text">Running</span>
+          </span>
+        </Show>
+      </A>
+    );
+  };
 
   const renderHistoryItem = (thread: ThreadSummary) => {
     return (

@@ -844,6 +844,8 @@ export function ChatPage() {
       : "Start a conversation — a temporary workspace is created automatically when you send a message. Link a project if you want to work with real files."
   ));
   const isBackgroundThread = createMemo(() => threadData()?.kind === "background");
+  // Background and scheduled runs execute outside the chat stream manager, so there is no stream to rejoin.
+  const canReconnectStream = createMemo(() => !isBackgroundThread() && threadData()?.kind !== "scheduled");
   const backgroundTaskActive = createMemo(() => {
     const task = backgroundTask();
     return Boolean(task && ACTIVE_TASK_STATUSES.has(task.status));
@@ -1308,11 +1310,12 @@ export function ChatPage() {
     }
   };
 
-  const reconnectStream = async (threadId: string) => {
-    if (isUnmounting || threadId !== currentThreadId() || threadLoading()) return;
+  /** Resolves to the number of streamed events, or null when no reconnect was attempted. */
+  const reconnectStream = async (threadId: string): Promise<number | null> => {
+    if (isUnmounting || threadId !== currentThreadId() || threadLoading()) return null;
     cleanupStaleStreams();
     if (streaming()) {
-      return;
+      return null;
     }
 
     const currentItems = items();
@@ -1331,6 +1334,7 @@ export function ChatPage() {
 
     const assistantIdRef: AssistantIdRef = { id: null };
     const streamedRef: StreamedRef = { received: false };
+    let eventCount = 0;
 
     try {
       const response = await fetchWithCsrf(API_PATHS.chatEventsReconnect, {
@@ -1347,10 +1351,11 @@ export function ChatPage() {
         throw new Error("Streaming response is not available.");
       }
 
-      await readNDJSONStream(
-        response.body,
-        makeEventHandler(assistantIdRef, streamedRef, streamThreadIdRef),
-      );
+      const handleEvent = makeEventHandler(assistantIdRef, streamedRef, streamThreadIdRef);
+      await readNDJSONStream(response.body, (event) => {
+        eventCount += 1;
+        handleEvent(event);
+      });
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         // Ignored
@@ -1376,6 +1381,7 @@ export function ChatPage() {
         void refreshThread(finishedTid);
       }
     }
+    return eventCount;
   };
 
   const stopChat = async () => {
@@ -1773,15 +1779,24 @@ export function ChatPage() {
   };
 
   let sessionEventRevision = 0;
+  // Runs started outside the chat stream manager (e.g. channel messages) answer a reconnect with
+  // an empty stream; retrying them on every session update would loop until the run ends.
+  const streamlessSessionIds = new Set<string>();
+  const reconnectToSession = async (session: ActiveSession) => {
+    if (streaming() || !threadData() || !canReconnectStream() || streamlessSessionIds.has(session.session_id)) {
+      return;
+    }
+    const eventCount = await reconnectStream(session.thread_id);
+    if (eventCount === 0) streamlessSessionIds.add(session.session_id);
+  };
+
   const handleSessionStartedOrUpdated = (event: Event) => {
     const customEvent = event as CustomEvent<ActiveSession>;
     const session = customEvent.detail;
     if (session && session.thread_id === currentThreadId()) {
       sessionEventRevision += 1;
       setActiveSession(session);
-      if (!streaming() && !threadLoading() && threadData() && !isBackgroundThread()) {
-        void reconnectStream(session.thread_id);
-      }
+      if (!threadLoading()) void reconnectToSession(session);
     }
   };
 
@@ -1798,9 +1813,11 @@ export function ChatPage() {
     }
   };
 
+  // A memo so refreshing the same thread's payload does not refetch sessions.
+  const readyThreadId = createMemo(() => threadData()?.thread_id || "");
   createEffect(on(
-    [currentThreadId, () => threadData()?.thread_id || "", isBackgroundThread],
-    ([threadId, readyThreadId, backgroundThread]) => {
+    [currentThreadId, readyThreadId, canReconnectStream],
+    ([threadId, readyThreadId]) => {
       let cancelled = false;
       const revision = sessionEventRevision;
       const requestController = new AbortController();
@@ -1817,9 +1834,7 @@ export function ChatPage() {
             const found = payload.sessions.find((s) => s.thread_id === threadId);
             if (!cancelled && !isUnmounting && revision === sessionEventRevision && threadId === currentThreadId()) {
               setActiveSession(found || null);
-              if (found && !streaming() && threadData() && !backgroundThread) {
-                void reconnectStream(threadId);
-              }
+              if (found) void reconnectToSession(found);
             }
           } catch (err) {
             if (!requestController.signal.aborted) console.error("Failed to fetch initial session details", err);

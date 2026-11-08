@@ -36,15 +36,18 @@
   display: none;
 }
 
-.sidebar-collapsed .nav-badge {
+.sidebar-collapsed .nav-live-indicator {
   position: absolute;
-  top: 3px;
-  right: 2px;
-  min-width: 14px;
-  height: 14px;
+  top: 5px;
+  right: 5px;
   margin-left: 0;
-  padding: 0 3px;
-  font-size: 0.5625rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.sidebar-collapsed .nav-live-text {
+  display: none;
 }
 
 .sidebar-collapsed .nav-history-group {

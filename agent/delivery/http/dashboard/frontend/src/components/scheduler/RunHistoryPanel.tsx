@@ -1,5 +1,6 @@
+import { A } from "@solidjs/router";
 import { createEffect, createSignal, For, on, onCleanup, Show } from "solid-js";
-import { Eye, History, RefreshCw, Trash2 } from "lucide-solid";
+import { ExternalLink, Eye, History, RefreshCw, Trash2 } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DashboardTable } from "@/components/DashboardTable";
@@ -8,7 +9,9 @@ import { Markdown } from "@/components/Markdown";
 import { SelectControl } from "@/components/SelectControl";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
+import { RunningPill } from "@/components/scheduler/RunningNowPanel";
 import { apiFetch, deleteJson } from "@/lib/api";
+import { chatThreadHref } from "@/lib/chatThreads";
 import { API_PATHS } from "@/lib/endpoints";
 import { truncateText } from "@/lib/utils";
 import type { SchedulerJob, SchedulerRun, SchedulerRunsPayload } from "@/types";
@@ -44,6 +47,14 @@ export function runModels(run: SchedulerRun): { labels: string[]; fromUsage: boo
     return { labels: run.models_used.map((item) => modelLabel(item.provider, item.model)), fromUsage: true };
   }
   return { labels: run.model || run.provider ? [modelLabel(run.provider, run.model)] : [], fromUsage: false };
+}
+
+function RunStatus(props: { status: string }) {
+  return (
+    <Show when={props.status === "running"} fallback={<StatusBadge status={props.status} />}>
+      <RunningPill />
+    </Show>
+  );
 }
 
 export function RunHistoryPanel(props: {
@@ -118,11 +129,11 @@ export function RunHistoryPanel(props: {
   return (
     <section class="panel" id="scheduler-run-history">
       <div class="panel-header split">
-        <div class="panel-title">
-          <History size={16} /> Run History
+        <div class="panel-title scheduler-panel-title">
+          <History size={15} /> Run History
           <span class="hint">{total()} run{total() === 1 ? "" : "s"}</span>
         </div>
-        <div class="row-wrap">
+        <div class="row-wrap scheduler-history-actions">
           <SelectControl
             value={props.jobFilter}
             options={jobOptions()}
@@ -174,7 +185,7 @@ export function RunHistoryPanel(props: {
                   <span class="mono hint">{run.user_id}</span>
                 </div>
               </td>
-              <td><StatusBadge status={run.status} /></td>
+              <td><RunStatus status={run.status} /></td>
               <td>
                 <Show when={models().labels.length > 0} fallback={<span class="hint">-</span>}>
                   <For each={models().labels}>{(label) => <div class="mono">{label}</div>}</For>
@@ -210,9 +221,18 @@ export function RunHistoryPanel(props: {
         size="lg"
         onClose={() => setSelected(null)}
         footer={
-          <button class="btn" type="button" onClick={() => setSelected(null)}>
-            Close
-          </button>
+          <>
+            <Show when={selected()?.thread_id}>
+              {(threadId) => (
+                <A class="btn" href={chatThreadHref(threadId())}>
+                  <ExternalLink size={13} /> Open thread
+                </A>
+              )}
+            </Show>
+            <button class="btn" type="button" onClick={() => setSelected(null)}>
+              Close
+            </button>
+          </>
         }
       >
         <Show when={selected()}>
@@ -220,7 +240,7 @@ export function RunHistoryPanel(props: {
             <div class="stack">
               <dl class="scheduler-run-details">
                 <dt>Status</dt>
-                <dd><StatusBadge status={run().status} /></dd>
+                <dd><RunStatus status={run().status} /></dd>
                 <dt>Trigger</dt>
                 <dd>{run().trigger_source === "manual" ? "Manual run" : "Schedule"}</dd>
                 <dt>Agent</dt>

@@ -1,9 +1,8 @@
-import { createSignal, For, Show } from "solid-js";
-import { Bot, Clock, Edit3, History, Play, Square, Trash2 } from "lucide-solid";
+import { createEffect, createMemo, createSignal, For, type JSX, on, onCleanup, Show } from "solid-js";
+import { Bot, CalendarClock, Clock, Edit3, History, Pause, Play, Plus, Trash2 } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { DashboardTable } from "@/components/DashboardTable";
 import { Dialog } from "@/components/Dialog";
 import { SelectControl } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
@@ -11,10 +10,21 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
 import { getPlatforms, getTriggerTypes } from "@/lib/catalogStore";
+import { API_PATHS } from "@/lib/endpoints";
+import { isSchedulerSession } from "@/lib/schedulerSessions";
+import { useSessions } from "@/lib/sessionStore";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
-import { dateTimeInTimeZone, triggerArgsFromDateInput } from "@/lib/utils";
-import { modelLabel, RunHistoryPanel } from "@/components/scheduler/RunHistoryPanel";
-import type { Identity, SchedulerExecutor, SchedulerJob } from "@/types";
+import { dateTimeInTimeZone, triggerArgsFromDateInput, truncateText } from "@/lib/utils";
+import { formatRunTime, modelLabel, RunHistoryPanel } from "@/components/scheduler/RunHistoryPanel";
+import { RunningNowPanel, RunningPill } from "@/components/scheduler/RunningNowPanel";
+import type {
+  ActiveSession,
+  Identity,
+  SchedulerExecutor,
+  SchedulerJob,
+  SchedulerRun,
+  SchedulerRunsPayload,
+} from "@/types";
 
 type SchedulerPayload = {
   jobs: SchedulerJob[];
@@ -607,16 +617,298 @@ function TriggerFields(props: {
   );
 }
 
+const SCHEDULER_RUNS_LOOKUP_LIMIT = 20;
+const CLOCK_TICK_MS = 1000;
+
+const DURATION_UNITS = [
+  ["weeks", "w"],
+  ["days", "d"],
+  ["hours", "h"],
+  ["minutes", "m"],
+  ["seconds", "s"],
+] as const;
+
+function durationLabel(args: Record<string, unknown>): string {
+  return DURATION_UNITS.flatMap(([key, unit]) => {
+    const value = Number(args[key] ?? 0);
+    return Number.isFinite(value) && value > 0 ? [`${value}${unit}`] : [];
+  }).join(" ");
+}
+
+function cronExpressionOf(job: SchedulerJob): string {
+  const args = job.trigger_args || {};
+  return buildCronExpression(
+    args.minute as string,
+    args.hour as string,
+    args.day as string,
+    args.month as string,
+    args.day_of_week as string
+  );
+}
+
+export function scheduleSummary(job: SchedulerJob): string {
+  const args = job.trigger_args || {};
+  if (job.trigger_type === "cron") {
+    return formatCronDescription(
+      args.minute as string,
+      args.hour as string,
+      args.day as string,
+      args.month as string,
+      args.day_of_week as string
+    );
+  }
+  const duration = durationLabel(args);
+  if (job.trigger_type === "interval") {
+    return duration ? `Runs every ${duration}` : "Runs on an interval";
+  }
+  if (typeof args.run_date === "string" && args.run_date) {
+    return `Runs once at ${formatRunTime(args.run_date)}`;
+  }
+  if (job.trigger_type === "relative" && duration) {
+    return `Runs once, ${duration} after creation`;
+  }
+  return "Runs once";
+}
+
+export function formatRelativeTime(value: string | null, now: number): string {
+  if (!value) return "";
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return "";
+  const delta = timestamp - now;
+  const distance = Math.abs(delta);
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (distance < minute) return delta >= 0 ? "in a moment" : "just now";
+  let amount: string;
+  if (distance < hour) {
+    amount = `${Math.floor(distance / minute)}m`;
+  } else if (distance < day) {
+    const minutes = Math.floor((distance % hour) / minute);
+    amount = `${Math.floor(distance / hour)}h${minutes ? ` ${minutes}m` : ""}`;
+  } else {
+    amount = `${Math.floor(distance / day)}d`;
+  }
+  return delta >= 0 ? `in ${amount}` : `${amount} ago`;
+}
+
+function identityOptions(identities: Identity[]) {
+  return [
+    ...identities.map((identity) => ({
+      value: `${identity.platform}:${identity.external_id}`,
+      label: `${identity.platform} - ${identity.external_id}`,
+    })),
+    { value: "__manual__", label: "Enter manually" },
+  ];
+}
+
+function JobFormFields(props: {
+  form: ScheduleForm;
+  setField: <K extends keyof ScheduleForm>(key: K, value: ScheduleForm[K]) => void;
+  identities: Identity[];
+}) {
+  return (
+    <div class="stack">
+      <div class="field">
+        <label>Task</label>
+        <textarea
+          class="textarea scheduler-task-input"
+          placeholder="Describe what the agent should do each time this job fires."
+          value={props.form.task}
+          onInput={(event) => props.setField("task", event.currentTarget.value)}
+        />
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label>Target User</label>
+          <SelectControl
+            value={props.form.identity}
+            options={identityOptions(props.identities)}
+            onChange={(value) => props.setField("identity", value)}
+            ariaLabel="Target User"
+          />
+        </div>
+        <div class="field">
+          <label>Schedule</label>
+          <SelectControl
+            value={props.form.trigger_type}
+            options={getTriggerTypes()}
+            onChange={(value) => props.setField("trigger_type", value as TriggerType)}
+            ariaLabel="Schedule"
+          />
+        </div>
+      </div>
+      <Show when={props.form.identity === "__manual__"}>
+        <div class="grid-2">
+          <div class="field">
+            <label>Platform</label>
+            <SelectControl
+              value={props.form.platform}
+              options={getPlatforms()}
+              onChange={(value) => props.setField("platform", value)}
+              ariaLabel="Platform"
+            />
+          </div>
+          <div class="field">
+            <label>User ID</label>
+            <input
+              class="input"
+              value={props.form.user_id}
+              onInput={(event) => props.setField("user_id", event.currentTarget.value)}
+            />
+          </div>
+        </div>
+      </Show>
+      <TriggerFields form={props.form} setField={props.setField} />
+    </div>
+  );
+}
+
+function MetricTile(props: { value: JSX.Element; label: string; tone?: "info"; title?: string }) {
+  return (
+    <div
+      class={`panel metric metric-card scheduler-metric ${props.tone ? `metric-${props.tone}` : ""}`}
+      title={props.title}
+    >
+      <div class="metric-value">{props.value}</div>
+      <div class="metric-label">{props.label}</div>
+    </div>
+  );
+}
+
+function JobCard(props: {
+  job: SchedulerJob;
+  running: boolean;
+  now: number;
+  onEdit: () => void;
+  onRun: () => void;
+  onHistory: () => void;
+  onTogglePause: () => void;
+  onDelete: () => void;
+}) {
+  const nextRun = () => (props.job.paused ? null : props.job.next_run_time);
+  return (
+    <article
+      class={`scheduler-job-card ${props.running ? "is-running" : ""} ${props.job.paused ? "is-paused" : ""}`}
+    >
+      <header class="scheduler-job-card-head">
+        <div class="scheduler-job-tags">
+          <Show when={props.running} fallback={<StatusBadge status={props.job.paused ? "paused" : "active"} />}>
+            <RunningPill />
+          </Show>
+          <span class="chip">{props.job.trigger_type}</span>
+        </div>
+        <div class="scheduler-job-actions">
+          <button class="btn btn-sm btn-ghost" type="button" title="Edit job" aria-label="Edit job" onClick={props.onEdit}>
+            <Edit3 size={14} />
+          </button>
+          <button class="btn btn-sm btn-ghost" type="button" title="Run history" aria-label="Run history" onClick={props.onHistory}>
+            <History size={14} />
+          </button>
+          <button
+            class="btn btn-sm btn-ghost"
+            type="button"
+            title={props.job.paused ? "Resume job" : "Pause job"}
+            aria-label={props.job.paused ? "Resume job" : "Pause job"}
+            onClick={props.onTogglePause}
+          >
+            <Show when={props.job.paused} fallback={<Pause size={14} />}>
+              <Play size={14} />
+            </Show>
+          </button>
+          <button
+            class="btn btn-sm btn-ghost scheduler-job-delete"
+            type="button"
+            title="Delete job"
+            aria-label="Delete job"
+            onClick={props.onDelete}
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </header>
+
+      <p class="scheduler-job-task" title={props.job.task}>{props.job.task}</p>
+
+      <div class="scheduler-trigger-cell">
+        <div class="scheduler-schedule-line">
+          <Clock size={13} />
+          <span class="scheduler-cron-summary">{scheduleSummary(props.job)}</span>
+        </div>
+        <Show when={props.job.trigger_type === "cron"}>
+          <code class="mono scheduler-cron-expr">{cronExpressionOf(props.job)}</code>
+        </Show>
+      </div>
+
+      <footer class="scheduler-job-foot">
+        <div class="scheduler-job-foot-meta">
+          <div class="scheduler-job-next">
+            <span class="scheduler-job-foot-label">Next run</span>
+            <Show
+              when={nextRun()}
+              fallback={<span class="hint">{props.job.paused ? "Paused" : "Not scheduled"}</span>}
+            >
+              {(value) => (
+                <>
+                  <span class="scheduler-job-next-relative">{formatRelativeTime(value(), props.now)}</span>
+                  <span class="mono hint">{formatRunTime(value())}</span>
+                </>
+              )}
+            </Show>
+          </div>
+          <div class="scheduler-job-target">
+            <span class="badge">{props.job.platform}</span>
+            <span class="mono hint" title={props.job.user_id}>{props.job.user_id}</span>
+          </div>
+        </div>
+        <button class="btn btn-sm" type="button" disabled={props.running} onClick={props.onRun}>
+          <Play size={13} />
+          Run now
+        </button>
+      </footer>
+    </article>
+  );
+}
+
 export function SchedulerPage() {
   const [data, setData] = createSignal<SchedulerPayload>();
   const [error, setError] = createSignal("");
   const [form, setForm] = createSignal<ScheduleForm>(defaultScheduleForm());
+  const [createOpen, setCreateOpen] = createSignal(false);
+  const [saving, setSaving] = createSignal(false);
   const [editJob, setEditJob] = createSignal<SchedulerJob | null>(null);
   const [editForm, setEditForm] = createSignal<ScheduleForm>(defaultScheduleForm());
   const [deleteTarget, setDeleteTarget] = createSignal<SchedulerJob | null>(null);
   const [historyJobFilter, setHistoryJobFilter] = createSignal("");
   const [historyRefreshToken, setHistoryRefreshToken] = createSignal(0);
+  const [recentRuns, setRecentRuns] = createSignal<SchedulerRun[]>([]);
+  const [stopping, setStopping] = createSignal<ReadonlySet<string>>(new Set());
+  const [now, setNow] = createSignal(Date.now());
   const { showToast } = useToast();
+  const { sessions } = useSessions();
+
+  const clock = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+  onCleanup(() => clearInterval(clock));
+
+  const schedulerSessions = createMemo(() => sessions().filter(isSchedulerSession));
+  const runsByThread = createMemo(() => new Map(recentRuns().map((run) => [run.thread_id, run])));
+  const runningJobIds = createMemo(() => {
+    const ids = new Set<string>();
+    for (const session of schedulerSessions()) {
+      const jobId = runsByThread().get(session.thread_id)?.job_id;
+      if (jobId) ids.add(jobId);
+    }
+    return ids;
+  });
+
+  const summary = createMemo(() => {
+    const jobs = data()?.jobs ?? [];
+    const active = jobs.filter((job) => !job.paused);
+    const upcoming = active
+      .filter((job) => job.next_run_time && !Number.isNaN(Date.parse(job.next_run_time)))
+      .sort((left, right) => Date.parse(left.next_run_time!) - Date.parse(right.next_run_time!));
+    return { active: active.length, paused: jobs.length - active.length, next: upcoming[0] ?? null };
+  });
 
   const refreshHistorySoon = () => {
     setTimeout(() => setHistoryRefreshToken((value) => value + 1), RUN_HISTORY_REFRESH_DELAY_MS);
@@ -649,7 +941,34 @@ export function SchedulerPage() {
     }
   };
 
+  const loadRecentRuns = async () => {
+    try {
+      const payload = await apiFetch<SchedulerRunsPayload>(
+        API_PATHS.schedulerRuns({ limit: SCHEDULER_RUNS_LOOKUP_LIMIT }),
+      );
+      setRecentRuns(payload.runs);
+    } catch {
+      // Live sessions still render without their run details.
+    }
+  };
+
+  // A scheduler session starting or stopping changes run history and next run times.
+  createEffect(on(
+    () => schedulerSessions().map((session) => session.thread_id).sort().join("|"),
+    (key, previous) => {
+      const live = new Set(key ? key.split("|") : []);
+      setStopping((current) => new Set([...current].filter((threadId) => live.has(threadId))));
+      if (key) void loadRecentRuns();
+      if (previous === undefined) return;
+      setHistoryRefreshToken((value) => value + 1);
+      void load();
+    },
+  ));
+
+  const openCreate = () => setCreateOpen(true);
+
   const createJob = async () => {
+    setSaving(true);
     try {
       const current = form();
       const identity = identityFromForm(current);
@@ -661,10 +980,13 @@ export function SchedulerPage() {
         trigger_args: triggerArgs(current),
       });
       showToast("Job created.");
+      setCreateOpen(false);
       setForm(defaultScheduleForm(data()?.scheduler_timezone));
       await load();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to create job", "error");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -702,6 +1024,7 @@ export function SchedulerPage() {
     if (!job) {
       return;
     }
+    setSaving(true);
     try {
       const current = editForm();
       const identity = identityFromForm(current);
@@ -717,6 +1040,8 @@ export function SchedulerPage() {
       await load();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to update job", "error");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -753,253 +1078,185 @@ export function SchedulerPage() {
     }
   };
 
+  const stopSession = async (session: ActiveSession) => {
+    const threadId = session.thread_id;
+    setStopping((current) => new Set([...current, threadId]));
+    try {
+      await postJson(API_PATHS.sessionsStop, { thread_id: threadId });
+      showToast("Stop requested.", "success");
+    } catch (err) {
+      setStopping((current) => new Set([...current].filter((id) => id !== threadId)));
+      showToast(err instanceof Error ? err.message : "Failed to stop the task", "error");
+    }
+  };
+
   useCatalogAndLoad(load);
 
   return (
     <AppShell
       title="Scheduled Tasks"
-      subtitle="Create recurring and one-off channel tasks."
+      subtitle={
+        <>
+          Create recurring and one-off channel tasks.
+          <Show when={data()?.scheduler_timezone}>
+            {(timeZone) => <span class="scheduler-subtitle-tz"> Times use <span class="mono">{timeZone()}</span>.</span>}
+          </Show>
+        </>
+      }
+      actions={
+        <button class="btn btn-primary" type="button" disabled={!data()} onClick={openCreate}>
+          <Plus size={14} />
+          New job
+        </button>
+      }
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
-          <div class="stack">
-            <section class="panel">
-                <div class="panel-header">
-                  <div class="panel-title">Create Scheduled Job</div>
-                  <span class="hint">{payload().scheduler_timezone}</span>
-                </div>
-                <div class="panel-body stack">
-                  <ExecutorModelNotice executor={payload().executor} />
-                  <div class="field">
-                    <label>Task</label>
-                    <textarea class="textarea" value={form().task} onInput={(event) => setField("task", event.currentTarget.value)} />
-                  </div>
-                  <div class="grid-2">
-                    <div class="field">
-                      <label>Target User</label>
-                      <SelectControl
-                        value={form().identity}
-                        options={[
-                          ...payload().identities.map((identity) => ({
-                            value: `${identity.platform}:${identity.external_id}`,
-                            label: `${identity.platform} - ${identity.external_id}`,
-                          })),
-                          { value: "__manual__", label: "Enter manually" },
-                        ]}
-                        onChange={(value) => setField("identity", value)}
-                        ariaLabel="Target User"
-                      />
-                    </div>
-                    <div class="field">
-                      <label>Schedule</label>
-                      <SelectControl
-                        value={form().trigger_type}
-                        options={getTriggerTypes()}
-                        onChange={(value) => setField("trigger_type", value as TriggerType)}
-                        ariaLabel="Schedule"
-                      />
-                    </div>
-                  </div>
-                  <Show when={form().identity === "__manual__"}>
-                    <div class="grid-2">
-                      <div class="field">
-                        <label>Platform</label>
-                        <SelectControl
-                          value={form().platform}
-                          options={getPlatforms()}
-                          onChange={(value) => setField("platform", value)}
-                          ariaLabel="Platform"
-                        />
-                      </div>
-                      <div class="field">
-                        <label>User ID</label>
-                        <input class="input" value={form().user_id} onInput={(event) => setField("user_id", event.currentTarget.value)} />
-                      </div>
-                    </div>
-                  </Show>
-                  <TriggerFields form={form()} setField={setField} />
-                  <div class="row-wrap">
-                    <button class="btn btn-primary" type="button" onClick={createJob}>
-                      <Play size={14} />
-                      Create Job
-                    </button>
-                  </div>
-                </div>
-              </section>
-
-              <section class="panel">
-                <div class="panel-header">
-                  <div class="panel-title">All Scheduled Jobs</div>
-                </div>
-                <DashboardTable
-                  tableClass="scheduler-jobs-table"
-                  columns={[
-                    { header: "Job" },
-                    { header: "Target" },
-                    { header: "Trigger" },
-                    { header: "Next Run" },
-                    { header: "Status" },
-                    { header: "Actions" },
-                  ]}
-                  rows={payload().jobs}
-                  emptyMessage="No scheduled jobs."
-                >
-                  {(job) => (
-                    <tr>
-                      <td>
-                        <div>{job.task}</div>
-                        <div class="mono hint">{job.id}</div>
-                      </td>
-                      <td>
-                        <span class="badge">{job.platform}</span>
-                        <div class="mono hint">{job.user_id}</div>
-                      </td>
-                      <td>
-                        <div class="scheduler-trigger-cell">
-                          <span class="chip">{job.trigger_type}</span>
-                          <Show when={job.trigger_type === "cron"}>
-                            <span class="mono hint scheduler-cron-expr">
-                              {buildCronExpression(
-                                job.trigger_args?.minute as string,
-                                job.trigger_args?.hour as string,
-                                job.trigger_args?.day as string,
-                                job.trigger_args?.month as string,
-                                job.trigger_args?.day_of_week as string
-                              )}
-                            </span>
-                            <div class="scheduler-cron-summary hint">
-                              {formatCronDescription(
-                                job.trigger_args?.minute as string,
-                                job.trigger_args?.hour as string,
-                                job.trigger_args?.day as string,
-                                job.trigger_args?.month as string,
-                                job.trigger_args?.day_of_week as string
-                              )}
-                            </div>
-                          </Show>
-                        </div>
-                      </td>
-                      <td>{job.next_run_time || "-"}</td>
-                      <td><StatusBadge status={job.paused ? "paused" : "active"} /></td>
-                      <td>
-                        <div class="row-wrap">
-                          <button class="btn btn-sm" type="button" onClick={() => openEdit(job)}>
-                            <Edit3 size={13} />
-                            Edit
-                          </button>
-                          <button class="btn btn-sm" type="button" onClick={() => jobAction(job, "run")}>
-                            <Play size={13} />
-                            Run
-                          </button>
-                          <button class="btn btn-sm" type="button" onClick={() => showJobHistory(job)}>
-                            <History size={13} />
-                            History
-                          </button>
-                          {job.paused ? (
-                            <button class="btn btn-sm" type="button" onClick={() => jobAction(job, "resume")}>
-                              <Play size={13} />
-                              Resume
-                            </button>
-                          ) : (
-                            <button class="btn btn-sm btn-warning" type="button" onClick={() => jobAction(job, "pause")}>
-                              <Square size={13} />
-                              Pause
-                            </button>
-                          )}
-                          <button class="btn btn-sm btn-danger" type="button" onClick={() => jobAction(job, "delete")}>
-                            <Trash2 size={13} />
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </DashboardTable>
-              </section>
-
-              <RunHistoryPanel
-                jobs={payload().jobs}
-                jobFilter={historyJobFilter()}
-                onJobFilterChange={setHistoryJobFilter}
-                refreshToken={historyRefreshToken()}
-              />
-
-              <Dialog
-                open={Boolean(editJob())}
-                title={`Edit ${editJob()?.id || "job"}`}
-                onClose={() => setEditJob(null)}
-                footer={
+          <div class="stack scheduler-page">
+            <div class="scheduler-metrics">
+              <MetricTile value={summary().active} label="Active jobs" />
+              <MetricTile value={summary().paused} label="Paused jobs" />
+              <MetricTile
+                tone={schedulerSessions().length > 0 ? "info" : undefined}
+                value={
                   <>
-                    <button class="btn" type="button" onClick={() => setEditJob(null)}>
-                      Close
-                    </button>
-                    <button class="btn btn-primary" type="button" onClick={updateJob}>
-                      Save Changes
-                    </button>
+                    <Show when={schedulerSessions().length > 0}>
+                      <span class="live-dot" aria-hidden="true" />
+                    </Show>
+                    {schedulerSessions().length}
                   </>
                 }
-              >
-                <div class="stack">
-                  <div class="field">
-                    <label>Task</label>
-                    <textarea class="textarea" value={editForm().task} onInput={(event) => setEditField("task", event.currentTarget.value)} />
-                  </div>
-                  <div class="grid-2">
-                    <div class="field">
-                      <label>Target User</label>
-                      <SelectControl
-                        value={editForm().identity}
-                        options={[
-                          ...(data()?.identities || []).map((identity) => ({
-                            value: `${identity.platform}:${identity.external_id}`,
-                            label: `${identity.platform} - ${identity.external_id}`,
-                          })),
-                          { value: "__manual__", label: "Enter manually" },
-                        ]}
-                        onChange={(value) => setEditField("identity", value)}
-                        ariaLabel="Target User"
-                      />
-                    </div>
-                    <div class="field">
-                      <label>Schedule</label>
-                      <SelectControl
-                        value={editForm().trigger_type}
-                        options={getTriggerTypes()}
-                        onChange={(value) => setEditField("trigger_type", value as TriggerType)}
-                        ariaLabel="Schedule"
-                      />
-                    </div>
-                  </div>
-                  <Show when={editForm().identity === "__manual__"}>
-                    <div class="grid-2">
-                      <div class="field">
-                        <label>Platform</label>
-                        <SelectControl
-                          value={editForm().platform}
-                          options={getPlatforms()}
-                          onChange={(value) => setEditField("platform", value)}
-                          ariaLabel="Platform"
-                        />
-                      </div>
-                      <div class="field">
-                        <label>User ID</label>
-                        <input class="input" value={editForm().user_id} onInput={(event) => setEditField("user_id", event.currentTarget.value)} />
-                      </div>
-                    </div>
-                  </Show>
-                  <TriggerFields form={editForm()} setField={setEditField} />
-                </div>
-              </Dialog>
-
-              <ConfirmDialog
-                open={deleteTarget() !== null}
-                title="Delete Job"
-                message={<p>Are you sure you want to delete job <span class="mono">{deleteTarget()?.id}</span>?</p>}
-                confirmLabel="Delete"
-                confirmVariant="danger"
-                onClose={() => setDeleteTarget(null)}
-                onConfirm={() => void confirmDeleteJob()}
+                label="Running now"
               />
+              <MetricTile
+                value={
+                  <span class="scheduler-metric-text">
+                    {summary().next ? formatRelativeTime(summary().next!.next_run_time, now()) : "-"}
+                  </span>
+                }
+                label={summary().next ? `Next: ${truncateText(summary().next!.task, 60)}` : "Next run"}
+                title={summary().next?.task}
+              />
+            </div>
+
+            <Show when={schedulerSessions().length > 0}>
+              <RunningNowPanel
+                sessions={schedulerSessions()}
+                runsByThread={runsByThread()}
+                now={now()}
+                stopping={stopping()}
+                onStop={(session) => void stopSession(session)}
+              />
+            </Show>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div class="panel-title scheduler-panel-title">
+                  <CalendarClock size={15} /> Jobs <span class="hint">{payload().jobs.length}</span>
+                </div>
+              </div>
+              <Show
+                when={payload().jobs.length > 0}
+                fallback={
+                  <div class="panel-body">
+                    <div class="empty-state">
+                      <div class="empty-state-icon" aria-hidden="true"><CalendarClock size={20} /></div>
+                      <div class="empty-state-message">No scheduled jobs yet.</div>
+                      <div class="empty-state-hint">
+                        Run the agent on a schedule and deliver the result to a channel.
+                      </div>
+                      <button class="btn btn-sm btn-primary empty-state-action" type="button" onClick={openCreate}>
+                        <Plus size={13} />
+                        New job
+                      </button>
+                    </div>
+                  </div>
+                }
+              >
+                <div class="scheduler-job-grid">
+                  <For each={payload().jobs}>
+                    {(job) => (
+                      <JobCard
+                        job={job}
+                        running={runningJobIds().has(job.id)}
+                        now={now()}
+                        onEdit={() => openEdit(job)}
+                        onRun={() => void jobAction(job, "run")}
+                        onHistory={() => showJobHistory(job)}
+                        onTogglePause={() => void jobAction(job, job.paused ? "resume" : "pause")}
+                        onDelete={() => void jobAction(job, "delete")}
+                      />
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </section>
+
+            <RunHistoryPanel
+              jobs={payload().jobs}
+              jobFilter={historyJobFilter()}
+              onJobFilterChange={setHistoryJobFilter}
+              refreshToken={historyRefreshToken()}
+            />
+
+            <Dialog
+              open={createOpen()}
+              title="New scheduled job"
+              subtitle={`Times use ${payload().scheduler_timezone}`}
+              icon={<CalendarClock size={16} />}
+              size="lg"
+              onClose={() => setCreateOpen(false)}
+              footer={
+                <>
+                  <button class="btn" type="button" onClick={() => setCreateOpen(false)}>
+                    Cancel
+                  </button>
+                  <button class="btn btn-primary" type="button" disabled={saving()} onClick={createJob}>
+                    <Plus size={14} />
+                    Create job
+                  </button>
+                </>
+              }
+            >
+              <div class="stack">
+                <ExecutorModelNotice executor={payload().executor} />
+                <JobFormFields form={form()} setField={setField} identities={payload().identities} />
+              </div>
+            </Dialog>
+
+            <Dialog
+              open={Boolean(editJob())}
+              title="Edit scheduled job"
+              subtitle={editJob()?.id}
+              icon={<Edit3 size={16} />}
+              size="lg"
+              onClose={() => setEditJob(null)}
+              footer={
+                <>
+                  <button class="btn" type="button" onClick={() => setEditJob(null)}>
+                    Close
+                  </button>
+                  <button class="btn btn-primary" type="button" disabled={saving()} onClick={updateJob}>
+                    Save Changes
+                  </button>
+                </>
+              }
+            >
+              <div class="stack">
+                <ExecutorModelNotice executor={payload().executor} />
+                <JobFormFields form={editForm()} setField={setEditField} identities={data()?.identities || []} />
+              </div>
+            </Dialog>
+
+            <ConfirmDialog
+              open={deleteTarget() !== null}
+              title="Delete Job"
+              message={<p>Are you sure you want to delete job <span class="mono">{deleteTarget()?.id}</span>?</p>}
+              confirmLabel="Delete"
+              confirmVariant="danger"
+              onClose={() => setDeleteTarget(null)}
+              onConfirm={() => void confirmDeleteJob()}
+            />
           </div>
         )}
       </DataGate>

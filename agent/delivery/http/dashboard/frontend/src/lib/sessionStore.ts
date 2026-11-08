@@ -3,6 +3,7 @@ import { createStore, reconcile } from "solid-js/store";
 
 import { SSE_URLS } from "@/lib/endpoints";
 import { CUSTOM_DOM_EVENTS, SESSION_EVENTS } from "@/lib/eventConstants";
+import { isSchedulerSession } from "@/lib/schedulerSessions";
 import { SSE_RECONNECT_DELAY_MS } from "@/lib/uiConstants";
 import type { ActiveSession } from "@/types";
 
@@ -60,10 +61,13 @@ function connect() {
         ? state.sessions.map((item) => item.session_id === session.session_id ? session : item)
         : [...state.sessions, session]);
       notify(eventName, session);
-      notify(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
-        threadId: session.thread_id,
-        agent_name: session.agent_name,
-      });
+      // Scheduler threads never appear in the sidebar, so announcing them would reload it on every step.
+      if (!isSchedulerSession(session)) {
+        notify(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, {
+          threadId: session.thread_id,
+          agent_name: session.agent_name,
+        });
+      }
       if (eventName === CUSTOM_DOM_EVENTS.SESSION_STARTED) notify(CUSTOM_DOM_EVENTS.THREADS_CHANGED);
     } catch (error) {
       console.error("Failed to parse session event", error);
