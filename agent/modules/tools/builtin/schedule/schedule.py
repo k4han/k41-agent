@@ -9,7 +9,7 @@ from agent.modules.agent_runtime import SessionManager
 from agent.modules.usage import usage_context_from_config
 from agent.modules.scheduler import (
     TriggerType,
-    execute_scheduled_task,
+    add_scheduled_task_job,
     get_scheduler,
     normalize_trigger,
 )
@@ -95,11 +95,13 @@ def schedule_task(
             scheduler,
         )
 
-        job = scheduler.add_job(
-            execute_scheduled_task,
-            trigger=normalized_trigger_type,
-            kwargs={"platform": platform, "user_id": user_id, "task": task_description},
-            **normalized_trigger_args,
+        job = add_scheduled_task_job(
+            scheduler,
+            platform=platform,
+            user_id=user_id,
+            task=task_description,
+            trigger_type=normalized_trigger_type,
+            trigger_args=normalized_trigger_args,
         )
     except ValueError as exc:
         raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from exc

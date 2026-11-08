@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from agent.modules.scheduler import TriggerType
@@ -13,8 +13,16 @@ from agent.delivery.http.dashboard.routes.helpers.scheduler import (
     serialize_job,
 )
 from agent.modules.scheduler import (
+    add_scheduled_task_job,
     execute_scheduled_task,
     normalize_trigger,
+)
+from agent.modules.scheduler.history import (
+    DEFAULT_RUN_LIST_LIMIT,
+    MAX_RUN_LIST_LIMIT,
+    TRIGGER_SOURCE_MANUAL,
+    delete_runs,
+    list_runs,
 )
 
 
@@ -29,6 +37,25 @@ async def list_scheduler_jobs() -> dict[str, list[dict[str, Any]]]:
     except RuntimeError:
         jobs = []
     return {"jobs": jobs}
+
+
+@router.get("/scheduler/runs")
+async def list_scheduler_runs(
+    job_id: str | None = Query(default=None, description="Only return runs of this job."),
+    limit: int = Query(default=DEFAULT_RUN_LIST_LIMIT, ge=1, le=MAX_RUN_LIST_LIMIT),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    """List past executions of scheduled jobs, newest first."""
+    return await list_runs(job_id=job_id, limit=limit, offset=offset)
+
+
+@router.delete("/scheduler/runs")
+async def clear_scheduler_runs(
+    job_id: str | None = Query(default=None, description="Only clear runs of this job."),
+) -> dict[str, Any]:
+    """Delete finished run history entries."""
+    deleted = await delete_runs(job_id=job_id)
+    return {"status": "deleted", "deleted": deleted}
 
 
 class CreateJobBody(BaseModel):
@@ -62,11 +89,13 @@ async def create_scheduler_job(body: CreateJobBody) -> dict[str, Any]:
             body.trigger_args,
             scheduler,
         )
-        job = scheduler.add_job(
-            execute_scheduled_task,
-            trigger=trigger_type,
-            kwargs={"platform": body.platform, "user_id": body.user_id, "task": body.task},
-            **trigger_args,
+        job = add_scheduled_task_job(
+            scheduler,
+            platform=body.platform,
+            user_id=body.user_id,
+            task=body.task,
+            trigger_type=trigger_type,
+            trigger_args=trigger_args,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -74,8 +103,6 @@ async def create_scheduler_job(body: CreateJobBody) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"Failed to create job: {exc}") from exc
 
     return {"status": "created", "job": serialize_job(job)}
-
-
 @router.put("/scheduler/jobs/{job_id}")
 async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, Any]:
     """Update an existing scheduled job's task, platform, user, or trigger."""
@@ -159,5 +186,7 @@ async def run_scheduler_job_now(
         platform=platform,
         user_id=user_id,
         task=task,
+        scheduler_job_id=job.id,
+        trigger_source=TRIGGER_SOURCE_MANUAL,
     )
     return {"status": "queued", "job_id": job_id}

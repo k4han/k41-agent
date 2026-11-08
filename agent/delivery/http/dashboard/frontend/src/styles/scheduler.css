@@ -241,3 +241,88 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   Scheduler Executor & Run History
+   ========================================================================== */
+
+.scheduler-executor-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.scheduler-executor-notice > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--fg-muted);
+}
+
+.scheduler-executor-model {
+  font-weight: 600;
+}
+
+.scheduler-run-meta-line {
+  gap: 6px;
+  margin-top: 4px;
+  align-items: center;
+}
+
+.scheduler-run-error-text {
+  color: var(--danger);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.scheduler-run-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.scheduler-run-details dt {
+  color: var(--fg-muted);
+  font-size: 0.8125rem;
+}
+
+.scheduler-run-details dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.scheduler-run-text {
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.scheduler-runs-table td {
+  vertical-align: top;
+}
+
+@media (max-width: 640px) {
+  .scheduler-run-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .scheduler-run-details dd {
+    margin-bottom: 6px;
+  }
+}
+
+.scheduler-run-markdown {
+  white-space: normal;
+}

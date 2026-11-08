@@ -63,6 +63,14 @@ export const API_PATHS = {
   schedulerJobAction: (jobId: string, action: "run" | "pause" | "resume") =>
     `/scheduler/jobs/${encodeURIComponent(jobId)}/${action}`,
   schedulerJobs: "/scheduler/jobs",
+  schedulerRuns: (params: { jobId?: string; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (params.jobId) query.set("job_id", params.jobId);
+    if (params.limit) query.set("limit", String(params.limit));
+    if (params.offset) query.set("offset", String(params.offset));
+    const suffix = query.toString();
+    return suffix ? `/scheduler/runs?${suffix}` : "/scheduler/runs";
+  },
   promptVariableItem: (name: string) => `/prompt-variables/${encodeURIComponent(name)}`,
   promptVariablesResource: "/prompt-variables",
   provider: (name: string) => `/dashboard-api/providers/${encodeURIComponent(name)}`,

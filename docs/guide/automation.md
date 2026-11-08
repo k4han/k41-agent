@@ -35,6 +35,18 @@ job controls to edit, pause, resume, or remove an existing schedule.
 Timezone changes apply to new or rescheduled jobs without restarting the runtime.
 Existing jobs keep their saved trigger timezone until they are rescheduled.
 
+## Review run history
+
+Each run, whether fired by its schedule or started with **Run**, appears under
+**Run History** on the Scheduler page. A run records its status, duration,
+result or error, and the model that executed it. Use **History** on a job to
+show only that job's runs.
+
+Scheduled runs use the internal `scheduler-executor` agent. Its card uses the
+`default` provider, so it follows the configured default model unless the card
+is customized. The Scheduler form shows the resolved model, and each run lists
+the models recorded by usage tracking. The newest 1,000 runs are kept.
+
 ## Keep the runtime available
 
 The machine and runtime must be available for scheduled work. On Linux, the

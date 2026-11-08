@@ -279,6 +279,9 @@ class UsageService:
                 logger.debug("Could not recover compacted context for %s: %s", thread_id, exc)
         return payload
 
+    async def get_models_by_threads(self, thread_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        return await self._repository.models_by_threads(thread_ids)
+
     async def get_workspace_usage(self, key: str) -> dict[str, Any]:
         return await self._repository.aggregate_by_workspace(key)
 

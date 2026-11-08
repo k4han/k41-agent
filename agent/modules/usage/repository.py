@@ -297,6 +297,37 @@ class LLMUsageRepository:
             await session.commit()
             return int(result.rowcount or 0)
 
+    async def models_by_threads(self, thread_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        """Return the provider/model pairs used by each thread, most tokens first."""
+        unique_ids = sorted({thread_id for thread_id in thread_ids if thread_id})
+        if not unique_ids:
+            return {}
+        stmt = (
+            select(
+                LLMUsageEvent.thread_id,
+                LLMUsageEvent.provider_name,
+                LLMUsageEvent.model_name,
+                func.count(LLMUsageEvent.id).label("calls"),
+                func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0).label("total_tokens"),
+            )
+            .where(LLMUsageEvent.thread_id.in_(unique_ids))
+            .group_by(LLMUsageEvent.thread_id, LLMUsageEvent.provider_name, LLMUsageEvent.model_name)
+        )
+        session = await get_async_session()
+        async with session:
+            rows = (await session.execute(stmt)).all()
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            grouped.setdefault(row.thread_id, []).append({
+                "provider": row.provider_name,
+                "model": row.model_name,
+                "calls": int(row.calls or 0),
+                "total_tokens": int(row.total_tokens or 0),
+            })
+        for models in grouped.values():
+            models.sort(key=lambda item: (item["total_tokens"], item["calls"]), reverse=True)
+        return grouped
+
     async def aggregate_by_thread(self, thread_id: str) -> dict[str, Any]:
         session = await get_async_session()
         stmt = (

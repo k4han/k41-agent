@@ -29,13 +29,122 @@ CURRENT_EXECUTE_TASK_REF = "agent.modules.scheduler.service:execute_scheduled_ta
 logger = logging.getLogger(__name__)
 
 
-async def execute_scheduled_task(platform: str, user_id: str, task: str):
+def describe_executor_model() -> dict[str, str]:
+    """Return the agent and provider/model that scheduled runs are configured to use."""
+    info = {"agent_name": AGENT_NAME, "provider": "", "model": "", "configured": "", "error": ""}
+    try:
+        from agent.modules.agents import get_catalog_service
+
+        card = get_catalog_service().get_agent_card(AGENT_NAME)
+        raw_model = getattr(card, "model", "") or ""
+        if isinstance(raw_model, dict):
+            raw_model = raw_model.get("id", "") or ""
+        card_provider = str(getattr(card, "provider", "") or "default")
+        card_model = str(raw_model)
+        info["configured"] = f"{card_provider}/{card_model}" if card_model else card_provider
+    except Exception as exc:
+        info["error"] = f"Could not load agent '{AGENT_NAME}': {exc}"
+        return info
+    try:
+        from agent.modules.providers import get_chat_model_selection
+
+        provider, model = get_chat_model_selection(provider_name=card_provider, model=card_model)
+        info["provider"] = provider
+        info["model"] = model
+    except Exception as exc:
+        info["error"] = str(exc)
+    return info
+
+
+def add_scheduled_task_job(
+    scheduler: AsyncIOScheduler,
+    *,
+    platform: str,
+    user_id: str,
+    task: str,
+    trigger_type: str,
+    trigger_args: dict[str, Any],
+):
+    """Add a job that runs ``task`` and remembers its own ID for run history."""
+    job_id = uuid.uuid4().hex
+    return scheduler.add_job(
+        execute_scheduled_task,
+        trigger=trigger_type,
+        id=job_id,
+        kwargs={
+            "platform": platform,
+            "user_id": user_id,
+            "task": task,
+            "scheduler_job_id": job_id,
+        },
+        **trigger_args,
+    )
+
+
+def _backfill_job_ids(scheduler: AsyncIOScheduler) -> int:
+    """Store the job ID in kwargs of jobs created before run history existed."""
+    updated = 0
+    for job in scheduler.get_jobs():
+        if job.kwargs.get("scheduler_job_id") == job.id:
+            continue
+        try:
+            job.modify(kwargs={**job.kwargs, "scheduler_job_id": job.id})
+            updated += 1
+        except Exception as exc:
+            logger.warning("Could not backfill scheduler job id for '%s': %s", job.id, exc)
+    return updated
+
+
+async def _record_run_start(**kwargs: Any) -> bool:
+    try:
+        from agent.modules.scheduler.history import start_run
+
+        await start_run(**kwargs)
+        return True
+    except Exception as exc:
+        logger.warning("Could not record scheduler run start: %s", exc)
+        return False
+
+
+async def _record_run_finish(run_id: str, **kwargs: Any) -> None:
+    try:
+        from agent.modules.scheduler.history import finish_run
+
+        await finish_run(run_id, **kwargs)
+    except Exception as exc:
+        logger.warning("Could not record scheduler run result: %s", exc)
+
+
+async def execute_scheduled_task(
+    platform: str,
+    user_id: str,
+    task: str,
+    scheduler_job_id: str = "",
+    trigger_source: str = "schedule",
+):
     """Execute a scheduled task: run the agent, inject results into user thread, and notify."""
-    job_id = str(uuid.uuid4())
-    background_thread_id = SessionManager.make_thread_id(BACKGROUND_THREAD_PREFIX, user_id, job_id)
+    from agent.modules.scheduler.history import RUN_STATUS_COMPLETED, RUN_STATUS_FAILED
+
+    run_id = str(uuid.uuid4())
+    background_thread_id = SessionManager.make_thread_id(BACKGROUND_THREAD_PREFIX, user_id, run_id)
     user_thread_id = SessionManager.make_thread_id(platform, user_id, user_id)
 
     logger.info(f"Executing scheduled task for {user_thread_id}: {task}")
+
+    executor = describe_executor_model()
+    recorded = await _record_run_start(
+        run_id=run_id,
+        job_id=scheduler_job_id,
+        task=task,
+        platform=platform,
+        user_id=user_id,
+        trigger_source=trigger_source,
+        thread_id=background_thread_id,
+        agent_name=AGENT_NAME,
+        provider=executor["provider"],
+        model=executor["model"],
+    )
+    agent_finished = False
 
     try:
         from agent.modules.conversations import (
@@ -48,15 +157,18 @@ async def execute_scheduled_task(platform: str, user_id: str, task: str):
             kind=THREAD_KIND_SCHEDULED,
             platform=BACKGROUND_THREAD_PREFIX,
             user_id=user_id,
-            channel_id=job_id,
+            channel_id=run_id,
             title=task,
         )
         response_text = await run_agent_full(
             user_input=task,
             thread_id=background_thread_id,
             agent_name=AGENT_NAME,
-            usage_context={"platform": BACKGROUND_THREAD_PREFIX, "user_id": user_id, "channel_id": job_id},
+            usage_context={"platform": BACKGROUND_THREAD_PREFIX, "user_id": user_id, "channel_id": run_id},
         )
+        agent_finished = True
+        if recorded:
+            await _record_run_finish(run_id, status=RUN_STATUS_COMPLETED, response=response_text)
 
         # No agent name: the executor ran in its own thread, and the user's agent keeps this one.
         await upsert_conversation_thread(
@@ -81,6 +193,8 @@ async def execute_scheduled_task(platform: str, user_id: str, task: str):
 
     except Exception as e:
         logger.error(f"Failed to execute scheduled task '{task}' for {user_thread_id}: {e}", exc_info=True)
+        if recorded and not agent_finished:
+            await _record_run_finish(run_id, status=RUN_STATUS_FAILED, error=str(e) or type(e).__name__)
         error_msg = (
             f"<b>Scheduled task failed:</b>\n{escape_html(task)}\n\n"
             f"Error: {escape_html(str(e))}"
@@ -164,6 +278,16 @@ async def initialize_scheduler(container=None):
     if active._scheduler is not None:
         return active._scheduler
 
+    # Close stale runs before starting, so jobs fired on start are not marked interrupted.
+    try:
+        from agent.modules.scheduler.history import mark_interrupted_runs
+
+        await mark_interrupted_runs()
+    except Exception as exc:
+        logger.warning("Could not close interrupted scheduler runs: %s", exc)
+    if active._scheduler is not None:
+        return active._scheduler
+
     sync_url = _normalize_url_to_sync(active.database_url)
     timezone_name, scheduler_tz = resolve_display_timezone()
 
@@ -174,6 +298,7 @@ async def initialize_scheduler(container=None):
         timezone=scheduler_tz,
     )
     scheduler.start()
+    _backfill_job_ids(scheduler)
     active._scheduler = scheduler
     active._scheduler_sync_engine = sync_engine
     logger.info(

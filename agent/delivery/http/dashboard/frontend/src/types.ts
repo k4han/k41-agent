@@ -481,6 +481,49 @@ export type SchedulerJob = {
   paused: boolean;
 };
 
+export type SchedulerExecutor = {
+  agent_name: string;
+  provider: string;
+  model: string;
+  configured: string;
+  error: string;
+};
+
+export type SchedulerRunModel = {
+  provider: string;
+  model: string;
+  calls: number;
+  total_tokens: number;
+};
+
+export type SchedulerRun = {
+  run_id: string;
+  job_id: string;
+  task: string;
+  platform: string;
+  user_id: string;
+  trigger_source: "schedule" | "manual" | string;
+  status: "running" | "completed" | "failed" | "interrupted" | string;
+  thread_id: string;
+  agent_name: string;
+  provider: string;
+  model: string;
+  response: string;
+  error: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+  models_used: SchedulerRunModel[];
+  total_tokens: number;
+};
+
+export type SchedulerRunsPayload = {
+  runs: SchedulerRun[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 export type SettingInfo = {
   key: string;
   value: unknown;

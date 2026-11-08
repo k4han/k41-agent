@@ -2702,4 +2702,10 @@ async def test_run_scheduler_job_now_queues_existing_job(monkeypatch) -> None:
     assert len(background_tasks.tasks) == 1
     task = background_tasks.tasks[0]
     assert task.func is _dashboard_attr("execute_scheduled_task")
-    assert task.kwargs == {"platform": "telegram", "user_id": "123", "task": "eat"}
+    assert task.kwargs == {
+        "platform": "telegram",
+        "user_id": "123",
+        "task": "eat",
+        "scheduler_job_id": job.id,
+        "trigger_source": "manual",
+    }

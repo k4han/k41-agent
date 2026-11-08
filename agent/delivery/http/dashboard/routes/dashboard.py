@@ -40,7 +40,7 @@ from agent.modules.channels import (
     list_channel_statuses,
 )
 from agent.modules.mcp import list_mcp_server_status
-from agent.modules.scheduler import get_scheduler
+from agent.modules.scheduler import describe_executor_model, get_scheduler
 
 # Mirrors BACKGROUND_TASK_ACTIVE_STATUSES from agent.modules.agent_runtime.background_tasks
 # (kept inline so we don't reach into the agent_runtime internals).
@@ -478,6 +478,7 @@ async def get_dashboard_scheduler() -> dict[str, Any]:
         "jobs": jobs,
         "identities": await paired_identities(),
         "scheduler_timezone": scheduler_timezone,
+        "executor": describe_executor_model(),
     }
 
 

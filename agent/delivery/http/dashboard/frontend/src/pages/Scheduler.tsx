@@ -1,5 +1,5 @@
 import { createSignal, For, Show } from "solid-js";
-import { Clock, Edit3, Play, Square, Trash2 } from "lucide-solid";
+import { Bot, Clock, Edit3, History, Play, Square, Trash2 } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -13,13 +13,46 @@ import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
 import { getPlatforms, getTriggerTypes } from "@/lib/catalogStore";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import { dateTimeInTimeZone, triggerArgsFromDateInput } from "@/lib/utils";
-import type { Identity, SchedulerJob } from "@/types";
+import { modelLabel, RunHistoryPanel } from "@/components/scheduler/RunHistoryPanel";
+import type { Identity, SchedulerExecutor, SchedulerJob } from "@/types";
 
 type SchedulerPayload = {
   jobs: SchedulerJob[];
   identities: Identity[];
   scheduler_timezone: string;
+  executor?: SchedulerExecutor;
 };
+
+const RUN_HISTORY_REFRESH_DELAY_MS = 1500;
+
+function ExecutorModelNotice(props: { executor?: SchedulerExecutor }) {
+  return (
+    <Show when={props.executor}>
+      {(executor) => (
+        <div class="scheduler-executor-notice">
+          <Bot size={15} />
+          <div>
+            <div>
+              Runs with agent <span class="mono">{executor().agent_name}</span> using{" "}
+              <Show when={executor().model} fallback={<span class="hint">an unresolved model</span>}>
+                <span class="mono scheduler-executor-model">{modelLabel(executor().provider, executor().model)}</span>
+              </Show>
+            </div>
+            <div class="hint">
+              {executor().configured === "default"
+                ? "The agent card uses provider \"default\", so it follows the llm.default_model setting."
+                : `Configured on the agent card as ${executor().configured}.`}
+              {" "}The model actually used is recorded for each run in Run History.
+            </div>
+            <Show when={executor().error}>
+              <div class="scheduler-run-error-text">{executor().error}</div>
+            </Show>
+          </div>
+        </div>
+      )}
+    </Show>
+  );
+}
 
 type TriggerType = "date" | "relative" | "interval" | "cron";
 
@@ -581,7 +614,18 @@ export function SchedulerPage() {
   const [editJob, setEditJob] = createSignal<SchedulerJob | null>(null);
   const [editForm, setEditForm] = createSignal<ScheduleForm>(defaultScheduleForm());
   const [deleteTarget, setDeleteTarget] = createSignal<SchedulerJob | null>(null);
+  const [historyJobFilter, setHistoryJobFilter] = createSignal("");
+  const [historyRefreshToken, setHistoryRefreshToken] = createSignal(0);
   const { showToast } = useToast();
+
+  const refreshHistorySoon = () => {
+    setTimeout(() => setHistoryRefreshToken((value) => value + 1), RUN_HISTORY_REFRESH_DELAY_MS);
+  };
+
+  const showJobHistory = (job: SchedulerJob) => {
+    setHistoryJobFilter(job.id);
+    document.getElementById("scheduler-run-history")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   const setField = <K extends keyof ScheduleForm>(key: K, value: ScheduleForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -684,6 +728,9 @@ export function SchedulerPage() {
     try {
       await postJson(`/scheduler/jobs/${encodeURIComponent(job.id)}/${action}`);
       showToast(`Job ${action} requested.`);
+      if (action === "run") {
+        refreshHistorySoon();
+      }
       await load();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Job action failed", "error");
@@ -722,6 +769,7 @@ export function SchedulerPage() {
                   <span class="hint">{payload().scheduler_timezone}</span>
                 </div>
                 <div class="panel-body stack">
+                  <ExecutorModelNotice executor={payload().executor} />
                   <div class="field">
                     <label>Task</label>
                     <textarea class="textarea" value={form().task} onInput={(event) => setField("task", event.currentTarget.value)} />
@@ -843,6 +891,10 @@ export function SchedulerPage() {
                             <Play size={13} />
                             Run
                           </button>
+                          <button class="btn btn-sm" type="button" onClick={() => showJobHistory(job)}>
+                            <History size={13} />
+                            History
+                          </button>
                           {job.paused ? (
                             <button class="btn btn-sm" type="button" onClick={() => jobAction(job, "resume")}>
                               <Play size={13} />
@@ -864,6 +916,13 @@ export function SchedulerPage() {
                   )}
                 </DashboardTable>
               </section>
+
+              <RunHistoryPanel
+                jobs={payload().jobs}
+                jobFilter={historyJobFilter()}
+                onJobFilterChange={setHistoryJobFilter}
+                refreshToken={historyRefreshToken()}
+              />
 
               <Dialog
                 open={Boolean(editJob())}
