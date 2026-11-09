@@ -20,6 +20,30 @@ def _normalize_cache_usage(usage: dict | None) -> dict | None:
     return {**usage, "prompt_tokens_details": {**details, "cached_tokens": usage["prompt_cache_hit_tokens"]}}
 
 
+# Gateways name the reasoning stream differently: DeepSeek, vLLM and NVIDIA use
+# ``reasoning_content`` while OpenRouter-style gateways use ``reasoning``.
+_REASONING_FIELDS = ("reasoning_content", "reasoning")
+
+
+def _reasoning_text(message: Any) -> str:
+    """Read reasoning text from a Chat Completions message or delta."""
+    if isinstance(message, openai.BaseModel):
+        message = message.model_dump()
+    if not isinstance(message, dict):
+        return ""
+    for field in _REASONING_FIELDS:
+        value = message.get(field)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _attach_reasoning(message: Any, reasoning: str) -> None:
+    """Keep reasoning that ChatOpenAI drops, under the key the runtime reads."""
+    if reasoning and isinstance(getattr(message, "additional_kwargs", None), dict):
+        message.additional_kwargs["reasoning_content"] = reasoning
+
+
 class OpenAICompatibleChatModel(ChatOpenAI):
     """Count the final Chat Completions usage snapshot once per request.
 
@@ -36,7 +60,12 @@ class OpenAICompatibleChatModel(ChatOpenAI):
         usage = _normalize_cache_usage(chunk.get("usage"))
         if usage is not chunk.get("usage"):
             chunk = {**chunk, "usage": usage}
-        return super()._convert_chunk_to_generation_chunk(chunk, default_chunk_class, base_generation_info)
+        generation = super()._convert_chunk_to_generation_chunk(chunk, default_chunk_class, base_generation_info)
+        choices = chunk.get("choices") or []
+        if generation is not None and choices and isinstance(choices[0], dict):
+            # Chunks merge string kwargs by concatenation, so the final message keeps all of it.
+            _attach_reasoning(generation.message, _reasoning_text(choices[0].get("delta")))
+        return generation
 
     def _create_chat_result(
         self, response: dict | openai.BaseModel, generation_info: dict | None = None,
@@ -52,7 +81,12 @@ class OpenAICompatibleChatModel(ChatOpenAI):
                 response = response.model_copy(update={"usage": response.usage.model_copy(update={
                     "prompt_tokens_details": PromptTokensDetails(**usage["prompt_tokens_details"]),
                 })})
-        return super()._create_chat_result(response, generation_info)
+        result = super()._create_chat_result(response, generation_info)
+        choices = response.get("choices") if isinstance(response, dict) else getattr(response, "choices", None)
+        for generation, choice in zip(result.generations, choices or []):
+            message = choice.get("message") if isinstance(choice, dict) else getattr(choice, "message", None)
+            _attach_reasoning(generation.message, _reasoning_text(message))
+        return result
 
     def _stream(self, *args: Any, **kwargs: Any) -> Iterator[ChatGenerationChunk]:
         if self._use_responses_api({**kwargs, **self.model_kwargs}):

@@ -7,6 +7,7 @@ import { TranscriptItemView, type ForkMessagePayload, type TranscriptAttachment,
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
 import { findTranscriptAnswerId, findTranscriptCompletedAnswerIds, findTranscriptResumeId, isTranscriptWaitingForModel } from "@/lib/transcriptActivity";
 import { THINKING_TEXT } from "@/lib/chatStatus";
+import { useShowThinking } from "@/lib/useShowThinking";
 import { useStreamingTranscriptItem } from "@/lib/useStreamingTranscriptItem";
 import { useTranscriptActivityView } from "@/lib/useTranscriptActivityView";
 import type { AgentCard } from "@/types";
@@ -90,8 +91,12 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   const answerItemId = createMemo(() => findTranscriptAnswerId(props.filteredItems));
   const completedAnswerIds = createMemo(() => streamActive() ? new Set<number>() : findTranscriptCompletedAnswerIds(props.items));
   const resumeItemId = createMemo(() => findTranscriptResumeId(props.items));
+  const { showThinking } = useShowThinking();
+  // Hidden reasoning still means the model is working on its reply.
+  const thinkingHidden = createMemo(() => streamActive() && !showThinking()
+    && props.items[props.items.length - 1]?.type === "thinking");
   const waitingForModel = createMemo(() => !props.compacting
-    && isTranscriptWaitingForModel(props.items, streamActive()));
+    && (isTranscriptWaitingForModel(props.items, streamActive()) || thinkingHidden()));
   // Each completed turn can be copied or forked; regeneration stays on the latest answer.
   const showAssistantActions = (itemId: number) =>
     !streamActive() && (completedAnswerIds().has(itemId) || answerItemId() === itemId);
@@ -197,6 +202,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                       item={row()}
                       itemId={row().id}
                       deferHighlight={isStreamingItem(row().id)}
+                      streaming={isStreamingItem(row().id)}
                       showAssistantActions={showAssistantActions(row().id)}
                       showRegenerateAction={!props.hideRegenerateAction && answerItemId() === row().id}
                       forking={props.forkingItemId === row().id}

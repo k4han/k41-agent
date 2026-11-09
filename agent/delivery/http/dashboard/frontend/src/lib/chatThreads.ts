@@ -18,6 +18,7 @@ import {
   GENERATE_IMAGE_TOOL_NAME,
   generatedImageAttachmentFromToolResult,
 } from "@/lib/generatedImages";
+import { thinkingDurationFor } from "@/lib/thinkingDurations";
 import { NO_WORKSPACE_KEY, NO_WORKSPACE_LABEL } from "@/lib/workspaceConstants";
 import { isNoWorkspace } from "@/lib/workspace";
 import type { ProjectSummary, WorkspaceBinding, WorkspaceRef } from "@/types";
@@ -70,6 +71,8 @@ export type ThreadMessage = {
   id: string | null;
   role: "user" | "assistant" | "tool" | "system";
   content: string;
+  /** Model reasoning that preceded this assistant message. */
+  thinking?: string;
   message_index?: number;
   source_checkpoint_id?: string;
   parent_checkpoint_id?: string;
@@ -311,6 +314,15 @@ export function toThreadTranscript(
         }),
       });
       return;
+    }
+
+    if (msg.role === "assistant" && msg.thinking?.trim()) {
+      items.push({
+        key: `thinking-${messageIndex}-${msg.id || "unknown"}`,
+        type: "thinking",
+        text: msg.thinking,
+        durationMs: thinkingDurationFor(threadId, msg.thinking),
+      });
     }
 
     if (msg.content || !msg.tool_calls?.length) {

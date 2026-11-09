@@ -271,6 +271,17 @@
   color: var(--fg);
 }
 
+.model-effort-divider {
+  flex-shrink: 0;
+  height: 1px;
+  margin: 4px 4px;
+  background: var(--border);
+}
+
+.model-effort-thinking-toggle {
+  flex-shrink: 0;
+}
+
 .model-effort-unavailable {
   margin: 0;
   padding: 8px;

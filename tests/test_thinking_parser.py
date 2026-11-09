@@ -503,3 +503,204 @@ async def test_run_agent_stream_emits_thinking_events_when_enabled(
     assert final_events
     assert final_events[-1]["content"] == "two plus two"
     assert "".join(event["content"] for event in message_events) == "two plus two"
+
+
+# ---------------------------------------------------------------------------
+# OpenAI Responses reasoning summaries
+# ---------------------------------------------------------------------------
+
+
+def test_parse_content_reads_reasoning_summary_parts() -> None:
+    content = [
+        {
+            "type": "reasoning",
+            "id": "rs_1",
+            "summary": [
+                {"index": 0, "type": "summary_text", "text": "First idea."},
+                {"index": 1, "type": "summary_text", "text": "Second idea."},
+            ],
+        },
+        {"type": "text", "text": "Answer"},
+    ]
+
+    assert extract_thinking_content(content) == "First idea.\n\nSecond idea."
+    assert extract_final_text_content(content) == "Answer"
+
+
+def test_streaming_extractor_reads_reasoning_summary_deltas() -> None:
+    extractor = _StreamingChunkExtractor()
+
+    def summary_chunk(index: int, text: str) -> tuple[AIMessageChunk, dict]:
+        return (
+            AIMessageChunk(
+                content=[
+                    {
+                        "type": "reasoning",
+                        "index": 0,
+                        "summary": [{"index": index, "type": "summary_text", "text": text}],
+                    }
+                ]
+            ),
+            {"langgraph_node": "llm"},
+        )
+
+    deltas = [
+        extractor.extract(summary_chunk(0, "")),
+        extractor.extract(summary_chunk(0, "First")),
+        extractor.extract(summary_chunk(1, "")),
+        extractor.extract(summary_chunk(1, "Second")),
+    ]
+
+    assert all(not delta.text for delta in deltas)
+    assert "".join(delta.thinking for delta in deltas) == "First\n\nSecond"
+
+
+# ---------------------------------------------------------------------------
+# Thinking emission order and de-duplication
+# ---------------------------------------------------------------------------
+
+
+async def _collect_stream_events(monkeypatch, graph_events, thread_id: str) -> list[dict]:
+    class _FakeCatalog:
+        def get_agent(self, name: str):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(
+                graph_type="react_agent",
+                context_compact_threshold=75,
+                tools=[],
+            )
+
+    class _FakeGraph:
+        async def astream(self, payload, **kwargs):
+            for event in graph_events:
+                yield event
+
+    from agent.modules.agent_runtime import runner as runner_module
+
+    monkeypatch.setattr(
+        "agent.modules.agents.get_catalog_service",
+        lambda: _FakeCatalog(),
+    )
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        runner_module,
+        "make_run_config",
+        lambda **kwargs: {"configurable": {"thread_id": kwargs["thread_id"]}},
+    )
+    return [
+        event
+        async for event in runner_module.run_agent_stream(
+            user_input="go",
+            thread_id=thread_id,
+            agent_name="default",
+            emit_thinking=True,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_does_not_repeat_streamed_thinking(monkeypatch) -> None:
+    events = await _collect_stream_events(
+        monkeypatch,
+        [
+            (
+                "messages",
+                (
+                    AIMessageChunk(content=[{"type": "thinking", "thinking": "plan"}]),
+                    {"langgraph_node": "llm"},
+                ),
+            ),
+            ("messages", (AIMessageChunk(content="done"), {"langgraph_node": "llm"})),
+            (
+                "values",
+                {
+                    "messages": [
+                        AIMessage(
+                            content=[
+                                {"type": "thinking", "thinking": "plan"},
+                                {"type": "text", "text": "done"},
+                            ],
+                            id="msg-dedupe",
+                        )
+                    ]
+                },
+            ),
+        ],
+        "thread-think-dedupe",
+    )
+
+    thinking_events = [event for event in events if event.get("type") == "thinking"]
+    assert [event["content"] for event in thinking_events] == ["plan"]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_falls_back_to_values_thinking_before_final(monkeypatch) -> None:
+    events = await _collect_stream_events(
+        monkeypatch,
+        [
+            (
+                "values",
+                {
+                    "messages": [
+                        AIMessage(
+                            content=[
+                                {"type": "thinking", "thinking": "unstreamed plan"},
+                                {"type": "text", "text": "answer"},
+                            ],
+                            id="msg-fallback",
+                        )
+                    ]
+                },
+            ),
+        ],
+        "thread-think-fallback",
+    )
+
+    types = [event.get("type") for event in events if event.get("type") in {"thinking", "final"}]
+    assert types == ["thinking", "final"]
+    thinking_event = next(event for event in events if event.get("type") == "thinking")
+    assert thinking_event["content"] == "unstreamed plan"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stream_orders_thinking_before_text_in_one_chunk(monkeypatch) -> None:
+    """A tool-free turn whose first chunk carries both reasoning and answer text."""
+    events = await _collect_stream_events(
+        monkeypatch,
+        [
+            (
+                "messages",
+                (
+                    AIMessageChunk(content="<think>Greet back.</think>Hello"),
+                    {"langgraph_node": "llm"},
+                ),
+            ),
+            ("messages", (AIMessageChunk(content=" there!"), {"langgraph_node": "llm"})),
+            (
+                "values",
+                {
+                    "messages": [
+                        AIMessage(
+                            content="<think>Greet back.</think>Hello there!",
+                            id="msg-no-tools",
+                        )
+                    ]
+                },
+            ),
+        ],
+        "thread-think-no-tools",
+    )
+
+    streamed = [
+        (event["type"], event["content"])
+        for event in events
+        if event.get("type") in {"thinking", "message", "final"}
+    ]
+    assert streamed == [
+        ("thinking", "Greet back."),
+        ("message", "Hello"),
+        ("message", " there!"),
+        ("final", "Hello there!"),
+    ]

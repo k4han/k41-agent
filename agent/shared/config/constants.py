@@ -133,7 +133,6 @@ RUNTIME_KEY_PATTERNS = [
     r"^web\.defaults\.(google|tavily|firecrawl|brave|bing)$",
     r"^tools\.(permissions|shell|storage_root)$",
     r"^(host|port|enable_web|enable_api|enable_dashboard|tray\.enabled|tray\.autostart)$",
-    r"^chat\.stream_thinking$",
     r"^browser\.(executable_path|storage_root|idle_ttl_seconds|operation_timeout_seconds|stream_quality|stream_max_width|stream_max_height)$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
@@ -171,7 +170,6 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^web\.connections\.[A-Za-z0-9_-]+\.(type|api_key|cse_id|base_url)$",
     r"^web\.defaults\.(google|tavily|firecrawl|brave|bing)$",
     r"^tools\.(permissions|shell|storage_root)$",
-    r"^chat\.stream_thinking$",
     r"^browser\.(executable_path|storage_root|idle_ttl_seconds|operation_timeout_seconds|stream_quality|stream_max_width|stream_max_height)$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
@@ -329,7 +327,6 @@ def _expand_runtime_keys() -> set[str]:
     keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
     keys.add("recursion_limit")
     keys.update({"tools.permissions", "tools.shell", "tools.storage_root"})
-    keys.add("chat.stream_thinking")
     keys.update({"browser.executable_path", "browser.storage_root", "browser.idle_ttl_seconds", "browser.operation_timeout_seconds"})
     keys.update({"browser.stream_quality", "browser.stream_max_width", "browser.stream_max_height"})
     keys.add("google_calendar.enabled")
@@ -1012,18 +1009,6 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "min": 1,
         "max": 1000,
         "step": 1,
-    },
-    # Chat UI settings
-    "chat.stream_thinking": {
-        "type": "boolean",
-        "description": (
-            "Surface model reasoning as it streams so the dashboard can "
-            "render it alongside the visible answer. Reasoning is always "
-            "stripped from the final visible text; this flag only controls "
-            "whether the intermediate deltas are forwarded."
-        ),
-        "category": "preferences",
-        "label": "Stream Thinking to UI",
     },
     # Decision settings
     "decision.router.mode": {

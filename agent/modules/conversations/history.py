@@ -17,7 +17,11 @@ from agent.modules.conversations.service import (
     list_conversation_threads,
     parse_thread_metadata,
 )
-from agent.shared.infrastructure.parsing import extract_final_text_content, extract_tool_display_content
+from agent.shared.infrastructure.parsing import (
+    extract_final_text_content,
+    extract_message_thinking,
+    extract_tool_display_content,
+)
 from agent.shared.infrastructure.errors import friendly_agent_error_message
 from agent.shared.thread_ids import resolve_thread_id
 
@@ -590,6 +594,9 @@ def _serialize_thread_messages(
             content = extract_final_text_content(getattr(msg, "content", None))
             entry["role"] = "assistant"
             entry["content"] = content or ""
+            thinking = extract_message_thinking(msg).strip()
+            if thinking:
+                entry["thinking"] = thinking
             if message_index in forkable and message_index in sources:
                 entry["message_index"] = message_index
                 entry["source_checkpoint_id"] = sources[message_index][0]

@@ -193,6 +193,7 @@ test('tool results update only their target thread and append missing calls', t 
     },
     '@/lib/chatStreamStore': streams,
     '@/lib/generatedImages': { GENERATE_IMAGE_TOOL_NAME: 'generate_image' },
+    '@/lib/thinkingDurations': loadModule('../src/lib/thinkingDurations.ts'),
   });
   mount(t, () => {
     let scrolls = 0;
@@ -228,6 +229,7 @@ function loadChatStreams(globals = {}) {
     },
     '@/lib/chatStreamStore': streams,
     '@/lib/generatedImages': { GENERATE_IMAGE_TOOL_NAME: 'generate_image' },
+    '@/lib/thinkingDurations': loadModule('../src/lib/thinkingDurations.ts'),
   }, { window: { setTimeout, clearTimeout }, ...globals });
   return { streams, useChatStreams };
 }
@@ -545,6 +547,7 @@ test('buffered chunks stay isolated by thread and authoritative replacements dis
     '@/components/Transcript': {},
     '@/lib/chatStreamStore': streams,
     '@/lib/generatedImages': {},
+    '@/lib/thinkingDurations': loadModule('../src/lib/thinkingDurations.ts'),
   }, {
     window: {
       setTimeout: callback => { const id = ++nextTimer; timers.set(id, callback); return id; },
@@ -606,6 +609,7 @@ function loadWorkspaceGroups() {
     '@/lib/userInputRequest': {},
     '@/lib/generatedImages': {},
     '@/lib/workspaceConstants': { NO_WORKSPACE_KEY: 'none', NO_WORKSPACE_LABEL: 'No workspace' },
+    '@/lib/thinkingDurations': loadModule('../src/lib/thinkingDurations.ts'),
     '@/lib/workspace': { isNoWorkspace: workspace => workspace?.execution?.metadata?.no_workspace === true || workspace?.execution?.metadata?.temp === true },
   });
   return loadModule('../src/lib/useThreadWorkspaceGroups.ts', {

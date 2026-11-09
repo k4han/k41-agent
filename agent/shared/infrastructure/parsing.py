@@ -52,6 +52,22 @@ def extract_thinking_content(value: object) -> str:
     return parse_content_for_thinking(value).thinking
 
 
+def extract_message_thinking(message: object) -> str:
+    """Extract all reasoning carried by a model message.
+
+    Reasoning lives in content blocks for most providers, while Chat
+    Completions gateways deliver it beside the content and the provider layer
+    keeps it in ``additional_kwargs["reasoning_content"]``.
+    """
+    pieces = [extract_thinking_content(getattr(message, "content", None))]
+    additional = getattr(message, "additional_kwargs", None)
+    if isinstance(additional, dict):
+        reasoning = additional.get("reasoning_content")
+        if isinstance(reasoning, str):
+            pieces.append(reasoning)
+    return "\n\n".join(piece for piece in pieces if piece.strip())
+
+
 def extract_final_text_content(value: object) -> str:
     """Extract the final user-visible text from model message content.
 
@@ -132,6 +148,7 @@ def safe_str_strip(value: object, default: str = "") -> str:
 __all__ = [
     "extract_final_text_content",
     "extract_tool_display_content",
+    "extract_message_thinking",
     "extract_thinking_content",
     "parse_string_or_list",
     "safe_str_strip",

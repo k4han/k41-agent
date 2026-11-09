@@ -9,6 +9,16 @@ from agent.modules.providers.models import ModelConfig
 from agent.modules.providers.provider import ProviderConfig
 
 
+def _returns_thoughts(model_name: str) -> bool:
+    """Whether Gemini should include thought summaries in its replies.
+
+    Thinking models only send thoughts on request. Gemini 1.x and 2.0 do not
+    think, and Gemma already returns its reasoning without the flag.
+    """
+    name = model_name.rsplit("/", 1)[-1].lower()
+    return name.startswith("gemini-") and not name.startswith(("gemini-1", "gemini-2.0"))
+
+
 class GoogleFactory:
     """Create ChatGoogleGenerativeAI client from provider + model config."""
 
@@ -21,6 +31,8 @@ class GoogleFactory:
             google_api_key=api_key,
             temperature=model_config.temperature,
             profile=model_config.profile,
+            # Leave the flag unset elsewhere so no thinking config is sent at all.
+            **({"include_thoughts": True} if _returns_thoughts(model_config.model_name) else {}),
             # Google expresses this value as total attempts, including the first call.
             **({"max_retries": 1} if model_config.disable_retries else {}),
         )

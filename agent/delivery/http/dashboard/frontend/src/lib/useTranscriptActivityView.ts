@@ -2,7 +2,7 @@ import { createMemo, mapArray, untrack, type Accessor } from "solid-js";
 
 import {
   buildTranscriptActivityView,
-  isEmptyAssistantMessage,
+  isEmptyTranscriptRow,
   isTranscriptActivityBoundary,
   type TranscriptActivitySource,
 } from "@/lib/transcriptActivity";
@@ -14,7 +14,7 @@ export function useTranscriptActivityView<T extends TranscriptActivitySource>(
 ) {
   const rows = mapArray(items, (item) => ({
     item,
-    kind: createMemo(() => isEmptyAssistantMessage(item)
+    kind: createMemo(() => isEmptyTranscriptRow(item)
       ? "hidden"
       : isTranscriptActivityBoundary(item) ? "item" : "activity"),
   }));

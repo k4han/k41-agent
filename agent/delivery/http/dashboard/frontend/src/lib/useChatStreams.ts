@@ -23,6 +23,7 @@ import {
   GENERATE_IMAGE_TOOL_NAME,
   generatedImageAttachmentFromToolResult,
 } from "@/lib/generatedImages";
+import { rememberThinkingDuration } from "@/lib/thinkingDurations";
 import type { useChatScroll } from "@/lib/useChatScroll";
 
 type ChatScroll = ReturnType<typeof useChatScroll>;
@@ -179,6 +180,18 @@ export function useChatStreams(params: UseChatStreamsParams) {
     const isCurrent = !getIsUnmounting() && (!targetThreadId || targetThreadId === getCurrentThreadId());
     if (isCurrent) {
       scroll.scrollToBottom();
+    }
+  };
+
+  const finishThinking = (id: number, durationMs: number, targetThreadId?: string) => {
+    const transcript = transcriptFor(targetThreadId);
+    if (!transcript) return;
+    // Apply buffered reasoning so the cached duration matches the full text.
+    flushPendingMessageChunks();
+    transcript[6](id, durationMs);
+    const item = transcript[0]().find((row) => row.id === id);
+    if (item?.type === "thinking") {
+      rememberThinkingDuration(resolveThreadKey(targetThreadId), item.text, durationMs);
     }
   };
 
@@ -407,6 +420,7 @@ export function useChatStreams(params: UseChatStreamsParams) {
     appendItem,
     updateMessage,
     replaceMessage,
+    finishThinking,
     removeItem,
     updateToolResult,
     updatePlanReview,

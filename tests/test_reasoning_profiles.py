@@ -88,7 +88,7 @@ def test_overrides_can_enable_disable_and_replace_metadata():
         "gpt-5": {"reasoning_effort_levels": []},
     })
     profile = get_model_profile("openai", "gpt-6.1-sol", overrides)
-    assert get_reasoning_effort_kwargs("openai", "gpt-6.1-sol", None, profile=profile) == {"reasoning": {"effort": "high"}}
+    assert get_reasoning_effort_kwargs("openai", "gpt-6.1-sol", None, profile=profile) == {"reasoning": {"effort": "high", "summary": "auto"}}
     assert reasoning_metadata(get_model_profile("anthropic", "claude-opus-4-6", overrides)) == (("low",), None)
     assert get_reasoning_effort_kwargs("openai", "gpt-5", "high", profile=get_model_profile("openai", "gpt-5", overrides)) == {}
     assert reasoning_metadata(get_model_profile("openai", "gpt-5"))[0]

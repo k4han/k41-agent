@@ -21,6 +21,7 @@ export interface StreamCallbacks {
   appendItem: (item: TranscriptItem, mode: AppendScrollMode, threadId?: string) => number;
   updateMessage: (id: number, chunk: string, threadId?: string) => void;
   replaceMessage?: (id: number, text: string, threadId?: string) => void;
+  finishThinking?: (id: number, durationMs: number, threadId?: string) => void;
   removeItem?: (id: number, threadId?: string) => void;
   updateToolResult: (toolCallId: string, name: string, result: unknown, threadId?: string) => void;
   updatePlanReviewResult: (toolCallId: string, result: unknown, threadId?: string) => void;
@@ -35,7 +36,12 @@ export interface StreamCallbacks {
 
 // ── Mutable refs shared across event handling ──
 
-export type AssistantIdRef = { id: number | null };
+export type AssistantIdRef = {
+  id: number | null;
+  /** Thinking block that is still receiving reasoning deltas. */
+  thinkingId?: number | null;
+  thinkingStartedAt?: number;
+};
 export type StreamedRef = { received: boolean };
 export type StreamThreadIdRef = { id: string; message: string; workspace?: WorkspaceRef | null };
 
@@ -91,6 +97,32 @@ export function isWorkspaceAffectingTool(toolName: string): boolean {
   return WORKSPACE_FILE_ACTION_REGEX.test(normalized);
 }
 
+// Any of these means the model stopped reasoning and moved on.
+const THINKING_SETTLING_EVENTS: ReadonlySet<unknown> = new Set([
+  STREAM_EVENTS.MESSAGE,
+  STREAM_EVENTS.FINAL,
+  STREAM_EVENTS.TOOL_CALL,
+  STREAM_EVENTS.PLAN_REVIEW,
+  STREAM_EVENTS.USER_INPUT_REQUEST,
+  STREAM_EVENTS.ERROR,
+]);
+
+/** Close the open thinking block, recording how long the model reasoned. */
+export function settleStreamThinking(
+  assistantIdRef: AssistantIdRef,
+  streamThreadIdRef: StreamThreadIdRef,
+  callbacks: Pick<StreamCallbacks, "finishThinking">,
+): void {
+  const thinkingId = assistantIdRef.thinkingId;
+  if (thinkingId === null || thinkingId === undefined) return;
+  const startedAt = assistantIdRef.thinkingStartedAt;
+  assistantIdRef.thinkingId = null;
+  assistantIdRef.thinkingStartedAt = undefined;
+  if (startedAt !== undefined) {
+    callbacks.finishThinking?.(thinkingId, Date.now() - startedAt, streamThreadIdRef.id);
+  }
+}
+
 // ── Core event handler ──
 
 export function handleStreamEvent(
@@ -100,6 +132,36 @@ export function handleStreamEvent(
   streamThreadIdRef: StreamThreadIdRef,
   callbacks: StreamCallbacks,
 ): void {
+  if (THINKING_SETTLING_EVENTS.has(event.type)) {
+    settleStreamThinking(assistantIdRef, streamThreadIdRef, callbacks);
+  }
+
+  if (event.type === STREAM_EVENTS.THINKING) {
+    const content = String(event.content || "");
+    if (!content) {
+      return;
+    }
+    if (assistantIdRef.thinkingId === null || assistantIdRef.thinkingId === undefined) {
+      if (assistantIdRef.id !== null) {
+        // Reasoning replaces the generic status placeholder of a new turn.
+        // After visible text, it ends that bubble so later text follows it;
+        // `received` stays set, so the closing `final` is still ignored.
+        if (!streamedRef.received) {
+          callbacks.removeItem?.(assistantIdRef.id, streamThreadIdRef.id);
+        }
+        assistantIdRef.id = null;
+      }
+      assistantIdRef.thinkingId = callbacks.appendItem(
+        { type: "thinking", text: "" },
+        "bottom",
+        streamThreadIdRef.id,
+      );
+      assistantIdRef.thinkingStartedAt = Date.now();
+    }
+    callbacks.updateMessage(assistantIdRef.thinkingId, content, streamThreadIdRef.id);
+    return;
+  }
+
   if (event.type === STREAM_EVENTS.THREAD_CREATED) {
     const threadId = String(event.thread_id || "");
     if (!threadId) {

@@ -164,6 +164,24 @@ async def test_text_turn_streams_once_and_persists(env):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("emit_thinking", [True, False])
+async def test_thinking_survives_checkpoint_history_without_duplicate_events(env, emit_thinking):
+    from agent.modules.conversations.history import _serialize_thread_messages
+
+    events = await env.collect("scenario:thinking", emit_thinking=emit_thinking)
+    thoughts = [event["content"] for event in events if event["type"] == "thinking"]
+    assert thoughts == (["Check the ", "cache."] if emit_thinking else [])
+    assert texts(events) == "The cache is warm."
+    assert events[-1] == {"type": "final", "content": "The cache is warm.", "already_streamed": True}
+    entries = _serialize_thread_messages(await env.messages())
+    assert [(entry["role"], entry["content"], entry.get("thinking")) for entry in entries] == [
+        ("user", "scenario:thinking", None),
+        ("assistant", "", "Check the cache."),
+        ("assistant", "The cache is warm.", None),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_tool_events_appear_once_and_persist_in_order(env):
     events = await env.collect("scenario:tools")
     assert [event["type"] for event in events if event["type"] != "context_usage"] == [
@@ -192,11 +210,16 @@ async def test_non_spec_stop_reason_finishes_normally(env):
 
 
 @pytest.mark.asyncio
-async def test_non_streaming_path_returns_the_final_text(env):
+@pytest.mark.parametrize(("scenario", "expected"), [
+    ("text", "Hello world"),
+    ("thinking", "The cache is warm."),
+    ("thinking_after_text", "The cache is warm."),
+])
+async def test_non_streaming_path_returns_the_final_text(env, scenario, expected):
     result = await asyncio.wait_for(runner_module.run_agent_full(
-        "scenario:text", THREAD, "ag", working_dir=str(env.workspace), usage_context={"platform": "api"},
+        f"scenario:{scenario}", THREAD, "ag", working_dir=str(env.workspace), usage_context={"platform": "api"},
     ), 30)
-    assert result == "Hello world"
+    assert result == expected
 
 
 # Permissions ------------------------------------------------------------------

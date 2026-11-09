@@ -5,6 +5,7 @@ import { useToast } from "@/components/Toast";
 import { FormSelect } from "@/components/FormSelect";
 import { apiFetch, putJson } from "@/lib/api";
 import { STORAGE_KEYS, THEME_OPTIONS } from "@/lib/uiConstants";
+import { useShowThinking } from "@/lib/useShowThinking";
 import type { SettingsPayload } from "@/types";
 
 import { SettingsLayout } from "./SettingsLayout";
@@ -18,10 +19,9 @@ export function AppearancePage() {
   // Server settings for display & chat
   const [timezone, setTimezone] = createSignal("UTC");
   const [timezoneOptions, setTimezoneOptions] = createSignal<string[]>(["UTC"]);
-  const [streamThinking, setStreamThinking] = createSignal(false);
   const [loadingConfig, setLoadingConfig] = createSignal(false);
   const [savingTimezone, setSavingTimezone] = createSignal(false);
-  const [savingThinking, setSavingThinking] = createSignal(false);
+  const { showThinking, toggleShowThinking } = useShowThinking();
 
   const { showToast } = useToast();
 
@@ -49,10 +49,6 @@ export function AppearancePage() {
           if (Array.isArray(tzInfo.options) && tzInfo.options.length > 0) {
             setTimezoneOptions(tzInfo.options.map(String));
           }
-        }
-        const thinkingInfo = payload.settings["chat.stream_thinking"];
-        if (thinkingInfo) {
-          setStreamThinking(Boolean(thinkingInfo.value));
         }
       }
     } catch {
@@ -113,23 +109,6 @@ export function AppearancePage() {
       showToast(err instanceof Error ? err.message : "Failed to update timezone", "error");
     } finally {
       setSavingTimezone(false);
-    }
-  };
-
-  const handleToggleStreamThinking = async () => {
-    const next = !streamThinking();
-    setStreamThinking(next);
-    setSavingThinking(true);
-    try {
-      await putJson("/settings", {
-        values: { "chat.stream_thinking": next },
-      });
-      showToast(`Stream thinking ${next ? "enabled" : "disabled"}.`, "success");
-    } catch (err) {
-      setStreamThinking(!next);
-      showToast(err instanceof Error ? err.message : "Failed to update stream thinking", "error");
-    } finally {
-      setSavingThinking(false);
     }
   };
 
@@ -288,23 +267,22 @@ export function AppearancePage() {
             <div class="stack" style={{ gap: "16px" }}>
               <div class="row" style={{ "justify-content": "space-between", "align-items": "center" }}>
                 <div>
-                  <div style={{ "font-weight": "550", "font-size": "0.8125rem" }}>Stream Thinking to UI</div>
+                  <div style={{ "font-weight": "550", "font-size": "0.8125rem" }}>Show model thinking</div>
                   <div class="hint" style={{ "font-size": "0.75rem", "max-width": "380px" }}>
-                    Show model reasoning while it streams.
+                    Show the reasoning of models that think before they answer. Saved in this browser.
                   </div>
                 </div>
                 <button
-                  class={`toggle-control ${streamThinking() ? "active" : ""}`}
+                  class={`toggle-control ${showThinking() ? "active" : ""}`}
                   type="button"
                   role="switch"
-                  aria-checked={streamThinking()}
-                  disabled={savingThinking() || loadingConfig()}
-                  onClick={handleToggleStreamThinking}
+                  aria-checked={showThinking()}
+                  onClick={toggleShowThinking}
                 >
                   <span class="toggle-track">
                     <span class="toggle-thumb" />
                   </span>
-                  <span class="toggle-text">{streamThinking() ? "Enabled" : "Disabled"}</span>
+                  <span class="toggle-text">{showThinking() ? "Shown" : "Hidden"}</span>
                 </button>
               </div>
             </div>

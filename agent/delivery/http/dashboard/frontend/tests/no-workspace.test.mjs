@@ -24,6 +24,7 @@ const workspace = loadModule('../src/lib/workspace.ts', {
 const threads = loadModule('../src/lib/chatThreads.ts', {
   '@/components/Transcript': {}, '@/lib/userInputRequest': {}, '@/lib/generatedImages': {},
   '@/lib/workspaceConstants': constants, '@/lib/workspace': workspace,
+  '@/lib/thinkingDurations': loadModule('../src/lib/thinkingDurations.ts'),
 });
 const ref = (metadata, locator = '/sessions/first') => ({ backend: 'local', locator, label: 'Temp workspace', metadata });
 

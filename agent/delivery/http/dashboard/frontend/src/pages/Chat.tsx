@@ -67,6 +67,7 @@ import {
 } from "@/lib/chatAttachments";
 import {
   handleStreamEvent,
+  settleStreamThinking,
   readNDJSONStream,
   type StreamCallbacks,
   type AssistantIdRef,
@@ -96,6 +97,7 @@ import { useChatAttachments } from "@/lib/useChatAttachments";
 import { useContextWindow } from "@/lib/useContextWindow";
 import { useBackgroundStream } from "@/lib/useBackgroundStream";
 import { useReasoningEffort } from "@/lib/useReasoningEffort";
+import { useShowThinking } from "@/lib/useShowThinking";
 import { useAcpSessionOptions } from "@/lib/useAcpSessionOptions";
 import { ASK_USER_TOOL_NAME, normalizeUserInputRequest } from "@/lib/userInputRequest";
 import {
@@ -448,6 +450,7 @@ export function ChatPage() {
     appendItem,
     updateMessage,
     replaceMessage,
+    finishThinking,
     removeItem,
     updateToolResult,
     updatePlanReview,
@@ -474,9 +477,11 @@ export function ChatPage() {
 
   const [compacting, setCompacting] = createSignal(false);
 
+  const { showThinking } = useShowThinking();
   const filteredItems = createMemo(() =>
     items().filter(
       (item) =>
+        !(item.type === "thinking" && !showThinking()) &&
         !(
           item.type === "tool" &&
           (
@@ -785,6 +790,7 @@ export function ChatPage() {
     appendItem,
     updateMessage,
     replaceMessage,
+    finishThinking,
     removeItem,
     updateToolResult,
     updatePlanReviewResult,
@@ -1294,6 +1300,7 @@ export function ChatPage() {
         }, "bottom", streamThreadIdRef.id);
       }
     } finally {
+      settleStreamThinking(assistantIdRef, streamThreadIdRef, streamCallbacks);
       const finishedTid = streamThreadIdRef.id;
       finishLocalStream(finishedTid);
       if (finishedTid) {
@@ -1367,6 +1374,7 @@ export function ChatPage() {
         }, "bottom", streamThreadIdRef.id);
       }
     } finally {
+      settleStreamThinking(assistantIdRef, streamThreadIdRef, streamCallbacks);
       const finishedTid = streamThreadIdRef.id;
       finishLocalStream(finishedTid);
       if (finishedTid) {
@@ -1717,6 +1725,7 @@ export function ChatPage() {
         }, "bottom", streamThreadIdRef.id);
       }
     } finally {
+      settleStreamThinking(assistantIdRef, streamThreadIdRef, streamCallbacks);
       const finishedTid = streamThreadIdRef.id;
       finishLocalStream(finishedTid);
       window.dispatchEvent(

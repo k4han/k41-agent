@@ -269,7 +269,7 @@ async def test_effort_changes_apply_per_turn_without_leaking_to_other_models(cac
     await cached_llm_node.run(model="gpt-5", reasoning_effort="high")
     assert cached_llm_node.captured["model_kwargs"] == {"reasoning_effort": "high"}
     await cached_llm_node.run(model="gpt-6.1-sol", reasoning_effort="high")
-    assert cached_llm_node.captured["model_kwargs"] == {"reasoning": {"effort": "high"}}
+    assert cached_llm_node.captured["model_kwargs"] == {"reasoning": {"effort": "high", "summary": "auto"}}
     await cached_llm_node.run(model="gpt-4.1", reasoning_effort="high")
     assert cached_llm_node.captured["model_kwargs"] == {}
     await cached_llm_node.run(model="gpt-5")

@@ -194,6 +194,15 @@ def turn_body(session_id, name, cancel, text):
         except urllib.error.HTTPError as exc:
             chunk(session_id, f"status={exc.code}")
         return "end_turn"
+    if name == "thinking":
+        update(session_id, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Check the "}})
+        update(session_id, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "cache."}})
+        chunk(session_id, "The cache is warm.")
+        return "end_turn"
+    if name == "thinking_after_text":
+        chunk(session_id, "The cache is warm.")
+        update(session_id, {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Finished."}})
+        return "end_turn"
     if name == "text":
         chunk(session_id, "Hello ")
         chunk(session_id, "world")

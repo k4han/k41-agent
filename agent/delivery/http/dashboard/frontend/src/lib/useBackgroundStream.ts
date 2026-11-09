@@ -4,6 +4,7 @@ import { API_PATHS } from "@/lib/endpoints";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
 import {
   handleStreamEvent,
+  type AssistantIdRef,
   type StreamCallbacks,
 } from "@/lib/chatStreamHandler";
 import type { BackgroundTaskSnapshot } from "@/lib/chatTypes";
@@ -48,7 +49,7 @@ export function useBackgroundStream(params: UseBackgroundStreamParams) {
 
   const openBackgroundStream = (threadId: string) => {
     closeBackgroundStream();
-    const assistantIdRef = { id: null as number | null };
+    const assistantIdRef: AssistantIdRef = { id: null };
     const streamedRef = { received: false };
     const source = new EventSource(API_PATHS.backgroundTaskStream(threadId));
     backgroundEventSource = source;
@@ -60,6 +61,7 @@ export function useBackgroundStream(params: UseBackgroundStreamParams) {
         return;
       }
       assistantIdRef.id = null;
+      assistantIdRef.thinkingId = null;
       streamedRef.received = false;
       setBackgroundStreamError("");
       applyBackgroundSnapshot(JSON.parse(event.data) as BackgroundTaskSnapshot);

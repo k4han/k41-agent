@@ -246,6 +246,7 @@ test('compacted context and history persist when revisiting the conversation', a
     '@/lib/chatStreamStore': store,
     '@/components/Transcript': {},
     '@/lib/generatedImages': {},
+    '@/lib/thinkingDurations': loadModule('../src/lib/thinkingDurations.ts'),
   });
   let chat;
   solid.createRoot((dispose) => {

@@ -207,6 +207,63 @@ def text_update(text, **extra):
     return {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}, **extra}
 
 
+def thought_update(text):
+    return {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": text}}
+
+
+def test_thinking_chunks_persist_with_stable_ids_without_becoming_answer_text():
+    from langgraph.graph.message import add_messages
+
+    from agent.modules.conversations.history import _serialize_thread_messages
+
+    record = transcript()
+    assert record.apply(thought_update("Check the ")) == [{"type": "thinking", "content": "Check the "}]
+    partial = record.messages()
+    assert len(partial) == 1
+    assert record.final_text == "" and not record.ends_with_text
+    record.apply(thought_update("cache."))
+    record.apply(text_update("The cache is warm."))
+    messages = add_messages(partial, record.messages())
+
+    assert len(messages) == 2 and messages[0].id == partial[0].id
+    assert all(message.additional_kwargs[ACP_LIVE_KWARG] for message in messages)
+    assert partial[0].additional_kwargs["reasoning_content"] == "Check the "
+    restored = [AIMessage.model_validate_json(message.model_dump_json()) for message in messages]
+    entries = _serialize_thread_messages(restored)
+    assert entries[0]["content"] == "" and entries[0]["thinking"] == "Check the cache."
+    assert entries[1]["content"] == "The cache is warm." and "thinking" not in entries[1]
+    assert record.final_text == "The cache is warm." and record.ends_with_text
+
+
+def test_thinking_keeps_its_position_between_text_and_tools():
+    from agent.modules.conversations.history import _serialize_thread_messages
+
+    record = transcript()
+    record.apply(text_update("Before."))
+    record.apply(thought_update("Read the file."))
+    assert record.ends_with_text
+    record.apply({"sessionUpdate": "tool_call", "toolCallId": "x", "kind": "read", "status": "in_progress"})
+    record.apply({"sessionUpdate": "tool_call_update", "toolCallId": "x", "status": "completed", "rawOutput": "data"})
+    record.apply(thought_update("Now summarize."))
+    assert not record.ends_with_text
+    record.apply(text_update("Done."))
+    record.apply(thought_update("Finished."))
+
+    entries = _serialize_thread_messages(record.messages())
+    assert [entry.get("thinking") or entry["content"] for entry in entries] == [
+        "Before.", "Read the file.", "", "data", "Now summarize.", "Done.", "Finished.",
+    ]
+    assert entries[2]["tool_calls"][0]["name"] == "acp_read"
+    assert record.final_text == "Done." and record.ends_with_text
+
+
+def test_empty_or_non_text_thoughts_do_not_create_history_messages():
+    record = transcript()
+    assert record.apply(thought_update("")) == []
+    assert record.apply({"sessionUpdate": "agent_thought_chunk", "content": {"type": "image"}}) == []
+    assert record.messages() == []
+
+
 def test_text_chunks_merge_into_one_message_and_stream_individually():
     record = transcript()
     assert record.apply(text_update("Hel")) == [{"type": "message", "content": "Hel"}]

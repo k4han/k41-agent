@@ -6,6 +6,7 @@ import { resolveModelAndProvider } from "@/lib/modelSelection";
 import { MOBILE_MEDIA_QUERY } from "@/lib/uiConstants";
 import { createMediaQuery } from "@/lib/useMediaQuery";
 import { parseFavoriteKey, useModelFavorites } from "@/lib/useModelFavorites";
+import { useShowThinking } from "@/lib/useShowThinking";
 import type { AgentCard, ModelCatalog, ModelOption } from "@/types";
 
 type PickerModel = ModelOption & { provider: string };
@@ -77,6 +78,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
   let modelTriggerRef: HTMLButtonElement | undefined;
   let menuRef: HTMLDivElement | undefined;
   let effortMenuRef: HTMLDivElement | undefined;
+  const { showThinking, toggleShowThinking } = useShowThinking();
   let searchInputRef: HTMLInputElement | undefined;
   const triggerRef = () => activePicker() === "agent" ? agentTriggerRef : modelTriggerRef;
 
@@ -189,7 +191,8 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
       left = parent.left - width - gap;
       if (left < 16) left = window.innerWidth - width - 16;
     }
-    const height = effortMenuRef?.offsetHeight || (target.levels.length + 1) * 40 + 40;
+    // Effort levels, the Auto option, and the thinking toggle below them.
+    const height = effortMenuRef?.offsetHeight || (target.levels.length + 2) * 40 + 48;
     const top = Math.max(8, Math.min(anchor.top, window.innerHeight - height - 8));
     setEffortPos({ top, left, width });
   };
@@ -625,6 +628,14 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
                 </For>
               </Show>
             </div>
+            <div class="model-effort-divider" role="separator" />
+            <button type="button" class="model-effort-option model-effort-thinking-toggle" role="menuitemcheckbox"
+              aria-checked={showThinking()}
+              title="Show the model's reasoning in the chat. Saved in this browser."
+              onClick={toggleShowThinking}>
+              <span>Show thinking</span>
+              <Show when={showThinking()}><Check size={13} /></Show>
+            </button>
           </div>
         </Show>
         </Portal>

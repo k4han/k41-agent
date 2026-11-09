@@ -375,6 +375,11 @@ def _parse_part_for_thinking(part: Any) -> ContentWithThinking:
                     thinking = _coerce_thinking_value(value)
                     if thinking:
                         return ContentWithThinking(text="", thinking=thinking)
+            summary = part.get("summary")
+            if isinstance(summary, list):
+                thinking = reasoning_summary_text(summary)
+                if thinking:
+                    return ContentWithThinking(text="", thinking=thinking)
             thinking = _coerce_thinking_value(part.get("text") or part.get("content"))
             return ContentWithThinking(text="", thinking=thinking)
         text_value = part.get("text")
@@ -398,6 +403,33 @@ def _parse_part_for_thinking(part: Any) -> ContentWithThinking:
     if content_attr is not None:
         return parse_content_for_thinking(content_attr)
     return ContentWithThinking(text="", thinking="")
+
+
+def reasoning_summary_text(summary: list[Any], *, streaming: bool = False) -> str:
+    """Join the ``summary_text`` items of an OpenAI Responses ``reasoning`` block.
+
+    A complete block separates its summary parts with blank lines. A streamed
+    chunk carries one part; an empty part after the first marks the start of a
+    new paragraph, so it yields the separator that the complete form would use.
+    """
+    pieces: list[str] = []
+    for item in summary:
+        if isinstance(item, dict):
+            text = item.get("text")
+            index = item.get("index")
+        else:
+            text = getattr(item, "text", None)
+            index = getattr(item, "index", None)
+        if not isinstance(text, str):
+            continue
+        if streaming:
+            if text:
+                pieces.append(text)
+            elif isinstance(index, int) and index > 0:
+                pieces.append("\n\n")
+        elif text.strip():
+            pieces.append(text)
+    return "".join(pieces) if streaming else "\n\n".join(pieces)
 
 
 def _coerce_thinking_value(value: Any) -> str:
@@ -428,5 +460,6 @@ __all__ = [
     "ThinkingTagStreamParser",
     "extract_thinking_from_text",
     "parse_content_for_thinking",
+    "reasoning_summary_text",
     "strip_thinking_tags",
 ]

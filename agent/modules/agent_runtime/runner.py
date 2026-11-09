@@ -11,14 +11,15 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Too
 from langgraph.types import Command
 from agent.shared.infrastructure.parsing import (
     extract_final_text_content,
+    extract_message_thinking,
     extract_tool_display_content,
-    extract_thinking_content,
 )
 from agent.shared.infrastructure.thinking_parser import (
     ContentWithThinking,
     ThinkingTagStreamParser,
     extract_thinking_from_text,
     parse_content_for_thinking,
+    reasoning_summary_text,
     strip_thinking_tags,
 )
 
@@ -612,6 +613,10 @@ class _StreamingChunkExtractor:
         visible_strings = "".join(part.text for part in parts if part.text)
         visible_delta = self._tag_parser.feed(visible_strings)
         thinking_delta = "".join(part.thinking for part in parts if part.thinking)
+        # Chat Completions gateways stream reasoning beside the content.
+        reasoning = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
+        if isinstance(reasoning, str):
+            thinking_delta += reasoning
         if thinking_delta:
             return ContentWithThinking(
                 text=visible_delta.text,
@@ -641,6 +646,12 @@ def _split_chunk_part(value: Any) -> ContentWithThinking:
                 nested = value.get(key)
                 if isinstance(nested, str) and nested:
                     return ContentWithThinking(text="", thinking=nested)
+            summary = value.get("summary")
+            if isinstance(summary, list):
+                return ContentWithThinking(
+                    text="",
+                    thinking=reasoning_summary_text(summary, streaming=True),
+                )
             nested = value.get("text") or value.get("content")
             return ContentWithThinking(text="", thinking=_coerce_thinking_value(nested))
         text_value = value.get("text")
@@ -1239,14 +1250,20 @@ async def run_agent(
             input_data,
             **stream_kwargs,
         ):
-            messages = event.get("messages", [])
-            if messages:
-                last = messages[-1]
+            for last in reversed(event.get("messages", [])):
                 if isinstance(last, AIMessage) and not last.additional_kwargs.get("is_compact_summary"):
                     content = extract_final_text_content(getattr(last, "content", None))
                     if content:
                         registry.update_step(session_id, SESSION_STEP_RESPONDING)
                         yield content
+                    elif (
+                        last.additional_kwargs.get(ACP_LIVE_KWARG)
+                        and last.additional_kwargs.get("reasoning_content")
+                        and not last.tool_calls
+                    ):
+                        # Persisted ACP thoughts can follow the final visible answer.
+                        continue
+                break
 
 
 @guard_workspace_run
@@ -1440,6 +1457,8 @@ async def run_agent_stream(
     try:
         with track_active_session(thread_id, agent_name, usage_context=usage_context) as session_id:
             chunk_extractor = _StreamingChunkExtractor()
+            # The values event repeats reasoning that was already streamed as deltas.
+            thinking_streamed = False
             async for event in graph.astream(
                 input_data,
                 **stream_kwargs,
@@ -1472,16 +1491,18 @@ async def run_agent_stream(
                     continue
                 if stream_mode == "messages":
                     delta = chunk_extractor.extract(event_data)
+                    # Reasoning precedes the text it led to, even within one chunk.
+                    if emit_thinking and delta.thinking:
+                        thinking_streamed = True
+                        yield {
+                            "type": "thinking",
+                            "content": delta.thinking,
+                        }
                     if delta.text:
                         registry.update_step(session_id, SESSION_STEP_RESPONDING)
                         yield {
                             "type": "message",
                             "content": delta.text,
-                        }
-                    if emit_thinking and delta.thinking:
-                        yield {
-                            "type": "thinking",
-                            "content": delta.thinking,
                         }
                     continue
 
@@ -1537,20 +1558,21 @@ async def run_agent_stream(
                         tool_calls = getattr(message, "tool_calls", None)
                         content = extract_final_text_content(getattr(message, "content", None))
                         thinking = (
-                            extract_thinking_content(getattr(message, "content", None))
-                            if emit_thinking
+                            extract_message_thinking(message)
+                            if emit_thinking and not thinking_streamed
                             else ""
                         )
+                        thinking_streamed = False
+                        if thinking:
+                            yield {
+                                "type": "thinking",
+                                "content": thinking,
+                            }
                         if content:
                             registry.update_step(session_id, SESSION_STEP_RESPONDING)
                             yield {
                                 "type": "final",
                                 "content": content,
-                            }
-                        if thinking:
-                            yield {
-                                "type": "thinking",
-                                "content": thinking,
                             }
                         if tool_calls:
                             for tc in tool_calls:
@@ -1692,6 +1714,8 @@ async def run_agent_edit_stream(
 
     with track_active_session(thread_id, agent_name, usage_context=usage_context) as session_id:
         chunk_extractor = _StreamingChunkExtractor()
+        # The values event repeats reasoning that was already streamed as deltas.
+        thinking_streamed = False
         async for event in graph.astream(
             {"messages": [edited_message]},
             **stream_kwargs,
@@ -1714,16 +1738,18 @@ async def run_agent_edit_stream(
                 continue
             if stream_mode == "messages":
                 delta = chunk_extractor.extract(event_data)
+                # Reasoning precedes the text it led to, even within one chunk.
+                if emit_thinking and delta.thinking:
+                    thinking_streamed = True
+                    yield {
+                        "type": "thinking",
+                        "content": delta.thinking,
+                    }
                 if delta.text:
                     registry.update_step(session_id, SESSION_STEP_RESPONDING)
                     yield {
                         "type": "message",
                         "content": delta.text,
-                    }
-                if emit_thinking and delta.thinking:
-                    yield {
-                        "type": "thinking",
-                        "content": delta.thinking,
                     }
                 continue
 
@@ -1775,20 +1801,21 @@ async def run_agent_edit_stream(
                     tool_calls = getattr(message, "tool_calls", None)
                     content = extract_final_text_content(getattr(message, "content", None))
                     thinking = (
-                        extract_thinking_content(getattr(message, "content", None))
-                        if emit_thinking
+                        extract_message_thinking(message)
+                        if emit_thinking and not thinking_streamed
                         else ""
                     )
+                    thinking_streamed = False
+                    if thinking:
+                        yield {
+                            "type": "thinking",
+                            "content": thinking,
+                        }
                     if content:
                         registry.update_step(session_id, SESSION_STEP_RESPONDING)
                         yield {
                             "type": "final",
                             "content": content,
-                        }
-                    if thinking:
-                        yield {
-                            "type": "thinking",
-                            "content": thinking,
                         }
                     if tool_calls:
                         for tc in tool_calls:

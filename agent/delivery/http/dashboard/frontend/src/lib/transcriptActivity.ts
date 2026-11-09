@@ -29,6 +29,16 @@ export function isEmptyAssistantMessage(item: TranscriptItem): boolean {
     && !item.generatedImagePending;
 }
 
+/** Ignore thinking blocks that have not received any reasoning yet. */
+export function isEmptyThinking(item: TranscriptItem): boolean {
+  return item.type === "thinking" && !item.text.trim();
+}
+
+/** Rows that carry nothing visible and are skipped by transcript scans. */
+export function isEmptyTranscriptRow(item: TranscriptItem): boolean {
+  return isEmptyAssistantMessage(item) || isEmptyThinking(item);
+}
+
 /** Completed tools leave the agent waiting for its next visible response. */
 export function isTranscriptWaitingForModel(
   items: readonly TranscriptItem[],
@@ -38,7 +48,7 @@ export function isTranscriptWaitingForModel(
   let hasTools = false;
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
-    if (isEmptyAssistantMessage(item)) continue;
+    if (isEmptyTranscriptRow(item)) continue;
     if (item.type !== "tool") break;
     hasTools = true;
     if (!hasToolCallResult(item)) return false;
@@ -59,6 +69,9 @@ export function isTranscriptActivityBoundary(item: TranscriptItem): boolean {
   }
   if (item.type === "tool") {
     return item.name === HTML_PREVIEW_TOOL_NAME;
+  }
+  if (item.type === "thinking") {
+    return !isEmptyThinking(item);
   }
   return item.type === "message" && !isEmptyAssistantMessage(item);
 }
@@ -90,7 +103,7 @@ export function findTranscriptCompletedAnswerIds<T extends TranscriptActivitySou
   const answers = new Set<number>();
   let candidate: number | null = null;
   for (const item of items) {
-    if (isEmptyAssistantMessage(item)) continue;
+    if (isEmptyTranscriptRow(item)) continue;
     if (item.type === "message" && item.role === "user") {
       if (candidate !== null) answers.add(candidate);
       candidate = null;
@@ -110,7 +123,7 @@ export function findTranscriptResumeId<T extends TranscriptActivitySource>(
 ): number | null {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
-    if (isEmptyAssistantMessage(item)) continue;
+    if (isEmptyTranscriptRow(item)) continue;
     return item.type === "message" && item.role === "error" && item.resumable
       ? item.id
       : null;
@@ -152,7 +165,7 @@ export function buildTranscriptActivityView<T extends TranscriptActivitySource>(
   };
 
   items.forEach((item) => {
-    if (isEmptyAssistantMessage(item)) {
+    if (isEmptyTranscriptRow(item)) {
       return;
     }
     if (isTranscriptActivityBoundary(item)) {

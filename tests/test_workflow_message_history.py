@@ -212,3 +212,22 @@ def test_normalize_tool_image_url_blocks_preserved():
     normalized = normalize_messages_for_chat_model([message])
 
     assert normalized[0].content == content
+
+
+def test_ui_history_keeps_assistant_thinking_separate_from_answer():
+    from agent.modules.conversations.history import _serialize_thread_messages
+
+    message = AIMessage(
+        content=[
+            {"type": "thinking", "thinking": "Check the cache first."},
+            {"type": "text", "text": "The cache is warm."},
+        ],
+        id="assistant-thinking",
+    )
+    plain = AIMessage(content="No reasoning here.", id="assistant-plain")
+
+    entries = _serialize_thread_messages([message, plain])
+
+    assert entries[0]["content"] == "The cache is warm."
+    assert entries[0]["thinking"] == "Check the cache first."
+    assert "thinking" not in entries[1]

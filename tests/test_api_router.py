@@ -314,7 +314,7 @@ def test_chat_events_passes_attachments(monkeypatch):
         "provider": None,
         "model": None,
         "attachments": attachments,
-        "emit_thinking": False,
+        "emit_thinking": True,
     }
 
     def fake_build_run_params(**params):
@@ -379,7 +379,7 @@ def test_chat_events_can_resume_existing_thread(monkeypatch):
         "context_compact_threshold": None,
         "provider": None,
         "model": None,
-        "emit_thinking": False,
+        "emit_thinking": True,
     }
 
     def fake_build_run_params(**params):
@@ -432,7 +432,7 @@ def test_chat_events_can_create_new_thread(monkeypatch, tmp_path):
         "context_compact_threshold": None,
         "provider": None,
         "model": None,
-        "emit_thinking": False,
+        "emit_thinking": True,
     }
 
     monkeypatch.setattr(
@@ -507,7 +507,7 @@ def test_chat_events_creates_temp_workspace_for_dashboard_new_thread_without_wor
         "context_compact_threshold": None,
         "provider": None,
         "model": None,
-        "emit_thinking": False,
+        "emit_thinking": True,
     }
 
     monkeypatch.setattr(
@@ -563,7 +563,7 @@ def test_chat_events_resolves_and_remembers_workspace(monkeypatch, tmp_path):
         "context_compact_threshold": None,
         "provider": None,
         "model": None,
-        "emit_thinking": False,
+        "emit_thinking": True,
     }
 
     def fake_build_run_params(**params):
@@ -624,7 +624,7 @@ def test_chat_events_keeps_stored_sandbox_dormant_before_stream(monkeypatch, exp
         "context_compact_threshold": None,
         "provider": None,
         "model": None,
-        "emit_thinking": False,
+        "emit_thinking": True,
     }
 
     def fake_build_run_params(**params):
@@ -677,7 +677,7 @@ def test_chat_events_streams_tool_calls_as_ndjson(monkeypatch):
         "context_compact_threshold": None,
         "provider": None,
         "model": None,
-        "emit_thinking": False,
+        "emit_thinking": True,
     }
 
     def fake_build_run_params(**params):
@@ -720,7 +720,7 @@ def test_chat_events_streams_classified_agent_errors(monkeypatch):
         "context_compact_threshold": None,
         "provider": None,
         "model": None,
-        "emit_thinking": False,
+        "emit_thinking": True,
     }
 
     class FakeRateLimitError(Exception):

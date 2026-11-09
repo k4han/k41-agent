@@ -89,6 +89,11 @@ class TextItem:
 
 
 @dataclass
+class ThinkingItem:
+    text: str = ""
+
+
+@dataclass
 class ToolItem:
     tool_call_id: str
     title: str = ""
@@ -111,7 +116,7 @@ class TurnTranscript:
         self.turn_id = turn_id
         self.thread_id = thread_id
         self.provider_label = provider_label
-        self.items: list[TextItem | ToolItem] = []
+        self.items: list[TextItem | ThinkingItem | ToolItem] = []
         self._tools: dict[str, ToolItem] = {}
         self.cancel_requested = False
 
@@ -123,9 +128,7 @@ class TurnTranscript:
         if kind == "agent_message_chunk":
             return self._apply_text(update)
         if kind == "agent_thought_chunk":
-            # Thoughts are live-only; history has no representation for them.
-            text = self._chunk_text(update)
-            return [{"type": "thinking", "content": text}] if text else []
+            return self._apply_thinking(update)
         if kind in {"tool_call", "tool_call_update"}:
             return self._apply_tool(update)
         if kind == "usage_update":
@@ -136,6 +139,17 @@ class TurnTranscript:
     def _chunk_text(update: dict[str, Any]) -> str:
         content = update.get("content")
         return str(content.get("text") or "") if isinstance(content, dict) and content.get("type") == "text" else ""
+
+    def _apply_thinking(self, update: dict[str, Any]) -> list[dict[str, Any]]:
+        text = self._chunk_text(update)
+        if not text:
+            return []
+        last = self.items[-1] if self.items else None
+        if isinstance(last, ThinkingItem):
+            last.text += text
+        else:
+            self.items.append(ThinkingItem(text=text))
+        return [{"type": "thinking", "content": text}]
 
     def _apply_text(self, update: dict[str, Any]) -> list[dict[str, Any]]:
         text = self._chunk_text(update)
@@ -269,7 +283,10 @@ class TurnTranscript:
 
     @property
     def ends_with_text(self) -> bool:
-        visible = [item for item in self.items if not (isinstance(item, ToolItem) and not item.announced)]
+        visible = [
+            item for item in self.items
+            if not isinstance(item, ThinkingItem) and not (isinstance(item, ToolItem) and not item.announced)
+        ]
         return bool(visible) and isinstance(visible[-1], TextItem)
 
     def messages(self, *, notice: str = "") -> list[BaseMessage]:
@@ -277,6 +294,13 @@ class TurnTranscript:
         output: list[BaseMessage] = []
         flags = {ACP_LIVE_KWARG: True}
         for index, item in enumerate(self.items):
+            if isinstance(item, ThinkingItem):
+                output.append(AIMessage(
+                    content="",
+                    id=self._stable_id(f"thinking:{index}"),
+                    additional_kwargs={**flags, "reasoning_content": item.text},
+                ))
+                continue
             if isinstance(item, TextItem):
                 output.append(AIMessage(content=item.text, id=self._stable_id(f"text:{index}"), additional_kwargs=flags))
                 continue

@@ -238,6 +238,102 @@
   margin-bottom: 6px;
 }
 
+/* Model reasoning shown above the answer or tool calls it led to. */
+.thinking-block {
+  min-width: 0;
+  margin: 0 0 14px;
+}
+
+.thinking-block-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-size-chat);
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thinking-block-summary:hover {
+  color: var(--fg);
+}
+
+.thinking-block-summary:focus-visible,
+.thinking-block-body:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.thinking-block-chevron,
+.thinking-block-icon {
+  flex-shrink: 0;
+}
+
+.thinking-block-chevron {
+  transition: transform 120ms ease;
+}
+
+.thinking-block.is-open .thinking-block-chevron {
+  transform: rotate(90deg);
+}
+
+.thinking-block-label {
+  font-weight: 500;
+}
+
+.thinking-block.is-live .thinking-block-icon,
+.thinking-block.is-live .thinking-block-label {
+  animation: thinking-pulse 1.6s ease-in-out infinite;
+}
+
+.thinking-block-body {
+  box-sizing: border-box;
+  max-height: 280px;
+  contain: layout;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
+  margin: 6px 0 0 11px;
+  padding: 2px 8px 2px 18px;
+  border-left: 1px solid var(--border);
+}
+
+.thinking-block-body[hidden] {
+  display: none;
+}
+
+.thinking-markdown {
+  color: var(--muted);
+  font-size: calc(var(--font-size-chat) * 0.93);
+}
+
+@keyframes thinking-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-block.is-live .thinking-block-icon,
+  .thinking-block.is-live .thinking-block-label {
+    animation: none;
+  }
+}
+
 .tool-call {
   margin: 0 0 14px;
 }

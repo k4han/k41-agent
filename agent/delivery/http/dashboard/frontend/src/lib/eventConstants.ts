@@ -4,6 +4,7 @@ export const STREAM_EVENTS = {
   CONTEXT_USAGE: "context_usage",
   MESSAGE: "message",
   FINAL: "final",
+  THINKING: "thinking",
   TOOL_CALL: "tool_call",
   TOOL_RESULT: "tool_result",
   PLAN_REVIEW: "plan_review",
@@ -46,6 +47,7 @@ export const CUSTOM_DOM_EVENTS = {
   WORKSPACE_RUNTIME_CHANGED: "k41:workspace-runtime-changed",
   TASKS_CHANGED: "k41:tasks-changed",
   TRANSCRIPT_TOOL_TOGGLE: "k41:transcript-tool-toggle",
+  SHOW_THINKING_CHANGED: "k41:show-thinking-changed",
   OPEN_MOBILE_NAV: "k41:open-mobile-nav",
 } as const;
 

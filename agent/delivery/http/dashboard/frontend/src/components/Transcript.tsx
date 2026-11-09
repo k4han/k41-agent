@@ -40,6 +40,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { browserImageUrl } from "@/lib/browserViewer";
 import { Markdown } from "@/components/Markdown";
 import { StatusIndicator } from "@/components/StatusIndicator";
+import { TranscriptThinkingBlock } from "@/components/TranscriptThinkingBlock";
 import { useToast } from "@/components/Toast";
 import { isChatStatusText } from "@/lib/chatStatus";
 import { getSharedDarkMode } from "@/lib/theme";
@@ -131,6 +132,14 @@ export type TranscriptTool = {
   resultReceived?: boolean;
 };
 
+/** Model reasoning that preceded the next answer or tool call. */
+export type TranscriptThinking = {
+  type: "thinking";
+  text: string;
+  /** Measured on the client while streaming; history rows may not have it. */
+  durationMs?: number;
+};
+
 export type TranscriptPlanReviewStatus = "pending" | "approved" | "revision_requested";
 
 export type TranscriptPlanReview = {
@@ -161,6 +170,7 @@ export type TranscriptUserInputRequest = {
 
 export type TranscriptItem =
   | TranscriptMessage
+  | TranscriptThinking
   | TranscriptTool
   | TranscriptPlanReview
   | TranscriptUserInputRequest;
@@ -1682,6 +1692,8 @@ export interface TranscriptItemViewProps {
   item: TranscriptItem;
   deferMermaid?: boolean;
   deferHighlight?: boolean;
+  /** True while this row is the one receiving streamed deltas. */
+  streaming?: boolean;
   itemId?: number;
   agents?: AgentCard[];
   activeAgentName?: string;
@@ -1769,6 +1781,16 @@ export function TranscriptItemView(props: TranscriptItemViewProps) {
   }
   if (props.item.type === "user_input_request") {
     return null;
+  }
+  if (props.item.type === "thinking") {
+    return (
+      <TranscriptThinkingBlock
+        text={props.item.text}
+        durationMs={props.item.durationMs}
+        live={!!props.streaming}
+        threadId={props.threadId}
+      />
+    );
   }
   return (
     <ToolCallDetail

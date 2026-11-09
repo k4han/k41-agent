@@ -20,6 +20,7 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
   appendItem: (item: ChatTranscriptItem) => void,
   replaceMessage: (id: number, text: string) => void,
   setToolResult: (toolCallId: string, name: string, result: unknown) => boolean,
+  finishThinking: (id: number, durationMs: number) => void,
 ] {
   const [state, setState] = createStore({ items: cloneValue(unwrap(initialItems)) });
   const indices = new Map<number, number>();
@@ -46,7 +47,7 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
         const index = indices.get(id);
         if (index === undefined || !chunk) continue;
         setState("items", index, produce((item) => {
-          if (item.type === "message") item.text += chunk;
+          if (item.type === "message" || item.type === "thinking") item.text += chunk;
         }));
       }
     })),
@@ -85,6 +86,13 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
         }
       }));
       return true;
+    }),
+    (id, durationMs) => untrack(() => {
+      const index = indices.get(id);
+      if (index === undefined) return;
+      setState("items", index, produce((item) => {
+        if (item.type === "thinking") item.durationMs = durationMs;
+      }));
     }),
   ];
 }
