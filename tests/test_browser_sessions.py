@@ -908,7 +908,7 @@ async def test_browser_tools_without_authenticated_owner_do_not_bind(browser, mo
     monkeypatch.setattr(tools, "authorize", unexpected)
     monkeypatch.setattr("langgraph.types.interrupt", unexpected)
     for dashboard_open in (False, True):
-        with pytest.raises(ToolError, match="channel or scheduler") as error:
+        with pytest.raises(ToolError, match="unavailable in channel runs") as error:
             await getattr(tools, name)(runtime, **arguments)
         assert error.value.code == ToolErrorCode.PERMISSION_DENIED
         binding = await browser.repository.binding(browser.canonical("chat"))
@@ -1993,3 +1993,23 @@ def test_browser_permission_rules_are_enforced(tmp_path, monkeypatch):
                         lambda: SimpleNamespace(permissions=Permissions(OutputStore(tmp_path))))
     with pytest.raises(ToolError, match="Policy denies browser_run"):
         tools.authorize(SimpleNamespace(), "browser_run", {"code": "submit()"})
+
+
+@pytest.mark.asyncio
+async def test_handoff_is_refused_in_scheduled_runs(browser, monkeypatch):
+    from agent.modules.tools.builtin import browser as tools
+    from agent.modules.tools.result import ToolError
+
+    runtime = SimpleNamespace(context={"browser_owner_id": "admin:1"}, tool_call_id="handoff", config={
+        "configurable": {"thread_id": "scheduled"},
+        "metadata": {"usage_context": {"platform": "bg", "user_id": "123", "channel_id": "run"}},
+    })
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("A scheduled handoff must fail before permission or graph interrupts")
+
+    monkeypatch.setattr(tools, "authorize", unexpected)
+    monkeypatch.setattr("langgraph.types.interrupt", unexpected)
+    with pytest.raises(ToolError, match="scheduled run"):
+        await tools._handoff(runtime, "Please sign in")
+    assert not browser.sessions

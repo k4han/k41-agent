@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+
+from agent.modules.admin_auth import get_current_admin
 
 from agent.modules.scheduler import TriggerType
 from agent.delivery.http.dashboard.routes.helpers.scheduler import (
@@ -95,7 +97,7 @@ class UpdateJobBody(BaseModel):
 
 
 @router.post("/scheduler/jobs")
-async def create_scheduler_job(body: CreateJobBody) -> dict[str, Any]:
+async def create_scheduler_job(body: CreateJobBody, admin: str = Depends(get_current_admin)) -> dict[str, Any]:
     """Create a new scheduled job with the given trigger configuration."""
     scheduler = get_scheduler_or_503()
 
@@ -114,6 +116,7 @@ async def create_scheduler_job(body: CreateJobBody) -> dict[str, Any]:
             trigger_type=trigger_type,
             trigger_args=trigger_args,
             project_id=body.project_id,
+            browser_owner_id=f"admin:{admin}",
         )
     except (KeyError, ProjectWorkspaceError) as exc:
         raise workspace_http_error(exc) from exc
@@ -126,7 +129,7 @@ async def create_scheduler_job(body: CreateJobBody) -> dict[str, Any]:
 
 
 @router.put("/scheduler/jobs/{job_id}")
-async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, Any]:
+async def update_scheduler_job(job_id: str, body: UpdateJobBody, admin: str = Depends(get_current_admin)) -> dict[str, Any]:
     """Update an existing scheduled job's task, platform, user, or trigger."""
     job = get_job_or_404(job_id)
 
@@ -147,6 +150,8 @@ async def update_scheduler_job(job_id: str, body: UpdateJobBody) -> dict[str, An
                 new_kwargs["user_id"] = body.user_id
             if project_changed:
                 new_kwargs["project_id"] = body.project_id
+            # The admin who edits a job vouches for it, so its runs use their browser.
+            new_kwargs["browser_owner_id"] = f"admin:{admin}"
             job.modify(kwargs=new_kwargs)
 
         if body.trigger_type is not None and body.trigger_args is not None:
@@ -197,6 +202,7 @@ async def resume_scheduler_job(job_id: str) -> dict[str, str]:
 async def run_scheduler_job_now(
     job_id: str,
     background_tasks: BackgroundTasks,
+    admin: str = Depends(get_current_admin),
 ) -> dict[str, str]:
     """Trigger immediate execution of a scheduled job."""
     job = get_job_or_404(job_id)
@@ -218,5 +224,6 @@ async def run_scheduler_job_now(
         scheduler_job_id=job.id,
         trigger_source=TRIGGER_SOURCE_MANUAL,
         project_id=job.kwargs.get("project_id"),
+        browser_owner_id=job.kwargs.get("browser_owner_id") or f"admin:{admin}",
     )
     return {"status": "queued", "job_id": job_id}

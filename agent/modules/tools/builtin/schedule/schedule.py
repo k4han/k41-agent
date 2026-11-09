@@ -18,6 +18,7 @@ from agent.modules.scheduler import (
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
+from agent.modules.tools.runtime.context import get_context_value
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +112,8 @@ async def schedule_task(
             trigger_type=normalized_trigger_type,
             trigger_args=normalized_trigger_args,
             project_id=project_id,
+            # Only dashboard conversations carry an owner, so channel jobs stay browser-less.
+            browser_owner_id=get_context_value(getattr(runtime, "context", None), "browser_owner_id", None),
         )
     except (ValueError, KeyError, RuntimeError) as exc:
         raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from exc

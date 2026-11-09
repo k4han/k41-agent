@@ -149,20 +149,20 @@ async def test_job_project_changes_apply_only_to_future_runs(scheduled_projects,
         result = await create_scheduler_job(CreateJobBody(
             task="project task", platform="telegram", user_id="123", trigger_type="interval",
             trigger_args={"hours": 1}, project_id=projects[0]["id"],
-        ))
+        ), admin="1")
         job = scheduler.get_job(result["job"]["id"])
         assert result["job"]["project_id"] == projects[0]["id"]
         manual = BackgroundTasks()
-        await run_scheduler_job_now(job.id, manual)
+        await run_scheduler_job_now(job.id, manual, admin="1")
         assert manual.tasks[0].kwargs["project_id"] == projects[0]["id"]
         await manual()
         first = (await list_runs(job_id=job.id))["runs"][0]
-        await update_scheduler_job(job.id, UpdateJobBody(task="updated task"))
+        await update_scheduler_job(job.id, UpdateJobBody(task="updated task"), admin="1")
         assert job.kwargs["project_id"] == projects[0]["id"]
-        await update_scheduler_job(job.id, UpdateJobBody(project_id=projects[1]["id"]))
+        await update_scheduler_job(job.id, UpdateJobBody(project_id=projects[1]["id"]), admin="1")
         await job.func(**job.kwargs)
         second = (await list_runs(job_id=job.id))["runs"][0]
-        await update_scheduler_job(job.id, UpdateJobBody(project_id=None))
+        await update_scheduler_job(job.id, UpdateJobBody(project_id=None), admin="1")
         assert job.kwargs["project_id"] is None
         await job.func(**job.kwargs)
         third = (await list_runs(job_id=job.id))["runs"][0]

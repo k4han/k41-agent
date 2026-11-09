@@ -17,8 +17,11 @@ from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
 from agent.modules.tools.policy import browser_batch_error
 from agent.modules.tools.runtime.context import get_context_value, get_thread_id
+from agent.modules.usage import usage_context_from_config
 
 Runtime = Annotated[ToolRuntime[Any, Any], InjectedToolArg]
+# Scheduled runs have no live user to resume a handoff interrupt.
+UNATTENDED_PLATFORMS = frozenset({"bg"})
 BROWSER_TOOLS: dict[str, BaseTool] = {}
 SnapshotId = Annotated[str, Field(description="Bracketed ID copied from the latest browser_snapshot, e.g. '1-42'.")]
 
@@ -64,7 +67,7 @@ def identity(runtime):
     if not owner_id:
         raise ToolError(
             ToolErrorCode.PERMISSION_DENIED,
-            "Browser tools require an authenticated dashboard conversation and are unavailable in channel or scheduler runs.",
+            "Browser tools require an authenticated dashboard conversation, or a scheduled task created by a dashboard admin, and are unavailable in channel runs.",
         )
     return thread_id, owner_id
 
@@ -172,6 +175,10 @@ async def _handoff(runtime: Runtime, reason: str):
     if not reason.strip() or len(reason) > 2000:
         raise ToolError(ToolErrorCode.INVALID_INPUT, "Provide a short reason for handing the browser to the user.")
     thread_id, owner_id = identity(runtime)
+    if usage_context_from_config(runtime.config).platform in UNATTENDED_PLATFORMS:
+        raise ToolError(ToolErrorCode.EXECUTION_ERROR,
+                        "approval_unavailable: Nobody can take over the browser in a scheduled run. "
+                        "Report what needs human interaction in your final answer instead.")
     try:
         BrowserService.assert_handoff_supported(thread_id)
         authorize(runtime, "browser_handoff", {"reason": reason})

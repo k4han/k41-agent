@@ -19,6 +19,7 @@ from agent.shared.timezone import resolve_display_timezone
 
 AGENT_NAME = "scheduler-executor"
 BACKGROUND_THREAD_PREFIX = "bg"
+DASHBOARD_PLATFORM = "api"
 TASK_TITLE_MAX_LEN = 80
 SCHEDULER_SHUTDOWN_TIMEOUT = 10
 APSCHEDULER_JOBS_TABLE = "apscheduler_jobs"
@@ -74,8 +75,13 @@ def add_scheduled_task_job(
     trigger_type: str,
     trigger_args: dict[str, Any],
     project_id: int | None = None,
+    browser_owner_id: str | None = None,
 ):
-    """Add a job that runs ``task`` and remembers its own ID for run history."""
+    """Add a job that runs ``task`` and remembers its own ID for run history.
+
+    ``browser_owner_id`` is set only when an authenticated dashboard admin created
+    the job, so its runs may use that admin's browser profiles.
+    """
     job_id = uuid.uuid4().hex
     return scheduler.add_job(
         execute_scheduled_task,
@@ -87,6 +93,7 @@ def add_scheduled_task_job(
             "task": task,
             "scheduler_job_id": job_id,
             "project_id": project_id,
+            "browser_owner_id": browser_owner_id,
         },
         **trigger_args,
     )
@@ -124,6 +131,26 @@ def _backfill_job_ids(scheduler: AsyncIOScheduler) -> int:
     return updated
 
 
+async def _resolve_browser_owner(platform: str, browser_owner_id: str | None) -> str | None:
+    """Return the browser owner a scheduled run acts as, if any.
+
+    Jobs stored before owners were recorded fall back to the active admin only
+    when they belong to the dashboard platform, which requires an admin login.
+    """
+    if browser_owner_id:
+        return browser_owner_id
+    if platform != DASHBOARD_PLATFORM:
+        return None
+    try:
+        from agent.modules.admin_auth import get_admin_auth_service
+
+        admin = await get_admin_auth_service().get_admin()
+    except Exception as exc:
+        logger.warning("Could not resolve the browser owner for a scheduled run: %s", exc)
+        return None
+    return f"admin:{admin.id}" if admin is not None else None
+
+
 async def _record_run_start(**kwargs: Any) -> bool:
     try:
         from agent.modules.scheduler.history import start_run
@@ -151,6 +178,7 @@ async def execute_scheduled_task(
     scheduler_job_id: str = "",
     trigger_source: str = "schedule",
     project_id: int | None = None,
+    browser_owner_id: str | None = None,
 ):
     """Execute a scheduled task in its own conversation and notify its owner."""
     from agent.modules.scheduler.history import RUN_STATUS_COMPLETED, RUN_STATUS_FAILED
@@ -199,6 +227,7 @@ async def execute_scheduled_task(
             thread_id=background_thread_id,
             agent_name=AGENT_NAME,
             workspace=workspace,
+            browser_owner_id=await _resolve_browser_owner(platform, browser_owner_id),
             usage_context={"platform": BACKGROUND_THREAD_PREFIX, "user_id": user_id, "channel_id": run_id},
         )
         agent_finished = True

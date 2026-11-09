@@ -299,7 +299,7 @@ async def test_new_jobs_use_updated_timezone_without_restart(
             result = await create_scheduler_job(CreateJobBody(
                 task="Remind me to eat.", platform="telegram", user_id="123",
                 trigger_type=trigger_type, trigger_args=trigger_args,
-            ))
+            ), admin="1")
             job = scheduler.get_job(result["job"]["id"])
 
         zone = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -313,7 +313,7 @@ async def test_new_jobs_use_updated_timezone_without_restart(
         if entrypoint == "dashboard":
             await update_scheduler_job(old_job.id, UpdateJobBody(
                 trigger_type="cron", trigger_args={"hour": "6", "minute": "0"},
-            ))
+            ), admin="1")
             assert old_job.trigger.get_next_fire_time(None, anchor) == expected
     finally:
         scheduler.shutdown(wait=False)
@@ -435,3 +435,76 @@ async def test_execute_scheduled_task_uses_scheduled_thread_for_usage(monkeypatc
     assert run["usage_context"]["user_id"] == "6197833678"
     assert captured["notification"]["args"][:2] == ("telegram", "6197833678")
     assert captured["notification"]["args"][2] == "**Scheduled task:** daily summary\n\ndone"
+
+
+async def _run_scheduled_task(monkeypatch, tmp_path, platform: str, **task_kwargs) -> dict:
+    import agent.modules.conversations as conversations_module
+    import agent.modules.workspaces as workspaces_module
+    from agent.modules.scheduler import service as scheduler_service
+    from unittest.mock import AsyncMock
+
+    captured: dict = {}
+    workspace = workspaces_module.WorkspaceRef(locator=str(tmp_path), metadata={"no_workspace": True})
+
+    async def fake_run_agent_full(**kwargs):
+        captured.update(kwargs)
+        return "done"
+
+    monkeypatch.setattr(scheduler_service, "run_agent_full", fake_run_agent_full)
+    monkeypatch.setattr(scheduler_service, "_record_run_start", AsyncMock(return_value=False))
+    monkeypatch.setattr(scheduler_service, "_send_notification", AsyncMock(return_value=True))
+    monkeypatch.setattr(workspaces_module, "create_no_workspace", AsyncMock(return_value=workspace))
+    monkeypatch.setattr(workspaces_module, "remember_thread_workspace_ref", AsyncMock())
+    monkeypatch.setattr(conversations_module, "upsert_conversation_thread", AsyncMock())
+
+    await scheduler_service.execute_scheduled_task(platform, "123", "open a page", **task_kwargs)
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_scheduled_run_uses_the_stored_browser_owner(monkeypatch, tmp_path):
+    run = await _run_scheduled_task(monkeypatch, tmp_path, "telegram", browser_owner_id="admin:7")
+    assert run["browser_owner_id"] == "admin:7"
+
+
+@pytest.mark.asyncio
+async def test_legacy_dashboard_job_falls_back_to_the_active_admin(monkeypatch, tmp_path):
+    import agent.modules.admin_auth as admin_auth_module
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    service = SimpleNamespace(get_admin=AsyncMock(return_value=SimpleNamespace(id=3)))
+    monkeypatch.setattr(admin_auth_module, "get_admin_auth_service", lambda: service)
+
+    assert (await _run_scheduled_task(monkeypatch, tmp_path, "api"))["browser_owner_id"] == "admin:3"
+    assert (await _run_scheduled_task(monkeypatch, tmp_path, "telegram"))["browser_owner_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_tool_stores_the_conversation_browser_owner(monkeypatch):
+    from types import SimpleNamespace
+    from agent.modules.tools.builtin.schedule import schedule as schedule_module
+
+    captured: dict = {}
+
+    def fake_add_job(scheduler, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(id="job", trigger=None, next_run_time=None)
+
+    monkeypatch.setattr(schedule_module, "add_scheduled_task_job", fake_add_job)
+    monkeypatch.setattr(schedule_module, "get_scheduler", lambda: None)
+    monkeypatch.setattr(schedule_module, "normalize_trigger", lambda kind, args, _: (kind, args))
+    monkeypatch.setattr(schedule_module, "describe_trigger", lambda trigger: "once")
+
+    async def no_project(project_id):
+        return None
+
+    monkeypatch.setattr(schedule_module, "resolve_scheduled_project", no_project)
+
+    for context, expected in (({"browser_owner_id": "admin:1"}, "admin:1"), ({}, None)):
+        runtime = SimpleNamespace(context=context, config={
+            "configurable": {"thread_id": "conversation"},
+            "metadata": {"usage_context": {"platform": "api", "user_id": "dashboard"}},
+        })
+        await schedule_module.schedule_task.coroutine("Open a page.", "date", {"run_date": "x"}, runtime)
+        assert captured["browser_owner_id"] == expected

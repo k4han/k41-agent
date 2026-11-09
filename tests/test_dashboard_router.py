@@ -2676,12 +2676,13 @@ async def test_create_scheduler_job_accepts_relative_trigger(monkeypatch) -> Non
         trigger_args={"minutes": 2},
     )
 
-    result = await _dashboard_attr("create_scheduler_job")(body)
+    result = await _dashboard_attr("create_scheduler_job")(body, admin="7")
 
     assert result["status"] == "created"
     assert result["job"]["trigger_type"] == "date"
     assert scheduler.calls[0]["trigger"] == "date"
     assert scheduler.calls[0]["trigger_args"]["run_date"] == now + timedelta(minutes=2)
+    assert scheduler.calls[0]["kwargs"]["browser_owner_id"] == "admin:7"
 
 
 @pytest.mark.asyncio
@@ -2696,7 +2697,7 @@ async def test_run_scheduler_job_now_queues_existing_job(monkeypatch) -> None:
     _patch_dashboard_attr(monkeypatch, "get_scheduler_or_503", lambda: scheduler)
 
     background_tasks = BackgroundTasks()
-    result = await _dashboard_attr("run_scheduler_job_now")(job.id, background_tasks)
+    result = await _dashboard_attr("run_scheduler_job_now")(job.id, background_tasks, admin="7")
 
     assert result == {"status": "queued", "job_id": job.id}
     assert len(background_tasks.tasks) == 1
@@ -2709,4 +2710,5 @@ async def test_run_scheduler_job_now_queues_existing_job(monkeypatch) -> None:
         "scheduler_job_id": job.id,
         "trigger_source": "manual",
         "project_id": None,
+        "browser_owner_id": "admin:7",
     }
