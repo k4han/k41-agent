@@ -23,7 +23,7 @@ from agent.modules.tools.coding.service import CodingService
 from agent.modules.workspaces import CommandResult, WorkspaceRef
 
 
-@pytest.fixture(params=["daytona", "modal"])
+@pytest.fixture(params=["daytona", "modal", "instabox"])
 def remote_coding(tmp_path, isolated_container, monkeypatch, request):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -544,15 +544,17 @@ async def test_real_bundle_daemon_and_file_rpc_transport(tmp_path):
         await client.call({"operation": "close"})
 
 
-@pytest.mark.parametrize("backend_name", ["daytona", "modal"])
+@pytest.mark.parametrize("backend_name", ["daytona", "modal", "instabox"])
 @pytest.mark.asyncio
 async def test_provider_transport_preserves_large_payloads(backend_name):
     from agent.modules.workspaces.daytona_backend import DaytonaWorkspaceBackend
+    from agent.modules.workspaces.instabox_backend import InstaboxWorkspaceBackend
     from agent.modules.workspaces.modal_backend import ModalWorkspaceBackend
-    backend_type = DaytonaWorkspaceBackend if backend_name == "daytona" else ModalWorkspaceBackend
-    backend = object.__new__(backend_type)
-    backend.root = "/workspace"
-    backend.ref = WorkspaceRef(backend=backend_name, locator="sandbox")
+    backend_type = {"daytona": DaytonaWorkspaceBackend, "modal": ModalWorkspaceBackend}.get(backend_name)
+    if backend_type is not None:
+        backend = object.__new__(backend_type)
+        backend.root = "/workspace"
+        backend.ref = WorkspaceRef(backend=backend_name, locator="sandbox")
     files = {}
 
     def upload(content, path):
@@ -572,7 +574,30 @@ async def test_provider_transport_preserves_large_payloads(backend_name):
             return output
         return ""
 
-    if backend_name == "daytona":
+    if backend_name == "instabox":
+        class InstaboxApi:
+            async def exec(self, machine_id, *, cmd, cwd=None, timeout_seconds=None, **kwargs):
+                return {"stdout": execute(cmd), "stderr": "", "exitCode": 0}
+
+            async def read_file(self, machine_id, path):
+                return files[path]
+
+            async def write_file(self, machine_id, path, content):
+                upload(content, path)
+
+        api = InstaboxApi()
+
+        async def client():
+            return api
+
+        async def ensure_running(machine_id):
+            return {"id": machine_id, "state": "running"}
+
+        service = SimpleNamespace(client=client, ensure_running=ensure_running)
+        backend = InstaboxWorkspaceBackend(
+            WorkspaceRef(backend="instabox", locator="sandbox", metadata={"root": "/workspace"}), service=service
+        )
+    elif backend_name == "daytona":
         backend.fs = SimpleNamespace(upload_file=upload, download_file=lambda path: files[path])
         backend.process = SimpleNamespace(exec=lambda command, **kwargs: SimpleNamespace(result=execute(command), exit_code=0))
     else:

@@ -14,6 +14,11 @@ from agent.modules.tools.coding.storage import OutputStore, atomic_json, digest
 
 logger = logging.getLogger(__name__)
 
+# Destructive actions ask by default; rules may still allow or deny them.
+ASK_BY_DEFAULT_ACTIONS = frozenset({"external_directory", "instabox_machine_delete", "instabox_snapshot_delete"})
+# Always confirmed by the user, even when a rule allows them.
+APPROVAL_REQUIRED_ACTIONS = frozenset({"instabox_snapshot_restore"})
+
 
 def permission_request_event(value: dict[str, Any], interrupt_id: str = "") -> dict[str, Any]:
     """Project a permission interrupt onto the existing dashboard choice UI."""
@@ -55,13 +60,15 @@ class Permissions(PathPermissions):
 
     def assert_allowed(self, context: InvocationContext, action: str, resource: str,
                        *, allow_interrupt: bool = True, **metadata: Any) -> None:
-        effect = "ask" if action == "external_directory" else "allow"
+        effect = "ask" if action in ASK_BY_DEFAULT_ACTIONS else "allow"
         for rule in context.permission_rules:
             path_action = action in {"read", "edit", "external_directory"}
             subject = self.normalize_resource(context, resource) if path_action else resource
             pattern = self.normalize_resource(context, rule.resource) if path_action else rule.resource
             if fnmatch.fnmatchcase(action, rule.action) and fnmatch.fnmatchcase(subject, pattern):
                 effect = rule.effect
+        if action in APPROVAL_REQUIRED_ACTIONS and effect == "allow":
+            effect = "ask"
         logger.info("Coding permission call=%s action=%s effect=%s resource_fingerprint=%s",
                     context.tool_call_id, action, effect, digest(resource), extra={"tool_call_id": context.tool_call_id,
                     "permission_action": action, "permission_effect": effect,

@@ -103,6 +103,9 @@ class ToolPolicy:
         return [d for d in descriptors if self.is_allowed(d)]
 
 
+INSTABOX_DESKTOP_TOOL_PREFIX = "instabox_desktop_"
+
+
 def is_browser_tool(name: str) -> bool:
     from agent.modules.tools.builtin.browser import BROWSER_TOOLS
 
@@ -115,6 +118,9 @@ def browser_batch_error(calls: Sequence[Mapping[str, object]]) -> str | None:
     selected = [call for call in calls if call.get("name") in BROWSER_TOOLS]
     if len(selected) > 1 or (any(call.get("name") == "browser_handoff" for call in selected) and len(calls) > 1):
         return "Call browser tools sequentially, one per turn. Call browser_handoff alone. No tools in this batch were executed."
+    desktop = [call for call in calls if str(call.get("name") or "").startswith(INSTABOX_DESKTOP_TOOL_PREFIX)]
+    if len(desktop) > 1:
+        return "Call Instabox desktop tools sequentially, one per turn. No tools in this batch were executed."
     return None
 
 

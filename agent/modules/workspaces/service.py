@@ -175,7 +175,7 @@ async def cleanup_orphaned_temp_workspaces() -> dict[str, int]:
 
     temp_records: dict[str, dict[str, Any]] = {}
     try:
-        for cloud_backend in ("daytona", "modal"):
+        for cloud_backend in ("daytona", "modal", "instabox"):
             records.update(await repo.list_by_backend(cloud_backend))
     except Exception:
         # Unknown cloud mappings may own local mirrors, so orphan sweeping must wait.
@@ -475,6 +475,9 @@ def is_workspace_unavailable_error(ref: WorkspaceRef, error: Exception) -> bool:
     if ref.backend == DAYTONA_BACKEND:
         from agent.modules.workspaces.daytona_backend import _is_daytona_not_found_error
         return _is_daytona_not_found_error(error) or "sandbox is destroyed" in str(error).lower()
+    if ref.backend == "instabox":
+        from agent.modules.instabox import is_instabox_not_found
+        return is_instabox_not_found(error)
     return False
 
 

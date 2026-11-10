@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import io
 import json
@@ -435,7 +436,8 @@ print(json.dumps({"running": running}))
             if execution_secrets:
                 request["execution_secrets"] = execution_secrets
         try:
-            result = ToolResult.model_validate(await client.call(request))
+            async with self.activity_lease(context, request["request_id"]):
+                result = ToolResult.model_validate(await client.call(request))
         except asyncio.CancelledError:
             try:
                 await asyncio.shield(client.call({"operation": "cancel_call", "request_id": request["request_id"]}))
@@ -452,6 +454,13 @@ print(json.dumps({"running": running}))
                 if path and invalidate_repository_skills_for_path(path):
                     break
         return result
+
+    def activity_lease(self, context, lease_id):
+        """Keep an auto-pausing machine awake while a tool runs on it."""
+        if context.backend == "instabox":
+            from agent.modules.instabox import get_instabox_service
+            return get_instabox_service().activity_lease(context.locator, f"k41-{lease_id}")
+        return contextlib.nullcontext()
 
     async def retain(self, result, context):
         client = await self.client(context)

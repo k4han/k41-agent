@@ -40,6 +40,11 @@ const AppearancePage = lazy(() =>
     default: module.AppearancePage,
   })),
 );
+const InstaboxMachinePage = lazy(() =>
+  import("@/pages/settings/InstaboxMachine").then((module) => ({
+    default: module.InstaboxMachinePage,
+  })),
+);
 const SandboxesPage = lazy(() =>
   import("@/pages/settings/SandboxesPage").then((module) => ({
     default: module.SandboxesPage,
@@ -127,6 +132,7 @@ render(
         <Route path="/settings/backends" component={() => <Navigate href="/settings/providers?tab=workspace" />} />
         <Route path="/settings/backends/:backendName" component={LegacyBackendDetail} />
         <Route path="/settings/sandboxes" component={SandboxesPage} />
+        <Route path="/settings/sandboxes/instabox/:machineId" component={InstaboxMachinePage} />
         <Route path="/settings/providers" component={ProviderHubPage} />
         <Route path="/settings/providers/llm/:providerName" component={ProviderHubPage} />
         <Route path="/settings/providers/web/:connectionName" component={ProviderHubPage} />

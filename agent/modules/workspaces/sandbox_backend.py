@@ -1,4 +1,4 @@
-"""Abstract base class for cloud sandbox backends (Daytona, Modal)."""
+"""Abstract base class for cloud sandbox backends (Daytona, Modal, Instabox)."""
 
 from __future__ import annotations
 
@@ -45,6 +45,13 @@ from agent.modules.workspaces.posix_utils import normalize_posix_path
 logger = logging.getLogger(__name__)
 
 
+async def _resolve(value: Any) -> Any:
+    """Await *value* when a primitive is implemented asynchronously."""
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
 class SandboxBackendBase(ABC):
     """Shared implementation for cloud sandbox backends.
 
@@ -59,7 +66,7 @@ class SandboxBackendBase(ABC):
     # ------------------------------------------------------------------ #
 
     def __init__(self, ref: WorkspaceRef) -> None:
-        if ref.backend not in {"daytona", "modal"}:
+        if not ref.backend or ref.backend == "local":
             raise ValueError(f"Unsupported sandbox backend: {ref.backend}")
         self.ref = ref
         self.root: str = ""
@@ -77,12 +84,18 @@ class SandboxBackendBase(ABC):
     async def upload_coding_file(self, content: bytes, path: str) -> None:
         import asyncio
 
+        if inspect.iscoroutinefunction(self._upload_file):
+            await self._upload_file(content, path)
+            return
         await asyncio.to_thread(self._upload_file, content, path)
 
     async def download_coding_file(self, path: str) -> bytes:
         import asyncio
 
-        raw = await asyncio.to_thread(self._download_file, path)
+        if inspect.iscoroutinefunction(self._download_file):
+            raw = await self._download_file(path)
+        else:
+            raw = await asyncio.to_thread(self._download_file, path)
         return raw.encode("utf-8") if isinstance(raw, str) else bytes(raw)
 
     # ------------------------------------------------------------------ #
@@ -153,7 +166,7 @@ class SandboxBackendBase(ABC):
         from agent.modules.workspaces.posix_utils import resolve_remote_path
 
         remote_path = resolve_remote_path(self.root, file_path)
-        raw = self._download_file(remote_path)
+        raw = await _resolve(self._download_file(remote_path))
         if isinstance(raw, bytes):
             return raw.decode("utf-8", errors="replace")
         return str(raw or "")
@@ -163,7 +176,7 @@ class SandboxBackendBase(ABC):
         from agent.modules.workspaces.posix_utils import resolve_remote_path
 
         remote_path = resolve_remote_path(self.root, file_path)
-        raw = self._download_file(remote_path)
+        raw = await _resolve(self._download_file(remote_path))
         if isinstance(raw, str):
             return raw.encode("utf-8")
         return bytes(raw or b"")
@@ -231,7 +244,7 @@ class SandboxBackendBase(ABC):
         mode = await self._remote_file_mode(write_target)
         tmp_path = f"{write_target}.k41-{time.time_ns()}.tmp"
         try:
-            self._upload_file(content.encode("utf-8"), tmp_path)
+            await _resolve(self._upload_file(content.encode("utf-8"), tmp_path))
             if mode:
                 chmod_result = await self._exec_cmd(
                     f"chmod {mode} {shlex.quote(tmp_path)}", cwd="/"
@@ -259,7 +272,7 @@ class SandboxBackendBase(ABC):
         """
         tmp_path = f"{remote_path}.k41-{time.time_ns()}.tmp"
         try:
-            self._upload_file(content.encode("utf-8"), tmp_path)
+            await _resolve(self._upload_file(content.encode("utf-8"), tmp_path))
             result = await self._exec_cmd(
                 f"cat {shlex.quote(tmp_path)} >> {shlex.quote(remote_path)}", cwd="/"
             )
@@ -311,14 +324,14 @@ class SandboxBackendBase(ABC):
         """Return directory listing for *path*."""
         from agent.modules.workspaces.posix_utils import resolve_remote_path
 
-        self.ensure_active()
+        await _resolve(self.ensure_active())
         target = resolve_remote_path(self.root, path or ".")
         cached, value = self._get_metadata_cache("tree", target)
         if cached:
             return value
         entries: list[dict[str, Any]] = []
         truncated = False
-        items = self._list_remote_files(target)
+        items = await _resolve(self._list_remote_files(target))
         for item in items:
             name = file_info_name(item)
             if not name:
@@ -355,12 +368,12 @@ class SandboxBackendBase(ABC):
         """Return file content and metadata."""
         from agent.modules.workspaces.posix_utils import resolve_remote_path
 
-        self.ensure_active()
+        await _resolve(self.ensure_active())
         remote_path = resolve_remote_path(self.root, path)
-        info = self._stat_file(remote_path)
+        info = await _resolve(self._stat_file(remote_path))
         if file_info_is_dir(info):
             raise ValueError(f"Path is not a file: {path}")
-        raw = self._download_file(remote_path)
+        raw = await _resolve(self._download_file(remote_path))
         if isinstance(raw, str):
             raw_bytes = raw.encode("utf-8")
         else:
@@ -399,7 +412,7 @@ class SandboxBackendBase(ABC):
 
     async def changes(self) -> dict[str, Any]:
         """Return git status for the workspace."""
-        self.ensure_active()
+        await _resolve(self.ensure_active())
         git_root = await self._find_git_root()
         if git_root is None:
             return {
@@ -426,7 +439,7 @@ class SandboxBackendBase(ABC):
             resolve_remote_path,
         )
 
-        self.ensure_active()
+        await _resolve(self.ensure_active())
         remote_path = resolve_remote_path(self.root, path)
         relative = relative_remote_path(self.root, remote_path)
         if not relative:
@@ -495,7 +508,7 @@ class SandboxBackendBase(ABC):
         )
 
         self._invalidate_workspace_caches()
-        self.ensure_active()
+        await _resolve(self.ensure_active())
         source = resolve_remote_path(self.root, path)
         relative = relative_remote_path(self.root, source)
         if not relative:
@@ -513,12 +526,12 @@ class SandboxBackendBase(ABC):
         )
         if destination == source:
             return {"root": self.root, "path": source, "new_path": destination}
-        check = self._exec_sync(
+        check = await self._exec_cmd(
             f"test -e {shlex.quote(destination)}", cwd="/"
         )
         if check.exit_code == 0:
             raise FileExistsError(f"Destination already exists: {clean_name}")
-        result = self._exec_sync(
+        result = await self._exec_cmd(
             f"mv {shlex.quote(source)} {shlex.quote(destination)}",
             cwd="/",
         )
@@ -534,12 +547,12 @@ class SandboxBackendBase(ABC):
         )
 
         self._invalidate_workspace_caches()
-        self.ensure_active()
+        await _resolve(self.ensure_active())
         target = resolve_remote_path(self.root, path)
         relative = relative_remote_path(self.root, target)
         if not relative:
             raise ValueError("Cannot delete workspace root.")
-        kind_result = self._exec_sync(
+        kind_result = await self._exec_cmd(
             f"if [ -d {shlex.quote(target)} ]; then echo directory; "
             f"elif [ -f {shlex.quote(target)} ]; then echo file; "
             "else exit 44; fi",
@@ -550,7 +563,7 @@ class SandboxBackendBase(ABC):
         if kind_result.exit_code not in (0, None):
             raise RuntimeError(kind_result.output.strip() or "Delete failed.")
         kind = kind_result.output.strip().splitlines()[-1]
-        result = self._exec_sync(f"rm -rf {shlex.quote(target)}", cwd="/")
+        result = await self._exec_cmd(f"rm -rf {shlex.quote(target)}", cwd="/")
         if result.exit_code not in (0, None):
             raise RuntimeError(result.output.strip() or "Delete failed.")
         return {"root": self.root, "path": target, "kind": kind}
@@ -564,20 +577,20 @@ class SandboxBackendBase(ABC):
         )
 
         self._invalidate_workspace_caches()
-        self.ensure_active()
+        await _resolve(self.ensure_active())
         target = resolve_remote_path(self.root, path)
         relative = relative_remote_path(self.root, target)
         if not relative:
             raise ValueError("Cannot create file at workspace root.")
-        check = self._exec_sync(f"test -e {shlex.quote(target)}", cwd="/")
+        check = await self._exec_cmd(f"test -e {shlex.quote(target)}", cwd="/")
         if check.exit_code == 0:
             raise FileExistsError(f"Path already exists: {relative}")
         parent = posixpath.dirname(target)
-        mkdir_res = self._exec_sync(f"mkdir -p {shlex.quote(parent)}", cwd="/")
+        mkdir_res = await self._exec_cmd(f"mkdir -p {shlex.quote(parent)}", cwd="/")
         if mkdir_res.exit_code not in (0, None):
             raise RuntimeError(mkdir_res.output.strip() or "Failed to create directory.")
         encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
-        res = self._exec_sync(
+        res = await self._exec_cmd(
             f"printf '%s' {shlex.quote(encoded)} | base64 -d > {shlex.quote(target)}",
             cwd="/",
         )
@@ -593,15 +606,15 @@ class SandboxBackendBase(ABC):
         )
 
         self._invalidate_workspace_caches()
-        self.ensure_active()
+        await _resolve(self.ensure_active())
         target = resolve_remote_path(self.root, path)
         relative = relative_remote_path(self.root, target)
         if not relative:
             raise ValueError("Cannot create workspace root.")
-        check = self._exec_sync(f"test -e {shlex.quote(target)}", cwd="/")
+        check = await self._exec_cmd(f"test -e {shlex.quote(target)}", cwd="/")
         if check.exit_code == 0:
             raise FileExistsError(f"Path already exists: {relative}")
-        res = self._exec_sync(f"mkdir -p {shlex.quote(target)}", cwd="/")
+        res = await self._exec_cmd(f"mkdir -p {shlex.quote(target)}", cwd="/")
         if res.exit_code not in (0, None):
             raise RuntimeError(res.output.strip() or "Failed to create directory.")
         return {"root": self.root, "path": target, "relative_path": relative, "kind": "directory"}
@@ -699,6 +712,11 @@ class SandboxBackendBase(ABC):
         """
         import asyncio
 
+        if inspect.iscoroutinefunction(self._exec):
+            return await self._exec(
+                command, cwd=cwd, timeout=timeout,
+                max_output_chars=max_output_chars,
+            )
         return await asyncio.to_thread(
             self._exec, command, cwd=cwd, timeout=timeout,
             max_output_chars=max_output_chars,
@@ -800,7 +818,7 @@ class SandboxBackendBase(ABC):
     async def _text_line_count(self, path: str) -> int:
         """Count text lines in a remote file."""
         try:
-            raw = self._download_file(path)
+            raw = await _resolve(self._download_file(path))
         except Exception:
             return 0
         raw_bytes = raw.encode("utf-8") if isinstance(raw, str) else bytes(raw or b"")

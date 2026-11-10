@@ -31,6 +31,7 @@ from agent.delivery.http.dashboard.routes import (
     tasks as tasks_routes,
     usage as usage_routes,
     workspace as workspace_routes,
+    instabox as instabox_routes,
     web_connections as web_connections_routes,
 )
 
@@ -62,6 +63,7 @@ for child_router in (
     conversations_routes.router,
     mcp_routes.router,
     sandboxes_routes.router,
+    instabox_routes.router,
     skills_routes.router,
     skill_packages_routes.router,
 ):

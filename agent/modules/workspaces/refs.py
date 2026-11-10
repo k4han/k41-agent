@@ -25,7 +25,7 @@ class WorkspaceRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     def display_label(self) -> str:
-        if self.backend in {"daytona", "modal"}:
+        if self.backend != "local":
             repository = str(
                 self.metadata.get("repository_full_name") or ""
             ).strip()
@@ -88,6 +88,25 @@ class WorkspaceBinding(BaseModel):
 
 
 WorkspaceInput = WorkspaceRef | WorkspaceBinding | dict[str, Any] | str | None
+
+
+def _backend_descriptor(backend: str):
+    try:
+        from agent.modules.workspaces.registry import get_workspace_backend_registry
+
+        return get_workspace_backend_registry().descriptor(backend)
+    except Exception:
+        return None
+
+
+def _backend_title(backend: str) -> str:
+    descriptor = _backend_descriptor(backend)
+    return str(getattr(descriptor, "title", "") or backend.title())
+
+
+def _backend_default_root(backend: str) -> str:
+    descriptor = _backend_descriptor(backend)
+    return str(getattr(descriptor, "default_root", "") or "/workspace")
 
 
 def _local_workspace_display_label(value: str) -> str:
@@ -179,10 +198,9 @@ def normalize_workspace_ref(
     if backend != "local":
         locator = raw_locator.strip()
         if not locator:
-            backend_label = "Daytona" if backend == "daytona" else "Modal"
-            raise ValueError(f"{backend_label} sandbox ID is required.")
+            raise ValueError(f"{_backend_title(backend)} sandbox ID is required.")
         normalized_metadata = dict(metadata)
-        default_root = "workspace" if backend == "daytona" else "/workspace"
+        default_root = _backend_default_root(backend)
         root = (
             str(normalized_metadata.get("root") or default_root).strip()
             or default_root

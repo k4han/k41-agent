@@ -68,7 +68,7 @@ export function WorkspaceRuntimePicker(props: {
     <SelectControl value={selected()} ariaLabel="Execution backend" portalMount={props.portalMount}
       onChange={(value) => setSelected(value as WorkspaceBackendKey)}
       disabled={props.disabled || props.busy || unavailable()}
-      options={getEnabledBackends().filter((backend) => ["local", "daytona", "modal"].includes(backend.name))
+      options={getEnabledBackends()
         .map((backend) => ({ value: backend.name, label: getBackendDisplayName(backend.name) }))} />
     <Show when={!props.draft && selected() === "local" && props.payload.workspace?.execution.backend !== "local"}>
       <p>Execution will continue in the fixed host workspace after synchronization completes.</p>

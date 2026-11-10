@@ -10,8 +10,12 @@ import {
   CircleStop,
   CloudCog,
   ExternalLink,
+  GitFork,
   HardDrive,
+  Pause,
+  Play,
   PowerOff,
+  Settings2,
   RefreshCw,
   Search,
   Trash2,
@@ -19,10 +23,12 @@ import {
 
 import { DataGate } from "@/components/State";
 import { Dialog } from "@/components/Dialog";
+import { TypedConfirmDialog } from "@/components/TypedConfirmDialog";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
-import { getBackendDisplayName, getEnabledBackends } from "@/lib/catalogStore";
+import { getBackendDisplayName, getBackends, getEnabledBackends } from "@/lib/catalogStore";
+import { errorText, instaboxApi, instaboxMachineHref } from "@/lib/instabox";
 import { getBackendIcon } from "@/lib/iconRegistry";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import { truncateText } from "@/lib/utils";
@@ -44,6 +50,7 @@ const STATUS_LABELS: Record<SandboxStatus, string> = {
   started: "Running",
   starting: "Starting",
   stopped: "Stopped",
+  paused: "Paused",
   archived: "Archived",
   destroyed: "Destroyed",
   error: "Error",
@@ -54,6 +61,7 @@ const STATUS_TONE: Record<SandboxStatus, "ok" | "warn" | "muted" | "danger"> = {
   started: "ok",
   starting: "warn",
   stopped: "muted",
+  paused: "muted",
   archived: "muted",
   destroyed: "danger",
   error: "danger",
@@ -64,6 +72,7 @@ const STATUS_GROUP: Record<SandboxStatus, StatusFilter> = {
   started: "active",
   starting: "active",
   stopped: "stopped",
+  paused: "stopped",
   archived: "archived",
   destroyed: "destroyed",
   error: "destroyed",
@@ -76,16 +85,27 @@ const TERMINAL_STATUSES: ReadonlyArray<SandboxStatus> = [
   "archived",
 ];
 
-const SANDBOX_BACKEND_CAPABILITIES: Partial<Record<SandboxBackendKey, { supportsStop: boolean; supportsArchive: boolean }>> = {
-  daytona: { supportsStop: true, supportsArchive: true },
-};
+function backendDescriptor(backend: SandboxBackendKey) {
+  return getBackends().find((entry) => entry.name === backend);
+}
 
 function sandboxSupportsStop(backend: SandboxBackendKey): boolean {
-  return SANDBOX_BACKEND_CAPABILITIES[backend]?.supportsStop ?? false;
+  return backendDescriptor(backend)?.supports_stop ?? false;
 }
 
 function sandboxSupportsArchive(backend: SandboxBackendKey): boolean {
-  return SANDBOX_BACKEND_CAPABILITIES[backend]?.supportsArchive ?? false;
+  return backendDescriptor(backend)?.supports_archive ?? false;
+}
+
+function hasMachineControls(backend: SandboxBackendKey): boolean {
+  return backendDescriptor(backend)?.capabilities?.includes("machines") ?? false;
+}
+
+/** Instabox keeps memory when it archives (suspends) a machine, so name the action accordingly. */
+function archiveLabel(backend: SandboxBackendKey): { idle: string; busy: string; done: string } {
+  return backend === "instabox"
+    ? { idle: "Suspend", busy: "Suspending…", done: "suspended" }
+    : { idle: "Archive", busy: "Archiving…", done: "archived" };
 }
 
 function backendIcon(name: SandboxBackendKey) {
@@ -277,13 +297,37 @@ export function SandboxesPage() {
         API_PATHS.sandboxArchive(row.backend, row.sandbox_id),
       );
       showToast(
-        `Sandbox ${sandboxDisplayId(row.sandbox_id)} archived (${result.cloud_status}).`,
+        `Sandbox ${sandboxDisplayId(row.sandbox_id)} ${archiveLabel(row.backend).done} (${result.cloud_status}).`,
         "success",
       );
       await refresh();
     } catch (err) {
       showToast(
         err instanceof Error ? err.message : "Failed to archive sandbox",
+        "error",
+      );
+    } finally {
+      setActionState(row, null);
+    }
+  };
+
+  const handleMachineAction = async (row: SandboxRow, action: "start" | "resume" | "fork") => {
+    setActionState(row, action);
+    try {
+      if (action === "fork") {
+        const record = await instaboxApi.fork(row.sandbox_id);
+        showToast(record.machine_id ? `Fork ${sandboxDisplayId(record.machine_id)} is being created.` : "Fork requested.", "success");
+      } else {
+        await instaboxApi.action(row.sandbox_id, action);
+        showToast(`Machine ${sandboxDisplayId(row.sandbox_id)} ${action === "start" ? "starting" : "resuming"}.`, "success");
+      }
+      await refresh();
+    } catch (err) {
+      const message = errorText(err, `Failed to ${action} machine`);
+      showToast(
+        action === "fork"
+          ? `${message} Fork needs a running machine with spare host capacity; create a snapshot and start a machine from it instead.`
+          : message,
         "error",
       );
     } finally {
@@ -363,6 +407,10 @@ export function SandboxesPage() {
   const counts = createMemo(() => countByBackend(rows()));
 
   const hasSandboxes = createMemo(() => rows().length > 0);
+  const typedDelete = () => {
+    const row = deleteTarget();
+    return Boolean(row && row.on_cloud && hasMachineControls(row.backend));
+  };
   const hasEnabledSandboxBackend = createMemo(() =>
     getEnabledBackends().some((backend) => backend.name !== "local"),
   );
@@ -493,7 +541,7 @@ export function SandboxesPage() {
                                 <>
                                   <div class="sandboxes-empty-title">No cloud sandbox backend is enabled</div>
                                   <div class="sandboxes-empty-hint">
-                                    Enable Daytona or Modal in <A href="/settings/providers?tab=workspace">Execution environment settings</A>
+                                    Enable Daytona, Modal or Instabox in <A href="/settings/providers?tab=workspace">Execution environment settings</A>
                                     {" "}to create and manage sandboxes.
                                   </div>
                                 </>
@@ -505,7 +553,7 @@ export function SandboxesPage() {
                                   when={includeAll()}
                                   fallback={
                                     <>
-                                      Attach a Daytona or Modal sandbox to a chat
+                                      Attach a cloud sandbox to a chat
                                       thread, or toggle <strong>Show all on cloud</strong>
                                       {" "}to scan the cloud provider.
                                     </>
@@ -554,7 +602,7 @@ export function SandboxesPage() {
                     </thead>
                     <tbody>
                       <For each={visibleRows()}>
-                        {(row) => <SandboxRowView row={row} busyAction={actionBusy()} onStop={handleStop} onArchive={handleArchive} onDelete={confirmDelete} />}
+                        {(row) => <SandboxRowView row={row} busyAction={actionBusy()} onStop={handleStop} onArchive={handleArchive} onDelete={confirmDelete} onMachineAction={handleMachineAction} />}
                       </For>
                     </tbody>
                   </table>
@@ -565,8 +613,23 @@ export function SandboxesPage() {
         )}
       </DataGate>
 
+      <TypedConfirmDialog
+        open={typedDelete()}
+        title="Delete Instabox machine"
+        expected={deleteTarget()?.sandbox_id || ""}
+        confirmLabel="Delete machine"
+        busy={deleting()}
+        onClose={cancelDelete}
+        onConfirm={() => void performDelete()}
+      >
+        <p>
+          The machine and its disk are deleted permanently and any chat threads that reference it are detached.
+          Snapshots of the machine are kept.
+        </p>
+      </TypedConfirmDialog>
+
       <Dialog
-        open={deleteTarget() !== null}
+        open={deleteTarget() !== null && !typedDelete()}
         size="sm"
         icon={<Trash2 size={17} />}
         iconVariant="danger"
@@ -614,12 +677,17 @@ function SandboxRowView(props: {
   onStop: (row: SandboxRow) => void;
   onArchive: (row: SandboxRow) => void;
   onDelete: (row: SandboxRow) => void;
+  onMachineAction: (row: SandboxRow, action: "start" | "resume" | "fork") => void;
 }) {
   const isTerminal = () => TERMINAL_STATUSES.includes(props.row.status);
   const isStopped = () => props.row.status === "stopped";
+  const isPaused = () => props.row.status === "paused";
   const isArchived = () => props.row.status === "archived";
+  const machineControls = () => hasMachineControls(props.row.backend) && props.row.on_cloud;
   const canStop = () => sandboxSupportsStop(props.row.backend) && !isTerminal() && !isStopped() && !isArchived();
-  const canArchive = () => sandboxSupportsArchive(props.row.backend) && !isTerminal() && !isArchived();
+  const canArchive = () => sandboxSupportsArchive(props.row.backend) && !isTerminal() && !isArchived() && !isPaused()
+    && !(machineControls() && isStopped());
+  const labels = () => archiveLabel(props.row.backend);
   const canDelete = () => !isTerminal() || props.row.on_cloud || !!props.row.thread_id;
   const threadHref = () => {
     if (!props.row.thread_id || !props.row.thread_alive) {
@@ -631,6 +699,7 @@ function SandboxRowView(props: {
   const currentAction = () => props.busyAction[rowKey()];
   const stopBusy = () => currentAction() === "stop";
   const archiveBusy = () => currentAction() === "archive";
+  const machineBusy = () => ["start", "resume", "fork"].includes(currentAction() || "");
 
   return (
     <tr class={`sandbox-row sandbox-row-${props.row.backend}`}>
@@ -689,13 +758,46 @@ function SandboxRowView(props: {
               </A>
             )}
           </Show>
+          <Show when={machineControls()}>
+            <A
+              class="btn btn-sm sandbox-action"
+              href={instaboxMachineHref(props.row.sandbox_id)}
+              title="Ports, snapshots, desktop and operations"
+            >
+              <Settings2 size={12} />
+              Manage
+            </A>
+          </Show>
+          <Show when={machineControls() && (isPaused() || isStopped())}>
+            <button
+              class="btn btn-sm sandbox-action"
+              type="button"
+              disabled={machineBusy()}
+              onClick={() => props.onMachineAction(props.row, isPaused() ? "resume" : "start")}
+            >
+              <Play size={12} />
+              {machineBusy() ? "Working…" : isPaused() ? "Resume" : "Start"}
+            </button>
+          </Show>
+          <Show when={machineControls() && props.row.status === "started"}>
+            <button
+              class="btn btn-sm sandbox-action"
+              type="button"
+              disabled={machineBusy()}
+              onClick={() => props.onMachineAction(props.row, "fork")}
+              title="Copy the running machine, including its memory, into a new machine"
+            >
+              <GitFork size={12} />
+              Fork
+            </button>
+          </Show>
           <Show when={canStop()}>
             <button
               class="btn btn-sm sandbox-action"
               type="button"
               disabled={stopBusy()}
               onClick={() => props.onStop(props.row)}
-              title="Stop the sandbox (Daytona only)"
+              title="Stop the sandbox"
             >
               <CircleStop size={12} />
               {stopBusy() ? "Stopping…" : "Stop"}
@@ -707,10 +809,10 @@ function SandboxRowView(props: {
               type="button"
               disabled={archiveBusy()}
               onClick={() => props.onArchive(props.row)}
-              title="Archive the sandbox (Daytona only)"
+              title={props.row.backend === "instabox" ? "Suspend the machine; it keeps memory and resumes quickly" : "Archive the sandbox"}
             >
-              <Archive size={12} />
-              {archiveBusy() ? "Archiving…" : "Archive"}
+              <Show when={props.row.backend === "instabox"} fallback={<Archive size={12} />}><Pause size={12} /></Show>
+              {archiveBusy() ? labels().busy : labels().idle}
             </button>
           </Show>
           <button

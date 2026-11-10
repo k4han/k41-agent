@@ -80,7 +80,7 @@ class MigrationSelectionBody(BaseModel):
 
 class ProjectRuntimeSwitchBody(ProjectRuntimeBody):
     thread_id: str = Field(min_length=1, max_length=512)
-    backend: Literal["local", "daytona", "modal"]
+    backend: Literal["local", "daytona", "modal", "instabox"]
     expected_generation: int = Field(ge=1)
     preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
@@ -133,7 +133,7 @@ class WorkspaceHostSyncBody(BaseModel):
 class ThreadRuntimeSwitchBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     thread_id: str = Field(min_length=1, max_length=512)
-    backend: Literal["local", "daytona", "modal"]
+    backend: Literal["local", "daytona", "modal", "instabox"]
     expected_generation: str = Field(pattern=r"^[a-f0-9]{64}$")
     preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 

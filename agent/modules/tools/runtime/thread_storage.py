@@ -25,7 +25,8 @@ THREAD_STORAGE_DIRS = ("scratchpad", "outputs", "uploads", "generated-images", "
 SYNC_STORAGE_DIRS = frozenset({"scratchpad", "uploads", "generated-images", "browser"})
 THREAD_STORAGE_BASE_DIR = Path.home() / ".k41-agent" / "workspace-storage"
 GENERATED_IMAGES_DIR = Path.home() / ".k41-agent" / "generated-images"
-_SANDBOX_BACKENDS = frozenset({"daytona", "modal"})
+_SANDBOX_BACKENDS = frozenset({"daytona", "modal", "instabox"})
+_SANDBOX_DEFAULT_ROOTS = {"modal": "/workspace", "instabox": "/data/home/workspace"}
 
 # Module-level caches avoid repeated SHA256/regex work and redundant mkdir
 # syscalls on every storage I/O call. The keys are the sanitized storage
@@ -342,7 +343,7 @@ async def ingest_attachment_file_to_sandbox(
 
         root = getattr(file_io, "root", None) or str(ref.metadata.get("root") or "")
         if not root:
-            root = "/workspace" if ref.backend == "modal" else "workspace"
+            root = _SANDBOX_DEFAULT_ROOTS.get(ref.backend, "workspace")
         try:
             abs_path = resolve_remote_path(str(root), rel)
         except Exception:

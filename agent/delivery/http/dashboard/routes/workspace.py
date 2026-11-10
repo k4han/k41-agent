@@ -376,7 +376,7 @@ class WorkspaceResolveBody(WorkspaceProjectBody):
     """Request body for resolving a workspace from various inputs (local, GitHub, sandbox)."""
 
     kind: str | None = Field(default=None, description="Workspace kind hint (e.g. 'github', 'local').")
-    backend: str | None = Field(default=None, description="Explicit backend name ('local', 'daytona', 'modal').")
+    backend: str | None = Field(default=None, description="Explicit backend name ('local', 'daytona', 'modal', 'instabox').")
     workspace: WorkspaceRef | WorkspaceBinding | None = Field(default=None, description="Existing workspace reference.")
     locator: str | None = Field(default=None, description="Backend-specific locator (e.g. sandbox ID).")
     repository_id: int | None = Field(default=None, description="GitHub repository ID to attach.")
@@ -405,7 +405,7 @@ def _resolve_backend(body: WorkspaceResolveBody, kind: str) -> str:
 
 @router.post("/dashboard-api/workspace/resolve")
 async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBody) -> dict[str, Any]:
-    """Resolve a workspace from the given inputs. Supports local, GitHub, Daytona, and Modal backends."""
+    """Resolve a workspace from the given inputs. Supports local, GitHub and every registered sandbox backend."""
     kind_source = body.kind or (
         resolve_workspace_ref(body.workspace).backend if body.workspace else "local"
     )
@@ -460,7 +460,7 @@ async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBo
                     workspace=workspace,
                     kind=backend,
                 )
-            if backend == "modal":
+            if backend == "modal" or _is_generic_sandbox_backend(backend):
                 workspace = await _resolve_github_in_sandbox(
                     body,
                     backend=backend,
@@ -562,6 +562,21 @@ async def resolve_dashboard_workspace(request: Request, body: WorkspaceResolveBo
                 "label": binding.scope.label,
                 "workspace": binding.model_dump(),
             }
+        if _is_generic_sandbox_backend(kind):
+            workspace = await _create_or_attach_sandbox(body, backend=kind)
+            if repository_id is not None:
+                workspace = await attach_github_repository_to_workspace(
+                    workspace,
+                    repository_id=repository_id,
+                )
+            if body.thread_id and body.thread_id.strip():
+                workspace = await remember_thread_workspace_ref(body.thread_id, workspace)
+            binding = bind_workspace_ref(workspace)
+            return {
+                "kind": kind,
+                "label": binding.scope.label,
+                "workspace": binding.model_dump(),
+            }
         raise ValueError(f"Unsupported workspace kind: {body.kind}")
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -598,12 +613,34 @@ async def _resolve_github_in_sandbox(
             )
         else:
             workspace = await create_modal_workspace()
+    elif _is_generic_sandbox_backend(backend):
+        workspace = await _create_or_attach_sandbox(body, backend=backend)
     else:
         raise ValueError(f"Unsupported sandbox backend: {backend}")
     return await attach_github_repository_to_workspace(
         workspace,
         repository_id=repository_id,
     )
+
+
+def _is_generic_sandbox_backend(backend: str) -> bool:
+    """Registered cloud backends without a dedicated branch (for example Instabox)."""
+    if backend in {"local", "daytona", "modal", "github"}:
+        return False
+    descriptor = get_workspace_backend_registry().descriptor(backend)
+    return descriptor is not None and bool(descriptor.create_loader and descriptor.attach_loader)
+
+
+async def _create_or_attach_sandbox(body: WorkspaceResolveBody, *, backend: str) -> WorkspaceRef:
+    body_ref = resolve_workspace_ref(body.workspace) if body.workspace else None
+    sandbox_id = body.locator or (body_ref.locator if body_ref else "")
+    if sandbox_id and sandbox_id.strip():
+        return await attach_workspace_backend(
+            backend,
+            sandbox_id,
+            root=_workspace_metadata_root(body_ref),
+        )
+    return await create_workspace_backend(backend)
 
 
 async def _remember_and_respond(

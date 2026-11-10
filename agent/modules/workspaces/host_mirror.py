@@ -77,6 +77,11 @@ async def workspace_runtime_status(ref: WorkspaceRef) -> str:
         except Exception:
             return "unknown"
         return status["status"] if status else "unknown"
+    if ref.backend == "instabox":
+        from agent.modules.workspaces.instabox_backend import probe_instabox_sandbox
+        # Reads machine state only; listing or probing never wakes the machine.
+        status = await probe_instabox_sandbox(ref.locator)
+        return status["status"] if status else "unknown"
     return "unknown"
 
 
@@ -793,7 +798,7 @@ class HostMirrorService:
     async def _run_thread_switch(self, thread_id, backend, generation, *, preview_token=None):
         from agent.modules.workspaces import create_workspace_backend, get_workspace_backend_registry, is_backend_enabled
         descriptor = get_workspace_backend_registry(self.service.container).require(backend)
-        if backend not in {"local", "daytona", "modal"} or not is_backend_enabled(descriptor, config_service=self.service.container.config_service):
+        if not is_backend_enabled(descriptor, config_service=self.service.container.config_service):
             raise ValueError("The requested execution backend is not enabled.")
         rows, _ = await self.thread_status(thread_id)
         row = sorted(rows, key=lambda item: (":sub:" in item.thread_id, item.id))[0]

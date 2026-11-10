@@ -610,6 +610,47 @@ def test_dashboard_workspace_resolve_modal_reports_disabled_backend(
     assert response.json()["detail"] == "Modal workspace backend is disabled."
 
 
+def test_dashboard_workspace_resolve_creates_and_attaches_instabox_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.modules.workspaces import WorkspaceRef
+
+    calls: list[tuple] = []
+
+    def instabox_ref(locator: str, root: str | None = None) -> WorkspaceRef:
+        return WorkspaceRef(
+            backend="instabox",
+            locator=locator,
+            label=f"instabox:{locator}",
+            metadata={"root": root or "/data/home/workspace"},
+        )
+
+    async def fake_create(backend: str):
+        calls.append(("create", backend))
+        return instabox_ref("m_new")
+
+    async def fake_attach(backend: str, sandbox_id: str, *, root: str | None = None):
+        calls.append(("attach", backend, sandbox_id, root))
+        return instabox_ref(sandbox_id, root)
+
+    _patch_dashboard_attr(monkeypatch, "create_workspace_backend", fake_create)
+    _patch_dashboard_attr(monkeypatch, "attach_workspace_backend", fake_attach)
+    client = _create_dashboard_client(ChannelManager())
+
+    created = client.post("/dashboard-api/workspace/resolve", json={"kind": "instabox"})
+    assert created.status_code == 200
+    assert created.json()["kind"] == "instabox"
+    assert created.json()["workspace"]["execution"]["locator"] == "m_new"
+
+    attached = client.post(
+        "/dashboard-api/workspace/resolve",
+        json={"kind": "instabox", "locator": "m_existing"},
+    )
+    assert attached.status_code == 200
+    assert attached.json()["workspace"]["execution"]["metadata"]["root"] == "/data/home/workspace"
+    assert calls == [("create", "instabox"), ("attach", "instabox", "m_existing", None)]
+
+
 def test_dashboard_workspace_browse_lists_directories(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "docs").mkdir()

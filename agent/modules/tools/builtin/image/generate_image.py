@@ -288,7 +288,7 @@ def _build_generate_image_tool(config: dict[str, ToolConfigValue]) -> BaseTool:
                     ws_dir = ensure_physical_workspace_storage(workspace.locator) / "generated-images"
                     ws_dir.mkdir(parents=True, exist_ok=True)
                     (ws_dir / filename).write_bytes(content)
-                elif workspace.backend in {"daytona", "modal"}:
+                elif workspace.backend != "local":
                     try:
                         from agent.modules.tools.runtime.context import ToolContext
 

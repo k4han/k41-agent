@@ -178,6 +178,7 @@ class AppContainer:
     _acp_auth_manager: Any = field(default=None, repr=False)
     _acp_installer: Any = field(default=None, repr=False)
     _project_workspace_service: Any = field(default=None, repr=False)
+    _instabox_service: Any = field(default=None, repr=False)
     _mcp_loaded: bool = field(default=False, repr=False)
     _mcp_load_lock: Any = field(default=None, repr=False)
     _mcp_load_task: Any = field(default=None, repr=False)
@@ -697,6 +698,9 @@ class AppContainer:
             }
             from agent.modules.tools import get_coding_service
             get_coding_service(self)
+            from agent.modules.instabox import get_instabox_service
+            # Resume tracking long-running Instabox changes started before a restart.
+            get_instabox_service(self).start()
         finally:
             restore_context_container(token)
         self._persistence_ready = True
@@ -735,6 +739,9 @@ class AppContainer:
                 await asyncio.gather(*watchers, return_exceptions=True)
         if self._project_workspace_service is not None:
             await self._project_workspace_service.close()
+        if self._instabox_service is not None:
+            await self._instabox_service.close()
+            self._instabox_service = None
         await close_checkpointer(container=self)
         await close_async_engine(container=self)
         try:

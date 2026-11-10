@@ -292,7 +292,7 @@ export type PromptVariablesPayload = {
   variables: PromptVariable[];
 };
 
-export type WorkspaceBackendKey = "local" | "daytona" | "modal";
+export type WorkspaceBackendKey = "local" | "daytona" | "modal" | "instabox";
 
 export function isSandboxBackend(backend: string): boolean {
   return backend !== "local";
@@ -618,6 +618,9 @@ export type BackendCatalogItem = {
   availability?: Record<string, unknown>;
   install_extra?: string;
   enabled: boolean;
+  supports_stop?: boolean;
+  supports_archive?: boolean;
+  default_root?: string;
 };
 
 export type SelectOption = {
@@ -783,7 +786,7 @@ export type GitHubRepositoryBinding = {
   allowed_tools: string[];
   allowed_skills: string[];
   branch_prefix: string;
-  workspace_backend: "local" | "daytona" | "modal";
+  workspace_backend: WorkspaceBackendKey;
   last_synced_at: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -1034,6 +1037,7 @@ export type SandboxStatus =
   | "started"
   | "starting"
   | "stopped"
+  | "paused"
   | "archived"
   | "destroyed"
   | "error"
@@ -1043,6 +1047,7 @@ export type SandboxBackendKey = Exclude<WorkspaceBackendKey, "local">;
 
 export function sandboxBackendDefaultRoot(backend: SandboxBackendKey): string {
   if (backend === "modal") return "/workspace";
+  if (backend === "instabox") return "/data/home/workspace";
   return "workspace";
 }
 

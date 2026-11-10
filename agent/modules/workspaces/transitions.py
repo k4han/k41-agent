@@ -10,6 +10,12 @@ class RuntimeTransitionCoordinator:
         if isinstance(status, int) and status >= 500:
             return True
         try:
+            from agent.modules.instabox import InstaboxApiError
+            if isinstance(error, InstaboxApiError) and (error.status >= 500 or error.status == 429):
+                return True
+        except ImportError:
+            pass
+        try:
             import httpx
             if isinstance(error, httpx.TransportError):
                 return True

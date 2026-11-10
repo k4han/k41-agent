@@ -38,6 +38,8 @@ Live checks stay skipped unless explicitly enabled:
 - `K41_TEST_BROWSER=1` enables `tests/test_browser_live.py`.
 - `K41_TEST_DAYTONA_WORKSPACE` / `K41_TEST_MODAL_WORKSPACE` enable
   `tests/test_skill_package_live.py` when set to a `WorkspaceRef` JSON payload.
+- `INSTABOX_LIVE=1` with `INSTABOX_API_KEY` enables `tests/test_instabox_live.py`
+  (creates and deletes real machines; see [Instabox](instabox.md)).
 
 ## Temp files and SQLite
 

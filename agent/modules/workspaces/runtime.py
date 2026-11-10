@@ -14,7 +14,8 @@ class RuntimeObservation:
 
 def runtime_observation(backend: str, state: str) -> RuntimeObservation:
     return RuntimeObservation(state,
-        can_resume=backend == "daytona" and state in {"stopped", "archived"},
+        can_resume=(backend == "daytona" and state in {"stopped", "archived"})
+        or (backend == "instabox" and state in {"stopped", "paused"}),
         needs_replacement=state == "destroyed" or (backend == "modal" and state in {"stopped", "finished"}))
 
 

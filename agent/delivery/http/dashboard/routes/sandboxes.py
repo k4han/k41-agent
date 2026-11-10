@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from agent.modules.workspaces import (
     DAYTONA_BACKEND,
+    INSTABOX_BACKEND,
     MODAL_BACKEND,
     archive_sandbox,
     delete_sandbox,
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-SUPPORTED_BACKENDS = {DAYTONA_BACKEND, MODAL_BACKEND}
+SUPPORTED_BACKENDS = {DAYTONA_BACKEND, MODAL_BACKEND, INSTABOX_BACKEND}
 
 
 def _normalize_backend(value: str) -> str:

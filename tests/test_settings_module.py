@@ -514,6 +514,7 @@ class TestDatabaseConfigSource:
                 "workspace.daytona.api_key": "daytona-secret",
                 "workspace.modal.token_id": "modal-id",
                 "workspace.modal.token_secret": "modal-secret",
+                "workspace.instabox.api_key": "ibk_instabox-secret",
             }
         )
 
@@ -523,6 +524,7 @@ class TestDatabaseConfigSource:
         assert source.get("workspace.daytona.api_key") == "daytona-secret"
         assert source.get("workspace.modal.token_id") == "modal-id"
         assert source.get("workspace.modal.token_secret") == "modal-secret"
+        assert source.get("workspace.instabox.api_key") == "ibk_instabox-secret"
 
         engine = create_engine(db_url, future=True)
         try:
@@ -547,6 +549,9 @@ class TestDatabaseConfigSource:
         assert "modal-id" not in modal_id_row.value_json
         assert modal_secret_row.encrypted is True
         assert "modal-secret" not in modal_secret_row.value_json
+        instabox_row = by_key["workspace.instabox.api_key"]
+        assert instabox_row.encrypted is True
+        assert "instabox-secret" not in instabox_row.value_json
         assert by_key["recursion_limit"].encrypted is False
 
     def test_seed_missing_settings_preserves_existing_database_values(self, tmp_path: Path) -> None:
@@ -635,6 +640,9 @@ class TestDatabaseConfigSource:
         assert is_database_runtime_key("workspace.modal.token_id")
         assert is_database_runtime_key("workspace.modal.token_secret")
         assert is_database_runtime_key("workspace.modal.default_root")
+        assert is_database_runtime_key("workspace.instabox.enabled")
+        assert is_database_runtime_key("workspace.instabox.api_key")
+        assert is_database_runtime_key("workspace.instabox.workspace_root")
         assert is_database_runtime_key("workspace.root")
         assert is_database_runtime_key("workspace.github.root")
         assert not is_database_runtime_key("database.url")
@@ -812,6 +820,9 @@ class TestRuntimeKeyMetadata:
         assert is_runtime_key("workspace.modal.token_id")
         assert is_runtime_key("workspace.modal.token_secret")
         assert is_runtime_key("workspace.modal.default_root")
+        assert is_runtime_key("workspace.instabox.enabled")
+        assert is_runtime_key("workspace.instabox.api_key")
+        assert is_runtime_key("workspace.instabox.template")
         assert is_runtime_key("workspace.root")
         assert is_runtime_key("workspace.github.root")
         assert not is_runtime_key("llm.providers.openai-main.random_field")
@@ -862,6 +873,16 @@ class TestRuntimeKeyMetadata:
         assert token_meta["category"] == "workspace"
         assert enabled_meta["type"] == "boolean"
         assert image_meta["type"] == "text"
+
+    def test_instabox_setting_metadata(self) -> None:
+        api_key_meta = get_setting_metadata("workspace.instabox.api_key")
+        enabled_meta = get_setting_metadata("workspace.instabox.enabled")
+        root_meta = get_setting_metadata("workspace.instabox.workspace_root")
+
+        assert api_key_meta["type"] == "password"
+        assert api_key_meta["category"] == "workspace"
+        assert enabled_meta["type"] == "boolean"
+        assert root_meta["type"] == "text"
 
 
 # =====================================================================

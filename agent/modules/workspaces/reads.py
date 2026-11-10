@@ -39,6 +39,14 @@ async def provider_read_error(ref, error):
             unavailable = isinstance(error, ServiceError)
             missing = isinstance(error, NotFoundError)
             invalid = isinstance(error, InvalidError)
+        elif ref.backend == "instabox":
+            from agent.modules.instabox import InstaboxApiError
+            if not isinstance(error, InstaboxApiError):
+                return error
+            denied = error.is_auth_error
+            unavailable = error.retryable or error.status >= 500 or error.status == 429
+            missing = error.is_not_found
+            invalid = error.status in {400, 422}
         else:
             return error
     except ImportError:

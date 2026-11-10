@@ -153,6 +153,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^workspace\.project_storage_root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
+    r"^workspace\.instabox\.(enabled|api_key|api_url|workspace_root|template|snapshot_id|org_id|vcpus|mem_mib|auto_suspend_after_seconds)$",
     r"^google_calendar\.enabled$",
     r"^skills\.(repository_dir|additional_roots|disabled_ids|max_files|max_bytes|max_file_bytes|local_execution_mode|cache_root)$",
     r"^database\.url$",
@@ -189,6 +190,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^workspace\.project_storage_root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
+    r"^workspace\.instabox\.(enabled|api_key|api_url|workspace_root|template|snapshot_id|org_id|vcpus|mem_mib|auto_suspend_after_seconds)$",
     r"^google_calendar\.enabled$",
     r"^skills\.(repository_dir|additional_roots|disabled_ids|max_files|max_bytes|max_file_bytes|local_execution_mode|cache_root)$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
@@ -211,6 +213,7 @@ SENSITIVE_RUNTIME_KEY_PATTERNS = [
     r"^mcp\.servers\.[A-Za-z0-9_-]+\.headers\.[A-Za-z0-9_-]+$",
     r"^workspace\.daytona\.api_key$",
     r"^workspace\.modal\.(token_id|token_secret)$",
+    r"^workspace\.instabox\.api_key$",
     r"^decision\.cloudflare\.api_token$",
     r"^decision\.providers\.[A-Za-z0-9_-]+\.[A-Za-z0-9_]*(api_key|token|secret|password)[A-Za-z0-9_]*$",
 ]
@@ -321,6 +324,16 @@ def _expand_runtime_keys() -> set[str]:
     keys.add("workspace.modal.image")
     keys.add("workspace.modal.sandbox_timeout_seconds")
     keys.add("workspace.modal.idle_timeout_seconds")
+    keys.add("workspace.instabox.enabled")
+    keys.add("workspace.instabox.api_key")
+    keys.add("workspace.instabox.api_url")
+    keys.add("workspace.instabox.workspace_root")
+    keys.add("workspace.instabox.template")
+    keys.add("workspace.instabox.snapshot_id")
+    keys.add("workspace.instabox.org_id")
+    keys.add("workspace.instabox.vcpus")
+    keys.add("workspace.instabox.mem_mib")
+    keys.add("workspace.instabox.auto_suspend_after_seconds")
     keys.add(REPOSITORY_SKILLS_DIR_KEY)
     keys.update({"skills.additional_roots", "skills.disabled_ids", "skills.max_files", "skills.max_bytes", "skills.max_file_bytes",
                  "skills.local_execution_mode", "skills.cache_root"})
@@ -428,6 +441,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "workspace.modal.image": "python:3.13-slim",
     "workspace.modal.sandbox_timeout_seconds": 3600,
     "workspace.modal.idle_timeout_seconds": 900,
+    "workspace.instabox.enabled": False,
+    "workspace.instabox.api_key": "",
+    "workspace.instabox.api_url": "https://api.instabox.sh",
+    "workspace.instabox.workspace_root": "/data/home/workspace",
+    "workspace.instabox.template": "agent-browser",
+    "workspace.instabox.snapshot_id": "",
+    "workspace.instabox.org_id": "",
+    "workspace.instabox.vcpus": 0,
+    "workspace.instabox.mem_mib": 0,
+    "workspace.instabox.auto_suspend_after_seconds": 0,
     REPOSITORY_SKILLS_DIR_KEY: ".agent/skills",
     "skills.additional_roots": [],
     "skills.disabled_ids": [],
@@ -791,6 +814,75 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "min": 0,
         "max": 86400,
         "step": 1,
+    },
+    "workspace.instabox.enabled": {
+        "type": "boolean",
+        "description": "Enable Instabox machine workspaces.",
+        "category": "workspace",
+        "label": "Instabox Enabled",
+    },
+    "workspace.instabox.api_key": {
+        "type": "password",
+        "description": "Instabox API key (ibk_...). Needs machines:read, machines:write, images:read, images:write and images:delete scopes.",
+        "category": "workspace",
+        "label": "Instabox API Key",
+    },
+    "workspace.instabox.api_url": {
+        "type": "text",
+        "description": "Instabox API base URL.",
+        "category": "workspace",
+        "label": "Instabox API URL",
+    },
+    "workspace.instabox.workspace_root": {
+        "type": "text",
+        "description": "Workspace directory inside Instabox machines.",
+        "category": "workspace",
+        "label": "Instabox Workspace Root",
+    },
+    "workspace.instabox.template": {
+        "type": "text",
+        "description": "Template for new machines. agent-browser includes a desktop.",
+        "category": "workspace",
+        "label": "Instabox Template",
+    },
+    "workspace.instabox.snapshot_id": {
+        "type": "text",
+        "description": "Default snapshot for new machines. When set, the template is not sent.",
+        "category": "workspace",
+        "label": "Instabox Default Snapshot",
+    },
+    "workspace.instabox.org_id": {
+        "type": "text",
+        "description": "Organization that owns new machines. Leave empty for the personal organization.",
+        "category": "workspace",
+        "label": "Instabox Organization ID",
+    },
+    "workspace.instabox.vcpus": {
+        "type": "number",
+        "description": "vCPUs for new machines, set together with memory. Use 0 for the Instabox default.",
+        "category": "workspace",
+        "label": "Instabox vCPUs",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+    },
+    "workspace.instabox.mem_mib": {
+        "type": "number",
+        "description": "Memory in MiB for new machines, set together with vCPUs. Use 0 for the Instabox default.",
+        "category": "workspace",
+        "label": "Instabox Memory MiB",
+        "min": 0,
+        "max": 262144,
+        "step": 256,
+    },
+    "workspace.instabox.auto_suspend_after_seconds": {
+        "type": "number",
+        "description": "Pause idle machines after this many seconds. Use 0 for the Instabox default.",
+        "category": "workspace",
+        "label": "Instabox Auto Pause Seconds",
+        "min": 0,
+        "max": 604800,
+        "step": 60,
     },
     REPOSITORY_SKILLS_DIR_KEY: {
         "type": "text",

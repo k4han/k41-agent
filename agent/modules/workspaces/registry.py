@@ -14,6 +14,7 @@ from agent.shared.integrations import (
 LOCAL_BACKEND = "local"
 DAYTONA_BACKEND = "daytona"
 MODAL_BACKEND = "modal"
+INSTABOX_BACKEND = "instabox"
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,7 @@ class WorkspaceBackendDescriptor(IntegrationDescriptor):
     sweeper_stop_loader: str = ""
     sweeper_run_loader: str = ""
     requires_api_key: bool = False
+    default_root: str = ""
 
 
 BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS = (
@@ -89,6 +91,7 @@ BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS = (
             "agent.modules.workspaces.daytona_backend:stop_daytona_lifecycle_sweeper"
         ),
         sweeper_run_loader="agent.modules.workspaces.daytona_backend:sweep_idle_daytona_workspaces",
+        default_root="workspace",
     ),
     WorkspaceBackendDescriptor(
         kind="workspace_backend",
@@ -121,6 +124,49 @@ BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS = (
         delete_loader="agent.modules.workspaces.modal_backend:delete_modal_workspace",
         inventory_loader="agent.modules.workspaces.modal_backend:list_modal_cloud_sandboxes",
         status_probe_loader="agent.modules.workspaces.modal_backend:probe_modal_sandbox",
+        default_root="/workspace",
+    ),
+    WorkspaceBackendDescriptor(
+        kind="workspace_backend",
+        name=INSTABOX_BACKEND,
+        title="Instabox",
+        summary="Run workspaces on Instabox machines with previews, a desktop and snapshots.",
+        config_prefix="workspace.instabox",
+        loader="agent.modules.workspaces.instabox_backend:InstaboxWorkspaceBackend",
+        capabilities=frozenset(
+            {
+                "file_io",
+                "commands",
+                "browser",
+                "changes",
+                "repository_clone",
+                "lifecycle",
+                "sandbox_inventory",
+                "stop",
+                "archive",
+                "machines",
+                "ports",
+                "desktop",
+                "snapshots",
+                "fork",
+                "restore",
+            }
+        ),
+        supports_sandbox_inventory=True,
+        supports_lifecycle=True,
+        supports_repository_clone=True,
+        requires_api_key=True,
+        backend_factory_loader=(
+            "agent.modules.workspaces.instabox_backend:create_instabox_backend"
+        ),
+        create_loader="agent.modules.workspaces.instabox_backend:create_instabox_workspace",
+        attach_loader="agent.modules.workspaces.instabox_backend:attach_instabox_workspace",
+        delete_loader="agent.modules.workspaces.instabox_backend:delete_instabox_workspace",
+        stop_loader="agent.modules.workspaces.instabox_backend:stop_instabox_workspace",
+        archive_loader="agent.modules.workspaces.instabox_backend:archive_instabox_workspace",
+        inventory_loader="agent.modules.workspaces.instabox_backend:list_instabox_cloud_sandboxes",
+        status_probe_loader="agent.modules.workspaces.instabox_backend:probe_instabox_sandbox",
+        default_root="/data/home/workspace",
     ),
 )
 
@@ -216,6 +262,9 @@ def list_workspace_backend_catalog(
                 "availability": availability.to_dict(),
                 "install_extra": descriptor.install_extra,
                 "enabled": _is_backend_enabled(descriptor, config_service=config_service),
+                "supports_stop": bool(descriptor.stop_loader),
+                "supports_archive": bool(descriptor.archive_loader),
+                "default_root": descriptor.default_root,
             }
         )
     return catalog
@@ -251,6 +300,7 @@ async def call_workspace_backend_loader(
 __all__ = [
     "BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS",
     "DAYTONA_BACKEND",
+    "INSTABOX_BACKEND",
     "LOCAL_BACKEND",
     "MODAL_BACKEND",
     "WorkspaceBackendDescriptor",

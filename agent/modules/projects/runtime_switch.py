@@ -195,7 +195,7 @@ class WorkspaceRuntimeSwitcher:
                       *, preview_token: str | None = None, session_state: dict | None = None):
         from agent.modules.workspaces import get_workspace_backend_registry, is_backend_enabled
         descriptor = get_workspace_backend_registry(self.service.container).require(backend)
-        if backend not in {"local", "daytona", "modal"} or not is_backend_enabled(descriptor, config_service=self.service.container.config_service):
+        if not is_backend_enabled(descriptor, config_service=self.service.container.config_service):
             raise ValueError("The requested execution backend is not enabled.")
         project, workspace, runtime = await self.service.rows(project_id, workspace_id)
         workspace_id = workspace.id

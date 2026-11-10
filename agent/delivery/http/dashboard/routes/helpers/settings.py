@@ -502,7 +502,7 @@ async def backend_settings_payload(request: Request) -> dict[str, Any]:
     return {
         "active_nav": "backends",
         "page_title": "Workspace Backends",
-        "page_subtitle": "Manage local, Daytona, and Modal workspace backends.",
+        "page_subtitle": "Manage local, Daytona, Modal, and Instabox workspace backends.",
         "settings": settings,
         "by_category": group_settings_by_category(settings),
         "settings_sources": settings_sources,

@@ -156,6 +156,35 @@ const BACKEND_DEFS_BY_NAME: Record<string, BackendDefinition> = {
       },
     ],
   },
+  instabox: {
+    name: "instabox",
+    title: "Instabox",
+    toggleable: true,
+    configuredPredicate: (settings, drafts) => {
+      const key = "workspace.instabox.api_key";
+      const value = drafts[key] ?? settings[key]?.value;
+      return value !== null && value !== undefined && String(value).length > 0;
+    },
+    sections: [
+      {
+        id: "authentication",
+        title: "Authentication",
+        fields: [ENABLED_SUFFIX, "api_key", "api_url", "org_id"],
+      },
+      {
+        id: "defaults",
+        title: "Defaults",
+        fields: ["workspace_root", "template", "snapshot_id"],
+        defaultCollapsed: true,
+      },
+      {
+        id: "machine",
+        title: "Machine",
+        fields: ["vcpus", "mem_mib", "auto_suspend_after_seconds"],
+        defaultCollapsed: true,
+      },
+    ],
+  },
 };
 
 function settingKey(backend: string, suffix: string): string {

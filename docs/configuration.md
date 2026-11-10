@@ -311,10 +311,10 @@ Repo được clone vào `<workspace.github.root>/{owner}/{repo}`. Khi issue/com
 
 Dashboard Workspace selector là UI 2 cấp:
 
-1. **Backend**: `local` (host filesystem) | `daytona` | `modal`.
-2. **Source**: tuỳ backend — `local` có `folder`, `daytona`/`modal` có `sandbox` và `github-repo`.
+1. **Backend**: `local` (host filesystem) | `daytona` | `modal` | `instabox` (xem [Instabox](instabox.md)).
+2. **Source**: tuỳ backend — `local` có `folder`, `daytona`/`modal`/`instabox` có `sandbox` và `github-repo`.
 
-Khi chọn source `github-repo`, dashboard gọi `POST /dashboard-api/workspace/resolve` với `kind="github"`, `backend="local"|"daytona"|"modal"`, `repository_id=<id>`. Backend sẽ:
+Khi chọn source `github-repo`, dashboard gọi `POST /dashboard-api/workspace/resolve` với `kind="github"`, `backend="local"|"daytona"|"modal"|"instabox"`, `repository_id=<id>`. Backend sẽ:
 
 - Tạo (hoặc attach) sandbox tương ứng.
 - Clone repo vào trong sandbox bằng `git clone --depth 1 --branch <default_branch> --single-branch` với installation token (nếu có). Vị trí: `{sandbox_root}/{owner}/{repo}`.

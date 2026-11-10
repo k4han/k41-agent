@@ -10,8 +10,8 @@ catalog entry so that workspace is easy to return to.
 ## Choose a conversation workspace
 
 Use the workspace selector in chat to select the context for the task. A local
-workspace runs on the K41 host. Optional Daytona and Modal backends provide
-remote execution when configured.
+workspace runs on the K41 host. Optional Daytona, Modal and
+[Instabox](../instabox.md) backends provide remote execution when configured.
 
 New project conversations use local execution. Moving an existing conversation
 to another execution environment is an explicit session change.

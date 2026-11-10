@@ -29,7 +29,7 @@ export function ComposerWorkspacePicker(props: WorkspaceSelectorProps & {
   const backend = () => (props.draft ? props.draftBackend : undefined) || props.selection?.backend || props.workspace?.backend || "local";
   const backendLabel = () => {
     const label = getBackendDisplayName(backend());
-    const titles: Record<string, string> = { local: "Local", daytona: "Daytona", modal: "Modal" };
+    const titles: Record<string, string> = { local: "Local", daytona: "Daytona", modal: "Modal", instabox: "Instabox" };
     return label === backend() ? titles[backend()] || label : label;
   };
   const projectLabel = createMemo(() => {

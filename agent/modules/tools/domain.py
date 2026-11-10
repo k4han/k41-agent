@@ -35,6 +35,7 @@ class ToolCategory(StrEnum):
     SHELL = "shell"
     WEB = "web"
     BROWSER = "browser"
+    SANDBOX = "sandbox"
     IMAGE = "image"
     SCHEDULE = "schedule"
     AGENT = "agent"

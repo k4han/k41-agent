@@ -190,6 +190,10 @@ export function modalWorkspaceRef(locator: string, root = "/workspace"): Workspa
   return sandboxWorkspaceRef("modal", locator, root);
 }
 
+export function instaboxWorkspaceRef(locator: string, root = "/data/home/workspace"): WorkspaceRef | null {
+  return sandboxWorkspaceRef("instabox", locator, root);
+}
+
 export function formatWorkspaceRoot(locator: string): string {
   const trimmed = locator.trim();
   if (!trimmed) {

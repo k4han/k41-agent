@@ -64,7 +64,7 @@ const settingsNavGroups: SettingsNavGroup[] = [
     id: "intelligence",
     label: "Intelligence",
     items: [
-      { href: "/settings/providers", label: "Providers", icon: () => <Workflow size={15} />, description: "Models, web, environments & decisions", keywords: "llm provider model openai anthropic web search firecrawl tavily brave bing google daytona modal backend cloudflare" },
+      { href: "/settings/providers", label: "Providers", icon: () => <Workflow size={15} />, description: "Models, web, environments & decisions", keywords: "llm provider model openai anthropic web search firecrawl tavily brave bing google daytona modal instabox backend cloudflare" },
       { href: "/settings/decisions", label: "Decisions & Routing", icon: () => <Route size={15} />, description: "Clef-flash & routing", keywords: "decision routing clef cloudflare model strategy cascade" },
       { href: "/settings/tools", label: "Tools", icon: () => <Wrench size={15} />, description: "Global tool config", keywords: "tool api key search image web config" },
       { href: "/settings/agents", label: "Agents", icon: () => <Users size={15} />, description: "Agent profiles", keywords: "agent persona" },

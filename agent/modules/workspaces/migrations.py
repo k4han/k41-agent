@@ -75,7 +75,7 @@ def _backfill_legacy_workspaces(conn, table_name: str) -> None:
         if backend == "local":
             locator = str(Path(locator).expanduser().resolve())
         else:
-            metadata.setdefault("root", "workspace" if backend == "daytona" else "/workspace")
+            metadata.setdefault("root", {"daytona": "workspace", "instabox": "/data/home/workspace"}.get(backend, "/workspace"))
         ref = WorkspaceRef(backend=backend, locator=locator, label=row["execution_label"] or row["workspace_label"] or locator,
                            metadata=metadata)
         scope = derive_workspace_scope(ref)

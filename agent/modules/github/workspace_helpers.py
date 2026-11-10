@@ -121,11 +121,14 @@ async def _prepare_remote_workspace(
     branch: str,
     default_branch: str | None = None,
 ) -> WorkspaceRef:
-    """Clone repository inside a Daytona/Modal sandbox and return WorkspaceRef."""
+    """Clone repository inside a cloud sandbox and return WorkspaceRef."""
     from agent.modules.workspaces import (
         GitHubRepositorySelection,
         attach_github_repository_to_daytona_workspace,
         attach_github_repository_to_modal_workspace,
+        attach_github_repository_to_sandbox_workspace,
+        create_workspace_backend,
+        get_workspace_backend_registry,
     )
 
     selection = GitHubRepositorySelection(
@@ -151,7 +154,15 @@ async def _prepare_remote_workspace(
             token=token,
         )
     else:
-        raise ValueError(f"Unsupported remote backend: {backend}")
+        descriptor = get_workspace_backend_registry().descriptor(backend)
+        if descriptor is None or not descriptor.supports_repository_clone or not descriptor.create_loader:
+            raise ValueError(f"Unsupported remote backend: {backend}")
+        workspace_ref = await create_workspace_backend(backend, label=binding.full_name)
+        ref = await attach_github_repository_to_sandbox_workspace(
+            workspace_ref,
+            selection,
+            token=token,
+        )
 
     metadata = dict(ref.metadata or {})
     metadata["source"] = "github"

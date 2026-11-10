@@ -29,13 +29,13 @@ def get_workspace(runtime: ToolRuntime[Any, Any]) -> WorkspaceRef:
 def get_working_dir(runtime: ToolRuntime[Any, Any]) -> str:
     """Return the physical workspace path for prompt rendering.
 
-    For Daytona/Modal sandboxes the workspace ``locator`` is a sandbox ID and
+    For cloud sandboxes the workspace ``locator`` is a sandbox ID and
     is not a usable filesystem path. Prefer ``metadata["root"]`` so the value
     reflects the actual cwd used by the backend (which may sit inside a
     cloned repository).
     """
     workspace = get_workspace(runtime)
-    if workspace.backend in {"daytona", "modal"}:
+    if workspace.backend != "local":
         root = str(workspace.metadata.get("root") or "").strip()
         if root:
             return root

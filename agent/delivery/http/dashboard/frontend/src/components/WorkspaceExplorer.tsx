@@ -12,6 +12,7 @@ import {
   Globe,
   Maximize2,
   Minimize2,
+  Monitor,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
@@ -31,6 +32,7 @@ import { Portal } from "solid-js/web";
 
 import { Dialog } from "@/components/Dialog";
 import { BrowserPanel } from "@/components/BrowserPanel";
+import { InstaboxDesktop } from "@/components/InstaboxDesktop";
 import { WorkspaceFilePreview } from "@/components/WorkspaceFilePreview";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
@@ -106,7 +108,7 @@ type WorkspaceResolvePayload = {
   workspace: WorkspaceRef;
 };
 
-type WorkspaceTab = "changes" | "files" | "browser" | `file:${string}`;
+type WorkspaceTab = "changes" | "files" | "browser" | "desktop" | `file:${string}`;
 
 const WORKSPACE_POLL_INTERVAL_MS = 15_000;
 // Fallback polling during active tool runs (10-15s).
@@ -269,6 +271,10 @@ export function WorkspaceExplorer(props: {
   const primaryTabs = createMemo(() => openTabs().filter((tab) => !tab.startsWith("file:")));
   const fileTabs = createMemo(() => openTabs().filter((tab) => tab.startsWith("file:")));
   const browserActive = () => lastPrimaryTab() === "browser" && openTabs().includes("browser");
+  const desktopActive = () => lastPrimaryTab() === "desktop" && openTabs().includes("desktop");
+  // Browser and desktop take the whole explorer body, like a single full-width panel.
+  const panelActive = () => browserActive() || desktopActive();
+  const desktopMachineId = () => props.workspace?.backend === "instabox" ? (props.workspace.locator || "").trim() : "";
   let explorerRef: HTMLElement | undefined;
   const [containerWidth, setContainerWidth] = createSignal(
     typeof window !== "undefined" ? window.innerWidth : 640
@@ -286,7 +292,7 @@ export function WorkspaceExplorer(props: {
   const [innerResizing, setInnerResizing] = createSignal(false);
   const isCompact = () => !props.fullscreen && containerWidth() < 640;
   const isSplit = createMemo(() => {
-    if (browserActive()) return false;
+    if (panelActive()) return false;
     if (isCompact()) return false;
     if (props.fullscreen) return true;
     if (!props.splitView) return false;
@@ -845,12 +851,12 @@ export function WorkspaceExplorer(props: {
 
   const openTab = (tab: WorkspaceTab) => {
     setOpenTabs((current) => (current.includes(tab) ? current : [...current, tab]));
-    if (tab !== "browser" || !activeTab().startsWith("file:")) setActiveTab(tab);
+    if ((tab !== "browser" && tab !== "desktop") || !activeTab().startsWith("file:")) setActiveTab(tab);
     if (!tab.startsWith("file:")) {
       setLastPrimaryTab(tab);
     } else {
       showCollapsedFile();
-      if (browserActive()) {
+      if (panelActive()) {
         setOpenTabs((current) => current.includes("files") ? current : ["files", ...current]);
         setLastPrimaryTab("files");
       }
@@ -1310,7 +1316,7 @@ export function WorkspaceExplorer(props: {
   return (
     <aside
       ref={explorerRef}
-      class={`workspace-explorer ${isCompact() ? "is-compact" : ""} ${isSplit() ? "is-split" : ""} ${props.fullscreen ? "is-fullscreen" : ""} ${activeTab().startsWith("file:") && !browserActive() ? "has-file-open" : ""} ${splitLayout() && fileExpanded() ? "file-expanded" : ""} ${splitLayout() && fileCollapsed() ? "file-collapsed" : ""}`}
+      class={`workspace-explorer ${isCompact() ? "is-compact" : ""} ${isSplit() ? "is-split" : ""} ${props.fullscreen ? "is-fullscreen" : ""} ${activeTab().startsWith("file:") && !panelActive() ? "has-file-open" : ""} ${splitLayout() && fileExpanded() ? "file-expanded" : ""} ${splitLayout() && fileCollapsed() ? "file-collapsed" : ""}`}
       style={`--workspace-split-sidebar-width: ${sidebarWidth()}px; --workspace-compact-tree-height: ${treeHeight()}px;`}
     >
       <div class="workspace-tabs-bar workspace-primary-tabs-bar">
@@ -1332,7 +1338,7 @@ export function WorkspaceExplorer(props: {
             {(tab) => {
               const isFiles = tab === "files";
               const isChanges = tab === "changes";
-              const label = isFiles ? "Files" : isChanges ? "Changes" : "Browser";
+              const label = isFiles ? "Files" : isChanges ? "Changes" : tab === "desktop" ? "Desktop" : "Browser";
 
               return (
                 <div
@@ -1362,7 +1368,7 @@ export function WorkspaceExplorer(props: {
                       closeTab(tab, event);
                     }
                   }}
-                  title={isFiles ? "Files Explorer" : isChanges ? "Git Changes" : "Browser"}
+                  title={isFiles ? "Files Explorer" : isChanges ? "Git Changes" : label}
                 >
                   <div class="workspace-tab-icon-slot">
                     <span class="workspace-tab-icon" aria-hidden="true">
@@ -1373,6 +1379,7 @@ export function WorkspaceExplorer(props: {
                         <GitCompare size={14} />
                       </Show>
                       <Show when={tab === "browser"}><Globe size={14} /></Show>
+                      <Show when={tab === "desktop"}><Monitor size={14} /></Show>
                     </span>
                     <button
                       class="workspace-tab-close"
@@ -1472,6 +1479,13 @@ export function WorkspaceExplorer(props: {
                       <Show when={openTabs().includes("browser")}><span class="workspace-menu-pill">Open</span></Show>
                     </button>
                   </Show>
+                  <Show when={desktopMachineId()}>
+                    <button class={`workspace-plus-menu-item ${openTabs().includes("desktop") ? "is-open" : ""}`}
+                      type="button" role="menuitem" onClick={() => { openTab("desktop"); setPlusMenuOpen(false); }}>
+                      <Monitor size={15} /><span>Desktop</span>
+                      <Show when={openTabs().includes("desktop")}><span class="workspace-menu-pill">Open</span></Show>
+                    </button>
+                  </Show>
                   <div class="workspace-menu-divider" />
                   <div
                     class="workspace-plus-menu-item is-disabled"
@@ -1527,7 +1541,7 @@ export function WorkspaceExplorer(props: {
         </div>
       </div>
 
-      <Show when={fileTabs().length > 0 && !browserActive()}>
+      <Show when={fileTabs().length > 0 && !panelActive()}>
         <div class="workspace-file-tabs-bar">
           <Show when={splitLayout() && fileExpanded()}>
             <button
@@ -1697,6 +1711,11 @@ export function WorkspaceExplorer(props: {
               onOpen={openBrowser} onResume={(payload) => props.onBrowserResume?.(payload)}
               onSessionChange={props.onBrowserSessionChange}
               onHandoffChange={(pending, threadId) => props.onBrowserHandoffChange?.(pending, threadId)} />
+          </section>
+        </Show>
+        <Show when={desktopMachineId() && openTabs().includes("desktop")}>
+          <section class="workspace-desktop-panel workspace-tab-panel" role="tabpanel" aria-label="Desktop" hidden={!desktopActive()}>
+            <InstaboxDesktop machineId={desktopMachineId()} active={props.visible !== false && desktopActive()} compact={isCompact()} />
           </section>
         </Show>
         <Show when={openTabs().includes("changes")}>
@@ -1927,7 +1946,7 @@ export function WorkspaceExplorer(props: {
         </Show>
 
         <Show when={activeTab().startsWith("file:")}>
-          <section class="workspace-section workspace-file-panel workspace-tab-panel" role="tabpanel" hidden={browserActive()}>
+          <section class="workspace-section workspace-file-panel workspace-tab-panel" role="tabpanel" hidden={panelActive()}>
             <Show
               when={!fileLoadingByPath[activeFilePath()] || Boolean(activeFilePayload())}
               fallback={<div class="empty compact">Loading file...</div>}
@@ -1974,7 +1993,7 @@ export function WorkspaceExplorer(props: {
           </section>
         </Show>
 
-        <Show when={!browserActive() && !fileExpanded() && !fileCollapsed() && ((splitLayout()) || (isCompact() && activeTab().startsWith("file:") && !treeCollapsed()))}>
+        <Show when={!panelActive() && !fileExpanded() && !fileCollapsed() && ((splitLayout()) || (isCompact() && activeTab().startsWith("file:") && !treeCollapsed()))}>
           <div
             class="workspace-inner-resizer"
             onPointerDown={startInnerResize}

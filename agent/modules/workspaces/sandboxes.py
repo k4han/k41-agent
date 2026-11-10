@@ -1,7 +1,8 @@
 """High-level helpers for listing, stopping, archiving, and deleting cloud
 sandboxes used by the Settings dashboard.
 
-This module orchestrates the provider-specific backends (Daytona, Modal) and
+This module orchestrates the provider-specific backends (Daytona, Modal,
+Instabox) and
 the local ``thread_workspaces`` repository so the UI can render a unified
 view of every cloud sandbox the agent knows about.
 """
@@ -17,6 +18,7 @@ from typing import Any
 from agent.modules.workspaces.refs import WorkspaceRef, normalize_workspace_ref
 from agent.modules.workspaces.registry import (
     DAYTONA_BACKEND,
+    INSTABOX_BACKEND,
     MODAL_BACKEND,
     call_workspace_backend_loader,
     get_workspace_backend_registry,
@@ -26,6 +28,8 @@ from agent.modules.workspaces.repository import get_thread_workspace_repository
 from agent.modules.workspaces.service import _workspace_backend_uses_thread_loader
 
 logger = logging.getLogger(__name__)
+
+SANDBOX_BACKENDS = frozenset({DAYTONA_BACKEND, MODAL_BACKEND, INSTABOX_BACKEND})
 
 
 def thread_root_id(thread_id: str | None) -> str | None:
@@ -49,6 +53,8 @@ def _normalize_status(value: Any) -> str:
         return "stopped"
     if raw in {"archived", "archive"}:
         return "archived"
+    if raw in {"paused", "suspended"}:
+        return "paused"
     if raw in {"destroyed", "deleted", "removed"}:
         return "destroyed"
     if raw in {"starting"}:
@@ -81,7 +87,7 @@ def _record_to_sandbox_summary(
     if payload is None:
         return None
     backend = str(payload.get("backend") or "").strip().lower()
-    if backend not in {DAYTONA_BACKEND, MODAL_BACKEND}:
+    if backend not in SANDBOX_BACKENDS:
         return None
     sandbox_id = str(payload.get("locator") or "").strip()
     if not sandbox_id:
@@ -124,6 +130,32 @@ async def _daytona_sandboxes_from_thread_records() -> list[dict[str, Any]]:
         if summary is not None
     ]
     return summaries + await _project_runtime_summaries(DAYTONA_BACKEND)
+
+
+async def _sandboxes_from_thread_records(backend: str) -> list[dict[str, Any]]:
+    records = await get_thread_workspace_repository().list_by_backend(backend)
+    summaries = [
+        summary
+        for summary in (
+            _record_to_sandbox_summary(record) for record in records.values()
+        )
+        if summary is not None
+    ]
+    return summaries + await _project_runtime_summaries(backend)
+
+
+async def _sandboxes_from_cloud(backend: str) -> tuple[list[dict[str, Any]], bool]:
+    """Call an async inventory loader; ``None`` means the provider was unreachable."""
+    descriptor = get_workspace_backend_registry().require(backend)
+    if not descriptor.inventory_loader:
+        return [], True
+    lister = get_workspace_backend_registry().resolve_loader(backend, descriptor.inventory_loader)
+    result = lister()
+    if inspect.isawaitable(result):
+        result = await result
+    if not isinstance(result, list):
+        return [], False
+    return result, True
 
 
 async def _modal_sandboxes_from_thread_records() -> list[dict[str, Any]]:
@@ -265,6 +297,8 @@ def parse_iso_timestamp(value: Any) -> float | None:
 async def _probe_sandbox_statuses(
     backend: str,
     records: list[dict[str, Any]],
+    *,
+    final_statuses: frozenset[str] = frozenset({"stopped", "destroyed", "archived", "error"}),
 ) -> set[str]:
     """Refresh ``status``/``on_cloud`` for cloud sandbox records via live probes.
 
@@ -288,7 +322,6 @@ async def _probe_sandbox_statuses(
         backend,
         descriptor.status_probe_loader,
     )
-    final_statuses = {"stopped", "destroyed", "archived", "error"}
 
     async def _probe_one(record: dict[str, Any]) -> str | None:
         sandbox_id = str(record.get("sandbox_id") or "").strip()
@@ -333,10 +366,27 @@ async def list_sandboxes(
             returned.
     """
     normalized = str(backend or "").strip().lower()
-    if normalized not in {DAYTONA_BACKEND, MODAL_BACKEND}:
+    if normalized not in SANDBOX_BACKENDS:
         raise ValueError(f"Unsupported sandbox backend: {backend!r}")
 
-    if normalized == DAYTONA_BACKEND:
+    if normalized == INSTABOX_BACKEND:
+        thread_records = await _sandboxes_from_thread_records(normalized)
+        # Instabox machines can be restarted, so only a deleted machine is final.
+        probe_confirmed_ids = await _probe_sandbox_statuses(
+            normalized, thread_records, final_statuses=frozenset({"destroyed"})
+        )
+        if include_all:
+            cloud_records, cloud_scan_ok = await _sandboxes_from_cloud(normalized)
+        else:
+            cloud_records, cloud_scan_ok = [], True
+        sandboxes = _merge_sandbox_lists(
+            thread_records,
+            cloud_records,
+            cloud_scanned=include_all,
+            cloud_scan_ok=cloud_scan_ok,
+            probe_confirmed_ids=probe_confirmed_ids,
+        )
+    elif normalized == DAYTONA_BACKEND:
         thread_records = await _daytona_sandboxes_from_thread_records()
         if include_all:
             cloud_records = await asyncio.to_thread(_daytona_sandboxes_from_cloud)
@@ -394,7 +444,7 @@ async def list_sandboxes(
 async def get_sandbox(backend: str, sandbox_id: str) -> dict[str, Any] | None:
     """Return a single sandbox summary by id, or ``None`` if not found."""
     normalized = str(backend or "").strip().lower()
-    if normalized not in {DAYTONA_BACKEND, MODAL_BACKEND}:
+    if normalized not in SANDBOX_BACKENDS:
         raise ValueError(f"Unsupported sandbox backend: {backend!r}")
     normalized_id = str(sandbox_id or "").strip()
     if not normalized_id:
@@ -536,7 +586,9 @@ async def _detach_sandbox_from_threads(backend: str, sandbox_id: str) -> list[st
 
 __all__ = [
     "DAYTONA_BACKEND",
+    "INSTABOX_BACKEND",
     "MODAL_BACKEND",
+    "SANDBOX_BACKENDS",
     "archive_sandbox",
     "delete_sandbox",
     "get_sandbox",

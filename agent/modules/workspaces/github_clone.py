@@ -176,6 +176,26 @@ async def attach_github_repository_to_daytona_workspace(
     return _with_github_metadata(workspace, selection, repository_path=relative_path)
 
 
+async def attach_github_repository_to_sandbox_workspace(
+    workspace: WorkspaceRef,
+    selection: GitHubRepositorySelection,
+    *,
+    token: str | None = None,
+) -> WorkspaceRef:
+    """Clone a GitHub repository inside any cloud sandbox that supports cloning."""
+    from agent.modules.workspaces.service import get_workspace_repository_cloner
+
+    owner, repo = _split_full_name(selection.full_name)
+    cloner = await get_workspace_repository_cloner(workspace)
+    relative_path = await cloner.clone_repository(
+        owner=owner,
+        repo=repo,
+        default_branch=selection.default_branch,
+        token=(token or selection.token or "").strip() or None,
+    )
+    return _with_github_metadata(workspace, selection, repository_path=relative_path)
+
+
 async def attach_github_repository_to_modal_workspace(
     workspace: WorkspaceRef,
     selection: GitHubRepositorySelection,
@@ -207,7 +227,7 @@ def _with_github_metadata(
     metadata.update(
         _github_workspace_metadata(selection, repository_path=repository_path)
     )
-    if workspace.backend in {"daytona", "modal"}:
+    if workspace.backend != "local":
         metadata["root"] = _join_sandbox_repository_root(
             metadata.get("root"),
             repository_path,
@@ -314,6 +334,15 @@ async def attach_github_repository_to_workspace(
         )
     if backend == "modal":
         return await attach_github_repository_to_modal_workspace(
+            workspace,
+            selection,
+            token=token or None,
+        )
+    from agent.modules.workspaces.registry import get_workspace_backend_registry
+
+    descriptor = get_workspace_backend_registry().descriptor(backend)
+    if descriptor is not None and descriptor.supports_repository_clone:
+        return await attach_github_repository_to_sandbox_workspace(
             workspace,
             selection,
             token=token or None,

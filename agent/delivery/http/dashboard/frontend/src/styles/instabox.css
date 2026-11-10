@@ -1,0 +1,41 @@
+.instabox-desktop { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; color: var(--fg); background: var(--surface); }
+.instabox-desktop-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.instabox-desktop-status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 12px; }
+.instabox-desktop-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.instabox-desktop-error { flex: 0 0 auto; margin: 8px 10px 0; color: var(--danger, #dc2626); font-size: 12px; overflow-wrap: anywhere; }
+.instabox-desktop-screen { position: relative; flex: 1 1 0; min-width: 0; min-height: 240px; overflow: hidden; margin: 6px; border: 1px solid var(--border); border-radius: 6px; background: #111; }
+.instabox-desktop-screen.is-controlling { border-color: var(--info); box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 30%, transparent); }
+.instabox-desktop.is-compact .instabox-desktop-screen { min-height: 180px; }
+.workspace-desktop-panel { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+
+.instabox-machine { display: grid; gap: 16px; }
+.instabox-machine-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.instabox-machine-title { display: grid; gap: 4px; min-width: 0; }
+.instabox-machine-title h2 { margin: 0; font-size: 1.05rem; overflow-wrap: anywhere; }
+.instabox-machine-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; color: var(--fg-muted); font-size: 12px; }
+.instabox-machine-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.instabox-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--border); }
+.instabox-tab { padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--fg-muted); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.instabox-tab[aria-selected="true"] { border-bottom-color: var(--fg); color: var(--fg); font-weight: 600; }
+.instabox-panel { display: grid; gap: 12px; min-width: 0; }
+.instabox-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.instabox-form label { display: grid; gap: 4px; color: var(--fg-muted); font-size: 12px; }
+.instabox-form input, .instabox-form select, .instabox-confirm input { min-width: 0; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--fg); font: inherit; font-size: 13px; }
+.instabox-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius, 8px); }
+.instabox-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.instabox-table th, .instabox-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+.instabox-table th { color: var(--fg-muted); font-size: 12px; font-weight: 500; }
+.instabox-table tr:last-child td { border-bottom: 0; }
+.instabox-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.instabox-hint { margin: 0; color: var(--fg-muted); font-size: 12px; }
+.instabox-confirm { display: grid; gap: 8px; }
+.instabox-confirm code { overflow-wrap: anywhere; }
+.instabox-desktop-page { display: flex; height: min(70vh, 720px); min-height: 320px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius, 8px); }
+.instabox-op-status { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); font-size: 11px; }
+.instabox-op-status[data-status="succeeded"] { color: #15803d; }
+.instabox-op-status[data-status="failed"] { color: #dc2626; }
+
+@media (max-width: 640px) {
+  .instabox-desktop-page { height: 60vh; }
+  .instabox-table th:nth-child(n+4), .instabox-table td:nth-child(n+4):not(:last-child) { display: none; }
+}

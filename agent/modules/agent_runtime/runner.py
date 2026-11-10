@@ -388,7 +388,7 @@ async def _ingest_attachments_to_sandbox(
         from agent.modules.workspaces import resolve_workspace_ref
 
         ref = resolve_workspace_ref(workspace)
-        if ref.backend not in {"daytona", "modal"}:
+        if ref.backend == "local":
             from agent.modules.projects import get_project_workspace_service
             projects = get_project_workspace_service()
             binding = await projects.find_binding(ref, thread_id=thread_id)

@@ -38,7 +38,7 @@ export type ChatPayload = {
   workspace?: WorkspaceRef | WorkspaceBinding;
   project_id?: number;
   project_workspace_id?: number;
-  execution_backend?: "local" | "daytona" | "modal";
+  execution_backend?: "local" | "daytona" | "modal" | "instabox";
   provider?: string;
   model?: string;
   reasoning_effort?: ReasoningEffort;
