@@ -181,6 +181,7 @@ async def execute_scheduled_task(
     browser_owner_id: str | None = None,
 ):
     """Execute a scheduled task in its own conversation and notify its owner."""
+    from agent.modules.browser import release_thread_browser
     from agent.modules.scheduler.history import RUN_STATUS_COMPLETED, RUN_STATUS_FAILED
 
     run_id = str(uuid.uuid4())
@@ -222,14 +223,17 @@ async def execute_scheduled_task(
         if workspace is None:
             workspace = await create_no_workspace(background_thread_id)
         await remember_thread_workspace_ref(background_thread_id, workspace)
-        response_text = await run_agent_full(
-            user_input=task,
-            thread_id=background_thread_id,
-            agent_name=AGENT_NAME,
-            workspace=workspace,
-            browser_owner_id=await _resolve_browser_owner(platform, browser_owner_id),
-            usage_context={"platform": BACKGROUND_THREAD_PREFIX, "user_id": user_id, "channel_id": run_id},
-        )
+        try:
+            response_text = await run_agent_full(
+                user_input=task,
+                thread_id=background_thread_id,
+                agent_name=AGENT_NAME,
+                workspace=workspace,
+                browser_owner_id=await _resolve_browser_owner(platform, browser_owner_id),
+                usage_context={"platform": BACKGROUND_THREAD_PREFIX, "user_id": user_id, "channel_id": run_id},
+            )
+        finally:
+            await release_thread_browser(background_thread_id)
         agent_finished = True
         if recorded:
             await _record_run_finish(run_id, status=RUN_STATUS_COMPLETED, response=response_text)

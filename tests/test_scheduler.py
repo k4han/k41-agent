@@ -468,6 +468,29 @@ async def test_scheduled_run_uses_the_stored_browser_owner(monkeypatch, tmp_path
 
 
 @pytest.mark.asyncio
+async def test_scheduled_run_without_browser_keeps_service_uninitialized(isolated_container, monkeypatch, tmp_path):
+    assert isolated_container._browser_service is None
+    await _run_scheduled_task(monkeypatch, tmp_path, "telegram")
+    assert isolated_container._browser_service is None
+
+
+@pytest.mark.asyncio
+async def test_browser_cleanup_failure_does_not_replace_scheduled_result(isolated_container, monkeypatch, tmp_path, caplog):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from agent.modules.scheduler import service as scheduler
+
+    release = AsyncMock(side_effect=RuntimeError("cleanup failed"))
+    isolated_container._browser_service = SimpleNamespace(release_thread=release)
+    run = await _run_scheduled_task(monkeypatch, tmp_path, "telegram")
+    release.assert_awaited_once_with(run["thread_id"])
+    scheduler._send_notification.assert_awaited_once_with(
+        "telegram", "123", "**Scheduled task:** open a page\n\ndone", mode="markdown")
+    assert "Browser cleanup failed for finished thread" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_legacy_dashboard_job_falls_back_to_the_active_admin(monkeypatch, tmp_path):
     import agent.modules.admin_auth as admin_auth_module
     from types import SimpleNamespace

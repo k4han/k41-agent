@@ -125,13 +125,18 @@ and releases only its own tabs when it finishes. Closing one conversation leaves
 the others open. A fatal browser failure or operation timeout ends all sessions
 sharing that physical browser.
 
+Scheduled runs release their browser tabs as soon as execution ends, including
+when a run fails or is cancelled. Saved logins and screenshots remain available
+after the browser closes.
+
 Any agent with Browser tools in a conversation using a profile can act with its
 sign-ins, and a malicious page could try to direct that agent. Keep important
 accounts in profiles that only the projects needing them can use.
 
-Profiles belong to the authenticated dashboard account. Use a dashboard
-conversation for browser tasks; channel and scheduler runs do not supply that
-account identity.
+Profiles belong to the authenticated dashboard account. Scheduled tasks created
+by a dashboard admin use that account's browser profiles. Channel runs without
+a dashboard account cannot use browser tools. Scheduled runs cannot pause for
+a human browser handoff; they report any required interaction in their result.
 
 ## Sign in to sites that reject automated browsers
 

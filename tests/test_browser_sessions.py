@@ -396,6 +396,81 @@ async def test_failed_release_does_not_fail_delegation(browser, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["completed", "failed", "cancelled"])
+@pytest.mark.parametrize("shared", [False, True])
+async def test_scheduled_run_releases_browser_before_reporting(browser, monkeypatch, outcome, shared):
+    from unittest.mock import AsyncMock
+
+    import agent.modules.conversations as conversations
+    import agent.modules.workspaces as workspaces
+    from agent.modules.scheduler import service as scheduler
+
+    other = await browser.ensure("user-chat", "admin:1") if shared else None
+    opened = []
+    artifacts = []
+    started = asyncio.Event()
+
+    async def run(*, thread_id, browser_owner_id, **kwargs):
+        current = await browser.ensure(thread_id, browser_owner_id)
+        opened.append(current)
+        result = await browser.execute(thread_id, browser_owner_id, "capture", "browser_screenshot", {})
+        artifacts.append(result["artifact"])
+        await browser.issue_ticket(thread_id, browser_owner_id)
+        started.set()
+        if outcome == "failed":
+            raise RuntimeError("scheduled execution failed")
+        if outcome == "cancelled":
+            await asyncio.Event().wait()
+        return "done"
+
+    async def assert_released(*args, **kwargs):
+        assert opened[0].closed and opened[0].driver.closed
+        assert opened[0].thread_id not in browser.sessions
+
+    finish = AsyncMock(side_effect=assert_released)
+    notify = AsyncMock(side_effect=assert_released)
+    workspace = workspaces.WorkspaceRef(locator=str(browser.root.parent), metadata={"no_workspace": True})
+    monkeypatch.setattr(scheduler, "run_agent_full", run)
+    monkeypatch.setattr(scheduler, "_record_run_start", AsyncMock(return_value=True))
+    monkeypatch.setattr(scheduler, "_record_run_finish", finish)
+    monkeypatch.setattr(scheduler, "_send_notification", notify)
+    monkeypatch.setattr(scheduler, "describe_executor_model", lambda: {"provider": "test", "model": "test"})
+    monkeypatch.setattr(conversations, "upsert_conversation_thread", AsyncMock())
+    monkeypatch.setattr(workspaces, "create_no_workspace", AsyncMock(return_value=workspace))
+    monkeypatch.setattr(workspaces, "remember_thread_workspace_ref", AsyncMock())
+
+    execution = asyncio.create_task(scheduler.execute_scheduled_task(
+        "api", "1", "open a page", browser_owner_id="admin:1"))
+    if outcome == "cancelled":
+        await asyncio.wait_for(started.wait(), 5)
+        execution.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await execution
+        finish.assert_not_awaited()
+        notify.assert_not_awaited()
+    else:
+        await asyncio.wait_for(execution, 5)
+        finish.assert_awaited_once()
+        assert finish.await_args.kwargs["status"] == outcome
+        if outcome == "completed":
+            assert finish.await_args.kwargs["response"] == "done"
+        else:
+            assert finish.await_args.kwargs["error"] == "scheduled execution failed"
+        notify.assert_awaited_once()
+
+    current = opened[0]
+    assert current.closed and current.driver.closed
+    assert not (await browser.status(current.thread_id, "admin:1"))["open"]
+    assert not browser.tickets
+    assert await browser.repository.artifact("admin:1", artifacts[0]["artifact_id"])
+    assert (browser.root / "profiles" / current.profile_key).is_dir()
+    assert current.driver.root.closed is (not shared)
+    if other:
+        assert not other.driver.closed
+        assert (await browser.status(other.thread_id, "admin:1"))["open"]
+
+
+@pytest.mark.asyncio
 async def test_sub_agent_shares_parent_browser_with_its_own_tabs(browser):
     profile = await browser.create_profile("admin:1", "Work")
     await browser.select_profile("chat", "admin:1", profile["profile_id"])

@@ -399,15 +399,21 @@ class BrowserService:
         async with self.thread_scope(thread_id):
             await self._close(thread_id, owner_id, allow_human=allow_human)
 
-    async def release_inherited_profile(self, thread_id):
-        """Release a finished helper's tabs while preserving its parent's session."""
+    async def release_thread(self, thread_id):
+        """Release a finished run's tabs without creating a session or binding."""
         thread_id = self.canonical(thread_id)
         if thread_id not in self.sessions:
             return
         async with self.thread_scope(thread_id):
             current = self.sessions.get(thread_id)
-            if current and ":sub:" in thread_id:
+            if current:
                 await self._close_session(current)
+
+    async def release_inherited_profile(self, thread_id):
+        """Release a finished helper's tabs while preserving its parent's session."""
+        thread_id = self.canonical(thread_id)
+        if ":sub:" in thread_id:
+            await self.release_thread(thread_id)
 
     async def _close(self, thread_id, owner_id, *, allow_human=True):
         await self.repository.bind(thread_id, owner_id)

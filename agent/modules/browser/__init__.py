@@ -28,6 +28,20 @@ async def delete_thread_browsers(thread_id: str) -> None:
         await container.browser_service.delete_thread(thread_id)
 
 
+async def release_thread_browser(thread_id: str) -> None:
+    """Release a finished run's browser without initializing an unused service."""
+    from agent.bootstrap.container import get_active_container
+
+    container = get_active_container()
+    service = container._browser_service if container is not None else None
+    if service is None:
+        return
+    try:
+        await service.release_thread(thread_id)
+    except Exception:
+        logger.warning("Browser cleanup failed for finished thread %s.", thread_id, exc_info=True)
+
+
 async def release_delegated_browser(thread_id: str) -> None:
     """Release a finished sub-agent's browser tabs; delegation succeeds regardless."""
     from agent.bootstrap.container import get_active_container
@@ -53,4 +67,4 @@ async def abandon_thread_handoffs(thread_id: str, *, expired_only: bool = False)
 
 __all__ = ["BROWSER_HANDOFF_WAIT_KEY", "BrowserAccessDenied", "BrowserAccountProfile", "BrowserArtifact", "BrowserBinding", "BrowserError", "BrowserHandoffResume",
            "BrowserInvocation", "BrowserProfile", "BrowserProjectProfile", "BrowserService", "CDPViewer", "StagehandDriver",
-           "abandon_thread_handoffs", "get_browser_service", "delete_thread_browsers", "migrate_browser_tables", "release_delegated_browser"]
+           "abandon_thread_handoffs", "get_browser_service", "delete_thread_browsers", "migrate_browser_tables", "release_delegated_browser", "release_thread_browser"]
