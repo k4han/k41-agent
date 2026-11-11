@@ -7,6 +7,7 @@ import { computeFloatingPosition, fixedContainingBlockOrigin, type FloatingPlace
 export type SelectControlOption = {
   value: string;
   label: string;
+  shortLabel?: string;
   disabled?: boolean;
   title?: string;
   icon?: JSX.Element;
@@ -186,7 +187,14 @@ export function SelectControl(props: {
             {selectedOption()?.icon}
           </span>
         </Show>
-        <span class="select-control-value">{selectedLabel()}</span>
+        <span class={`select-control-value ${selectedOption()?.shortLabel ? "select-control-value--full" : ""}`}>
+          {selectedLabel()}
+        </span>
+        <Show when={selectedOption()?.shortLabel}>
+          <span class="select-control-value select-control-value--short">
+            {selectedOption()?.shortLabel}
+          </span>
+        </Show>
         <ChevronDown class="select-control-caret" size={14} />
       </button>
       <Show when={open()}>

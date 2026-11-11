@@ -540,11 +540,135 @@
 
   .chat-composer .agent-model-badge {
     padding-inline: 4px;
+    gap: 3px;
+    min-width: 40px;
+  }
+
+  .chat-composer .agent-model-badge-icon {
+    display: grid !important;
+  }
+
+  .chat-composer .agent-model-badge-effort {
+    display: none !important;
+  }
+
+  .chat-composer .agent-model-badge-caret {
+    display: none !important;
+  }
+
+  .chat-composer .agent-model-badge-agent {
+    max-width: 48px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chat-composer .agent-model-badge-model {
+    max-width: 58px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .chat-composer .permission-mode-picker .select-control-trigger {
-    padding-inline: 4px 18px;
-    max-width: 130px;
+    padding-inline: 20px 4px;
+    max-width: 72px;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-icon {
+    left: 4px;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-caret {
+    display: none !important;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-value--full {
+    display: none !important;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-value--short {
+    display: inline-block !important;
+    max-width: 42px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chat-composer .acp-session-option .select-control-trigger {
+    padding-inline: 20px 4px;
+    max-width: 72px;
+  }
+
+  .chat-composer .acp-session-option .select-control-caret {
+    display: none !important;
+  }
+
+  .chat-composer .acp-session-option .select-control-value {
+    max-width: 48px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@container chat-composer (width < 380px) {
+  .chat-composer-tier-selectors {
+    gap: 2px;
+  }
+
+  .chat-composer-tier-selectors > .agent-model-picker-wrapper {
+    gap: 2px;
+  }
+
+  .chat-composer .agent-model-badge {
+    padding-inline: 4px;
+    min-width: 38px;
+    justify-content: center;
+  }
+
+  .chat-composer .agent-model-badge-agent,
+  .chat-composer .agent-model-badge-model {
+    max-width: 0 !important;
+    width: 0 !important;
+    opacity: 0;
+    margin: 0;
+    padding: 0;
+    pointer-events: none;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-trigger {
+    padding: 0 !important;
+    min-width: 32px;
+    width: 32px;
+    justify-content: center;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-icon {
+    position: static !important;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-value {
+    display: none !important;
+  }
+
+  .chat-composer .acp-session-option .select-control-trigger {
+    padding: 0 !important;
+    min-width: 32px;
+    width: 32px;
+    justify-content: center;
+  }
+
+  .chat-composer .acp-session-option .select-control-icon {
+    position: static !important;
+  }
+
+  .chat-composer .acp-session-option .select-control-caret {
+    display: none !important;
+  }
+
+  .chat-composer .acp-session-option .select-control-value {
+    display: none !important;
   }
 }
 

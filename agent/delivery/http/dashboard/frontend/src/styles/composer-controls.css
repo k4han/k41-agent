@@ -1197,19 +1197,62 @@
     font-size: var(--font-size-chat);
   }
 
+  .agent-model-badge-icon {
+    display: grid !important;
+  }
+
+  .agent-model-badge-effort {
+    display: none !important;
+  }
+
+  .agent-model-badge-caret {
+    display: none !important;
+  }
+
   .agent-model-badge-agent {
     flex: 0 1 auto;
-    max-width: 40%;
+    max-width: 46px;
     min-width: 0;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .agent-model-badge-model {
-    flex: 1 1 0;
+    flex: 0 1 auto;
+    max-width: 56px;
     min-width: 0;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .agent-model-badge-icon {
-    display: none;
+  .chat-composer .permission-mode-picker .select-control-trigger {
+    padding-inline: 20px 4px;
+    max-width: 72px;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-icon {
+    left: 4px;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-caret {
+    display: none !important;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-value--full {
+    display: none !important;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-value--short {
+    display: inline-block !important;
+    font-size: 11px;
+    max-width: 42px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
@@ -1218,6 +1261,56 @@
     min-width: 76px;
     max-width: 100px;
     padding-inline: 4px;
+  }
+
+  .agent-model-badge {
+    padding-inline: 4px;
+    min-width: 38px;
+    justify-content: center;
+  }
+
+  .agent-model-badge-agent,
+  .agent-model-badge-model {
+    max-width: 0 !important;
+    width: 0 !important;
+    opacity: 0;
+    margin: 0;
+    padding: 0;
+    pointer-events: none;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-trigger {
+    padding: 0 !important;
+    min-width: 32px;
+    width: 32px;
+    justify-content: center;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-icon {
+    position: static !important;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-value {
+    display: none !important;
+  }
+
+  .chat-composer .acp-session-option .select-control-trigger {
+    padding: 0 !important;
+    min-width: 32px;
+    width: 32px;
+    justify-content: center;
+  }
+
+  .chat-composer .acp-session-option .select-control-icon {
+    position: static !important;
+  }
+
+  .chat-composer .acp-session-option .select-control-caret {
+    display: none !important;
+  }
+
+  .chat-composer .acp-session-option .select-control-value {
+    display: none !important;
   }
 }
 
