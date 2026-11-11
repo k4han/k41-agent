@@ -2,7 +2,7 @@ import { ChevronDown } from "lucide-solid";
 import { createEffect, createMemo, createSelector, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
-import { computeFloatingPosition, fixedContainingBlockOrigin, floatingMenuStyle } from "@/lib/floating";
+import { computeFloatingPosition, fixedContainingBlockOrigin, type FloatingPlacement } from "@/lib/floating";
 
 export type SelectControlOption = {
   value: string;
@@ -27,7 +27,20 @@ export function SelectControl(props: {
   portalMount?: HTMLElement;
 }) {
   const [open, setOpen] = createSignal(false);
-  const [menuPos, setMenuPos] = createSignal({ top: 0, left: 0, width: 0, maxHeight: 260 });
+  const [menuPos, setMenuPos] = createSignal<{
+    top?: number;
+    bottom?: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+    placement: FloatingPlacement;
+  }>({
+    top: 0,
+    left: 0,
+    width: 0,
+    maxHeight: 260,
+    placement: "bottom",
+  });
   let controlRef: HTMLDivElement | undefined;
   let triggerRef: HTMLButtonElement | undefined;
   let menuRef: HTMLDivElement | undefined;
@@ -57,12 +70,26 @@ export function SelectControl(props: {
     // the centered project popover), position: fixed coordinates resolve
     // against that ancestor instead of the viewport, so subtract its origin.
     const origin = fixedContainingBlockOrigin(props.portalMount);
-    setMenuPos({
-      top: rect.top - origin.top,
-      left: rect.left - origin.left,
-      width: rect.width,
-      maxHeight: rect.maxHeight,
-    });
+    if (rect.placement === "top" && rect.bottom !== undefined) {
+      const bottom = origin.height !== undefined
+        ? origin.height - (triggerRef.getBoundingClientRect().top - origin.top) + 6
+        : rect.bottom;
+      setMenuPos({
+        bottom,
+        left: rect.left - origin.left,
+        width: rect.width,
+        maxHeight: rect.maxHeight,
+        placement: "top",
+      });
+    } else {
+      setMenuPos({
+        top: rect.top - origin.top,
+        left: rect.left - origin.left,
+        width: rect.width,
+        maxHeight: rect.maxHeight,
+        placement: "bottom",
+      });
+    }
   };
 
   createEffect(() => {
@@ -178,7 +205,8 @@ export function SelectControl(props: {
               }
             }}
             style={{
-              top: `${menuPos().top}px`,
+              top: menuPos().placement === "top" ? "auto" : `${menuPos().top}px`,
+              bottom: menuPos().placement === "top" ? `${menuPos().bottom}px` : "auto",
               left: `${menuPos().left}px`,
               width: `${menuPos().width}px`,
               "max-height": `${menuPos().maxHeight}px`,

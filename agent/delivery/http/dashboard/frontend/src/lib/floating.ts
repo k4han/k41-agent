@@ -6,6 +6,7 @@ export type FloatingRect = {
   width: number;
   maxHeight: number;
   placement: FloatingPlacement;
+  bottom?: number;
 };
 
 const GAP = 6;
@@ -39,8 +40,10 @@ export function computeFloatingPosition(
 
   let maxHeight = defaultMax;
   let top = rect.bottom + GAP;
+  let bottom: number | undefined;
   if (placement === "top") {
     maxHeight = Math.min(defaultMax, Math.max(MIN_MENU_HEIGHT, spaceAbove - GAP));
+    bottom = viewportHeight - rect.top + GAP;
     top = rect.top - maxHeight - GAP;
     if (top < VIEWPORT_MARGIN) {
       top = VIEWPORT_MARGIN;
@@ -63,12 +66,22 @@ export function computeFloatingPosition(
     left = VIEWPORT_MARGIN;
   }
 
-  return { top, left, width, maxHeight, placement };
+  return { top, left, width, maxHeight, placement, bottom };
 }
 
 export function floatingMenuStyle(rect: FloatingRect): Record<string, string> {
+  if (rect.placement === "top" && rect.bottom !== undefined) {
+    return {
+      top: "auto",
+      bottom: `${Math.round(rect.bottom)}px`,
+      left: `${Math.round(rect.left)}px`,
+      width: `${Math.round(rect.width)}px`,
+      "max-height": `${Math.round(rect.maxHeight)}px`,
+    };
+  }
   return {
     top: `${Math.round(rect.top)}px`,
+    bottom: "auto",
     left: `${Math.round(rect.left)}px`,
     width: `${Math.round(rect.width)}px`,
     "max-height": `${Math.round(rect.maxHeight)}px`,
@@ -93,16 +106,20 @@ function establishesFixedContainingBlock(style: CSSStyleDeclaration): boolean {
  * the viewport. Viewport coordinates must therefore be converted into that
  * ancestor's coordinate space, otherwise the element renders displaced.
  */
-export function fixedContainingBlockOrigin(element?: HTMLElement | null): { left: number; top: number } {
+export function fixedContainingBlockOrigin(element?: HTMLElement | null): { left: number; top: number; height?: number } {
   let node: HTMLElement | null = element ?? null;
   while (node && node !== document.documentElement) {
     if (establishesFixedContainingBlock(getComputedStyle(node))) {
       const rect = node.getBoundingClientRect();
       // clientLeft/clientTop convert from border box to the padding box,
       // which is the actual containing block for fixed descendants.
-      return { left: rect.left + node.clientLeft, top: rect.top + node.clientTop };
+      return {
+        left: rect.left + node.clientLeft,
+        top: rect.top + node.clientTop,
+        height: node.clientHeight,
+      };
     }
     node = node.parentElement;
   }
-  return { left: 0, top: 0 };
+  return { left: 0, top: 0, height: undefined };
 }
