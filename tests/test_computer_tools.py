@@ -100,7 +100,7 @@ def tools(computer, tmp_path, monkeypatch):
     """The tool module aimed at the fake desktop, with a local main workspace and permissive rules."""
     from agent.modules.tools.builtin import computer as module
     from agent.modules.tools.coding.models import InvocationContext
-    from agent.modules.tools.coding.permissions import Permissions
+    from agent.modules.tools.permissions import Permissions
     from agent.modules.tools.coding.storage import OutputStore
     from agent.modules.tools.runtime.targets import ExecutionTarget
 
@@ -387,7 +387,7 @@ async def test_open_url_rules_match_the_url(tools, computer):
     assert computer.steps[-1].url == "https://github.com/k41"
     with pytest.raises(ToolError) as asked:
         await tools._computer_action(runtime(tools.workspace), [{"action": "open_url", "url": "https://evil.test/"}])
-    assert asked.value.code == ToolErrorCode.PERMISSION_DENIED
+    assert asked.value.code == ToolErrorCode.APPROVAL_UNAVAILABLE
 
 
 @pytest.mark.asyncio
@@ -408,7 +408,7 @@ def test_conversation_grants_ignore_coordinates(tmp_path, monkeypatch):
     import langgraph.types
 
     from agent.modules.tools.coding.models import InvocationContext
-    from agent.modules.tools.coding.permissions import Permissions
+    from agent.modules.tools.permissions import Permissions
     from agent.modules.tools.coding.storage import OutputStore
 
     asked = []

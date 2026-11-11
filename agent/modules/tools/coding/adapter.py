@@ -47,6 +47,8 @@ def invocation_context(runtime: Any) -> InvocationContext:
     from agent.modules.agents import get_catalog_service
     from agent.shared.config.service import get_config_service
 
+    from agent.modules.tools.permissions.modes import resolve_mode
+
     raw = getattr(runtime, "context", None)
     workspace = get_workspace(runtime)
     agent_name = get_context_value(raw, "agent_name", "default")
@@ -72,6 +74,7 @@ def invocation_context(runtime: Any) -> InvocationContext:
         message_id=str(configurable.get("coding_message_id", "")),
         tool_call_id=str(getattr(runtime, "tool_call_id", "") or ""),
         approval_supported=bool(get_context_value(raw, "approval_supported", configurable.get("approval_supported", False))),
+        permission_mode=resolve_mode(get_context_value(raw, "permission_mode", None), agent, get_config_service()),
         permission_rules=tuple(PermissionRule.model_validate(rule) for rule in rules),
         skill_roots=skill_roots, skill_environment=skill_environment,
         skill_cache_root=str(packages.cache_root) if workspace.backend == "local" else "")
@@ -247,6 +250,10 @@ def make_coding_tool(name: str, *, retained_only: bool = False, targeted: bool =
     tool = CodingStructuredTool.from_function(name=name, description=description, coroutine=invoke,
                                        args_schema=targeted_schema(name) if targeted else SCHEMAS[name],
                                        infer_schema=False)
+    from agent.modules.tools.permissions.risk import RiskLevel
+    tool.metadata = {**(tool.metadata or {}), "permission_self_authorizing": True,
+                     "permission_may_interrupt": False,
+                     "permission_risk": RiskLevel.MUTATING if name in {"bash", "edit", "write", "stop_process", "write_process_input"} else RiskLevel.SAFE}
     object.__setattr__(tool, "coding_definition", definition)
     object.__setattr__(tool, "coding_targeted", targeted)
     return tool

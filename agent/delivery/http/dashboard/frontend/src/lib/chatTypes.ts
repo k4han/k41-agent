@@ -1,3 +1,4 @@
+import type { PermissionMode } from "@/lib/permissionMode";
 import type { TranscriptAttachment } from "@/components/Transcript";
 import type {
   BackgroundTask,
@@ -42,6 +43,7 @@ export type ChatPayload = {
   provider?: string;
   model?: string;
   reasoning_effort?: ReasoningEffort;
+  permission_mode?: PermissionMode;
   acp_config_options?: Record<string, string>;
   thread_id?: string;
   new_thread?: boolean;

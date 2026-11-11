@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup, SoupStrainer
 from langchain_core.tools import StructuredTool
 from markdownify import markdownify as md
 
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.builtin.web.config import normalize_fetch_config
 from agent.modules.tools.domain import (
@@ -397,7 +398,7 @@ def _build_web_fetch_tool(config: dict[str, ToolConfigValue]) -> StructuredTool:
     )
 
 
-web_fetch = register_tool(
+web_fetch = register_tool(risk=RiskLevel.SAFE, may_interrupt=False,
     config_normalizer=normalize_fetch_config,
     category=ToolCategory.WEB,
     capabilities=[ToolCapability.NETWORK],

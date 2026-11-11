@@ -2,6 +2,7 @@ import { createSignal, For, Show } from "solid-js";
 import { RotateCcw } from "lucide-solid";
 import { useLocation, useNavigate } from "@solidjs/router";
 
+import { PermissionModePicker } from "@/components/PermissionModePicker";
 import { ModelPicker } from "@/components/ModelPicker";
 import { isAcpCard } from "@/lib/acp";
 import type { AgentMcpInstall, AgentsPayload, ToolConfigField, ToolConfigSchema } from "@/types";
@@ -165,14 +166,14 @@ export function AgentToolsTab(props: {
 
   return (
     <div class="agent-config-tools">
-      <Show when={isAcpCard(props.form)}>
-        <p class="hint">
-          The agent keeps its own tools and can also use the ones selected here. They run with K41's credentials, and each call goes through this card's tool approvals. Permission rules set to Ask are refused, because a tool cannot pause for approval here. Use Allow or Deny for these tools.
-        </p>
-      </Show>
       <fieldset disabled={props.readOnly}>
-        <legend>Tool permissions</legend>
-        <p>Rules are evaluated in order; the last match wins. Inherit uses global rules. An empty override uses built-in defaults.</p>
+        <legend>Permission mode</legend>
+        <PermissionModePicker value={props.form.permission_mode} disabled={props.readOnly}
+          acp={isAcpCard(props.form)} onChange={(value) => props.onUpdate("permission_mode", value ?? null)} />
+      </fieldset>
+      <fieldset disabled={props.readOnly}>
+        <legend>Permission exceptions</legend>
+        <p>Deny always wins. Otherwise the last matching rule applies. Full access ignores Ask exceptions. Inherit uses global rules; an empty override uses the mode defaults.</p>
         <label><input type="checkbox" checked={props.form.tool_permissions !== null}
           onChange={(event) => props.onUpdate("tool_permissions", event.currentTarget.checked ? [] : null)} /> Override global permissions</label>
         <For each={props.form.tool_permissions || []}>{(rule, index) => {

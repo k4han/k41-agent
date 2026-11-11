@@ -48,7 +48,8 @@ class TurnRequest:
     blocks: list[dict[str, Any]]
     session_id: str = ""
     session_cwd: str = ""
-    auto_allow: bool = False
+    permission_context: Any = None
+    native_grants: frozenset[str] = frozenset()
     can_interrupt: bool = False
     config_options: dict[str, str] | None = None
     system_prompt: Callable[[], Awaitable[str]] | None = None
@@ -214,7 +215,8 @@ class AcpService:
                 session_id=session_id,
                 agent_id=request.agent_id,
                 client=client,
-                auto_allow=request.auto_allow,
+                permission_context=request.permission_context,
+                native_grants=request.native_grants,
                 can_interrupt=request.can_interrupt,
                 on_done=self._on_turn_done,
                 tools=tools,
@@ -308,8 +310,6 @@ class AcpService:
         if previous is not None:
             self._tool_bridge.revoke(previous)
         if tools is not None:
-            if previous is not None:
-                tools.inherit_grants(previous)
             self._session_tools[session_id] = tools
 
     def _forget_session(self, session_id: str) -> None:

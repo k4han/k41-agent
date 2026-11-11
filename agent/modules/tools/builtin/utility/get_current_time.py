@@ -4,13 +4,14 @@ from datetime import datetime
 
 from langchain_core.tools import tool
 
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCategory
 from agent.modules.tools.middleware import apply_default_middleware
 from agent.shared.timezone import resolve_display_timezone
 
 
-@register_tool(category=ToolCategory.UTILITY, tags=["time"])
+@register_tool(risk=RiskLevel.SAFE, may_interrupt=False, category=ToolCategory.UTILITY, tags=["time"])
 @tool
 def get_current_time() -> str:
     """Return current time with configured timezone."""

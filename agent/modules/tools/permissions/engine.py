@@ -12,56 +12,29 @@ from agent.modules.tools.coding.models import CodingError, InvocationContext, Pe
 from agent.modules.tools.coding.paths import PathPermissions
 from agent.modules.tools.coding.storage import OutputStore, atomic_json, digest
 
+from .risk import ALWAYS_CONFIRM, RiskLevel, classify, decide
+
 logger = logging.getLogger(__name__)
 
-# Destructive actions ask by default; rules may still allow or deny them.
-ASK_BY_DEFAULT_ACTIONS = frozenset({
-    "external_directory",
-    "instabox_machine_create", "instabox_machine_fork", "instabox_machine_delete",
-    "instabox_snapshot_delete",
-    # Checked in addition to the tool's own action when a port becomes public.
-    "instabox_port_public",
-    # Untrusted pages can carry instructions aimed at the agent.
-    "computer_open_url",
-    # The focused window may not be the one the agent expects.
-    "computer_type_secret",
-})
-# Always confirmed by the user, even when a rule allows them.
-APPROVAL_REQUIRED_ACTIONS = frozenset({"instabox_snapshot_restore"})
 
-
-def permission_request_event(value: dict[str, Any], interrupt_id: str = "") -> dict[str, Any]:
-    """Project a permission interrupt onto the existing dashboard choice UI."""
-    return {
-        "type": "user_input_request", "tool_call_id": value.get("tool_call_id"),
-        "interrupt_id": interrupt_id, "title": "Tool permission approval",
-        "questions": [{
-            "id": "permission:" + str(value["request_id"]),
-            "question": f"{value['action']}: {value['resource']}\n{value.get('metadata', {})}",
-            "selection_mode": "single", "required": True,
-            "options": [{"id": "allow_once", "label": "Allow once"},
-                        {"id": "allow_thread", "label": "Allow in this conversation"},
-                        {"id": "deny", "label": "Deny"}],
-            "free_text": {"enabled": False},
-        }], "submit_label": "Apply decision",
-    }
-
-
-async def pending_permission_requests(thread_id: str, checkpoint_id: str | None = None) -> list[dict[str, Any]]:
-    from agent.modules.acp import PERMISSION_INTERRUPT_TYPE, permission_request_event as acp_permission_event
-    from agent.modules.workflows import get_workflow_graph, graph_name_for_thread, make_run_config
-    config = make_run_config(thread_id=thread_id)
-    if checkpoint_id:
-        config["configurable"]["checkpoint_id"] = checkpoint_id
-    projections = {"permission_request": permission_request_event, PERMISSION_INTERRUPT_TYPE: acp_permission_event}
-    try:
-        snapshot = await get_workflow_graph(await graph_name_for_thread(thread_id)).aget_state(config)
-        return [projections[item.value["type"]](item.value, str(item.id))
-                for task in getattr(snapshot, "tasks", ())
-                for item in getattr(task, "interrupts", ())
-                if isinstance(item.value, dict) and item.value.get("type") in projections]
-    except Exception:
-        return []
+def evaluate(context: InvocationContext, action: str, resource: str,
+             *, risk: RiskLevel | str | None = None) -> str:
+    """Evaluate policy without consulting grants, storage or interrupts."""
+    classified = classify(action, resource)
+    if classified == RiskLevel.BLOCKED or risk == RiskLevel.BLOCKED:
+        return "deny"
+    path_action = action in {"read", "edit", "external_directory"}
+    subject = Permissions.normalize_resource(context, resource) if path_action else resource
+    effect = None
+    for rule in context.permission_rules:
+        pattern = Permissions.normalize_resource(context, rule.resource) if path_action else rule.resource
+        if fnmatch.fnmatchcase(action, rule.action) and fnmatch.fnmatchcase(subject, pattern):
+            if rule.effect == "deny":
+                effect = "deny"
+                break
+            effect = rule.effect
+    return decide(context.permission_mode, risk or classified, effect,
+                  always_confirm=action in ALWAYS_CONFIRM)
 
 
 class Permissions(PathPermissions):
@@ -69,7 +42,7 @@ class Permissions(PathPermissions):
         self.storage = storage
 
     def assert_allowed(self, context: InvocationContext, action: str, resource: str,
-                       *, allow_interrupt: bool = True, details: dict[str, Any] | None = None,
+                       *, risk: RiskLevel | str | None = None, allow_interrupt: bool = True, details: dict[str, Any] | None = None,
                        **metadata: Any) -> None:
         """Apply rules and ask the user when needed.
 
@@ -77,15 +50,7 @@ class Permissions(PathPermissions):
         covers; ``details`` is only shown in the approval request, so values
         such as click coordinates do not make every call ask again.
         """
-        effect = "ask" if action in ASK_BY_DEFAULT_ACTIONS else "allow"
-        for rule in context.permission_rules:
-            path_action = action in {"read", "edit", "external_directory"}
-            subject = self.normalize_resource(context, resource) if path_action else resource
-            pattern = self.normalize_resource(context, rule.resource) if path_action else rule.resource
-            if fnmatch.fnmatchcase(action, rule.action) and fnmatch.fnmatchcase(subject, pattern):
-                effect = rule.effect
-        if action in APPROVAL_REQUIRED_ACTIONS and effect == "allow":
-            effect = "ask"
+        effect = evaluate(context, action, resource, risk=risk)
         logger.info("Coding permission call=%s action=%s effect=%s resource_fingerprint=%s",
                     context.tool_call_id, action, effect, digest(resource), extra={"tool_call_id": context.tool_call_id,
                     "permission_action": action, "permission_effect": effect,
@@ -94,9 +59,7 @@ class Permissions(PathPermissions):
             raise CodingError("permission_denied", f"Policy denies {action}: {resource}")
         if effect == "allow":
             return
-        identity = json.dumps([context.agent_name, action, resource, metadata,
-                               [rule.model_dump() for rule in context.permission_rules]], sort_keys=True)
-        grant_key = digest(identity)
+        grant_key = self.grant_key(context, action, resource, metadata)
         grant_path = self.storage.owner_dir(context) / f"{grant_key[:32]}.grant"
         once_path = self.storage.owner_dir(context) / f"{digest(context.message_id + context.tool_call_id + grant_key)[:32]}.once"
         if grant_path.is_file() or (context.tool_call_id and once_path.is_file()):
@@ -132,6 +95,12 @@ class Permissions(PathPermissions):
         else:
             atomic_json(once_path, {"action": action, "resource": resource})
 
+
+    @staticmethod
+    def grant_key(context, action, resource, metadata):
+        identity = json.dumps([context.agent_name, action, resource, metadata,
+                               [rule.model_dump() for rule in context.permission_rules]], sort_keys=True)
+        return digest(identity)
 
     @staticmethod
     def normalize_resource(context: InvocationContext, resource: str) -> str:

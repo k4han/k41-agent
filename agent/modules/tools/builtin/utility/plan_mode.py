@@ -5,6 +5,7 @@ from langgraph.prebuilt import ToolRuntime
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.builtin.utility.plan_resume import (
@@ -111,10 +112,9 @@ request_plan_review = StructuredTool.from_function(
     infer_schema=False,
 )
 
-register_tool(
+register_tool(risk=RiskLevel.SAFE, may_interrupt=True,
     category=ToolCategory.UTILITY,
     capabilities=[
-        ToolCapability.MUTATES_STATE,
         ToolCapability.REQUIRES_THREAD,
     ],
     tags=["planning", "approval", "human-in-the-loop"],

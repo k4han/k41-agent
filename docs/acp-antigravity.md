@@ -16,9 +16,9 @@ CLI is not required.
 
 ```yaml
 graph_type: acp_agent
+permission_mode: ask          # ask, auto, full_access, or explicit null
 acp:
   agent: antigravity-acp
-  permission_mode: ask          # or auto_allow
   config_options:               # optional; choices are listed on the card once signed in
     thinking_level: low
 ```
@@ -45,6 +45,7 @@ enabled for the card:
 
 ```yaml
 graph_type: acp_agent
+permission_mode: ask          # ask, auto, full_access, or explicit null
 tools: [web_search, web_fetch, mcp__github__create_issue]
 acp:
   agent: antigravity-acp
@@ -53,40 +54,27 @@ acp:
 The built-in **Antigravity** card has no K41 tools and is read-only. Clone it or create your own card
 to use them.
 
-- **Approval.** Every call goes through `permission_mode`, like the agent's own edits and commands.
-  K41 also checks this itself: a tool runs only if K41 saw that exact call approved, so an agent that
-  skips the question, or changes the arguments afterwards, is refused. **Allow in this conversation**
-  is kept by K41, in memory, until K41 restarts. The agent itself only ever hears "allow once".
+- **Approval.** Bridged K41 tools have one approval authority: the shared K41 engine.
+  ACP permission requests for the `k41` server are answered with allow once; K41
+  still evaluates the actual tool arguments, including calls the provider did not
+  ask about. Conversation grants cover exact operations and arguments, not tool names.
 - **K41's credentials.** These tools run inside K41 and can use its connections, such as calendar or
   GitHub access, which the agent does not otherwise have. Select only what the card needs, because
   text the agent reads can try to make it use them.
-- **Permission rules.** `tool_permissions` and the tools' default permission checks still apply.
-  Operations that require approval, such as creating an Instabox machine or restoring a snapshot,
-  pause in dashboard conversations until you approve or deny them. This is separate from ACP's
-  approval of the tool call: `permission_mode: auto_allow` does not bypass K41 operation approvals.
-  Surfaces without an approval UI refuse these operations unless their permission rules allow them.
-- **Browser handoff.** `browser_handoff` works as for other agents, in dashboard conversations: the
-  turn pauses until you choose **Return control to agent** or **Cancel browser task**, and the agent
-  then receives the result. Stopping the turn, or sending a new message, cancels the handoff and closes
-  the browser. Stopping also records the turn's output and ends the paused run. If nobody answers before
-  the handoff expires (`browser.idle_ttl_seconds`), the browser closes and the agent is told right away.
-  Its reply appears once you dismiss the expired handoff. Elsewhere, such as channels, the call fails
-  because nobody can take over the browser.
-- **Not available:** `ask_user`, `delegate_task`, `plan_mode_respond`, `request_plan_review`, `skill`
-  and `write_todos`. They need a K41 graph run, which an external agent does not have. Selecting them
-  on a card has no effect. A small `read` tool limited to retained tool output is added, as for other
-  agents, so long results stay reachable.
-- **Changing the selection** applies from the next message, including in a conversation already under
-  way.
+- **Permission rules.** The shared mode, risk table, deny rules and hard blocks apply.
+  Tools can pause for a K41 operation approval without replaying the external prompt.
+  Full access removes these prompts but retains deny and hard blocks. Channels and
+  synchronous API runs report `approval_unavailable` when approval is required.
+
 
 K41 serves these tools from an MCP endpoint on `127.0.0.1` with a random port and one secret token per
 agent session. The endpoint starts the first time a card with tools runs.
 
 ### What is different from other agents
 
-- **Tool approvals.** With `permission_mode: ask`, edits, shell commands and K41 tools pause for
-  approval on the dashboard. Surfaces where nobody can answer (channels, the scheduler, the
-  synchronous API) deny automatically. `auto_allow` approves everything the agent asks for.
+- **Tool approvals.** Use the common Permission mode control on the card or in Chat.
+  `ask` allows safe reads and asks for mutations; `auto` asks for dangerous operations;
+  `full_access` skips prompts while retaining enforceable deny rules and hard blocks.
 - **The agent's tools run on the machine running K41, with K41's access.** Approval only covers what
   the agent asks about, and an approved shell command can reach anything that user can.
 - **Card settings that do not apply.** Skills, sub-agents and the K41 provider and model settings are
@@ -202,3 +190,35 @@ listed under "Not verified".
 - Linux and macOS, including the meaning of the Linux `--uid=` argument from the registry.
 - How long the server waits for one MCP tool call. `browser_handoff` keeps its request open until the
   person answers or the handoff expires, which can take minutes.
+
+## Permission modes and enforcement limits
+
+K41 enforces its policy on its own tools and on native permission requests the
+ACP provider forwards. The external agent executes native tools itself. If the
+provider does not forward a request, K41 currently has no enforcement point for
+that operation. Neither deny rules nor shell_guard cover unforwarded native
+operations, and these modes do not sandbox the external process.
+
+Forwarded requests are normalized into the shared read/edit/shell operations.
+Every resource must pass policy. Safe reads can run in ask mode, routine edits
+inside cwd can run in auto, and dangerous commands or edits outside cwd ask in
+auto. Malformed or missing edit locations are never safe. Execute requests without
+a command, requests missing resources needed for enforcement, hard-blocked commands,
+and matching deny rules are refused even in full access. The reader thread only
+evaluates policy snapshots and queues questions; it never calls graph interrupt.
+
+Providers must offer allow_once. K41 never sends allow_always, even when a person
+chooses Allow in this conversation: K41 retains and checks that exact grant itself.
+This lets subsequent requests be checked against the next turn's current policy.
+
+### Configuration upgrade
+
+The nested `acp.permission_mode` field is rejected. Move legacy ask to card-level
+`permission_mode: ask`. Cards that omitted the old mode implicitly used ask and
+must also choose explicitly. To intentionally inherit the global mode, write
+`permission_mode: null`; omitting the key is rejected during this transition.
+Legacy auto_allow has no exact mapping. Choose auto (recommended; dangerous native
+and K41 operations may ask), or explicitly full_access (also removes K41 operation
+prompts, while preserving hard blocks and deny within K41's enforcement scope).
+The new global default is auto. Broad deny rules cannot be overridden by later
+allow exceptions; narrow the deny scope before upgrading.

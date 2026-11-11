@@ -4,19 +4,20 @@ from langchain_core.tools import BaseTool
 
 from agent.modules.tools.coding.adapter import make_coding_tool
 from agent.modules.tools.coding.names import CODING_TOOLS
+from agent.modules.tools.permissions.risk import RiskLevel, classify
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 
 
 def registered(name: str, category: ToolCategory, mutates: bool = False):
     capabilities = [ToolCapability.REQUIRES_WORKSPACE, ToolCapability.REQUIRES_THREAD]
-    if category == ToolCategory.SHELL:
+    if category == ToolCategory.SHELL and mutates:
         capabilities.append(ToolCapability.EXEC_SHELL)
     if category == ToolCategory.FILE:
         capabilities.append(ToolCapability.WRITE_FS if mutates else ToolCapability.READ_FS)
     if mutates:
         capabilities.append(ToolCapability.MUTATES_STATE)
-    return register_tool(category=category, capabilities=capabilities, tags=["coding"])(make_coding_tool(name))
+    return register_tool(risk=RiskLevel.MUTATING if mutates else RiskLevel.SAFE, self_authorizing=True, may_interrupt=False, category=category, capabilities=capabilities, tags=["coding"])(make_coding_tool(name))
 
 
 bash = registered("bash", ToolCategory.SHELL, True)

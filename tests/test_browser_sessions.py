@@ -1643,7 +1643,7 @@ async def test_handoff_snapshot_respects_permissions_without_another_interrupt(b
     from agent.modules.tools.builtin import browser as tools
     from agent.modules.tools.coding.contracts import InvocationContext
     from agent.modules.tools.coding.models import PermissionRule
-    from agent.modules.tools.coding.permissions import Permissions
+    from agent.modules.tools.permissions import Permissions
     from agent.modules.tools.coding.storage import OutputStore
 
     context = InvocationContext(agent_name="test", workspace=str(tmp_path), thread_id="chat",
@@ -2057,7 +2057,7 @@ def test_browser_permission_rules_are_enforced(tmp_path, monkeypatch):
     from agent.modules.tools.builtin import browser as tools
     from agent.modules.tools.coding.contracts import InvocationContext
     from agent.modules.tools.coding.models import PermissionRule
-    from agent.modules.tools.coding.permissions import Permissions
+    from agent.modules.tools.permissions import Permissions
     from agent.modules.tools.coding.storage import OutputStore
     from agent.modules.tools.result import ToolError
 

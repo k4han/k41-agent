@@ -14,6 +14,7 @@ from agent.modules.tools.domain import (
     ToolDescriptor,
     ToolSource,
 )
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.middleware import apply_default_middleware
 
 MCP_TOOL_PREFIX = "mcp__"
@@ -55,13 +56,19 @@ class McpToolSource:
                 continue
             seen_ids.add(desc_id)
             apply_default_middleware(raw_tool)
+            metadata = raw_tool.metadata or {}
+            annotations = metadata.get("annotations", metadata) or {}
+            if not isinstance(annotations, dict):
+                annotations = annotations.model_dump()
+            risk = RiskLevel.SAFE if annotations.get("readOnlyHint") is True else RiskLevel.DANGEROUS
+            raw_tool.metadata = {**metadata, "permission_risk": risk}
             descriptors.append(
                 ToolDescriptor(
                     id=desc_id,
                     name=tool_name,
                     description=raw_tool.description or "",
                     source=ToolSource.MCP,
-                    category=ToolCategory.UNKNOWN,
+                    category=ToolCategory.UNKNOWN, risk=risk, may_interrupt=False,
                     tool=raw_tool,
                     tags=frozenset({"mcp", server_name}),
                     args_schema=getattr(raw_tool, "args_schema", None),

@@ -55,16 +55,13 @@ def create_requests(instabox):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("permission_mode", ["ask", "auto_allow"])
+@pytest.mark.parametrize("permission_mode", ["ask", "auto"])
 async def test_machine_creation_waits_for_k41_approval_and_runs_once(env, instabox, permission_mode):
     from agent.modules.tools import pending_permission_requests
     from agent.modules.workspaces import list_thread_resources
 
     use_card_tools(env, "instabox_machine_create", permission_mode=permission_mode)
     first = await env.collect(tool_prompt(name="dev-sandbox", purpose="Development"))
-    if permission_mode == "ask":
-        assert question_of(first)["id"].startswith("acp_permission:")
-        first = await env.collect(resume_payload=resume(first, "allow"))
     assert "instabox_machine_create: dev-sandbox" in question_of(first)["question"]
     assert not create_requests(instabox) and not await list_thread_resources(THREAD)
     restored = await pending_permission_requests(THREAD)
@@ -82,7 +79,7 @@ async def test_machine_creation_waits_for_k41_approval_and_runs_once(env, instab
 
 @pytest.mark.asyncio
 async def test_denying_k41_approval_never_creates_a_machine(env, instabox):
-    use_card_tools(env, "instabox_machine_create", permission_mode="auto_allow")
+    use_card_tools(env, "instabox_machine_create", permission_mode="auto")
     first = await env.collect(tool_prompt())
     second = await env.collect(resume_payload=permission_resume(first, "deny"))
     assert "User denied instabox_machine_create" in texts(second)
@@ -96,7 +93,7 @@ async def test_denying_k41_approval_never_creates_a_machine(env, instabox):
     {"action": "acp_permission", "request_id": "another", "option_id": "allow"},
 ])
 async def test_unrelated_answers_cannot_approve_k41_operations(env, instabox, forged):
-    use_card_tools(env, "instabox_machine_create", permission_mode="auto_allow")
+    use_card_tools(env, "instabox_machine_create", permission_mode="auto")
     first = await env.collect(tool_prompt())
     second = await env.collect(resume_payload=forged)
     assert question_of(second)["id"] == question_of(first)["id"]
@@ -109,7 +106,7 @@ async def test_unrelated_answers_cannot_approve_k41_operations(env, instabox, fo
 @pytest.mark.asyncio
 @pytest.mark.parametrize("effect", ["allow", "deny"])
 async def test_explicit_k41_rules_still_apply(env, instabox, effect):
-    use_card_tools(env, "instabox_machine_create", permission_mode="auto_allow")
+    use_card_tools(env, "instabox_machine_create", permission_mode="auto")
     env.agent.tool_permissions = [{"action": "instabox_machine_create", "effect": effect}]
     events = await env.collect(tool_prompt())
     assert "user_input_request" not in types(events)
@@ -123,7 +120,7 @@ async def test_explicit_k41_rules_still_apply(env, instabox, effect):
 
 @pytest.mark.asyncio
 async def test_explicit_ask_rule_can_pause_a_read_only_tool(env, instabox):
-    use_card_tools(env, "instabox_machine_list", permission_mode="auto_allow")
+    use_card_tools(env, "instabox_machine_list", permission_mode="auto")
     env.agent.tool_permissions = [{"action": "instabox_machine_list", "effect": "ask"}]
     first = await env.collect(tool_prompt("instabox_machine_list"))
     assert "instabox_machine_list" in question_of(first)["question"]
@@ -135,7 +132,7 @@ async def test_explicit_ask_rule_can_pause_a_read_only_tool(env, instabox):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("decision", ["allow_once", "allow_thread"])
 async def test_permission_grants_keep_their_original_scope(env, instabox, decision):
-    use_card_tools(env, "instabox_machine_create", permission_mode="auto_allow")
+    use_card_tools(env, "instabox_machine_create", permission_mode="auto")
     first = await env.collect(tool_prompt())
     await env.collect(resume_payload=permission_resume(first, decision))
     second = await env.collect(tool_prompt())
@@ -150,7 +147,7 @@ async def test_permission_grants_keep_their_original_scope(env, instabox, decisi
 
 @pytest.mark.asyncio
 async def test_channels_without_approval_still_refuse_default_ask_operations(env, instabox):
-    use_card_tools(env, "instabox_machine_create", permission_mode="auto_allow")
+    use_card_tools(env, "instabox_machine_create", permission_mode="auto")
     events = await env.collect(tool_prompt(), platform="telegram", thread="telegram_user_1")
     assert "does not support tool permission approval" in texts(events)
     assert "user_input_request" not in types(events) and not create_requests(instabox)
@@ -160,7 +157,7 @@ async def test_channels_without_approval_still_refuse_default_ask_operations(env
 async def test_synchronous_api_refuses_instead_of_waiting_for_approval(env, instabox):
     from agent.modules.agent_runtime import runner
 
-    use_card_tools(env, "instabox_machine_create", permission_mode="auto_allow")
+    use_card_tools(env, "instabox_machine_create", permission_mode="auto")
     result = await asyncio.wait_for(runner.run_agent_full(
         tool_prompt(), THREAD, "ag", working_dir=str(env.workspace), usage_context={"platform": "api"},
     ), 30)
@@ -170,7 +167,7 @@ async def test_synchronous_api_refuses_instead_of_waiting_for_approval(env, inst
 
 @pytest.mark.asyncio
 async def test_stopping_an_operation_approval_cancels_and_commits_the_turn(env, instabox):
-    use_card_tools(env, "instabox_machine_create", permission_mode="auto_allow")
+    use_card_tools(env, "instabox_machine_create", permission_mode="auto")
     await env.collect(tool_prompt())
     turn = env.service.turn((await env.state()).values["acp_turn_id"])
     pending = turn.next_pending()
@@ -186,7 +183,7 @@ async def test_stopping_an_operation_approval_cancels_and_commits_the_turn(env, 
 
 @pytest.mark.asyncio
 async def test_answer_after_restart_reports_the_lost_turn_without_replaying_the_operation(env, instabox):
-    use_card_tools(env, "instabox_machine_create", permission_mode="auto_allow")
+    use_card_tools(env, "instabox_machine_create", permission_mode="auto")
     first = await env.collect(tool_prompt())
     await env.restart_server()
     events = await env.collect(resume_payload=permission_resume(first))
@@ -206,7 +203,7 @@ async def test_snapshot_restore_still_requires_k41_confirmation_with_an_allow_ru
     instabox.fake.snapshots[snapshot_id] = {"id": snapshot_id, "state": "ready"}
     await activate_thread_machine(await reserve_thread_machine(THREAD, "instabox", limit=2), machine_id)
     await record_thread_resource(THREAD, SNAPSHOT, "instabox", snapshot_id)
-    use_card_tools(env, "instabox_snapshot_restore", permission_mode="auto_allow")
+    use_card_tools(env, "instabox_snapshot_restore", permission_mode="auto")
     env.agent.tool_permissions = [{"action": "instabox_snapshot_restore", "effect": "allow"}]
     monkeypatch.setattr(get_coding_service().remote, "workspace_processes", AsyncMock(return_value=0))
 

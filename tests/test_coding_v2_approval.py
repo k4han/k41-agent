@@ -8,7 +8,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from agent.modules.tools.coding.models import InvocationContext, PermissionRule
-from agent.modules.tools.coding.permissions import Permissions, pending_permission_requests, permission_request_event
+from agent.modules.tools.permissions import Permissions, pending_permission_requests, permission_request_event
 from agent.modules.tools.coding.storage import OutputStore
 
 
@@ -84,7 +84,7 @@ def test_agent_permissions_roundtrip_ignores_retired_profile():
 
 def test_global_coding_keys_are_runtime_database_settings():
     from agent.shared.config.constants import KNOWN_RUNTIME_KEYS, is_database_runtime_key, is_runtime_key
-    for key in ("tools.permissions", "tools.shell", "tools.storage_root"):
+    for key in ("tools.permission_mode", "tools.permissions", "tools.shell", "tools.storage_root"):
         assert key in KNOWN_RUNTIME_KEYS and is_runtime_key(key) and is_database_runtime_key(key)
 
 

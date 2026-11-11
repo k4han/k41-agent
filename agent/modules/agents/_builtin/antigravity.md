@@ -8,5 +8,5 @@ model: None
 tools: []
 acp:
   agent: antigravity-acp
-  permission_mode: ask
+permission_mode: ask
 ---

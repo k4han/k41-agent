@@ -69,7 +69,7 @@ async def test_dashboard_runs_keep_stored_identity_and_approval_support(isolated
         )]
         assert results
         assert captured["configurable"]["thread_id"] == thread_id
-        assert captured["configurable"]["approval_supported"] is True
+        assert captured["configurable"]["approval_supported"] is stream_events
         assert captured["metadata"]["usage_context"]["platform"] == "telegram"
         assert captured["metadata"]["usage_context"]["user_id"] == "123"
     finally:

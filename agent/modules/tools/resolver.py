@@ -144,6 +144,11 @@ class ToolResolver:
             from agent.modules.tools.builtin.coding_tools import targeted_tool
 
             tools = [targeted_tool(tool.name) or tool for tool in tools]
+        for descriptor, tool in zip(descriptors, tools):
+            tool.metadata = {**(tool.metadata or {}), "permission_risk": descriptor.risk,
+                             "permission_self_authorizing": descriptor.self_authorizing,
+                             "permission_may_interrupt": descriptor.may_interrupt}
+            object.__setattr__(tool, "permission_prepare", descriptor.prepare_permissions)
         return tools
 
     @staticmethod

@@ -245,7 +245,7 @@ def turn_body(session_id, name, cancel, text):
         chunk(session_id, "Three.")
         return "end_turn"
     if name == "concurrent_permissions":
-        calls = [{"toolCallId": f"c{i}", "title": f"step {i}", "kind": "execute", "status": "pending"} for i in (1, 2)]
+        calls = [{"toolCallId": f"c{i}", "title": f"step {i}", "kind": "execute", "rawInput": {"command": f"echo {i}"}, "status": "pending"} for i in (1, 2)]
         results = {}
         workers = [threading.Thread(target=lambda c=c: results.__setitem__(c["toolCallId"], permission(session_id, c))) for c in calls]
         for worker in workers:

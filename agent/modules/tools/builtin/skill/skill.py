@@ -6,13 +6,14 @@ from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import ToolRuntime
 
 from agent.modules.skills import get_effective_skill_content_xml
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.decorators import register_tool
-from agent.modules.tools.domain import ToolCategory
+from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
 from agent.modules.tools.runtime.context import get_context_value, get_thread_id
 
 
-@register_tool(category=ToolCategory.SKILL, tags=["skill"])
+@register_tool(risk=RiskLevel.MUTATING, may_interrupt=False, category=ToolCategory.SKILL, capabilities=[ToolCapability.MUTATES_STATE], tags=["skill"])
 @tool
 async def skill(
     name: str,

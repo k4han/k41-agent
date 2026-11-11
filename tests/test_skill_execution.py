@@ -23,7 +23,7 @@ from agent.modules.skills.package_worker import native_path, run_operation
 from agent.modules.skills.packages import SkillPackages
 from agent.modules.skills.repository import FilesystemSkillRepository
 from agent.modules.tools.coding.models import CodingError, InvocationContext, PermissionRule
-from agent.modules.tools.coding.permissions import Permissions
+from agent.modules.tools.permissions import Permissions
 from agent.modules.tools.coding.processes import ProcessManager
 from agent.modules.tools.coding.storage import OutputStore, conversation_key
 from agent.modules.workflows.nodes.tool import tool_node

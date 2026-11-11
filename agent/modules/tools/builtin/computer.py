@@ -24,6 +24,8 @@ from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.prebuilt import ToolRuntime
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent.modules.tools.permissions.risk import RiskLevel, classify
+from agent.modules.tools.permissions.preparation import prepare_builtin
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.policy import COMPUTER_TOOL_TAG
@@ -135,15 +137,8 @@ async def _computer(runtime, target: str | None):
 
 
 def _authorize(runtime, action: str, resource: str, *, details: dict[str, Any] | None = None, **metadata: Any) -> None:
-    from agent.modules.tools.coding.adapter import invocation_context
-    from agent.modules.tools.coding.models import CodingError
-    from agent.modules.tools.coding.service import get_coding_service
-
-    try:
-        get_coding_service().permissions.assert_allowed(invocation_context(runtime), action, resource,
-                                                        details=details, **metadata)
-    except CodingError as exc:
-        raise ToolError(ToolErrorCode.PERMISSION_DENIED, str(exc)) from None
+    from agent.modules.tools.permissions import authorize_tool
+    authorize_tool(runtime, action, resource, details=details, **metadata)
 
 
 def _authorize_step(runtime, target: ExecutionTarget, step: ComputerStep) -> None:
@@ -386,7 +381,7 @@ def registered(name: str, coroutine, description: str, *, mutates: bool) -> Stru
     capabilities = [ToolCapability.NETWORK, ToolCapability.ASYNC_ONLY, ToolCapability.REQUIRES_THREAD]
     if mutates:
         capabilities.append(ToolCapability.MUTATES_STATE)
-    return register_tool(category=ToolCategory.SANDBOX, capabilities=capabilities, tags=[COMPUTER_TOOL_TAG])(
+    return register_tool(risk=classify(name, "*"), self_authorizing=True, prepare_permissions=prepare_builtin, may_interrupt=False, category=ToolCategory.SANDBOX, capabilities=capabilities, tags=[COMPUTER_TOOL_TAG])(
         StructuredTool.from_function(name=name, coroutine=coroutine, description=description)
     )
 

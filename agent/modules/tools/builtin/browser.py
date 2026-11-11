@@ -12,6 +12,8 @@ from typing_extensions import NotRequired, TypedDict
 
 from agent.modules.browser import BROWSER_HANDOFF_WAIT_KEY, get_browser_service
 from agent.modules.browser import BrowserError, BrowserService
+from agent.modules.tools.permissions.risk import RiskLevel, classify
+from agent.modules.tools.permissions.preparation import prepare_builtin
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
@@ -73,15 +75,8 @@ def identity(runtime):
 
 
 def authorize(runtime, name, values, *, allow_interrupt=True):
-    from agent.modules.tools.coding.adapter import invocation_context
-    from agent.modules.tools.coding.service import get_coding_service
-
-    from agent.modules.tools.coding.models import CodingError
-    try:
-        get_coding_service().permissions.assert_allowed(invocation_context(runtime), name, "*",
-                                                       allow_interrupt=allow_interrupt, arguments=values)
-    except CodingError as exc:
-        raise ToolError(ToolErrorCode.PERMISSION_DENIED, str(exc)) from None
+    from agent.modules.tools.permissions import authorize_tool
+    authorize_tool(runtime, name, "*", allow_interrupt=allow_interrupt, arguments=values)
 
 
 def message(runtime, name, result):
@@ -198,7 +193,7 @@ def registered(name, coroutine, description, mutates=False):
     capabilities = [ToolCapability.NETWORK, ToolCapability.REQUIRES_THREAD, ToolCapability.ASYNC_ONLY]
     if mutates:
         capabilities.append(ToolCapability.MUTATES_STATE)
-    tool = register_tool(category=ToolCategory.BROWSER, capabilities=capabilities, tags=["browser"])(
+    tool = register_tool(risk=classify(name, "*"), self_authorizing=True, prepare_permissions=prepare_builtin, may_interrupt=name == "browser_handoff", category=ToolCategory.BROWSER, capabilities=capabilities, tags=["browser"])(
         StructuredTool.from_function(name=name, coroutine=coroutine, description=description))
     BROWSER_TOOLS[name] = tool
     return tool

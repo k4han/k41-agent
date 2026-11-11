@@ -17,6 +17,7 @@ export type AgentForm = {
   provider: string;
   model: string;
   reasoning_effort: string | null;
+  permission_mode: AgentCard["permission_mode"];
   tools: string[];
   tool_permissions: AgentCard["tool_permissions"];
   tool_configs: ToolConfigs;
@@ -64,6 +65,7 @@ export function agentFormPayload(form: AgentForm): AgentForm {
   const tools = manualToolNames(form.tools);
   return {
     ...form,
+    permission_mode: form.permission_mode ?? null,
     tools,
     tool_configs: Object.fromEntries(
       Object.entries(form.tool_configs).filter(
@@ -82,6 +84,7 @@ export function blankForm(workflow: string): AgentForm {
     provider: "default",
     model: "",
     reasoning_effort: null,
+    permission_mode: workflow === "acp_agent" ? "ask" : null,
     tools: [],
     tool_permissions: null,
     tool_configs: {},
@@ -103,6 +106,7 @@ export function cardToForm(card: AgentCard): AgentForm {
     provider: card.provider || "default",
     model: card.model || "",
     reasoning_effort: card.reasoning_effort ?? null,
+    permission_mode: card.permission_mode ?? null,
     tools: manualToolNames(card.tools || []),
     tool_permissions: card.tool_permissions ?? null,
     tool_configs: normalizeToolConfigs(card.tool_configs),

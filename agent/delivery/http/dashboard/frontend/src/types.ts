@@ -1,3 +1,4 @@
+import type { PermissionMode } from "@/lib/permissionMode";
 import type { ThreadSummary } from "@/lib/chatThreads";
 
 export type ServiceStatus = {
@@ -112,7 +113,6 @@ export type ModelCatalog = {
 
 export type AcpAgentSettings = {
   agent: string;
-  permission_mode: "ask" | "auto_allow";
   config_options: Record<string, string>;
 };
 
@@ -124,6 +124,7 @@ export type AgentCard = {
   provider: string;
   model: string;
   reasoning_effort?: string | null;
+  permission_mode?: PermissionMode | null;
   tool_permissions?: { action?: string; resource?: string; effect: "allow" | "ask" | "deny" }[] | null;
   tools: string[];
   tool_configs?: Record<string, Record<string, unknown>>;
@@ -149,6 +150,7 @@ export type AgentConfig = {
   provider: string;
   model: string;
   reasoning_effort?: string | null;
+  permission_mode?: PermissionMode | null;
   tools: string[];
   tool_configs?: Record<string, Record<string, unknown>>;
   sub_agents: string[] | null;

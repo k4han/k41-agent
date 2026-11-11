@@ -506,7 +506,7 @@ def test_computer_tools_must_run_one_per_machine_per_turn():
 def test_restore_always_requires_user_approval(tmp_path):
     from agent.modules.tools.coding.contracts import CodingError, InvocationContext
     from agent.modules.tools.coding.models import PermissionRule
-    from agent.modules.tools.coding.permissions import Permissions
+    from agent.modules.tools.permissions import Permissions
 
     permissions = Permissions(SimpleNamespace(owner_dir=lambda context: tmp_path))
     allow_all = (PermissionRule(action="*", resource="*", effect="allow"),)

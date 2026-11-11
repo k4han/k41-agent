@@ -238,3 +238,21 @@ agent/modules/agents/
 ├── examples/                      # Sample agent definitions (không load tự động)
 └── public.py                      # Public API
 ```
+
+## Tool permission modes
+
+`permission_mode` is shared by every graph type: `ask`, `auto`, `full_access`, or
+`null` to inherit `tools.permission_mode` (default `auto`). Conversation overrides
+win over the card. Safe reads run in all modes; ask pauses mutations, auto pauses
+dangerous operations, and full access skips prompts. Hard blocks and any matching
+`deny` always win. `tool_permissions: null` inherits global rules; lists replace
+them. Otherwise the last matching allow/ask rule applies. Full access ignores ask.
+
+ACP cards must explicitly include the top-level key, even when null. Removed
+`acp.permission_mode: ask` becomes card-level ask. ACP cards with no old mode also
+used ask and must explicitly choose it to retain that behavior. Legacy auto_allow
+has no exact replacement: auto retains dangerous-operation prompts (recommended),
+while an intentional full_access choice removes K41 prompts too. Never silently
+map auto_allow to full_access. A broad deny followed by allow no longer creates an
+exception; narrow the deny pattern. See [permissions](../../../docs/coding-v2.md#permissions-and-approvals)
+and [ACP limits](../../../docs/acp-antigravity.md#permission-modes-and-enforcement-limits).

@@ -407,11 +407,11 @@ async def test_search_checks_each_file_and_excludes_output_store(coding):
 
 
 @pytest.mark.asyncio
-async def test_permission_last_match_and_agent_override(coding, monkeypatch, isolated_container):
+async def test_permission_deny_precedence_and_agent_override(coding, monkeypatch, isolated_container):
     service, context, workspace = coding
     allowed = replace(context, permission_rules=(PermissionRule(action="edit", effect="deny"),
                       PermissionRule(action="edit", resource="*allowed.txt", effect="allow")))
-    assert (await invoke(service, allowed, "write", path="allowed.txt", content="allowed")).status == "success"
+    assert (await invoke(service, allowed, "write", path="allowed.txt", content="allowed")).error.code == "permission_denied"
     assert (await invoke(service, allowed, "write", path="denied.txt", content="denied")).error.code == "permission_denied"
     original_get = isolated_container.config_service.get
     monkeypatch.setattr(isolated_container.config_service, "get", lambda key, default=None:

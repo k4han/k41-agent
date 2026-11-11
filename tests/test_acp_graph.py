@@ -45,7 +45,7 @@ class Env:
         self.monkeypatch = monkeypatch
         self.graph = graph
         self.flags: list[str] = []
-        self.agent = AgentConfig(name="ag", graph_type="acp_agent", acp=AcpAgentSettings())
+        self.agent = AgentConfig(permission_mode="ask", name="ag", graph_type="acp_agent", acp=AcpAgentSettings())
         self.service = self.new_service()
 
     def new_service(self) -> AcpService:
@@ -132,6 +132,12 @@ def question_of(events):
 def resume(events, option_id, *, request_id=None):
     identifier = request_id or question_of(events)["id"].split(":", 1)[1]
     return {"action": "acp_permission", "request_id": identifier, "option_id": option_id}
+
+
+def resume_k41(events, decision="allow_once"):
+    identifier = question_of(events)["id"]
+    assert identifier.startswith("permission:")
+    return {"action": "permission", "request_id": identifier.split(":", 1)[1], "decision": decision}
 
 
 def visible(messages):
@@ -238,7 +244,7 @@ async def test_partial_transcript_survives_a_pending_permission(env):
 async def test_card_offers_agent_options_and_stop(env):
     events = await env.collect("scenario:permission")
     question = question_of(events)
-    assert [option["id"] for option in question["options"]] == ["allow", "deny", STOP_TURN_OPTION_ID]
+    assert [option["id"] for option in question["options"]] == ["allow", "deny", "__allow_thread__", STOP_TURN_OPTION_ID]
     assert "Run create_file?" in question["question"] and "hello.txt" in question["question"]
     assert question["free_text"]["enabled"] is False
 
@@ -326,14 +332,33 @@ async def test_non_streaming_path_denies_instead_of_hanging(env):
     result = await asyncio.wait_for(runner_module.run_agent_full(
         "scenario:permission", THREAD, "ag", working_dir=str(env.workspace), usage_context={"platform": "api"},
     ), 30)
-    assert result == "After." and env.effects() == []
+    assert "approval_unavailable" in result and result.endswith("After.") and env.effects() == []
 
 
 @pytest.mark.asyncio
-async def test_auto_allow_card_never_pauses(env):
-    env.agent = AgentConfig(name="ag", graph_type="acp_agent", acp=AcpAgentSettings(permission_mode="auto_allow"))
+async def test_auto_card_allows_routine_native_edits(env):
+    env.agent = AgentConfig(permission_mode="auto", name="ag", graph_type="acp_agent", acp=AcpAgentSettings())
     events = await env.collect("scenario:permission")
     assert "user_input_request" not in types(events) and env.effects() == ["edit-1"]
+
+
+@pytest.mark.asyncio
+async def test_native_conversation_grant_is_exact_and_persists_across_turns(env):
+    first = await env.collect("scenario:two_permissions")
+    second = await env.collect(resume_payload=resume(first, "__allow_thread__"))
+    assert "user_input_request" not in types(second)
+    assert env.effects() == ["edit-1", "edit-2"]
+    third = await env.collect("scenario:permission")
+    assert "user_input_request" not in types(third)
+    assert env.effects() == ["edit-1", "edit-2", "edit-1"]
+
+
+@pytest.mark.asyncio
+async def test_pending_native_approval_rechecks_deny_on_resume(env):
+    first = await env.collect("scenario:permission")
+    env.agent.tool_permissions = [{"action": "edit", "effect": "deny"}]
+    second = await env.collect(resume_payload=resume(first, "allow"), permission_mode="full_access")
+    assert "permission_denied" in texts(second) and env.effects() == []
 
 
 def test_acp_resume_cannot_pass_as_a_coding_approval():
@@ -543,7 +568,7 @@ async def test_remote_workspace_is_refused_before_starting_an_agent(env):
 
 @pytest.mark.asyncio
 async def test_system_prompt_is_sent_through_the_vendor_append_field(env):
-    env.agent = AgentConfig(name="ag", graph_type="acp_agent", system_prompt="Be brief.", acp=AcpAgentSettings())
+    env.agent = AgentConfig(permission_mode="ask", name="ag", graph_type="acp_agent", system_prompt="Be brief.", acp=AcpAgentSettings())
     await env.collect("hello")
     params = env.calls("session/new")[0]["params"]
     assert params["_meta"]["antigravity"]["systemPrompt"]["append"] == "Be brief."
@@ -558,7 +583,7 @@ async def test_system_prompt_is_sent_through_the_vendor_append_field(env):
 ])
 async def test_browser_reporting_rules_follow_the_agents_tools(env, tools, template, expected):
     env.flags = ["--mcp-http"]
-    env.agent = AgentConfig(name="ag", graph_type="acp_agent", tools=tools, system_prompt=template, acp=AcpAgentSettings())
+    env.agent = AgentConfig(permission_mode="ask", name="ag", graph_type="acp_agent", tools=tools, system_prompt=template, acp=AcpAgentSettings())
     await env.collect("hello", browser_owner_id=OWNER)
     assert env.calls("session/new")[0]["params"]["_meta"]["antigravity"]["systemPrompt"]["append"] == expected
 
@@ -570,14 +595,14 @@ async def test_a_tool_lookup_failure_does_not_stop_the_session_from_starting(env
 
     monkeypatch.setattr(CardToolProvider, "tool_names", fail)
     env.flags = ["--mcp-http"]
-    env.agent = AgentConfig(name="ag", graph_type="acp_agent", tools=["browser_run"], system_prompt="Be brief.", acp=AcpAgentSettings())
+    env.agent = AgentConfig(permission_mode="ask", name="ag", graph_type="acp_agent", tools=["browser_run"], system_prompt="Be brief.", acp=AcpAgentSettings())
     await env.collect("hello", browser_owner_id=OWNER)
     assert env.calls("session/new")[0]["params"]["_meta"]["antigravity"]["systemPrompt"]["append"] == "Be brief."
 
 
 @pytest.mark.asyncio
 async def test_config_options_are_applied_once_per_session(env):
-    env.agent = AgentConfig(name="ag", graph_type="acp_agent", acp=AcpAgentSettings(
+    env.agent = AgentConfig(permission_mode="ask", name="ag", graph_type="acp_agent", acp=AcpAgentSettings(
         config_options={"model": "fake-lite", "thinking_level": "high"},
     ))
     await env.collect("one")
@@ -588,14 +613,14 @@ async def test_config_options_are_applied_once_per_session(env):
 
 @pytest.mark.asyncio
 async def test_unavailable_config_option_is_reported_and_the_turn_continues(env):
-    env.agent = AgentConfig(name="ag", graph_type="acp_agent", acp=AcpAgentSettings(config_options={"model": "retired"}))
+    env.agent = AgentConfig(permission_mode="ask", name="ag", graph_type="acp_agent", acp=AcpAgentSettings(config_options={"model": "retired"}))
     events = await env.collect("hello")
     assert "kept its current 'model'" in texts(events) and texts(events).endswith("hello")
 
 
 @pytest.mark.asyncio
 async def test_run_options_override_the_card_for_that_turn(env):
-    env.agent = AgentConfig(name="ag", graph_type="acp_agent", acp=AcpAgentSettings(
+    env.agent = AgentConfig(permission_mode="ask", name="ag", graph_type="acp_agent", acp=AcpAgentSettings(
         config_options={"model": "fake-lite", "thinking_level": "low"},
     ))
     await env.collect("one", acp_config_options={"thinking_level": "high"})
@@ -632,7 +657,7 @@ async def test_model_is_set_before_the_options_that_depend_on_it(env):
 
 @pytest.mark.asyncio
 async def test_mode_cannot_be_changed_because_it_would_bypass_approvals(env):
-    env.agent = AgentConfig(name="ag", graph_type="acp_agent", acp=AcpAgentSettings(config_options={"mode": "yolo"}))
+    env.agent = AgentConfig(permission_mode="ask", name="ag", graph_type="acp_agent", acp=AcpAgentSettings(config_options={"mode": "yolo"}))
     first = await env.collect("one")
     second = await env.collect("two", acp_config_options={"mode": "yolo"})
     assert env.calls("session/set_config_option") == []
@@ -648,10 +673,10 @@ def test_build_run_params_passes_acp_options_only_when_set():
 
 
 def test_card_round_trips_acp_settings_and_keeps_only_usable_tool_settings():
-    config = AgentConfig(
+    config = AgentConfig(permission_mode="auto",
         name="ag", graph_type="acp_agent", tools=["read", "ask_user", "skill", "delegate_task"],
         tool_configs={"read": {"x": 1}}, sub_agents=["x"], plan_approval_targets=["y"],
-        acp=AcpAgentSettings(permission_mode="auto_allow", config_options={"model": "m"}),
+        acp=AcpAgentSettings(config_options={"model": "m"}),
     )
     assert config.tools == ["read"] and config.sub_agents is None and config.plan_approval_targets == []
     assert config.tool_configs == {"read": {"x": 1}}
@@ -664,8 +689,8 @@ def test_card_round_trips_acp_settings_and_keeps_only_usable_tool_settings():
 
 def use_card_tools(env, *tools, permission_mode="ask"):
     env.flags = ["--mcp-http"]
-    env.agent = AgentConfig(name="ag", graph_type="acp_agent", tools=list(tools),
-                            acp=AcpAgentSettings(permission_mode=permission_mode))
+    env.agent = AgentConfig(permission_mode=permission_mode, name="ag", graph_type="acp_agent", tools=list(tools),
+                            acp=AcpAgentSettings())
 
 
 def attached_servers(env, method="session/new", index=-1):
@@ -708,58 +733,63 @@ async def test_an_agent_without_http_mcp_runs_with_its_own_tools_and_says_so(env
 @pytest.mark.asyncio
 async def test_approved_call_runs_and_the_transcript_shows_the_real_result(env):
     use_card_tools(env, "get_current_time")
-    first = await env.collect("scenario:mcp_call")
-    question = question_of(first)
-    assert "k41_get_current_time" in question["question"]
-    second = await env.collect(resume_payload=resume(first, "allow"))
-    output = next(event for event in second if event["type"] == "tool_result")["content"]
-    assert output[:4].isdigit()  # A timestamp, not the agent's "Call get_current_time tool".
-    assert texts(second) == output
+    events = await env.collect("scenario:mcp_call")
+    assert "user_input_request" not in types(events)
+    output = next(event for event in events if event["type"] == "tool_result")["content"]
+    assert output[:4].isdigit() and texts(events) == output
     assert ("tool", output) in visible(await env.messages())
 
 
 @pytest.mark.asyncio
 async def test_duplicated_mcp_arguments_are_not_shown_twice(env):
     use_card_tools(env, "get_current_time")
+    env.agent.tool_permissions = [{"action": "get_current_time", "effect": "ask"}]
     first = await env.collect("scenario:mcp_swapped_arguments")
-    assert 'Input: {"a": 1}' in question_of(first)["question"]
+    question = question_of(first)
+    assert question["id"].startswith("permission:")
+    assert "'arguments': {'a': 2}" in question["question"]
 
 
 @pytest.mark.asyncio
 async def test_denied_call_does_not_run(env):
     use_card_tools(env, "get_current_time")
+    env.agent.tool_permissions = [{"action": "get_current_time", "effect": "ask"}]
     first = await env.collect("scenario:mcp_call")
-    second = await env.collect(resume_payload=resume(first, "deny"))
-    assert texts(second) == "denied"
-    assert mcp_choices(env) == ["deny"]
+    second = await env.collect(resume_payload=resume_k41(first, "deny"))
+    assert "User denied get_current_time" in texts(second)
+    assert mcp_choices(env) == ["allow"]
 
 
 @pytest.mark.asyncio
 async def test_surfaces_without_a_person_deny_card_tools(env):
     use_card_tools(env, "get_current_time")
+    env.agent.tool_permissions = [{"action": "get_current_time", "effect": "ask"}]
     events = await env.collect("scenario:mcp_call", platform="telegram", thread="telegram_user_1")
-    assert texts(events) == "denied"
+    assert "approval_unavailable" in texts(events)
     assert "user_input_request" not in types(events)
 
 
 @pytest.mark.asyncio
-async def test_a_call_the_agent_did_not_get_approved_is_refused(env):
+async def test_unreported_bridge_call_still_obeys_k41_deny(env):
     use_card_tools(env, "get_current_time")
+    env.agent.tool_permissions = [{"action": "get_current_time", "effect": "deny"}]
     events = await env.collect("scenario:mcp_unapproved")
-    assert texts(events).startswith("ERROR K41 refused this call")
+    assert "Policy denies get_current_time" in texts(events)
 
 
 @pytest.mark.asyncio
 async def test_an_approval_does_not_cover_other_arguments(env):
     use_card_tools(env, "get_current_time")
+    env.agent.tool_permissions = [{"action": "get_current_time", "effect": "ask"}]
     first = await env.collect("scenario:mcp_swapped_arguments")
-    second = await env.collect(resume_payload=resume(first, "allow"))
-    assert texts(second).startswith("ERROR K41 refused this call")
+    assert "'a': 2" in question_of(first)["question"]
+    second = await env.collect(resume_payload=resume_k41(first))
+    assert texts(second)[:4].isdigit()
 
 
 @pytest.mark.asyncio
-async def test_auto_allow_runs_without_asking_and_tells_the_agent_only_once(env):
-    use_card_tools(env, "get_current_time", permission_mode="auto_allow")
+async def test_auto_runs_without_asking_and_tells_the_agent_only_once(env):
+    use_card_tools(env, "get_current_time", permission_mode="auto")
     events = await env.collect("scenario:mcp_call")
     assert "user_input_request" not in types(events)
     assert not texts(events).startswith("ERROR")
@@ -769,40 +799,38 @@ async def test_auto_allow_runs_without_asking_and_tells_the_agent_only_once(env)
 @pytest.mark.asyncio
 async def test_allow_always_is_kept_by_k41_for_this_conversation(env):
     use_card_tools(env, "get_current_time")
+    env.agent.tool_permissions = [{"action": "get_current_time", "effect": "ask"}]
     first = await env.collect("scenario:mcp_call_twice")
-    labels = {option["id"]: option["label"] for option in question_of(first)["options"]}
-    assert labels["allow_always"] == "Allow in this conversation"
-    second = await env.collect(resume_payload=resume(first, "allow_always"))
-    # The second call needs no card, and the agent never hears "always".
+    second = await env.collect(resume_payload=resume_k41(first, "allow_thread"))
     assert "user_input_request" not in types(second)
-    assert texts(second) == "True True"
-    assert mcp_choices(env) == ["allow", "allow"]
+    assert texts(second) == "True True" and mcp_choices(env) == ["allow", "allow"]
 
 
 @pytest.mark.asyncio
 async def test_a_grant_survives_the_idle_stop_of_the_agent_process(env):
     use_card_tools(env, "get_current_time")
+    env.agent.tool_permissions = [{"action": "get_current_time", "effect": "ask"}]
     first = await env.collect("scenario:mcp_call")
-    await env.collect(resume_payload=resume(first, "allow_always"))
+    await env.collect(resume_payload=resume_k41(first, "allow_thread"))
     await env.service.restart_client(env.agent.acp.agent)
     events = await env.collect("scenario:mcp_call")
-    assert "user_input_request" not in types(events)
-    assert not texts(events).startswith("ERROR")
+    assert "user_input_request" not in types(events) and not texts(events).startswith("ERROR")
 
 
 @pytest.mark.asyncio
-async def test_a_grant_does_not_survive_a_server_restart(env):
+async def test_exact_grant_survives_a_server_restart(env):
     use_card_tools(env, "get_current_time")
+    env.agent.tool_permissions = [{"action": "get_current_time", "effect": "ask"}]
     first = await env.collect("scenario:mcp_call")
-    await env.collect(resume_payload=resume(first, "allow_always"))
+    await env.collect(resume_payload=resume_k41(first, "allow_thread"))
     await env.restart_server()
     events = await env.collect("scenario:mcp_call")
-    assert "user_input_request" in types(events)
+    assert "user_input_request" not in types(events)
 
 
 @pytest.mark.asyncio
 async def test_control_tools_stay_out_of_reach(env):
-    use_card_tools(env, "get_current_time", permission_mode="auto_allow")
+    use_card_tools(env, "get_current_time", permission_mode="auto")
     events = await env.collect("scenario:mcp_control_tool")
     assert texts(events).startswith("ERROR Tool 'ask_user' is not available")
 
@@ -872,8 +900,9 @@ async def test_tools_are_listed_for_an_agent_that_connects_while_the_session_ope
 @pytest.mark.asyncio
 async def test_a_call_whose_input_the_agent_did_not_report_can_be_approved(env):
     use_card_tools(env, "get_current_time")
+    env.agent.tool_permissions = [{"action": "get_current_time", "effect": "ask"}]
     first = await env.collect("scenario:mcp_call_without_input")
-    second = await env.collect(resume_payload=resume(first, "allow"))
+    second = await env.collect(resume_payload=resume_k41(first))
     assert texts(second)[:4].isdigit()
 
 
@@ -972,7 +1001,7 @@ async def test_a_tool_problem_only_costs_the_tools(env, monkeypatch, error):
 
 @pytest.mark.asyncio
 async def test_stopping_a_turn_cancels_a_running_tool(env, monkeypatch):
-    use_card_tools(env, "get_current_time", permission_mode="auto_allow")
+    use_card_tools(env, "get_current_time", permission_mode="auto")
     started, stopped = asyncio.Event(), asyncio.Event()
 
     async def slow(self, name, arguments):
@@ -1034,7 +1063,7 @@ async def browser(env, isolated_container, tmp_path):
     await close_async_engine(container=isolated_container)
 
 
-async def start_handoff(env, *, permission_mode="auto_allow"):
+async def start_handoff(env, *, permission_mode="auto"):
     use_card_tools(env, "browser_handoff", permission_mode=permission_mode)
     return await env.collect("scenario:mcp_handoff", browser_owner_id=OWNER)
 
@@ -1077,7 +1106,7 @@ async def test_handoff_pauses_the_turn_and_returns_the_result_to_the_agent(env, 
 async def test_handoff_is_asked_after_the_agent_gets_the_call_approved(env, browser):
     first = await start_handoff(env, permission_mode="ask")
     assert "browser_handoff_request" not in types(first) and not browser.sessions
-    second = await env.collect(resume_payload=resume(first, "allow"), browser_owner_id=OWNER)
+    second = await env.collect(resume_payload=resume_k41(first), browser_owner_id=OWNER)
     third = await env.collect(resume_payload=handoff_resume(second), browser_owner_id=OWNER)
     assert json.loads(texts(third))["handoff_status"] == "returned"
 
@@ -1192,14 +1221,14 @@ async def test_answering_a_handoff_after_a_restart_reports_a_lost_turn(env, brow
 
 @pytest.mark.asyncio
 async def test_handoff_is_refused_where_nobody_can_answer(env, browser):
-    use_card_tools(env, "browser_handoff", permission_mode="auto_allow")
+    use_card_tools(env, "browser_handoff", permission_mode="auto")
     events = await env.collect("scenario:mcp_handoff", platform="telegram", thread="telegram_user_1", browser_owner_id=OWNER)
     assert texts(events).startswith("ERROR Nobody can take over the browser")
     assert not browser.sessions
 
 
 def test_handoff_stays_selected_on_a_card():
-    config = AgentConfig(name="ag", graph_type="acp_agent", tools=["browser_handoff", "ask_user"])
+    config = AgentConfig(permission_mode="ask", name="ag", graph_type="acp_agent", tools=["browser_handoff", "ask_user"])
     assert config.tools == ["browser_handoff"]
 
 
@@ -1220,5 +1249,5 @@ def test_an_empty_tool_result_is_not_replaced_by_the_agents_report():
 
 
 def test_acp_settings_are_only_defaulted_for_acp_cards():
-    assert AgentConfig(name="ag", graph_type="acp_agent").acp == AcpAgentSettings()
+    assert AgentConfig(permission_mode="ask", name="ag", graph_type="acp_agent").acp == AcpAgentSettings()
     assert AgentConfig(name="other", graph_type="react_agent").acp is None

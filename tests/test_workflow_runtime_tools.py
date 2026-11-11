@@ -72,6 +72,7 @@ async def test_delegate_task_inherits_parent_runtime_context(monkeypatch):
             "working_dir": "D:/repo",
             "provider": "openai-main",
             "model": "parent-model",
+            "permission_mode": "ask",
             "browser_owner_id": "admin:1",
             "allowed_skill_names": ["repo-docs"],
         },
@@ -96,6 +97,7 @@ async def test_delegate_task_inherits_parent_runtime_context(monkeypatch):
     assert run_kwargs["workspace"] == "D:/repo"
     assert run_kwargs["provider"] == "openai-main"
     assert run_kwargs["model"] == "parent-model"
+    assert run_kwargs["permission_mode"] == "ask"
     assert run_kwargs["browser_owner_id"] == "admin:1"
     assert run_kwargs["allowed_skill_names"] == ["repo-docs"]
     assert run_kwargs["thread_id"].startswith("parent-thread:sub:child-agent:")
@@ -325,6 +327,15 @@ async def test_tool_node_resolves_runtime_allowed_tools(monkeypatch):
     assert captured["config"] == config
 
 
+async def invoke_checkpointed_tool_node(state, config, runtime):
+    from agent.modules.workflows.run_config import WorkflowContext
+    graph = StateGraph(dict, context_schema=WorkflowContext)
+    graph.add_node("tools", tool_node_module.tool_node)
+    graph.add_edge(START, "tools")
+    graph.add_edge("tools", END)
+    return await graph.compile(checkpointer=InMemorySaver()).ainvoke(state, config, context=runtime.context)
+
+
 @pytest.mark.asyncio
 async def test_tool_node_allows_pending_plan_mode_tool_after_agent_switch(monkeypatch):
     captured: dict = {}
@@ -364,7 +375,7 @@ async def test_tool_node_allows_pending_plan_mode_tool_after_agent_switch(monkey
         ]
     }
 
-    result = await tool_node_module.tool_node(
+    result = await invoke_checkpointed_tool_node(
         state,
         config={"configurable": {"thread_id": "thread-1"}},
         runtime=SimpleNamespace(
@@ -426,7 +437,7 @@ async def test_tool_node_allows_pending_ask_user_tool_after_agent_switch(monkeyp
         ]
     }
 
-    result = await tool_node_module.tool_node(
+    result = await invoke_checkpointed_tool_node(
         state,
         config={"configurable": {"thread_id": "thread-1"}},
         runtime=SimpleNamespace(

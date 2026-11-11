@@ -442,6 +442,8 @@ async def test_actual_tool_node_retains_output_before_checkpoint(output_environm
         """Fetch a long report."""
         return text
 
+    fetch_report.metadata = {"permission_risk": "safe"}
+
     async def resolve(self, agent_name, **kwargs):
         return [fetch_report]
 

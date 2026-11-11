@@ -386,6 +386,7 @@ def agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
         model=body.model.strip(),
         reasoning_effort=body.reasoning_effort,
         tools=canonical_tools,
+        permission_mode=body.permission_mode,
         tool_permissions=getattr(body, "tool_permissions", None),
         tool_configs={
             TOOL_ALIASES.get(str(name), str(name)): dict(values)

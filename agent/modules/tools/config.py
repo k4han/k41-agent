@@ -73,6 +73,9 @@ def normalize_tool_setting_value(key: str, value: Any) -> Any:
     Unknown tool fields and invalid values raise ValueError. Empty strings
     normalize to None so callers can reset the stored override.
     """
+    if key == "tools.permission_mode":
+        from agent.modules.tools.permissions.modes import PermissionMode
+        return PermissionMode(value).value if value else None
     if key == "tools.permissions":
         import json
         from agent.modules.tools.coding.models import PermissionRule

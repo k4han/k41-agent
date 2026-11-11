@@ -12,6 +12,7 @@ from agent.modules.agent_runtime.active_sessions import (
 def get_active_session_registry(*args, **kwargs) -> ActiveSessionRegistry:
     return active_sessions.get_active_session_registry(*args, **kwargs)
 from agent.modules.agent_runtime.runner import (
+    resolve_approval_supported,
     build_run_params,
     clear_agent_session,
     run_agent,
@@ -59,6 +60,7 @@ __all__ = [
     "NotifyChannel",
     "SessionManager",
     "TaskStatus",
+    "resolve_approval_supported",
     "build_run_params",
     "clear_agent_session",
     "current_session_id_var",

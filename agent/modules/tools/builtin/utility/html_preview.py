@@ -2,13 +2,14 @@ from typing import Literal
 
 from langchain_core.tools import tool
 
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCategory
 
 HtmlPreviewMode = Literal["auto", "card", "full_page"]
 
 
-@register_tool(category=ToolCategory.UTILITY, tags=["html", "preview"])
+@register_tool(risk=RiskLevel.MUTATING, may_interrupt=False, category=ToolCategory.UTILITY, tags=["html", "preview"])
 @tool
 def html_preview(html: str, title: str = "HTML Preview", mode: HtmlPreviewMode = "auto") -> str:
     """Render an interactive HTML preview in the chat transcript.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import asyncio
 import logging
 import time
@@ -752,6 +753,7 @@ def _build_target_context(runtime_context: WorkflowContext, target_agent: AgentC
         provider=runtime_context.get_provider(),
         model=runtime_context.get_model(),
         reasoning_effort=runtime_context.reasoning_effort,
+        permission_mode=runtime_context.permission_mode,
     )
     target_context.channel_trim_applied = runtime_context.channel_trim_applied
     return target_context

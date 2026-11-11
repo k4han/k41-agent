@@ -221,8 +221,8 @@ class TestBuiltinToolSource:
         assert ToolCapability.EXEC_SHELL in by_name["bash"].capabilities
         assert ToolCapability.NETWORK in by_name["web_search"].capabilities
         assert ToolCapability.MUTATES_STATE in by_name["write_todos"].capabilities
-        assert ToolCapability.MUTATES_STATE in by_name["ask_user"].capabilities
-        assert ToolCapability.MUTATES_STATE in by_name["request_plan_review"].capabilities
+        assert by_name["ask_user"].risk == "safe" and by_name["ask_user"].may_interrupt is True
+        assert by_name["request_plan_review"].risk == "safe" and by_name["request_plan_review"].may_interrupt is True
 
     def test_load_is_idempotent_in_id_space(self) -> None:
         source = BuiltinToolSource()

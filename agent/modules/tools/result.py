@@ -15,6 +15,7 @@ from langchain_core.tools import ToolException
 class ToolErrorCode(StrEnum):
     INVALID_INPUT = "invalid_input"
     NOT_FOUND = "not_found"
+    APPROVAL_UNAVAILABLE = "approval_unavailable"
     PERMISSION_DENIED = "permission_denied"
     TIMEOUT = "timeout"
     EXECUTION_ERROR = "execution_error"

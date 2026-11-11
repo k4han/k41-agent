@@ -67,6 +67,7 @@ class InvocationContext:
     tool_call_id: str = ""
     approval_supported: bool = False
     permission_rules: tuple[Any, ...] = ()
+    permission_mode: str = "auto"
     backend: str = "local"
     locator: str = ""
     skill_roots: tuple[str, ...] = ()

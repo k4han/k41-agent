@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from agent.modules.tools.builtin.utility.plan_resume import PlanResumePayload
 from agent.modules.tools.coding.models import AcpPermissionResume, PermissionResume
 from agent.modules.browser import BrowserHandoffResume
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 
@@ -218,10 +219,9 @@ ask_user = StructuredTool.from_function(
     infer_schema=False,
 )
 
-register_tool(
+register_tool(risk=RiskLevel.SAFE, may_interrupt=True,
     category=ToolCategory.UTILITY,
     capabilities=[
-        ToolCapability.MUTATES_STATE,
         ToolCapability.REQUIRES_THREAD,
     ],
     tags=["human-in-the-loop", "questions", "choices"],

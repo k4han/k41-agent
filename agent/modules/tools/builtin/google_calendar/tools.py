@@ -10,6 +10,7 @@ from langgraph.prebuilt import ToolRuntime
 from pydantic import BaseModel, Field
 
 from agent.modules.google_calendar import get_google_calendar_service
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
@@ -167,7 +168,7 @@ class CalendarDeleteEventInput(BaseModel):
     )
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.SAFE, may_interrupt=False,
     category=ToolCategory.SCHEDULE,
     capabilities=[ToolCapability.NETWORK],
     tags=["google_calendar", "calendar", "events"],
@@ -208,7 +209,7 @@ async def calendar_list_events(
         raise ToolError(ToolErrorCode.EXECUTION_ERROR, f"Failed to list calendar events: {exc}") from exc
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.SAFE, may_interrupt=False,
     category=ToolCategory.SCHEDULE,
     capabilities=[ToolCapability.NETWORK],
     tags=["google_calendar", "calendar", "calendars"],
@@ -236,7 +237,7 @@ async def calendar_list_calendars(
         raise ToolError(ToolErrorCode.EXECUTION_ERROR, f"Failed to list calendars: {exc}") from exc
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.SAFE, may_interrupt=False,
     category=ToolCategory.SCHEDULE,
     capabilities=[ToolCapability.NETWORK],
     tags=["google_calendar", "calendar", "events"],
@@ -270,7 +271,7 @@ async def calendar_get_event(
         raise ToolError(ToolErrorCode.EXECUTION_ERROR, f"Failed to get calendar event: {exc}") from exc
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.SAFE, may_interrupt=False,
     category=ToolCategory.SCHEDULE,
     capabilities=[ToolCapability.NETWORK],
     tags=["google_calendar", "calendar", "agenda"],
@@ -292,7 +293,7 @@ async def calendar_get_agenda(
         raise ToolError(ToolErrorCode.EXECUTION_ERROR, f"Failed to get agenda: {exc}") from exc
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.SAFE, may_interrupt=False,
     category=ToolCategory.SCHEDULE,
     capabilities=[ToolCapability.NETWORK],
     tags=["google_calendar", "calendar", "freebusy"],
@@ -321,7 +322,7 @@ async def calendar_check_availability(
         raise ToolError(ToolErrorCode.EXECUTION_ERROR, f"Failed to check availability: {exc}") from exc
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.MUTATING, may_interrupt=False,
     category=ToolCategory.SCHEDULE,
     capabilities=[ToolCapability.NETWORK, ToolCapability.MUTATES_STATE],
     tags=["google_calendar", "calendar", "create"],
@@ -368,7 +369,7 @@ async def calendar_create_event(
         raise ToolError(ToolErrorCode.EXECUTION_ERROR, f"Failed to create event: {exc}") from exc
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.MUTATING, may_interrupt=False,
     category=ToolCategory.SCHEDULE,
     capabilities=[ToolCapability.NETWORK, ToolCapability.MUTATES_STATE],
     tags=["google_calendar", "calendar", "update"],
@@ -410,7 +411,7 @@ async def calendar_update_event(
         raise ToolError(ToolErrorCode.EXECUTION_ERROR, f"Failed to update event: {exc}") from exc
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.MUTATING, may_interrupt=False,
     category=ToolCategory.SCHEDULE,
     capabilities=[ToolCapability.NETWORK, ToolCapability.MUTATES_STATE],
     tags=["google_calendar", "calendar", "delete"],

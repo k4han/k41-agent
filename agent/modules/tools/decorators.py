@@ -10,6 +10,8 @@ Tools live as the result of the LangChain ``@tool`` decorator (or
 
 from __future__ import annotations
 
+from agent.modules.tools.permissions.risk import RiskLevel
+
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
@@ -40,11 +42,19 @@ class ToolRegistration:
     default_config: dict[str, ToolConfigValue]
     factory: ToolFactory | None
     config_normalizer: ToolConfigNormalizer | None
+    risk: RiskLevel | None = None
+    self_authorizing: bool = False
+    may_interrupt: bool | None = None
+    prepare_permissions: Callable | None = None
 
 
 def register_tool(
     *,
     category: ToolCategory,
+    risk: RiskLevel | None = None,
+    self_authorizing: bool = False,
+    may_interrupt: bool | None = None,
+    prepare_permissions: Callable | None = None,
     capabilities: Iterable[ToolCapability] = (),
     tags: Iterable[str] = (),
     id: str | None = None,
@@ -67,9 +77,15 @@ def register_tool(
                 "(the result of @tool or StructuredTool.from_function); "
                 f"got {type(tool_obj).__name__!r} instead."
             )
+        declared_capabilities = frozenset(capabilities)
+        if risk == RiskLevel.SAFE and declared_capabilities.intersection({
+            ToolCapability.WRITE_FS, ToolCapability.EXEC_SHELL, ToolCapability.MUTATES_STATE,
+        }):
+            raise ValueError(f"Safe tool {tool_obj.name!r} declares mutating capabilities.")
         meta = ToolRegistration(
-            category=category,
-            capabilities=frozenset(capabilities),
+            category=category, risk=risk, self_authorizing=self_authorizing,
+            may_interrupt=may_interrupt, prepare_permissions=prepare_permissions,
+            capabilities=declared_capabilities,
             tags=frozenset(tags),
             explicit_id=id,
             version=version,

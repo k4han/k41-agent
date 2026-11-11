@@ -19,6 +19,7 @@ from agent.modules.providers import (
     get_default_llm_settings,
     list_providers,
 )
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import (
     ToolCapability,
@@ -336,7 +337,7 @@ def _build_generate_image_tool(config: dict[str, ToolConfigValue]) -> BaseTool:
     )
 
 
-generate_image = register_tool(
+generate_image = register_tool(risk=RiskLevel.MUTATING, may_interrupt=False,
     category=ToolCategory.IMAGE,
     capabilities=[ToolCapability.NETWORK, ToolCapability.MUTATES_STATE],
     tags=["image", "generation"],

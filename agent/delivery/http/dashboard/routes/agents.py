@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from agent.modules.tools import PermissionMode
+
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -53,6 +55,7 @@ class AgentCardBody(BaseModel):
     model: str = Field(default="", description="LLM model name override.")
     reasoning_effort: str | None = Field(default=None, pattern=EFFORT_PATTERN)
     tools: list[str] = Field(default_factory=list, description="List of tool names available to this agent.")
+    permission_mode: PermissionMode | None = None
     tool_permissions: list[dict[str, Any]] | None = None
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict, description="Per-tool config overrides keyed by tool name.")
     sub_agents: list[str] | None = Field(default=None, description="List of sub-agent names for delegation.")

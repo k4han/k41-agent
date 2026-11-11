@@ -10,6 +10,7 @@ import httpx
 from bs4 import BeautifulSoup
 from langchain_core.tools import StructuredTool
 
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.builtin.web.config import normalize_search_config
 from agent.modules.tools.domain import (
@@ -666,7 +667,7 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
     )
 
 
-web_search = register_tool(
+web_search = register_tool(risk=RiskLevel.SAFE, may_interrupt=False,
     config_normalizer=normalize_search_config,
     category=ToolCategory.WEB,
     capabilities=[ToolCapability.NETWORK],

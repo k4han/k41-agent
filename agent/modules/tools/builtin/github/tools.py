@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from agent.modules.github import GitHubAppClient, get_github_repository_store
 from agent.modules.tools.builtin.workspace import get_workspace
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
@@ -102,7 +103,7 @@ def _format_pr_detail(pr: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.SAFE, may_interrupt=False,
     category=ToolCategory.WEB,
     capabilities=[ToolCapability.NETWORK, ToolCapability.REQUIRES_WORKSPACE],
     tags=["github", "api"],
@@ -149,7 +150,7 @@ async def github_list_issue_pull_requests(
     return "\n".join(lines)
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.SAFE, may_interrupt=False,
     category=ToolCategory.WEB,
     capabilities=[ToolCapability.NETWORK, ToolCapability.REQUIRES_WORKSPACE],
     tags=["github", "api"],
@@ -188,7 +189,7 @@ async def github_get_pull_request(
     return _format_pr_detail(pr)
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.SAFE, may_interrupt=False,
     category=ToolCategory.WEB,
     capabilities=[ToolCapability.NETWORK, ToolCapability.REQUIRES_WORKSPACE],
     tags=["github", "api"],

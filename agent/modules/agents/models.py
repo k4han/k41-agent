@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from agent.modules.tools import PermissionMode
+
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent.modules.providers import EFFORT_PATTERN
 
@@ -31,9 +33,9 @@ def coerce_agent_text(value: Any, default: str = "") -> str:
 class AcpAgentSettings(BaseModel):
     """Settings of an agent card that runs an external agent over ACP."""
 
+    model_config = ConfigDict(extra="forbid")
+
     agent: str = Field(default="antigravity-acp", min_length=1)
-    # "ask" pauses for approval where a person can answer and denies elsewhere.
-    permission_mode: Literal["ask", "auto_allow"] = "ask"
     # Session config option id -> value, for example {"model": "gemini-3.8-flash"}.
     config_options: dict[str, str] = Field(default_factory=dict)
 
@@ -83,6 +85,14 @@ def normalize_agent_model(data: Any) -> Any:
 def reject_legacy_agent_settings(data: Any) -> Any:
     """Reject removed agent fields instead of silently ignoring them."""
     if isinstance(data, dict):
+        acp = data.get("acp")
+        if isinstance(acp, dict) and "permission_mode" in acp:
+            raise ValueError("Removed acp.permission_mode. Set card-level permission_mode: ask to retain approvals. "
+                             "For legacy auto_allow choose auto (recommended; dangerous operations still ask) "
+                             "or explicitly full_access (also removes K41 approval prompts; deny and hard blocks remain).")
+        if data.get("graph_type") == "acp_agent" and "permission_mode" not in data:
+            raise ValueError("ACP cards require an explicit permission_mode: ask to retain approvals, auto, "
+                             "full_access, or null to inherit the global mode.")
         legacy = sorted(set(data) & {"hidden", "context_trim_threshold", "max_context_tokens"})
         if legacy:
             instructions = []
@@ -111,6 +121,7 @@ class AgentConfig(BaseModel):
     model: str = ""
     reasoning_effort: str | None = Field(default=None, pattern=EFFORT_PATTERN)
     tools: list[str] = Field(default_factory=list)
+    permission_mode: PermissionMode | None = None
     tool_permissions: list[dict[str, Any]] | None = None
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     sub_agents: Optional[list[str]] = None  # Callable targets automatically enable delegate_task.
@@ -172,6 +183,7 @@ class AgentCard(BaseModel):
     model: str = ""
     reasoning_effort: str | None = Field(default=None, pattern=EFFORT_PATTERN)
     tools: list[str] = Field(default_factory=list)
+    permission_mode: PermissionMode | None = None
     tool_permissions: list[dict[str, Any]] | None = None
     tool_configs: dict[str, dict[str, Any]] = Field(default_factory=dict)
     sub_agents: Optional[list[str]] = None
@@ -229,6 +241,7 @@ class AgentCard(BaseModel):
             model=config.model,
             reasoning_effort=config.reasoning_effort,
             tools=list(config.tools),
+            permission_mode=config.permission_mode,
             tool_permissions=config.tool_permissions,
             tool_configs={
                 name: dict(values)
@@ -281,6 +294,7 @@ class AgentCard(BaseModel):
             model=self.model,
             reasoning_effort=self.reasoning_effort,
             tools=list(self.tools),
+            permission_mode=self.permission_mode,
             tool_permissions=self.tool_permissions,
             tool_configs={
                 name: dict(values)

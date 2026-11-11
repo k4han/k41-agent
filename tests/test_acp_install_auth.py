@@ -449,7 +449,7 @@ def catalog_with(tmp_path):
     repository.load()
     catalog = AgentCatalogService()
     catalog._repository = repository
-    catalog.create_agent_card(AgentConfig(name="ext", graph_type="acp_agent"))
+    catalog.create_agent_card(AgentConfig(permission_mode="ask", name="ext", graph_type="acp_agent"))
     return catalog
 
 

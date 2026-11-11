@@ -96,6 +96,7 @@ import { fetchCatalog, getBackendDisplayName, isBackendEnabled } from "@/lib/cat
 import { useChatAttachments } from "@/lib/useChatAttachments";
 import { useContextWindow } from "@/lib/useContextWindow";
 import { useBackgroundStream } from "@/lib/useBackgroundStream";
+import { readPermissionMode, savePermissionMode, type PermissionMode } from "@/lib/permissionMode";
 import { useReasoningEffort } from "@/lib/useReasoningEffort";
 import { useShowThinking } from "@/lib/useShowThinking";
 import { useAcpSessionOptions } from "@/lib/useAcpSessionOptions";
@@ -220,6 +221,12 @@ export function ChatPage() {
   const [model, setModel] = createSignal("");
   const [customModel, setCustomModel] = createSignal(false);
   const [reasoningScope, setReasoningScope] = createSignal(0);
+  const permissionScope = () => currentThreadId() || location.state?.newChatId || "__new__";
+  const [permissionMode, setPermissionMode] = createSignal<PermissionMode>();
+  const changePermissionMode = (value: PermissionMode | undefined) => {
+    setPermissionMode(value);
+    savePermissionMode(localStorage, permissionScope(), value);
+  };
   const [workingDir, setWorkingDir] = createSignal("");
   const [workspaceRef, setWorkspaceRef] = createSignal<WorkspaceRef | null>(null);
   const [workspaceBinding, setWorkspaceBinding] = createSignal<WorkspaceBinding | null>(null);
@@ -752,6 +759,8 @@ export function ChatPage() {
     const isViewingPending = !isUnmounting && currentStreamThreadId() === oldStreamTid;
 
     if (isViewingPending) {
+      if (permissionScope() !== threadId) savePermissionMode(localStorage, permissionScope(), undefined);
+      savePermissionMode(localStorage, threadId, permissionMode());
       loadedThreadId = threadId;
       loadedNewChatId = "";
       setCurrentThreadId(threadId);
@@ -991,6 +1000,7 @@ export function ChatPage() {
       loadedNewChatId = newChatId;
       // Reset effort on conversation switches, while thread creation keeps the same scope.
       setReasoningScope((scope) => scope + 1);
+      setPermissionMode(readPermissionMode(localStorage, threadId || newChatId || "__new__"));
       threadLoadRequestId += 1;
       compactRequestId += 1;
       threadLoadController?.abort();
@@ -1030,6 +1040,7 @@ export function ChatPage() {
       user_id: "dashboard",
       agent_name: agentNameOverride || agentName(),
       reasoning_effort: requestEffort(),
+      permission_mode: permissionMode(),
     };
     if (provider()) {
       payload.provider = provider();
@@ -1697,6 +1708,7 @@ export function ChatPage() {
           provider: provider(),
           model: model(),
           reasoning_effort: requestEffort(),
+          permission_mode: permissionMode(),
           workspace: workspaceRef() || localWorkspaceRef(workingDir()),
         }),
         signal: abortController.signal,
@@ -2211,6 +2223,8 @@ export function ChatPage() {
                 onAgentChange={handleAgentChange}
                 provider={provider()}
                 model={model()}
+                permissionMode={permissionMode()}
+                onPermissionModeChange={changePermissionMode}
                 reasoningEffort={reasoningEffort()}
                 reasoningEffortLevels={effortLevels()}
                 reasoningEffortDefault={selectedModelOption()?.reasoning_effort_default}

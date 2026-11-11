@@ -181,6 +181,16 @@ async def tool_node(
     with coding_authorization_scope():
         if calls:
             next_config["configurable"]["coding_message_id"] = str(getattr(state["messages"][-1], "id", "") or "")
+            from agent.modules.tools import prepare_permissions
+            from agent.modules.tools import ToolError
+            try:
+                await prepare_permissions(tools, calls, SimpleNamespace(
+                    context=runtime.context, state=state, config=next_config))
+            except (ToolError, ValueError, OSError, KeyError, TypeError) as exc:
+                code = exc.code.value if isinstance(exc, ToolError) else "invalid_input"
+                return {"messages": [ToolMessage(content=f"[error] {code}: Batch stopped before execution: {exc}",
+                        artifact={"error": {"code": code, "message": str(exc)}, "batch_stopped_before_execution": True},
+                        name=call["name"], tool_call_id=call["id"], status="error") for call in calls]}
             failure = await prepare_tool_batch(tools, calls, SimpleNamespace(
                 context=runtime.context, state=state, config=next_config,
             ))
@@ -189,7 +199,37 @@ async def tool_node(
                     content=failure.content, artifact=failure.model_dump(exclude={"content"}),
                     name=call["name"], tool_call_id=call["id"], status="error",
                 ) for call in calls]}, SimpleNamespace(context=runtime.context, config=next_config))
-        result = await ToolNode(tools).ainvoke(state, config=next_config, runtime=runtime)
+        from langgraph.func import task
+        from agent.modules.tools import permission_execution
+
+        @task
+        async def execute_tool_call(call):
+            # Each completed call has a durable result. Later interrupts replay only
+            # their own call, including business interrupts such as ask_user.
+            single = {**state, "messages": [*state["messages"][:-1],
+                      state["messages"][-1].model_copy(update={"tool_calls": [call]})]}
+            from langgraph.config import get_config
+            task_config = get_config()
+            task_config = {**task_config, "configurable": {
+                **task_config.get("configurable", {}),
+                "coding_message_id": next_config["configurable"].get("coding_message_id", ""),
+            }}
+            with permission_execution():
+                return await ToolNode(tools).ainvoke(single, config=task_config, runtime=runtime)
+
+        from langgraph.types import Command
+        result = []
+        for call in calls:
+            value = await execute_tool_call(call)
+            parts = value if isinstance(value, list) else [value]
+            result.extend(parts)
+        if not calls:
+            result = await ToolNode(tools).ainvoke(state, config=next_config, runtime=runtime)
+        elif all(isinstance(part, dict) for part in result):
+            result = {"messages": [message for part in result for message in part.get("messages", [])]}
+        else:
+            result = [Command(update=part) if isinstance(part, dict) else part for part in result]
+
     from agent.modules.skills import skill_events
     from langgraph.types import Command
 

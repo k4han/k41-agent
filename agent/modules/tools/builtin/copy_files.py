@@ -24,6 +24,8 @@ from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.prebuilt import ToolRuntime
 from pydantic import Field
 
+from agent.modules.tools.permissions.risk import RiskLevel
+from agent.modules.tools.permissions.preparation import prepare_builtin
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import AUXILIARY_MACHINES_TAG, ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
@@ -277,40 +279,21 @@ async def _write(side: _Side, kind: str, data: bytes, *, members: list[tuple[str
 
 
 def _authorize(runtime, source: _Side, destination: _Side) -> None:
-    from agent.modules.tools.coding.adapter import invocation_context
-    from agent.modules.tools.coding.models import CodingError
-    from agent.modules.tools.coding.service import get_coding_service
-
-    context = invocation_context(runtime)
-    permissions = get_coding_service().permissions
-    try:
-        # Path rules for the main workspace still apply to copies.
-        if not source.target.auxiliary:
-            permissions.assert_allowed(context, "read", source.absolute)
-        if not destination.target.auxiliary:
-            permissions.assert_allowed(context, "edit", destination.absolute)
-        permissions.assert_allowed(context, "copy_files", f"{source.label} -> {destination.label}")
-    except CodingError as exc:
-        raise ToolError(ToolErrorCode.PERMISSION_DENIED, str(exc)) from None
+    from agent.modules.tools.permissions import authorize_tool
+    if not source.target.auxiliary:
+        authorize_tool(runtime, "read", source.absolute)
+    if not destination.target.auxiliary:
+        authorize_tool(runtime, "edit", destination.absolute)
+    authorize_tool(runtime, "copy_files", f"{source.label} -> {destination.label}")
 
 
 def _authorize_path(side: _Side, action: str, absolute: str) -> None:
     if side.target.auxiliary:
         return
-    from agent.modules.tools.coding.adapter import invocation_context
-    from agent.modules.tools.coding.models import CodingError
-    from agent.modules.tools.coding.service import get_coding_service
-
-    context = invocation_context(side.runtime)
-    permissions = get_coding_service().permissions
-    try:
-        if side.target.backend == "local":
-            relative = os.path.relpath(absolute, side.target.root)
-            permissions.resolve_path(context, relative, action)
-        else:
-            permissions.assert_allowed(context, action, absolute)
-    except CodingError as exc:
-        raise ToolError(ToolErrorCode.PERMISSION_DENIED, str(exc)) from None
+    from agent.modules.tools.coding.adapter import apply_target, invocation_context
+    from agent.modules.tools.permissions import authorize_tool
+    context = apply_target(invocation_context(side.runtime), side.target)
+    authorize_tool(side.runtime, action, absolute, context=context, validate_path=side.target.backend == "local")
 
 
 async def _authorize_members(source: _Side, destination: _Side, names: list[str]) -> None:
@@ -343,7 +326,7 @@ async def _copy_files(
                        "source": source.label, "destination": destination.label}, ensure_ascii=False)
 
 
-copy_files = register_tool(
+copy_files = register_tool(risk=RiskLevel.MUTATING, may_interrupt=False, self_authorizing=True, prepare_permissions=prepare_builtin,
     category=ToolCategory.FILE,
     capabilities=[ToolCapability.REQUIRES_WORKSPACE, ToolCapability.REQUIRES_THREAD, ToolCapability.WRITE_FS,
                   ToolCapability.MUTATES_STATE, ToolCapability.ASYNC_ONLY],

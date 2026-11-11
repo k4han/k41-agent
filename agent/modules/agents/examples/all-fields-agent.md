@@ -88,16 +88,13 @@ tool_configs:
     provider: auto
     firecrawl_api_key: ""
 
-# Per-agent permission rules for file/shell/external-directory operations.
-#   null            -> inherit the global `tools.permissions` rules (default)
-#   [] or a list    -> replace the global rules for this agent
-# Each rule: action, resource, effect. Last matching rule wins.
-#   effect: allow | ask | deny
-#   action: read | edit | glob | grep | shell | external_directory |
-#           read_process_output | write_process_input | stop_process
-#   resource: glob matched against absolute file paths or the full shell command
-#            (use "*" to match anything). Workspace reads/writes and shell are
-#            allowed by default; explicit external paths require approval.
+# Conversation override > card mode > tools.permission_mode (default auto).
+# ask: safe reads run; mutations ask. auto: dangerous operations ask.
+# full_access: no prompts; explicit deny and hard blocks remain.
+permission_mode: auto
+# null inherits the global rule list; [] replaces it with no exceptions.
+# Any matching deny wins; otherwise the last allow/ask match wins.
+# Full access ignores ask rules and mandatory confirmations.
 tool_permissions:
   - action: edit
     resource: "*/secrets/*"

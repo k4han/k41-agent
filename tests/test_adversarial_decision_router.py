@@ -400,6 +400,11 @@ async def test_shadow_mode_slow_clef_concurrent_execution_and_negative_delta(
     }
     runtime = SimpleNamespace(context=_runtime_context())
 
+    async def prompt_variables(*args, **kwargs):
+        return {}
+    # Measure router branch concurrency independently of host shell discovery.
+    monkeypatch.setattr(router_module, "get_runtime_prompt_variable_values", prompt_variables)
+
     t0 = time.perf_counter()
     res = await router_module.llm_call_router(state, config, runtime)
     total_duration = time.perf_counter() - t0

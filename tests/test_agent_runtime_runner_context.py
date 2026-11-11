@@ -1559,6 +1559,7 @@ async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments
             agent_name="default",
             message_index=0,
             source_checkpoint_id="source-1",
+            permission_mode="ask",
             allowed_tool_names=allowed_tools,
         )
     ]
@@ -1568,6 +1569,7 @@ async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments
         {"type": "final", "content": "edited response"},
     ]
     assert captured["kwargs"]["stream_mode"] == ["messages", "values", "custom"]
+    assert captured["kwargs"]["context"]["permission_mode"] == "ask"
     assert captured["kwargs"]["context"]["allowed_tool_names"] == allowed_tools
     assert captured["kwargs"]["config"]["configurable"]["checkpoint_id"] == "parent-1"
     edited_message = captured["payload"]["messages"][0]

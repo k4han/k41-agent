@@ -112,6 +112,8 @@ class BuiltinToolSource:
                     source=ToolSource.BUILTIN,
                     category=category,
                     tool=tool_obj,
+                    risk=meta.risk, self_authorizing=meta.self_authorizing,
+                    may_interrupt=meta.may_interrupt, prepare_permissions=meta.prepare_permissions,
                     capabilities=meta.capabilities,
                     tags=meta.tags,
                     version=meta.version,

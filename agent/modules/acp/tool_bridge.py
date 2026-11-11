@@ -4,11 +4,10 @@ An agent runs its own loop and only reaches client tools through the ``mcpServer
 list it receives on ``session/new`` and ``session/resume``. Each attached session
 gets its own bearer token, so a token only ever reaches that session's tools.
 
-The agent decides when to ask for approval, but K41 tools hold credentials the
-agent does not otherwise have. A call therefore runs only after this side saw that
-exact call approved. That also ties the call to its ACP tool call id, which is how
-the transcript shows the real result: agy_acp_server reports ``"Call <tool> tool"``
-as ``rawOutput`` instead of what the tool returned.
+K41 is the approval authority for bridged tools, including calls made without a
+provider permission request. ACP allow_once responses correlate tool results with
+transcript call IDs; they do not grant permission to execute a K41 operation.
+The shared tool node enforces policy before any side effect.
 """
 
 from __future__ import annotations
@@ -118,7 +117,6 @@ class SessionTools:
         # Set before the session opens, because an agent may connect while it does.
         self.provider = provider
         self._lock = threading.Lock()
-        self._granted: set[str] = set()
         self._approvals: list[tuple[str, str, str]] = []
         self._running: set[asyncio.Task[Any]] = set()
 
@@ -135,21 +133,6 @@ class SessionTools:
                 self.turn = None
                 self.provider = None
                 self._approvals.clear()
-
-    def is_granted(self, tool: str) -> bool:
-        with self._lock:
-            return tool in self._granted
-
-    def grant(self, tool: str) -> None:
-        with self._lock:
-            self._granted.add(tool)
-
-    def inherit_grants(self, previous: SessionTools) -> None:
-        """Keep "this conversation" grants when the session gets a new token."""
-        with previous._lock:
-            granted = set(previous._granted)
-        with self._lock:
-            self._granted = granted & self.names
 
     def approve(self, tool_call: dict[str, Any], tool: str) -> None:
         # rawInput is optional in ACP, while an MCP call always carries an arguments object.
@@ -278,8 +261,6 @@ class ToolBridge:
         if turn is None or provider is None or turn.done or turn.cancel_requested:
             return _error_result("No agent turn is running, so this tool call was refused.")
         tool_call_id = session.take_approval(name, arguments)
-        if tool_call_id is None and not turn.auto_allow:
-            return _error_result(f"K41 refused this call to {name}: these exact arguments were not approved.")
         task = asyncio.ensure_future(provider.call_tool(name, arguments))
         session.track(task)
         try:

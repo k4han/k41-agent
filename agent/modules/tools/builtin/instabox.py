@@ -24,6 +24,8 @@ from agent.modules.instabox import (
     get_instabox_service,
     redact,
 )
+from agent.modules.tools.permissions.risk import RiskLevel, classify
+from agent.modules.tools.permissions.preparation import prepare_builtin
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import AUXILIARY_MACHINES_TAG, ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
@@ -40,14 +42,8 @@ INSTABOX_TOOLS: dict[str, BaseTool] = {}
 
 
 def _authorize(runtime, name: str, resource: str, values: dict[str, Any]) -> None:
-    from agent.modules.tools.coding.adapter import invocation_context
-    from agent.modules.tools.coding.models import CodingError
-    from agent.modules.tools.coding.service import get_coding_service
-
-    try:
-        get_coding_service().permissions.assert_allowed(invocation_context(runtime), name, resource, arguments=values)
-    except CodingError as exc:
-        raise ToolError(ToolErrorCode.PERMISSION_DENIED, str(exc)) from None
+    from agent.modules.tools.permissions import authorize_tool
+    authorize_tool(runtime, name, resource, arguments=values)
 
 
 async def _target(runtime, machine_id: str | None) -> ExecutionTarget:
@@ -106,7 +102,7 @@ def registered(name: str, coroutine, description: str, *, mutates: bool = False,
     tags = ["instabox", AUXILIARY_MACHINES_TAG] if machines else ["instabox"]
     if machines:
         capabilities.append(ToolCapability.REQUIRES_THREAD)
-    tool = register_tool(category=ToolCategory.SANDBOX, capabilities=capabilities, tags=tags)(
+    tool = register_tool(risk=classify(name, "*"), self_authorizing=True, prepare_permissions=prepare_builtin, may_interrupt=False, category=ToolCategory.SANDBOX, capabilities=capabilities, tags=tags)(
         StructuredTool.from_function(name=name, coroutine=coroutine, description=description)
     )
     INSTABOX_TOOLS[name] = tool
@@ -379,7 +375,7 @@ async def _snapshot_restore(
 ):
     target = await _target(runtime, machine_id)
     await _require_snapshot(runtime, snapshot_id)
-    # Restore always asks the user through the application approval step.
+    # Restore requires confirmation outside full_access, even with an allow rule.
     _authorize(runtime, "instabox_snapshot_restore", f"{target.locator}<-{snapshot_id}", {})
     return _json(await _call(get_instabox_service().restore_machine(
         target.locator, snapshot_id, confirm_machine=target.locator, confirm_snapshot=snapshot_id,

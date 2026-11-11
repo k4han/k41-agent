@@ -169,7 +169,7 @@ try {
       await js(`Array.from(document.querySelectorAll('.model-item-row')).find(row => row.querySelector('.model-item-row-name')?.textContent === ${JSON.stringify(modelId)}).querySelector('.model-item-effort-trigger').click()`);
     }
     await js(`(() => {
-      const button = Array.from(document.querySelectorAll('.model-effort-option')).find(button => button.textContent.toLowerCase() === ${JSON.stringify(level || 'auto')});
+      const button = Array.from(document.querySelectorAll('.model-effort-option[role="menuitemradio"]')).find(button => button.textContent.toLowerCase() === ${JSON.stringify(level || 'auto')});
       button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
       button.click();
     })()`);
@@ -177,7 +177,7 @@ try {
   };
   const effortOptions = async () => {
     await openModels();
-    const options = await js(`Array.from(document.querySelectorAll('.model-effort-option')).map(button => button.textContent.toLowerCase())`);
+    const options = await js(`Array.from(document.querySelectorAll('.model-effort-option[role="menuitemradio"]')).map(button => button.textContent.toLowerCase())`);
     await js('document.querySelector(".agent-model-popover-close").click()');
     return options;
   };
@@ -204,6 +204,14 @@ try {
     throw error;
   }
   assert.equal(await currentEffort(), 'high');
+  const choosePermission = async label => {
+    await js(`document.querySelector('[aria-label="Permission mode"]').click()`);
+    await until(() => js('!!document.querySelector(".select-control-menu")'), 'permission menu');
+    await js(`Array.from(document.querySelectorAll('.select-control-option')).find(option => option.textContent.trim() === ${JSON.stringify(label)}).click()`);
+  };
+  await choosePermission('Full access');
+  assert.equal(await js('document.querySelector(".permission-mode-picker").textContent.includes("removes approval prompts for K41 tools")'), true);
+  await choosePermission('Ask for approval');
   const openFavoriteMenu = async () => {
     await js('document.querySelector(".model-picker-trigger").click()');
     await until(() => js('!!document.querySelector(".model-item-favorite")'), 'model favorite buttons');
@@ -295,7 +303,7 @@ try {
     const row = Array.from(document.querySelectorAll('.model-item-row')).find(row => row.querySelector('.model-item-row-name')?.textContent === 'model-a');
     row.dispatchEvent(new MouseEvent('mouseenter'));
   })()`);
-  assert.deepEqual(await js(`Array.from(document.querySelectorAll('.model-effort-option')).map(button => button.textContent.toLowerCase())`), ['auto', 'low', 'high']);
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('.model-effort-option[role="menuitemradio"]')).map(button => button.textContent.toLowerCase())`), ['auto', 'low', 'high']);
   assert.equal(await currentEffort(), 'medium', 'hovering does not change the selected model or effort');
   await js(`(() => {
     const input = document.querySelector('.agent-model-search-input');
@@ -353,6 +361,7 @@ try {
   await js('(() => { const input = document.querySelector(".chat-prompt-input"); input.value = "Test automatic effort"; input.dispatchEvent(new Event("input", { bubbles: true })); })()');
   await js(`document.querySelector('button[aria-label="Send message"]').click()`);
   await until(() => sentChat !== undefined, 'explicit Auto chat request');
+  assert.equal(sentChat.permission_mode, 'ask', 'conversation mode survives model and agent changes');
   assert.equal(sentChat.reasoning_effort, 'auto');
   assert.equal(sentChat.agent_name, 'legacy-agent');
   await until(() => js(`!!document.querySelector('button[aria-label="Send message"]')`), 'mock chat completed');
@@ -397,7 +406,7 @@ try {
   await js(`${agentSave}.click()`);
   await until(() => savedAgent?.reasoning_effort === null, 'agent effort reset to Auto');
   assert.deepEqual(exceptions, []);
-  console.log('PASS: shared model favorites, pool priority, persistence, search, model profiles, chat effort, explicit Auto request, mobile widths, agent card effort choices, save, reload, and Auto reset.');
+  console.log('PASS: conversation permission mode and Full access notice, shared model favorites, pool priority, persistence, search, model profiles, chat effort, explicit Auto request, mobile widths, agent card effort choices, save, reload, and Auto reset.');
 } finally {
   await Promise.race([call?.('Browser.close').catch(() => {}), delay(2000)]);
   ws?.close(); browser.kill();

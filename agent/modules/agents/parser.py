@@ -149,6 +149,7 @@ def serialize_agent_config(config: AgentConfig) -> str:
     }
     if tool_configs:
         data["tool_configs"] = tool_configs
+    data["permission_mode"] = config.permission_mode.value if config.permission_mode is not None else None
     if config.tool_permissions is not None:
         data["tool_permissions"] = config.tool_permissions
     if config.sub_agents is not None:
@@ -249,6 +250,7 @@ def _build_agent_config(
             model=model,
             **({"reasoning_effort": data["reasoning_effort"]} if "reasoning_effort" in data else {}),
             tools=tools,
+            **({"permission_mode": data["permission_mode"]} if "permission_mode" in data else {}),
             tool_permissions=data.get("tool_permissions"),
             tool_configs=tool_configs,
             sub_agents=sub_agents,

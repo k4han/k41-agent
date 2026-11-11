@@ -1,3 +1,4 @@
+
 import asyncio
 import json
 import logging
@@ -108,6 +109,8 @@ def _request_to_run_params(request: ChatRequest) -> dict[str, object]:
         "model": request.model,
         "resume": request.resume,
     }
+    if request.permission_mode is not None:
+        params["permission_mode"] = request.permission_mode
     if request.reasoning_effort is not None:
         params["reasoning_effort"] = request.reasoning_effort
     if request.acp_config_options:
@@ -326,6 +329,7 @@ async def chat_events_edit(request: EditChatRequest, admin: str = Depends(get_cu
         provider=request.provider,
         model=request.model,
         reasoning_effort=request.reasoning_effort,
+        permission_mode=request.permission_mode,
     )
 
     params["message_index"] = request.message_index

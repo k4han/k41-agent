@@ -12,6 +12,8 @@ import {
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
+import { PermissionModePicker } from "@/components/PermissionModePicker";
+import type { PermissionMode } from "@/lib/permissionMode";
 import { AcpSessionOptions } from "@/components/AcpSessionOptions";
 import { AgentModelPicker } from "@/components/AgentModelPicker";
 import { ChatTodos, type TodoProgress } from "@/components/ChatTodos";
@@ -51,6 +53,8 @@ export interface ChatComposerProps {
   provider: string;
   model: string;
   onProviderModelChange: (provider: string, model: string, customModel?: boolean) => void;
+  permissionMode?: PermissionMode;
+  onPermissionModeChange: (mode: PermissionMode | undefined) => void;
   reasoningEffort: ReasoningEffort;
   reasoningEffortLevels: ReasoningEffort[];
   reasoningEffortDefault?: string | null;
@@ -533,6 +537,8 @@ export function ChatComposer(props: ChatComposerProps) {
             onReasoningEffortChange={props.onReasoningEffortChange}
             disabled={props.composerDisabled}
           />
+          <PermissionModePicker value={props.permissionMode} onChange={props.onPermissionModeChange}
+            disabled={props.composerDisabled} acp={props.hideModelPicker} />
         </div>
         <div class="chat-composer-actions">
           <Show when={props.currentThreadId}>

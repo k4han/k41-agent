@@ -15,6 +15,7 @@ from agent.modules.scheduler import (
     normalize_trigger,
     resolve_scheduled_project,
 )
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
@@ -79,9 +80,9 @@ class ScheduleTaskInput(BaseModel):
     )
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.MUTATING, may_interrupt=False,
     category=ToolCategory.SCHEDULE,
-    capabilities=[ToolCapability.REQUIRES_THREAD],
+    capabilities=[ToolCapability.REQUIRES_THREAD, ToolCapability.MUTATES_STATE],
     tags=["scheduler"],
 )
 @tool(args_schema=ScheduleTaskInput)
@@ -129,7 +130,7 @@ async def schedule_task(
     )
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.SAFE, may_interrupt=False,
     category=ToolCategory.SCHEDULE,
     capabilities=[ToolCapability.REQUIRES_THREAD],
     tags=["scheduler"],
@@ -167,9 +168,9 @@ class DeleteTaskInput(BaseModel):
     job_id: str = Field(..., description="The ID of the scheduled task to delete.")
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.MUTATING, may_interrupt=False,
     category=ToolCategory.SCHEDULE,
-    capabilities=[ToolCapability.REQUIRES_THREAD],
+    capabilities=[ToolCapability.REQUIRES_THREAD, ToolCapability.MUTATES_STATE],
     tags=["scheduler"],
 )
 @tool(args_schema=DeleteTaskInput)

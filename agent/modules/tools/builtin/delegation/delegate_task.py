@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import ToolRuntime
 
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
@@ -29,9 +30,10 @@ def _make_subagent_thread_id(runtime: ToolRuntime[Any, Any], sub_agent: str) -> 
     return f"sub_{sub_agent}_{suffix}"
 
 
-@register_tool(
+@register_tool(risk=RiskLevel.MUTATING, may_interrupt=False,
     category=ToolCategory.AGENT,
     capabilities=[
+        ToolCapability.MUTATES_STATE,
         ToolCapability.ASYNC_ONLY,
         ToolCapability.REQUIRES_THREAD,
         ToolCapability.NETWORK,
@@ -49,6 +51,7 @@ async def delegate_task(
     Use the exact sub_agent name from the callable agents catalog in this tool description.
     Provide a self-contained task with the context and expected result the sub-agent needs.
     """
+    from agent.modules.tools.coding.adapter import invocation_context
     from agent.modules.agent_runtime import run_agent_full
     from agent.modules.agents import get_catalog_service
     from agent.modules.browser import release_delegated_browser
@@ -87,6 +90,7 @@ async def delegate_task(
             user_input=task,
             thread_id=sub_thread_id,
             agent_name=sub_agent,
+            permission_mode=invocation_context(runtime).permission_mode,
             workspace=workspace_ref,
             provider=inherited_provider,
             model=inherited_model,

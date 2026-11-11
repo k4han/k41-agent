@@ -1,3 +1,5 @@
+
+from agent.modules.tools import PermissionMode
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,6 +26,7 @@ class WorkflowContext:
     provider: str | None = None
     model: str | None = None
     reasoning_effort: str | None = None
+    permission_mode: PermissionMode | None = None
     browser_owner_id: str | None = None
     acp_config_options: dict[str, str] | None = None
 
@@ -40,6 +43,7 @@ class WorkflowContext:
         provider: str | None = None,
         model: str | None = None,
         reasoning_effort: str | None = None,
+        permission_mode: PermissionMode | None = None,
         browser_owner_id: str | None = None,
         acp_config_options: dict[str, str] | None = None,
     ) -> None:
@@ -70,6 +74,7 @@ class WorkflowContext:
         self.provider = provider
         self.model = model
         self.reasoning_effort = reasoning_effort
+        self.permission_mode = permission_mode
         self.browser_owner_id = browser_owner_id
         self.acp_config_options = acp_config_options
 
@@ -127,6 +132,7 @@ def make_context(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    permission_mode: PermissionMode | None = None,
     browser_owner_id: str | None = None,
     acp_config_options: dict[str, str] | None = None,
 ) -> WorkflowContext:
@@ -150,6 +156,7 @@ def make_context(
         provider=provider.strip() if provider else None,
         model=model.strip() if model else None,
         reasoning_effort=reasoning_effort,
+        permission_mode=permission_mode,
         browser_owner_id=browser_owner_id,
         acp_config_options=acp_config_options,
     )
@@ -163,13 +170,14 @@ def make_config(
     if recursion_limit is None:
         from agent.shared.config.service import get_config_service
         recursion_limit = get_config_service().get_int("recursion_limit", 100)
-    from agent.shared.thread_ids import resolve_thread_id, storage_thread_id
+    from agent.shared.thread_ids import resolve_thread_id
+    from agent.modules.agent_runtime import resolve_approval_supported
 
     thread_id = resolve_thread_id(thread_id)
     return {
         "configurable": {
             "thread_id": thread_id,
-            "approval_supported": storage_thread_id(thread_id).startswith("api_"),
+            "approval_supported": resolve_approval_supported(None, thread_id, surfaces_interrupts=True),
         },
         "recursion_limit": recursion_limit,
     }

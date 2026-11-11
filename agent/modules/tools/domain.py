@@ -6,6 +6,8 @@ by category, capability, source, or tag instead of just by name.
 
 from __future__ import annotations
 
+from agent.modules.tools.permissions.risk import RiskLevel
+
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Callable, Literal
@@ -132,6 +134,10 @@ class ToolDescriptor:
     source: ToolSource
     category: ToolCategory
     tool: "BaseTool"
+    risk: RiskLevel | None = None
+    self_authorizing: bool = False
+    may_interrupt: bool | None = None
+    prepare_permissions: Callable | None = None
     capabilities: frozenset[ToolCapability] = field(default_factory=frozenset)
     tags: frozenset[str] = field(default_factory=frozenset)
     version: str = "1.0.0"

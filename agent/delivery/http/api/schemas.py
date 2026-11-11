@@ -1,3 +1,5 @@
+
+from agent.modules.tools import PermissionMode
 from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field, StringConstraints, model_validator
@@ -48,6 +50,7 @@ class ChatRequest(PoolSelectionValidation):
     agent_name: Optional[str] = Field(default=None, description="Agent card name to use. Defaults to 'default'.")
     provider: Optional[str] = Field(default=None, description="LLM provider name override.")
     model: Optional[str] = Field(default=None, description="LLM model name override.")
+    permission_mode: PermissionMode | None = None
     reasoning_effort: ReasoningEffort | None = Field(default=None, description="Model-specific reasoning effort override; omit to inherit the agent card default, or use 'auto' for the model default.")
     acp_config_options: AcpConfigOptions | None = Field(default=None, max_length=32, description="ACP session option overrides for this turn, such as model or thinking level. Ignored by other agents.")
     resume_payload: Optional[HumanResumePayload] = Field(default=None, description="Payload to resume after a human-in-the-loop pause.")
@@ -148,4 +151,5 @@ class EditChatRequest(PoolSelectionValidation):
     agent_name: Optional[str] = Field(default=None, description="Agent card name. Defaults to 'default'.")
     provider: Optional[str] = Field(default=None, description="LLM provider name override.")
     model: Optional[str] = Field(default=None, description="LLM model name override.")
+    permission_mode: PermissionMode | None = None
     reasoning_effort: ReasoningEffort | None = Field(default=None, description="Model-specific reasoning effort override; omit to inherit the agent card default, or use 'auto' for the model default.")

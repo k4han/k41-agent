@@ -1,3 +1,5 @@
+
+from agent.modules.tools import PermissionMode
 import asyncio
 import base64
 import binascii
@@ -71,6 +73,15 @@ MAX_IMAGE_ATTACHMENT_BYTES = 30 * 1024 * 1024
 MAX_TOTAL_ATTACHMENT_BYTES = 60 * 1024 * 1024
 
 
+def resolve_approval_supported(usage_context, thread_id: str, *, surfaces_interrupts: bool) -> bool:
+    """Only a live dashboard stream can deliver and resume approvals."""
+    if not surfaces_interrupts:
+        return False
+    from agent.shared.thread_ids import storage_thread_id
+    platform = str((usage_context or {}).get("platform", ""))
+    return platform == "api" or (not platform and storage_thread_id(thread_id).startswith("api_"))
+
+
 def build_run_params(
     *,
     platform: str,
@@ -87,6 +98,7 @@ def build_run_params(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    permission_mode: PermissionMode | None = None,
     acp_config_options: dict[str, str] | None = None,
     browser_owner_id: str | None = None,
     allowed_skill_names: list[str] | None = None,
@@ -144,6 +156,8 @@ def build_run_params(
     }
     if browser_owner_id is not None:
         params["browser_owner_id"] = browser_owner_id
+    if permission_mode is not None:
+        params["permission_mode"] = PermissionMode(permission_mode)
     if reasoning_effort is not None:
         params["reasoning_effort"] = reasoning_effort
     if acp_config_options:
@@ -1129,6 +1143,7 @@ async def run_agent(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    permission_mode: PermissionMode | None = None,
     acp_config_options: dict[str, str] | None = None,
     browser_owner_id: str | None = None,
     attachments: list[Any] | None = None,
@@ -1189,7 +1204,7 @@ async def run_agent(
 
     thread_id = resolve_thread_id(thread_id)
     await _assert_thread_graph_family(thread_id, resolved_workflow, agent_config)
-    approval_supported = str((usage_context or {}).get("platform", "")) == "api"
+    approval_supported = resolve_approval_supported(usage_context, thread_id, surfaces_interrupts=False)
     usage_context = (await load_usage_context(thread_id, usage_context)).to_dict()
     graph = get_workflow_graph(resolved_workflow)
     config = attach_usage_context(
@@ -1197,7 +1212,7 @@ async def run_agent(
         build_usage_context(thread_id, usage_context),
     )
     config = _config_with_checkpoint(config, checkpoint_id)
-    config["configurable"]["approval_supported"] = approval_supported or usage_context["platform"] == "api" or bool(config["configurable"].get("approval_supported"))
+    config["configurable"]["approval_supported"] = approval_supported
 
     context = make_run_context(
         workspace=workspace,
@@ -1210,6 +1225,7 @@ async def run_agent(
         provider=provider,
         model=model,
         reasoning_effort=reasoning_effort,
+        permission_mode=permission_mode,
         browser_owner_id=browser_owner_id,
         acp_config_options=acp_config_options,
     )
@@ -1282,6 +1298,7 @@ async def run_agent_stream(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    permission_mode: PermissionMode | None = None,
     acp_config_options: dict[str, str] | None = None,
     browser_owner_id: str | None = None,
     attachments: list[Any] | None = None,
@@ -1349,7 +1366,7 @@ async def run_agent_stream(
 
     thread_id = resolve_thread_id(thread_id)
     await _assert_thread_graph_family(thread_id, resolved_workflow, agent_config)
-    approval_supported = str((usage_context or {}).get("platform", "")) == "api"
+    approval_supported = resolve_approval_supported(usage_context, thread_id, surfaces_interrupts=True)
     usage_context = (await load_usage_context(thread_id, usage_context)).to_dict()
     graph = get_workflow_graph(resolved_workflow)
     config = attach_usage_context(
@@ -1357,10 +1374,7 @@ async def run_agent_stream(
         build_usage_context(thread_id, usage_context),
     )
     config = _config_with_checkpoint(config, checkpoint_id)
-    config["configurable"]["approval_supported"] = approval_supported or usage_context["platform"] == "api" or bool(config["configurable"].get("approval_supported"))
-    # Only this path surfaces interrupts to a person. run_agent ignores them, so an
-    # ACP permission request raised there would hang with nobody to answer it.
-    config["configurable"]["acp_can_interrupt"] = config["configurable"]["approval_supported"]
+    config["configurable"]["approval_supported"] = approval_supported
 
     context = make_run_context(
         workspace=workspace,
@@ -1373,6 +1387,7 @@ async def run_agent_stream(
         provider=provider,
         model=model,
         reasoning_effort=reasoning_effort,
+        permission_mode=permission_mode,
         browser_owner_id=browser_owner_id,
         acp_config_options=acp_config_options,
     )
@@ -1629,6 +1644,7 @@ async def run_agent_edit_stream(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    permission_mode: PermissionMode | None = None,
     browser_owner_id: str | None = None,
     usage_context: dict[str, Any] | None = None,
     resume: bool = False,
@@ -1652,7 +1668,7 @@ async def run_agent_edit_stream(
 
     thread_id = resolve_thread_id(thread_id)
     await _assert_thread_graph_family(thread_id, resolved_workflow, agent_config)
-    approval_supported = str((usage_context or {}).get("platform", "")) == "api"
+    approval_supported = resolve_approval_supported(usage_context, thread_id, surfaces_interrupts=True)
     usage_context = (await load_usage_context(thread_id, usage_context)).to_dict()
     graph = get_workflow_graph(resolved_workflow)
     base_config = attach_usage_context(
@@ -1660,7 +1676,7 @@ async def run_agent_edit_stream(
         build_usage_context(thread_id, usage_context),
     )
 
-    base_config["configurable"]["approval_supported"] = approval_supported or usage_context["platform"] == "api" or bool(base_config["configurable"].get("approval_supported"))
+    base_config["configurable"]["approval_supported"] = approval_supported
 
     source_state, original_message = await _find_message_source_state(
         graph,
@@ -1685,6 +1701,7 @@ async def run_agent_edit_stream(
         provider=provider,
         model=model,
         reasoning_effort=reasoning_effort,
+        permission_mode=permission_mode,
         browser_owner_id=browser_owner_id,
     )
 
@@ -1847,6 +1864,7 @@ async def run_agent_full(
     provider: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    permission_mode: PermissionMode | None = None,
     acp_config_options: dict[str, str] | None = None,
     browser_owner_id: str | None = None,
     attachments: list[Any] | None = None,
@@ -1890,6 +1908,7 @@ async def run_agent_full(
         provider=provider,
         model=model,
         reasoning_effort=reasoning_effort,
+        permission_mode=permission_mode,
         acp_config_options=acp_config_options,
         browser_owner_id=browser_owner_id,
         attachments=attachments,

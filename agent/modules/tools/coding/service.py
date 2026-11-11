@@ -16,7 +16,7 @@ from agent.modules.tools.coding.files import FileService
 from agent.modules.tools.coding.engine import CodingEngine
 from agent.modules.tools.coding.names import PROCESS_TOOLS
 from agent.modules.tools.coding.models import CodingError, CodingInvocation, InvocationContext, ResultError, ToolDefinition, ToolResult
-from agent.modules.tools.coding.permissions import Permissions
+from agent.modules.tools.permissions import Permissions
 from agent.modules.tools.coding.processes import ProcessManager, resolve_shell
 from agent.modules.tools.coding.storage import OutputStore, digest
 

@@ -49,3 +49,37 @@ def assert_command_allowed(command: str) -> None:
     blocked, reason = check_command_blocked(command)
     if blocked:
         raise ValueError(f"Blocked dangerous command ({reason}): command rejected for local execution")
+
+
+# Global Git options precede the subcommand and may contain quoted arguments.
+# Consume words and options atomically to bound backtracking on long inputs.
+_SHELL_WORD = r'''(?>(?:[^\s'";&|]+|'[^'\r\n]*'|"[^"\r\n]*")+)'''
+_GIT_COMMAND_PREFIX = (
+    r"\bgit(?:\.exe)?"
+    rf"(?>(?:\s+(?:(?:-C|-c|--git-dir|--work-tree|--namespace|--config-env)\s+{_SHELL_WORD}|-{_SHELL_WORD}))*)\s+"
+)
+
+_DANGEROUS_COMMAND_PATTERNS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
+    r"\brm\b[^\r\n;|]*\s(?:-[a-z]*r|--recursive)",
+    r"\b(?:Remove-Item|ri)\b[^\r\n;|]*\s-(?:Recurse|r)\b",
+    _GIT_COMMAND_PREFIX + r"push\b[^\r\n;|]*(?:--force(?:-with-lease)?\b|\s-f\b|\s\+)",
+    _GIT_COMMAND_PREFIX + r"reset\b[^\r\n;|]*--hard\b",
+    _GIT_COMMAND_PREFIX + r"clean\b[^\r\n;|]*-[a-z]*f",
+    r"\b(?:sudo|runas)\b",
+    r"\b(?:curl|wget)\b[^\r\n;]*\|\s*(?:sh|bash|zsh)\b",
+    r"\b(?:iwr|Invoke-WebRequest|irm|Invoke-RestMethod)\b[^\r\n;]*\|\s*(?:iex|Invoke-Expression)\b",
+    r"\b(?:chmod|chown)\b[^\r\n;|]*\s-(?:[a-z]*R|recursive)\b",
+    r"\btaskkill\b|\bkill\s+(?:-9|-KILL)\b",
+    r"\b(?:npm|pnpm|yarn)\s+publish\b",
+    r"\bdocker\s+system\s+prune\b",
+    r"\bDROP\s+(?:TABLE|DATABASE)\b",
+))
+
+
+def classify_command(command: str) -> str:
+    """Classify shell input before consulting modes, rules or grants."""
+    if check_command_blocked(command)[0]:
+        return "blocked"
+    if any(pattern.search(command) for pattern in _DANGEROUS_COMMAND_PATTERNS):
+        return "dangerous"
+    return "normal"

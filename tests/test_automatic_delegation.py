@@ -9,7 +9,7 @@ from langgraph.runtime import Runtime
 
 from agent.modules.agents import AgentConfig
 from agent.modules.agents.service import AgentCatalogService
-from agent.modules.tools import ToolCategory, ToolDescriptor, ToolPolicy, ToolResolver, ToolSource
+from agent.modules.tools import RiskLevel, ToolCategory, ToolDescriptor, ToolPolicy, ToolResolver, ToolSource
 from agent.modules.tools.builtin.delegation.delegate_task import delegate_task
 from agent.modules.tools.registry_service import ToolRegistryService
 from agent.modules.workflows.run_config import WorkflowContext
@@ -40,6 +40,7 @@ def delegation_catalog(monkeypatch):
         ToolDescriptor(
             id=f"builtin.test.{item.name}", name=item.name, description=item.description,
             source=ToolSource.BUILTIN, category=ToolCategory.AGENT, tool=item,
+            risk=RiskLevel.SAFE if item.name == "read" else RiskLevel.MUTATING, may_interrupt=False,
         )
         for item in (read_stub, delegate_task)
     ])
@@ -159,8 +160,14 @@ async def test_llm_binding_and_tool_execution_share_delegation_policy(
     state = {"messages": [AIMessage(content="", tool_calls=[{
         "name": "delegate_task", "args": {"task": "Research.", "sub_agent": "child"}, "id": "delegate-1",
     }])]}
-    result = await tool_module.tool_node(state, config, runtime)
-    message = result["messages"][0]
+    from langgraph.graph import END, START, MessagesState, StateGraph
+    from langgraph.checkpoint.memory import InMemorySaver
+    graph = StateGraph(MessagesState, context_schema=WorkflowContext)
+    graph.add_node("tools", tool_module.tool_node)
+    graph.add_edge(START, "tools")
+    graph.add_edge("tools", END)
+    result = await graph.compile(checkpointer=InMemorySaver()).ainvoke(state, config, context=runtime.context)
+    message = result["messages"][-1]
     if enabled:
         assert message.status == "success"
         assert "Child completed." in message.content

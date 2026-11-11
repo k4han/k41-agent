@@ -302,7 +302,7 @@ from agent.modules.tools.coding import service as _coding_service_module
 
 def get_coding_service(*args, **kwargs):
     return _coding_service_module.get_coding_service(*args, **kwargs)
-from agent.modules.tools.coding.permissions import pending_permission_requests, permission_request_event
+from agent.modules.tools.permissions import pending_permission_requests, permission_request_event
 from agent.modules.tools.coding.storage import atomic_json, bounded_text as bound_tool_text
 from agent.modules.tools.coding.storage import conversation_key
 from agent.modules.tools.coding.processes import kill_tree as kill_process_tree, spawn_contained as spawn_contained_process
@@ -341,3 +341,11 @@ async def clear_conversation_storage(thread_id: str) -> None:
 
 
 __all__.append("clear_conversation_storage")
+
+from agent.modules.tools.permissions import PermissionMode, Permissions, RiskLevel, evaluate, permission_execution, resolve_mode
+from agent.modules.tools.permissions.batch import prepare_permissions
+from agent.modules.tools.permissions.risk import acp_operations, classify_acp_tool_call
+from agent.modules.tools.policy import computer_tool_names
+
+__all__ += ["PermissionMode", "Permissions", "RiskLevel", "evaluate", "permission_execution", "resolve_mode",
+            "prepare_permissions", "acp_operations", "classify_acp_tool_call", "computer_tool_names"]

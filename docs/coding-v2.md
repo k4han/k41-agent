@@ -13,7 +13,7 @@ including `file_path`; parameter aliases are not supported.
 ## Runtime boundary
 
 `agent/modules/tools/coding` owns Pydantic input/result contracts, invocation
-context, operation permissions, durable settlement, process management,
+context, durable settlement, process management,
 output retention and file operations. `ToolDefinition` supplies execution,
 an output schema and optional rendering. The LangChain adapter returns a
 `ToolMessage` with structured `artifact` metadata and `status="error"` for
@@ -142,44 +142,81 @@ also terminates its daemon and children.
 
 ## Permissions and approvals
 
-Global settings `tools.permissions`, `tools.shell`, and `tools.storage_root`
-are database-owned runtime settings. Settings > Tools exposes a validated JSON
-rule editor and the local shell/storage settings. Shell/storage changes require
-an application restart. Operator YAML can seed these settings
-at first startup. Agent `tool_permissions: null` inherits global rules;
-an explicit list, including `[]`, replaces them. Last matching rule wins.
-Rules use action/resource glob matching. File resources are canonical absolute
-paths, with slash and Windows case normalization. Shell resources are the
-entire command; approval identity also includes the shell and cwd.
+The shared engine lives in `agent/modules/tools/permissions`, outside the coding
+runtime. Every tool executed by a workflow, including MCP and ACP-bridged K41
+tools, is authorized before execution. Global `tools.permission_mode` defaults
+to `auto`. A conversation override wins over the executing agent card's
+`permission_mode`, which wins over the global setting. Chat preserves its override
+for new messages, resumes and message edits. Routers preserve the override without
+resolving it against the source card; delegated runs inherit the parent's effective mode.
+
+| Risk | `ask` | `auto` | `full_access` |
+|---|---|---|---|
+| Safe reads | Allow | Allow | Allow |
+| Ordinary mutations | Ask | Allow | Allow |
+| Dangerous operations | Ask | Ask | Allow |
+| Hard blocked operations | Deny | Deny | Deny |
+
+All shell commands, including `ls` and `git status`, count as mutations. Static
+patterns mark recursive deletion, force pushes, hard resets, privilege escalation,
+remote scripts piped into interpreters, recursive ownership changes, publishing,
+process termination and destructive SQL as dangerous. Existing destructive system
+command blocks remain mandatory in every mode. Modes do not create an OS sandbox.
+
+`tools.permissions`, `tools.permission_mode`, `tools.shell`, and `tools.storage_root`
+are database runtime settings. Agent `tool_permissions: null` inherits the global
+rule list; an explicit list, including `[]`, replaces it. Any matching `deny` wins.
+Without a deny, the last matching `allow` or `ask` wins. Full access ignores `ask`
+rules and mandatory confirmation, including `instabox_snapshot_restore`, while
+retaining deny rules and hard blocks. Outside full access, snapshot restore always
+asks even when a rule allows it. Rules use action/resource glob matching:
 
 ```yaml
+permission_mode: auto
 tool_permissions:
   - {action: edit, resource: "*/secrets/*", effect: deny}
   - {action: shell, resource: "*", effect: ask}
+  - {action: "mcp__trusted__*", resource: "*", effect: allow}
 ```
 
-Actions include `read`, `edit`, `glob`, `grep`, `shell`, `external_directory`,
-`read_process_output`, `write_process_input`, and
-`stop_process`. Default workspace reads/searches/writes and shell calls are
-allowed. Explicit external paths require approval. Relative traversal and
-symlink escapes are rejected. Mandatory destructive-command guards apply
-before configurable authorization. Shell commands execute with host-user OS
-authority; command prefixes do not imply filesystem confinement.
+File resources are canonical absolute paths with slash and Windows case
+normalization. Shell resources are entire commands; identity includes shell and cwd.
+MCP tools with `readOnlyHint: true` are safe; all others default to dangerous.
+Unclassified tools also default to dangerous. Descriptor risk is passed explicitly
+to policy, independently of capability flags. See the complete [tool inventory](tool-permissions.md).
 
 Dashboard approvals offer Allow once, Allow in this conversation, or Deny.
-Conversation grants authorize the exact agent/action/resource/metadata/rule
-identity within that workspace/thread; changing policy invalidates the grant.
-Unsupported channels return `approval_unavailable`. Reloading the dashboard
-restores pending requests from the checkpoint. Resume IDs are correlated with
-the actual request; unrelated resume payloads cannot authorize an operation.
+Grants cover the exact agent/action/resource/metadata/rules in a workspace/thread.
+Changing mode does not invalidate a grant. Hard blocks and deny are always checked
+before grants. Channels, scheduled tasks, delegated runs and the synchronous API
+return `approval_unavailable` if a required approval cannot be delivered.
 
-Invocation journals key on agent/message/tool_call_id within a workspace/thread
-and record the tool/argument fingerprint. Completed results are reused before
-authorization during replay. Reusing an ID with changed arguments is rejected.
-An incomplete journal after interruption/restart returns `unknown_outcome`;
-inspect side effects manually before issuing a new call. No side effect is
-automatically retried. Journals are retained separately from expiring output
-artifacts so output expiration cannot re-enable an old mutation.
+The whole batch is prepared before any tool runs. Coding, browser, desktop,
+Instabox and file-transfer tools prepare detailed operations and recheck them
+without permission interrupts during execution. A changed resource requiring a
+new approval stops before that operation's side effect. Every call runs in its own
+LangGraph task checkpoint; completed results are reused if a later call pauses,
+including business pauses from `ask_user`, plan review and browser handoff.
+Calls execute sequentially so potentially interrupting tools never share a parallel
+batch with uncheckpointed side effects. Multi-step tools must approve all operations
+before their first effect or maintain their own step checkpoints. Browser handoff
+also retains its own invocation state. An unfinished call after a process crash may
+still have an unknown outcome; this is not a general distributed exactly-once guarantee.
+
+### Upgrading existing permissions
+
+The new `auto` default allows ordinary mutations but changes previous behavior:
+dangerous shell commands, MCP tools without a read-only hint and newly gated tools
+may now ask. A broad `deny *` followed by a specific `allow` no longer creates an
+exception: narrow the deny's scope instead. Card rules still replace global rules.
+
+ACP cards require an explicit card-level `permission_mode`, including `null` if
+inheritance is intended. Move old `acp.permission_mode: ask` to `permission_mode: ask`.
+ACP cards that omitted the old field also used ask and must explicitly choose ask
+to retain that behavior. Legacy `auto_allow` has no exact replacement: choose `auto`
+(recommended; dangerous K41 and native operations can ask), or deliberately choose
+`full_access` (removes K41 prompts too). It is never silently renamed. See the
+[ACP enforcement limits](acp-antigravity.md#permission-modes-and-enforcement-limits).
 
 ## Processes and output
 

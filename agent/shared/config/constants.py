@@ -131,7 +131,7 @@ def is_platform_managed_key(key: str) -> bool:
 RUNTIME_KEY_PATTERNS = [
     r"^web\.connections\.[A-Za-z0-9_-]+\.(type|api_key|cse_id|base_url)$",
     r"^web\.defaults\.(google|tavily|firecrawl|brave|bing)$",
-    r"^tools\.(permissions|shell|storage_root)$",
+    r"^tools\.(permission_mode|permissions|shell|storage_root)$",
     r"^(host|port|enable_web|enable_api|enable_dashboard|tray\.enabled|tray\.autostart)$",
     r"^browser\.(executable_path|storage_root|idle_ttl_seconds|operation_timeout_seconds|stream_quality|stream_max_width|stream_max_height)$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
@@ -170,7 +170,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^web\.migration_version$",
     r"^web\.connections\.[A-Za-z0-9_-]+\.(type|api_key|cse_id|base_url)$",
     r"^web\.defaults\.(google|tavily|firecrawl|brave|bing)$",
-    r"^tools\.(permissions|shell|storage_root)$",
+    r"^tools\.(permission_mode|permissions|shell|storage_root)$",
     r"^browser\.(executable_path|storage_root|idle_ttl_seconds|operation_timeout_seconds|stream_quality|stream_max_width|stream_max_height)$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
@@ -340,7 +340,7 @@ def _expand_runtime_keys() -> set[str]:
                  "skills.local_execution_mode", "skills.cache_root"})
     keys.add(DISPLAY_TIMEZONE_CONFIG_KEY)
     keys.add("recursion_limit")
-    keys.update({"tools.permissions", "tools.shell", "tools.storage_root"})
+    keys.update({"tools.permission_mode", "tools.permissions", "tools.shell", "tools.storage_root"})
     keys.update({"browser.executable_path", "browser.storage_root", "browser.idle_ttl_seconds", "browser.operation_timeout_seconds"})
     keys.update({"browser.stream_quality", "browser.stream_max_width", "browser.stream_max_height"})
     keys.add("google_calendar.enabled")
@@ -367,6 +367,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "browser.stream_quality": 50,
     "browser.stream_max_width": 1280,
     "browser.stream_max_height": 720,
+    "tools.permission_mode": "auto",
     "tools.permissions": [],
     "tools.shell": None,
     "tools.storage_root": None,
@@ -532,9 +533,14 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "description": "Channel history token budget applied once per turn, after compaction.",
         "min": 1, "step": 1,
     },
+    "tools.permission_mode": {
+        "type": "select", "category": "tools", "label": "Permission mode",
+        "description": "Default tool approval policy. Agent cards and conversations can override it.",
+        "options": ["ask", "auto", "full_access"], "default": "auto",
+    },
     "tools.permissions": {
         "type": "json", "category": "tools", "label": "Global tool permissions",
-        "description": "Ordered JSON rules with action, resource and effect (allow/ask/deny). Last match wins; agents may override this list.",
+        "description": "Ordered JSON rules with action, resource and effect (allow/ask/deny). Deny always wins; otherwise the last match wins. Agents may replace this list.",
         "default": [],
     },
     "tools.shell": {

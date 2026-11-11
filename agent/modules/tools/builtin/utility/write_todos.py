@@ -6,6 +6,7 @@ from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
+from agent.modules.tools.permissions.risk import RiskLevel
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory
 
@@ -82,7 +83,7 @@ write_todos = StructuredTool.from_function(
     infer_schema=False,
 )
 
-register_tool(
+register_tool(risk=RiskLevel.MUTATING, may_interrupt=False,
     category=ToolCategory.UTILITY,
     capabilities=[ToolCapability.MUTATES_STATE],
     tags=["planning", "todo"],

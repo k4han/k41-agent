@@ -119,7 +119,7 @@ class CardToolProvider:
     def __init__(self, context: WorkflowContext, config: RunnableConfig, turn_id: str) -> None:
         self._context = context
         self._turn_id = turn_id
-        self._can_interrupt = bool(config.get("configurable", {}).get("acp_can_interrupt"))
+        self._can_interrupt = bool(config.get("configurable", {}).get("approval_supported"))
         # Only what tools read. The rest of a node's config belongs to that graph run.
         self._config: RunnableConfig = {
             "configurable": {
@@ -231,6 +231,12 @@ async def _start_turn(state: AcpState, config: RunnableConfig, runtime: Runtime[
     if agent_config is None or agent_config.acp is None:
         raise AcpError(f"Agent '{ctx.get_agent_name()}' has no ACP settings.")
     settings = agent_config.acp
+    from types import SimpleNamespace
+    from agent.modules.tools import invocation_context
+    from agent.modules.tools import get_coding_service
+    policy_context = invocation_context(SimpleNamespace(context=ctx, state=state, config=config))
+    native_grants = frozenset(path.stem for path in get_coding_service().storage.owner_dir(policy_context).glob("*.grant"))
+
     thread_id = get_thread_id(config)
     cwd_path = Path(ctx.get_working_dir()).resolve()
     # Thread workspaces are created on first use, and no K41 tool runs here to do it.
@@ -259,8 +265,9 @@ async def _start_turn(state: AcpState, config: RunnableConfig, runtime: Runtime[
         blocks=prompt_blocks(user_message) if user_message is not None else [],
         session_id=str(state.get("acp_session_id") or ""),
         session_cwd=str(state.get("acp_session_cwd") or ""),
-        auto_allow=settings.permission_mode == "auto_allow",
-        can_interrupt=bool(config.get("configurable", {}).get("acp_can_interrupt")),
+        permission_context=policy_context,
+        native_grants=native_grants,
+        can_interrupt=bool(config.get("configurable", {}).get("approval_supported")),
         config_options={**settings.config_options, **(ctx.acp_config_options or {})},
         system_prompt=system_prompt,
         tools=tools,
@@ -377,7 +384,7 @@ def _apply_answer(turn: AcpTurn, pending: Any, response: Any) -> bool:
     return turn.answer(pending.request_id, decision.option_id) or turn.next_pending() is None or turn.done
 
 
-async def acp_permission_node(state: AcpState, config: RunnableConfig) -> dict[str, Any]:
+async def acp_permission_node(state: AcpState, config: RunnableConfig, runtime: Runtime[WorkflowContext]) -> dict[str, Any]:
     """Pause for one decision and hand it to whatever in the turn waits for it."""
     # Being here again means the person answered, which also dismisses an expired handoff.
     await abandon_thread_handoffs(get_thread_id(config), expired_only=True)
@@ -386,6 +393,19 @@ async def acp_permission_node(state: AcpState, config: RunnableConfig) -> dict[s
     if pending is None:
         # The turn ended while paused, or the server restarted. acp_turn reports it.
         return {"acp_pending": False}
+    # Refresh on the graph thread before applying an answer. Reader callbacks use
+    # only this immutable context snapshot and the in-memory grant index.
+    from types import SimpleNamespace
+    from agent.modules.tools import invocation_context
+    from agent.modules.tools import get_coding_service
+    policy = invocation_context(SimpleNamespace(context=runtime.context, state=state, config=config))
+    grants = frozenset(path.stem for path in get_coding_service().storage.owner_dir(policy).glob("*.grant"))
+    turn.update_policy(policy, grants, bool(config.get("configurable", {}).get("approval_supported")))
+    provider = turn.tools.provider if turn.tools else None
+    if isinstance(provider, CardToolProvider):
+        provider._context = runtime.context
+        provider._can_interrupt = turn.can_interrupt
+        provider._config["configurable"]["approval_supported"] = turn.can_interrupt
     while not _apply_answer(turn, pending, interrupt(pending.interrupt_value())):
         pass
     return {"acp_pending": False}

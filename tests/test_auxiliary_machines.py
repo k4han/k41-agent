@@ -231,7 +231,7 @@ async def test_public_ports_ask_separately(instabox, fake, monkeypatch):
 
 def test_new_actions_ask_by_default(tmp_path):
     from agent.modules.tools.coding.contracts import CodingError, InvocationContext
-    from agent.modules.tools.coding.permissions import Permissions
+    from agent.modules.tools.permissions import Permissions
 
     permissions = Permissions(SimpleNamespace(owner_dir=lambda context: tmp_path))
     context = InvocationContext(agent_name="a", workspace="/w", thread_id="t")
@@ -530,7 +530,7 @@ def _directory_link(target: Path, link: Path) -> None:
 
 def _permission_context(monkeypatch, workspace: Path, *rules):
     from agent.modules.tools.coding.models import InvocationContext
-    from agent.modules.tools.coding.permissions import Permissions
+    from agent.modules.tools.permissions import Permissions
     from agent.modules.tools.coding.storage import OutputStore
 
     context = InvocationContext("default", str(workspace), "t1", permission_rules=rules)

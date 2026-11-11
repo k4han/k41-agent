@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_ALLOW_KINDS = ("allow_once", "allow_always")
+_ALLOW_KINDS = ("allow_once",)
 _REJECT_KINDS = ("reject_once", "reject_always")
 GRANT_LABEL = "Allow in this conversation"
 
@@ -65,15 +65,11 @@ class PendingPermission:
     rpc_id: int | str
     tool_call: dict[str, Any]
     options: list[dict[str, Any]]
-    bridged_tool: str | None = None
 
     def interrupt_value(self) -> dict[str, Any]:
         locations = self.tool_call.get("locations")
         paths = [item.get("path") for item in locations if isinstance(item, dict)] if isinstance(locations, list) else []
         options = [_public_option(option) for option in self.options]
-        if self.bridged_tool:
-            # K41 keeps this grant itself, and only for this session.
-            options = [{**option, "label": GRANT_LABEL} if option["kind"] == "allow_always" else option for option in options]
         return {
             "type": PERMISSION_INTERRUPT_TYPE,
             "request_id": self.request_id,
@@ -173,7 +169,8 @@ class AcpTurn:
         session_id: str,
         agent_id: str,
         client: AcpClient,
-        auto_allow: bool = False,
+        permission_context=None,
+        native_grants: frozenset[str] = frozenset(),
         can_interrupt: bool = False,
         on_done: Callable[[AcpTurn], None] | None = None,
         tools: SessionTools | None = None,
@@ -184,7 +181,8 @@ class AcpTurn:
         self.session_id = session_id
         self.agent_id = agent_id
         self.client = client
-        self.auto_allow = auto_allow
+        self.permission_context = permission_context
+        self.native_grants = set(native_grants)
         self.can_interrupt = can_interrupt
         self.on_done = on_done
         self.tools = tools
@@ -276,39 +274,75 @@ class AcpTurn:
             self._events.extend(self.transcript.apply(update))
         self._notify()
 
+    def _native_policy(self, tool_call):
+        from agent.modules.tools import Permissions, evaluate
+        from agent.modules.tools import acp_operations
+        context = self.permission_context
+        if context is None:
+            return "deny", "permission_denied: ACP policy context is missing."
+        try:
+            operations = acp_operations(tool_call, context.workspace)
+        except ValueError as exc:
+            return "deny", str(exc)
+        decisions = [(evaluate(context, action, resource, risk=risk),
+                      Permissions.grant_key(context, action, resource, {"arguments": tool_call.get("rawInput")}))
+                     for action, resource, risk in operations]
+        if any(effect == "deny" for effect, _ in decisions):
+            return "deny", "permission_denied: ACP operation is blocked by policy."
+        if any(effect == "ask" and key[:32] not in self.native_grants for effect, key in decisions):
+            return "ask", ""
+        return "allow", ""
+
+    def update_policy(self, context, grants, can_interrupt):
+        """Install a graph-thread policy snapshot before processing a resume."""
+        with self._lock:
+            self.permission_context = context
+            self.native_grants = set(grants)
+            self.can_interrupt = can_interrupt
+
     def on_permission_request(self, rpc_id: int | str, params: dict[str, Any]) -> None:
+        # Reader-thread path: pure snapshot evaluation, never interrupt or storage I/O.
         options = [item for item in params.get("options") or [] if isinstance(item, dict)]
         tool_call = params.get("toolCall") if isinstance(params.get("toolCall"), dict) else {}
-        decision: str | None = None
-        queue_it = False
+        if any("agy.security.warning" in str(option.get("_meta", {})) for option in options):
+            meta = tool_call.get("_meta")
+            tool_call = {**tool_call, "_meta": {**(meta if isinstance(meta, dict) else {}), "agy.security.warning": True}}
         bridged = bridged_tool_name(tool_call) if self.tools is not None else None
-        approved = False
+        effect, reason = ("allow", "") if bridged else self._native_policy(tool_call)
+        once = _select_automatic_option(options, _ALLOW_KINDS)
+        if once is None:
+            effect, reason = "deny", "permission_denied: ACP provider offers no allow_once option."
+        if effect == "ask" and not self.can_interrupt:
+            effect, reason = "deny", "approval_unavailable: This surface cannot deliver ACP tool approvals."
         with self._lock:
-            # The request can arrive before its tool_call update. It carries the
-            # same fields, so the transcript learns the title and input either way.
             tool_id = str(tool_call.get("toolCallId") or "")
             if tool_id:
-                self.transcript.merge_tool(self.transcript.tool_item(tool_id), {key: value for key, value in tool_call.items() if key != "status"})
-            if self.transcript.cancel_requested:
-                decision = None
-            elif self.auto_allow or (bridged and self.tools.is_granted(bridged)):
-                decision = _select_automatic_option(options, _ALLOW_KINDS)
-                approved = decision is not None
-            elif not self.can_interrupt:
-                # No human can answer on this surface, so the safe answer is no.
-                decision = _select_automatic_option(options, _REJECT_KINDS)
-            else:
-                digest = hashlib.sha256(f"{self.turn_id}\0{rpc_id}".encode()).hexdigest()[:32]
-                self._pending[digest] = PendingPermission(digest, rpc_id, tool_call, options, bridged)
-                queue_it = True
-        if queue_it:
-            self._notify()
-        elif decision is not None:
-            if bridged and approved:
-                self.tools.approve(tool_call, bridged)
-            self.client.select_option(rpc_id, decision)
-        else:
+                self.transcript.merge_tool(self.transcript.tool_item(tool_id),
+                                           {key: value for key, value in tool_call.items() if key != "status"})
+            cancelled = self.transcript.cancel_requested
+            if not cancelled and effect == "ask":
+                identifier = hashlib.sha256(f"{self.turn_id}\0{rpc_id}".encode()).hexdigest()[:32]
+                # Conversation grants are kept by K41; the provider only hears allow_once.
+                public_options = [item for item in options if item.get("kind") != "allow_always"]
+                warning = next((item["_meta"] for item in options if isinstance(item.get("_meta"), dict)
+                                and item["_meta"].get("agy.security.warning")), {})
+                public_options.append({"optionId": "__allow_thread__", "name": GRANT_LABEL, "kind": "allow_always", "_meta": warning})
+                self._pending[identifier] = PendingPermission(identifier, rpc_id, tool_call, public_options)
+        if cancelled:
             self.client.respond_permission(rpc_id, CANCELLED_OUTCOME)
+        elif effect == "ask":
+            self._notify()
+        elif effect == "allow":
+            if bridged:
+                self.tools.approve(tool_call, bridged)
+            self.client.select_option(rpc_id, once)
+        else:
+            self.add_notice(reason)
+            decision = _select_automatic_option(options, _REJECT_KINDS)
+            if decision:
+                self.client.select_option(rpc_id, decision)
+            else:
+                self.client.respond_permission(rpc_id, CANCELLED_OUTCOME)
 
     # Node-side API ----------------------------------------------------------
 
@@ -333,13 +367,28 @@ class AcpTurn:
             if option is None:
                 return False
             del self._pending[request_id]
-        if request.bridged_tool and option.get("kind") in _ALLOW_KINDS:
-            self.tools.approve(request.tool_call, request.bridged_tool)
+        if option.get("kind") in {"allow_once", "allow_always"}:
+            effect, reason = self._native_policy(request.tool_call)
+            if effect == "deny":
+                self.add_notice(reason)
+                self.client.respond_permission(request.rpc_id, CANCELLED_OUTCOME)
+                return True
             if option.get("kind") == "allow_always":
-                # The agent could remember "always" beyond what K41 can see, so it
-                # hears "once" and K41 answers the later requests itself.
-                self.tools.grant(request.bridged_tool)
-                option_id = _select_automatic_option(request.options, ("allow_once",)) or option_id
+                from agent.modules.tools import Permissions
+                from agent.modules.tools import acp_operations
+                from agent.modules.tools import get_coding_service
+                from agent.modules.tools import atomic_json
+                context = self.permission_context
+                for action, resource, _ in acp_operations(request.tool_call, context.workspace):
+                    key = Permissions.grant_key(context, action, resource, {"arguments": request.tool_call.get("rawInput")})
+                    self.native_grants.add(key[:32])
+                    path = get_coding_service().storage.owner_dir(context) / f"{key[:32]}.grant"
+                    atomic_json(path, {"action": action, "resource": resource, "key": key})
+            option_id = _select_automatic_option(request.options, _ALLOW_KINDS)
+            if option_id is None:
+                self.add_notice("permission_denied: ACP provider offers no allow_once option.")
+                self.client.respond_permission(request.rpc_id, CANCELLED_OUTCOME)
+                return True
         self.client.select_option(request.rpc_id, option_id)
         self._notify()
         return True

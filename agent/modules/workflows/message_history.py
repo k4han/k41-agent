@@ -226,7 +226,7 @@ def _stale_screenshot_indexes(messages: list[BaseMessage]) -> set[int]:
         if not _tool_content_has_image(message.content):
             continue
         if names is None:
-            from agent.modules.tools.policy import computer_tool_names
+            from agent.modules.tools import computer_tool_names
 
             names = computer_tool_names()
         if message.name in names:
