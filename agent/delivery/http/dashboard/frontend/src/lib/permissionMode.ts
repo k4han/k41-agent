@@ -1,14 +1,42 @@
 export type PermissionMode = "ask" | "auto" | "full_access";
 
 export const PERMISSION_OPTIONS = [
-  { value: "", label: "Inherit permissions" },
   { value: "ask", label: "Ask for approval" },
   { value: "auto", label: "Approve for me" },
   { value: "full_access", label: "Full access" },
 ];
 
+export const PERMISSION_OPTIONS_WITH_INHERIT = [
+  { value: "", label: "Inherit permissions" },
+  ...PERMISSION_OPTIONS,
+];
+
 export const ACP_PERMISSION_LIMIT = "K41 enforces permissions on its own tools and native approval requests forwarded by the ACP provider. Native operations without a forwarded request are outside K41 enforcement; these modes do not sandbox the external agent.";
 export const FULL_ACCESS_NOTICE = "Full access removes approval prompts for K41 tools and forwarded ACP requests. Explicit deny rules and hard blocks still apply within K41 enforcement.";
+
+export const LAST_PERMISSION_MODE_STORAGE_KEY = "k41.dashboard.lastPermissionMode";
+
+export function readChatPermissionPreference(storage?: Pick<Storage, "getItem">): PermissionMode | null {
+  try {
+    const s = storage || (typeof window !== "undefined" ? window.localStorage : undefined);
+    if (!s) return null;
+    const value = s.getItem(LAST_PERMISSION_MODE_STORAGE_KEY);
+    return value === "ask" || value === "auto" || value === "full_access" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeChatPermissionPreference(mode: PermissionMode, storage?: Pick<Storage, "setItem">): void {
+  if (mode !== "ask" && mode !== "auto" && mode !== "full_access") return;
+  try {
+    const s = storage || (typeof window !== "undefined" ? window.localStorage : undefined);
+    if (!s) return;
+    s.setItem(LAST_PERMISSION_MODE_STORAGE_KEY, mode);
+  } catch {
+    // Chat remains usable when browser storage is unavailable.
+  }
+}
 
 export function readPermissionMode(storage: Pick<Storage, "getItem">, scope: string): PermissionMode | undefined {
   try {

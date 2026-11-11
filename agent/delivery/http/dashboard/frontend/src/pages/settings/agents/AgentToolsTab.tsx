@@ -169,7 +169,7 @@ export function AgentToolsTab(props: {
       <fieldset disabled={props.readOnly}>
         <legend>Permission mode</legend>
         <PermissionModePicker value={props.form.permission_mode} disabled={props.readOnly}
-          acp={isAcpCard(props.form)} onChange={(value) => props.onUpdate("permission_mode", value ?? null)} />
+          acp={isAcpCard(props.form)} includeInherit onChange={(value) => props.onUpdate("permission_mode", value ?? null)} />
       </fieldset>
       <fieldset disabled={props.readOnly}>
         <legend>Permission exceptions</legend>

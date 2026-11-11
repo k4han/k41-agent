@@ -9,15 +9,20 @@ export function PermissionModePicker(props: {
   disabled?: boolean;
   acp?: boolean;
   class?: string;
+  includeInherit?: boolean;
 }) {
   const isFullAccess = () => props.value === "full_access";
 
   const options = createMemo<SelectControlOption[]>(() => [
-    {
-      value: "",
-      label: "Inherit permissions",
-      icon: <Shield size={14} />,
-    },
+    ...(props.includeInherit
+      ? [
+          {
+            value: "",
+            label: "Inherit permissions",
+            icon: <Shield size={14} />,
+          },
+        ]
+      : []),
     {
       value: "ask",
       label: "Ask for approval",
@@ -37,19 +42,25 @@ export function PermissionModePicker(props: {
     },
   ]);
 
+  const selectedValue = createMemo(() => {
+    if (props.value) return props.value;
+    if (props.includeInherit) return "";
+    return "auto";
+  });
+
   return (
     <div
       class={`permission-mode-picker ${isFullAccess() ? "permission-mode--full-access" : ""} ${props.class || ""}`}
-      data-mode={props.value || "inherit"}
+      data-mode={selectedValue() || (props.includeInherit ? "inherit" : "auto")}
       title={isFullAccess() ? FULL_ACCESS_NOTICE : undefined}
       style={{ "min-width": "0", "max-width": "100%" }}
     >
       <SelectControl
-        value={props.value ?? ""}
+        value={selectedValue()}
         options={options()}
         ariaLabel="Permission mode"
         disabled={props.disabled}
-        onChange={(value) => props.onChange((value || undefined) as PermissionMode | undefined)}
+        onChange={(value) => props.onChange((value || (props.includeInherit ? undefined : "auto")) as PermissionMode | undefined)}
       />
       <Show when={props.acp}><p class="hint">{ACP_PERMISSION_LIMIT}</p></Show>
     </div>

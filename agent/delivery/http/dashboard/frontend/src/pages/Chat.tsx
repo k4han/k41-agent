@@ -96,7 +96,13 @@ import { fetchCatalog, getBackendDisplayName, isBackendEnabled } from "@/lib/cat
 import { useChatAttachments } from "@/lib/useChatAttachments";
 import { useContextWindow } from "@/lib/useContextWindow";
 import { useBackgroundStream } from "@/lib/useBackgroundStream";
-import { readPermissionMode, savePermissionMode, type PermissionMode } from "@/lib/permissionMode";
+import {
+  readChatPermissionPreference,
+  readPermissionMode,
+  savePermissionMode,
+  writeChatPermissionPreference,
+  type PermissionMode,
+} from "@/lib/permissionMode";
 import { useReasoningEffort } from "@/lib/useReasoningEffort";
 import { useShowThinking } from "@/lib/useShowThinking";
 import { useAcpSessionOptions } from "@/lib/useAcpSessionOptions";
@@ -222,10 +228,21 @@ export function ChatPage() {
   const [customModel, setCustomModel] = createSignal(false);
   const [reasoningScope, setReasoningScope] = createSignal(0);
   const permissionScope = () => currentThreadId() || location.state?.newChatId || "__new__";
-  const [permissionMode, setPermissionMode] = createSignal<PermissionMode>();
+  const [permissionMode, setPermissionMode] = createSignal<PermissionMode>(
+    readChatPermissionPreference() || "auto",
+  );
   const changePermissionMode = (value: PermissionMode | undefined) => {
-    setPermissionMode(value);
-    savePermissionMode(localStorage, permissionScope(), value);
+    const mode = value || "auto";
+    setPermissionMode(mode);
+    savePermissionMode(localStorage, permissionScope(), mode);
+    writeChatPermissionPreference(mode);
+    const threadId = currentThreadId();
+    if (threadId) {
+      permissionDrafts.set(threadId, mode);
+    } else {
+      const scope = permissionScope();
+      if (scope) permissionDrafts.set(scope, mode);
+    }
   };
   const [workingDir, setWorkingDir] = createSignal("");
   const [workspaceRef, setWorkspaceRef] = createSignal<WorkspaceRef | null>(null);
@@ -256,6 +273,7 @@ export function ChatPage() {
   let compactRequestId = 0;
   let latestLocalStreamFinish: { threadId: string; finishedAt: number } | null = null;
   const selectionDrafts = new Map<string, ChatModelPreference & { agentName: string }>();
+  const permissionDrafts = new Map<string, PermissionMode>();
   const promptDrafts = new Map<string, string>();
 
   const scroll = useChatScroll(() => transcriptRef);
@@ -345,13 +363,48 @@ export function ChatPage() {
     );
   };
 
+  const fallbackPermissionMode = (card?: AgentCard): PermissionMode => {
+    if (card?.permission_mode) {
+      return card.permission_mode;
+    }
+    return readChatPermissionPreference() || "auto";
+  };
+
+  const restoredPermissionMode = (
+    threadId: string | undefined,
+    card: AgentCard | undefined,
+  ): PermissionMode => {
+    if (threadId && permissionDrafts.has(threadId)) {
+      return permissionDrafts.get(threadId)!;
+    }
+    const threadSaved = threadId ? readPermissionMode(localStorage, threadId) : undefined;
+    if (threadSaved) {
+      if (threadId) permissionDrafts.set(threadId, threadSaved);
+      return threadSaved;
+    }
+    if (!threadId) {
+      const scope = location.state?.newChatId || "__new__";
+      const draft = permissionDrafts.get(scope);
+      if (draft) return draft;
+      const savedScope = readPermissionMode(localStorage, scope);
+      if (savedScope) return savedScope;
+      const remembered = readChatPermissionPreference();
+      if (remembered) return remembered;
+    }
+    return fallbackPermissionMode(card);
+  };
+
   const rememberSelection = () => {
     const selection = {
       agentName: agentName(), provider: provider(), model: model(),
       ...(customModel() ? { customModel: true as const } : {}),
     };
     const threadId = currentThreadId();
-    if (threadId) selectionDrafts.set(threadId, selection);
+    if (threadId) {
+      selectionDrafts.set(threadId, selection);
+      const mode = permissionMode();
+      if (mode) permissionDrafts.set(threadId, mode);
+    }
     const stream = persistedStreams.get(currentStreamThreadId() || "");
     if (stream) stream.selection = selection;
     return selection;
@@ -377,6 +430,7 @@ export function ChatPage() {
     setProvider(selection.provider);
     setModel(selection.model);
     setCustomModel(selection.customModel === true);
+    setPermissionMode(restoredPermissionMode(threadId, card));
   });
 
   const handleProviderModelChange = (nextProvider: string, nextModel: string, isCustomModel = false) => batch(() => {
@@ -761,6 +815,11 @@ export function ChatPage() {
     if (isViewingPending) {
       if (permissionScope() !== threadId) savePermissionMode(localStorage, permissionScope(), undefined);
       savePermissionMode(localStorage, threadId, permissionMode());
+      const mode = permissionMode();
+      if (mode) {
+        writeChatPermissionPreference(mode);
+        permissionDrafts.set(threadId, mode);
+      }
       loadedThreadId = threadId;
       loadedNewChatId = "";
       setCurrentThreadId(threadId);
@@ -983,6 +1042,9 @@ export function ChatPage() {
       setProvider(selection.provider);
       setModel(selection.model);
       setCustomModel(selectedModelIsCustom());
+      if (card.permission_mode) {
+        changePermissionMode(card.permission_mode);
+      }
     }
     rememberSelection();
     updateCurrentThreadAgent(nextAgentName);
@@ -1000,7 +1062,7 @@ export function ChatPage() {
       loadedNewChatId = newChatId;
       // Reset effort on conversation switches, while thread creation keeps the same scope.
       setReasoningScope((scope) => scope + 1);
-      setPermissionMode(readPermissionMode(localStorage, threadId || newChatId || "__new__"));
+      setPermissionMode(readPermissionMode(localStorage, threadId || newChatId || "__new__") || restoredPermissionMode(threadId, selectedCard()));
       threadLoadRequestId += 1;
       compactRequestId += 1;
       threadLoadController?.abort();
@@ -1168,6 +1230,14 @@ export function ChatPage() {
         ...(customModel() && selection.provider !== "@pool"
           ? { customModel: true as const } : {}),
       });
+      const mode = permissionMode();
+      if (mode) {
+        writeChatPermissionPreference(mode);
+        if (currentThreadId()) {
+          savePermissionMode(localStorage, currentThreadId(), mode);
+          permissionDrafts.set(currentThreadId(), mode);
+        }
+      }
     }
     if (resume) {
       payload.resume = true;

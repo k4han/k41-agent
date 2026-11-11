@@ -49,3 +49,12 @@ test("ACP limits and Full access effects are visible in the common picker", asyn
   assert.match(picker, /ACP_PERMISSION_LIMIT/);
   assert.match(picker, /FULL_ACCESS_NOTICE/);
 });
+
+test("chat permission preferences persist and restore across sessions", () => {
+  mode.writeChatPermissionPreference("ask", storage);
+  assert.equal(mode.readChatPermissionPreference(storage), "ask");
+  mode.writeChatPermissionPreference("full_access", storage);
+  assert.equal(mode.readChatPermissionPreference(storage), "full_access");
+  mode.writeChatPermissionPreference("invalid", storage);
+  assert.equal(mode.readChatPermissionPreference(storage), "full_access");
+});
