@@ -723,6 +723,32 @@
   opacity: 0.7;
 }
 
+/* Permission Mode: Full access coloring */
+.permission-mode-picker.permission-mode--full-access .select-control-value,
+.permission-mode-picker.permission-mode--full-access .select-control-trigger .select-control-icon,
+.select-control-trigger[data-value="full_access"] .select-control-value,
+.select-control-trigger[data-value="full_access"] .select-control-icon,
+.select-control-trigger.select-control-option--full-access .select-control-value,
+.select-control-trigger.select-control-option--full-access .select-control-icon,
+.select-control-option.select-control-option--full-access,
+.select-control-option[data-value="full_access"] {
+  color: var(--warning);
+}
+
+.select-control-option.select-control-option--full-access .select-control-option-icon,
+.select-control-option[data-value="full_access"] .select-control-option-icon {
+  color: var(--warning);
+}
+
+.select-control-option.select-control-option--full-access:hover,
+.select-control-option.select-control-option--full-access:focus-visible,
+.select-control-option.select-control-option--full-access.active,
+.select-control-option[data-value="full_access"]:hover,
+.select-control-option[data-value="full_access"]:focus-visible,
+.select-control-option[data-value="full_access"].active {
+  color: var(--warning);
+}
+
 .field {
   display: flex;
   flex-direction: column;

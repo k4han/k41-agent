@@ -94,6 +94,61 @@
   right: 6px;
 }
 
+/* Permission mode picker in chat composer - borderless */
+.chat-composer .permission-mode-picker {
+  width: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-composer .permission-mode-picker .select-control {
+  min-height: 28px;
+  width: auto;
+  border: 0;
+}
+
+.chat-composer .permission-mode-picker .select-control-trigger {
+  min-height: 28px;
+  height: 28px;
+  padding: 0 20px 0 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--fg);
+}
+
+.chat-composer .permission-mode-picker .select-control-trigger:hover,
+.chat-composer .permission-mode-picker .select-control.open .select-control-trigger,
+.chat-composer .permission-mode-picker .select-control-trigger:focus-visible {
+  background: var(--surface-2);
+  border: 0;
+  box-shadow: none;
+  outline: none;
+}
+
+.chat-composer .permission-mode-picker .select-control-icon {
+  left: 6px;
+  color: var(--muted);
+}
+
+.chat-composer .permission-mode-picker.permission-mode--full-access .select-control-icon,
+.chat-composer .permission-mode-picker .select-control-trigger[data-value="full_access"] .select-control-icon {
+  color: var(--warning);
+}
+
+.chat-composer .permission-mode-picker .select-control-caret {
+  right: 6px;
+  color: var(--muted);
+}
+
+.chat-composer .permission-mode-picker .hint {
+  display: none;
+}
+
 .chat-composer .agent-model-badge-agent,
 .chat-composer .agent-model-badge-model {
   min-width: 0;
@@ -485,6 +540,11 @@
 
   .chat-composer .agent-model-badge {
     padding-inline: 4px;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-trigger {
+    padding-inline: 4px 18px;
+    max-width: 130px;
   }
 }
 

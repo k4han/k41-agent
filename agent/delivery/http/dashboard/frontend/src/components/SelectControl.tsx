@@ -10,6 +10,7 @@ export type SelectControlOption = {
   disabled?: boolean;
   title?: string;
   icon?: JSX.Element;
+  class?: string;
 };
 
 export function SelectControl(props: {
@@ -140,7 +141,8 @@ export function SelectControl(props: {
     >
       <button
         ref={triggerRef}
-        class={`select-control-trigger ${props.icon || selectedOption()?.icon ? "select-control-with-icon" : ""}`}
+        class={`select-control-trigger ${props.icon || selectedOption()?.icon ? "select-control-with-icon" : ""} ${selectedOption()?.class || ""}`}
+        data-value={props.value}
         type="button"
         disabled={props.disabled}
         aria-label={props.ariaLabel}
@@ -185,7 +187,8 @@ export function SelectControl(props: {
             <For each={props.options}>
               {(option) => (
                 <button
-                  class={`select-control-option ${isSelected(option.value) ? "active" : ""}`}
+                  class={`select-control-option ${isSelected(option.value) ? "active" : ""} ${option.class || ""}`}
+                  data-value={option.value}
                   type="button"
                   disabled={option.disabled}
                   role="option"
