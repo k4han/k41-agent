@@ -169,8 +169,14 @@ class DaytonaWorkspaceLifecycleManager(WorkspaceLifecycleManager, Protocol):
         ...
 
 
+# The desktop contract lives with the rest of the shared computer layer.
+from agent.modules.workspaces.computer import COMPUTER_ACTIONS, ComputerError, WorkspaceComputer  # noqa: E402
+
 __all__ = [
+    "COMPUTER_ACTIONS",
     "CommandResult",
+    "ComputerError",
+    "WorkspaceComputer",
     "DaytonaWorkspaceLifecycleManager",
     "UnsupportedWorkspaceCapabilityError",
     "WorkspaceBrowser",

@@ -32,11 +32,12 @@ import { Portal } from "solid-js/web";
 
 import { Dialog } from "@/components/Dialog";
 import { BrowserPanel } from "@/components/BrowserPanel";
-import { InstaboxDesktop } from "@/components/InstaboxDesktop";
+import { WorkspaceDesktop } from "@/components/WorkspaceDesktop";
 import { WorkspaceFilePreview } from "@/components/WorkspaceFilePreview";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
 import type { BrowserHandoffResume } from "@/lib/browserViewer";
+import { getBackends } from "@/lib/catalogStore";
 import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
 import { renderUnifiedDiffHtml } from "@/lib/diffView";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
@@ -274,7 +275,12 @@ export function WorkspaceExplorer(props: {
   const desktopActive = () => lastPrimaryTab() === "desktop" && openTabs().includes("desktop");
   // Browser and desktop take the whole explorer body, like a single full-width panel.
   const panelActive = () => browserActive() || desktopActive();
-  const desktopMachineId = () => props.workspace?.backend === "instabox" ? (props.workspace.locator || "").trim() : "";
+  // Any backend whose catalog entry has the "desktop" capability gets the Desktop tab.
+  const desktopBackend = () => {
+    const backend = props.workspace?.backend || "";
+    return getBackends().find((item) => item.name === backend)?.capabilities?.includes("desktop") ? backend : "";
+  };
+  const desktopLocator = () => desktopBackend() ? (props.workspace?.locator || "").trim() : "";
   let explorerRef: HTMLElement | undefined;
   const [containerWidth, setContainerWidth] = createSignal(
     typeof window !== "undefined" ? window.innerWidth : 640
@@ -1479,7 +1485,7 @@ export function WorkspaceExplorer(props: {
                       <Show when={openTabs().includes("browser")}><span class="workspace-menu-pill">Open</span></Show>
                     </button>
                   </Show>
-                  <Show when={desktopMachineId()}>
+                  <Show when={desktopLocator()}>
                     <button class={`workspace-plus-menu-item ${openTabs().includes("desktop") ? "is-open" : ""}`}
                       type="button" role="menuitem" onClick={() => { openTab("desktop"); setPlusMenuOpen(false); }}>
                       <Monitor size={15} /><span>Desktop</span>
@@ -1713,9 +1719,9 @@ export function WorkspaceExplorer(props: {
               onHandoffChange={(pending, threadId) => props.onBrowserHandoffChange?.(pending, threadId)} />
           </section>
         </Show>
-        <Show when={desktopMachineId() && openTabs().includes("desktop")}>
+        <Show when={desktopLocator() && openTabs().includes("desktop")}>
           <section class="workspace-desktop-panel workspace-tab-panel" role="tabpanel" aria-label="Desktop" hidden={!desktopActive()}>
-            <InstaboxDesktop machineId={desktopMachineId()} active={props.visible !== false && desktopActive()} compact={isCompact()} />
+            <WorkspaceDesktop backend={desktopBackend()} locator={desktopLocator()} active={props.visible !== false && desktopActive()} compact={isCompact()} />
           </section>
         </Show>
         <Show when={openTabs().includes("changes")}>

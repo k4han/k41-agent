@@ -25,7 +25,7 @@ def load_orm_models() -> tuple[type[object], ...]:
     from agent.modules.projects import Project, ProjectSecret, ProjectWorkspace, WorkspaceRuntime
     from agent.modules.scheduler import SchedulerJobRun
     from agent.modules.usage import LLMUsageEvent
-    from agent.modules.workspaces import ThreadWorkspace
+    from agent.modules.workspaces import ThreadMachine, ThreadWorkspace
     from agent.modules.users import User
     from agent.modules.google_calendar import GoogleCalendarAccount
     from agent.modules.instabox import InstaboxOperation, InstaboxPortToken
@@ -54,6 +54,7 @@ def load_orm_models() -> tuple[type[object], ...]:
         MCPServerInstall,
         AgentMCPInstall,
         ThreadWorkspace,
+        ThreadMachine,
         PromptVariable,
         Project,
         ProjectSecret,

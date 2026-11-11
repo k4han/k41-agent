@@ -28,6 +28,16 @@ function codeBlock(value: string, language = ""): string {
   return `${fence}${language}\n${value}\n${fence}`;
 }
 
+// Models often send null for every argument a tool call does not use; those say nothing.
+function withoutNullArgs(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutNullArgs);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== null && item !== undefined)
+      .map(([key, item]) => [key, withoutNullArgs(item)]),
+  );
+}
+
 function readableMessage(message: ThreadMessage, markdown: boolean, includeTools: boolean): string {
   if (message.role === "tool" && !includeTools) return "";
   const label = message.role.charAt(0).toUpperCase() + message.role.slice(1);
@@ -48,7 +58,7 @@ function readableMessage(message: ThreadMessage, markdown: boolean, includeTools
   if (includeTools) {
     for (const call of message.tool_calls || []) {
       const description = `Tool call: ${inlineText(call.name)}`;
-      const args = JSON.stringify(call.args ?? {}, null, 2);
+      const args = JSON.stringify(withoutNullArgs(call.args ?? {}), null, 2);
       parts.push(markdown ? `### ${markdownLabel(description)}\n\n${codeBlock(args, "json")}` : `${description}\n${args}`);
     }
   }
@@ -84,7 +94,9 @@ export function createChatExport(
       provider: thread.provider,
       model: thread.model,
       kind: thread.kind,
-      messages: thread.messages.map(({ branch, ...message }) => message),
+      messages: thread.messages.map(({ branch, ...message }) => message.tool_calls
+        ? { ...message, tool_calls: message.tool_calls.map((call) => ({ ...call, args: withoutNullArgs(call.args) })) }
+        : message),
     };
     return { filename: `${filename}.json`, mimeType: "application/json;charset=utf-8", content: `${JSON.stringify(payload, null, 2)}\n` };
   }

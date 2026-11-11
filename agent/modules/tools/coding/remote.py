@@ -294,6 +294,11 @@ class RemoteCodingRuntime:
         self.cleanup_tasks = set()
         self.loop = None
 
+    def forget(self, backend: str, locator: str) -> None:
+        """Drop cached workers of a machine that stopped, was restored or deleted."""
+        for key in [key for key in self.clients if len(key) > 1 and key[0] == backend and key[1] == locator]:
+            self.clients.pop(key, None)
+
     async def workspace_processes(self, ref):
         """Probe existing workers across application restarts without starting a worker."""
         from agent.modules.workspaces import create_workspace_runtime_backend

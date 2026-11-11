@@ -33,6 +33,7 @@ _EXPORTS = {
     "AcpTurn": "agent.modules.acp.turns",
     "PERMISSION_INTERRUPT_TYPE": "agent.modules.acp.turns",
     "PendingHandoff": "agent.modules.acp.turns",
+    "PendingToolPermission": "agent.modules.acp.turns",
     "SIGN_IN_NOTICE": "agent.modules.acp.turns",
     "STOP_TURN_OPTION_ID": "agent.modules.acp.turns",
     "describe_failure": "agent.modules.acp.turns",

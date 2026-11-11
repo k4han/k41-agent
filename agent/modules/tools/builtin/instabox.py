@@ -1,17 +1,17 @@
-"""Agent tools for Instabox machines, preview ports, snapshots and the desktop.
+"""Agent tools for Instabox machines, preview ports and snapshots.
 
 Every operation is its own tool so agents can be granted each one separately.
-Desktop tools run one per turn and refuse input while a person controls the desktop.
+Tools only reach the machine of the current workspace and the auxiliary
+machines created in this conversation (see ``tools/runtime/targets.py``).
+The desktop is driven by the shared ``computer_*`` tools.
 """
 
 from __future__ import annotations
 
-import base64
+import asyncio
 import json
-import uuid
 from typing import Annotated, Any, Literal
 
-from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolArg, StructuredTool
 from langgraph.prebuilt import ToolRuntime
 from pydantic import Field
@@ -25,13 +25,16 @@ from agent.modules.instabox import (
     redact,
 )
 from agent.modules.tools.decorators import register_tool
-from agent.modules.tools.domain import ToolCapability, ToolCategory
+from agent.modules.tools.domain import AUXILIARY_MACHINES_TAG, ToolCapability, ToolCategory
 from agent.modules.tools.result import ToolError, ToolErrorCode
+from agent.modules.tools.runtime.targets import ExecutionTarget, forget_machine, owned_targets, resolve_target
 
+BACKEND = "instabox"
 Runtime = Annotated[ToolRuntime[Any, Any], InjectedToolArg]
 MachineId = Annotated[
     str | None,
-    Field(description="Instabox machine ID (m_...) or name. Omit to use the machine of the current Instabox workspace."),
+    Field(description="Machine ID (m_...) of the current workspace or of an auxiliary machine of this conversation. "
+                      "Omit to use the machine of the current Instabox workspace."),
 ]
 INSTABOX_TOOLS: dict[str, BaseTool] = {}
 
@@ -47,24 +50,26 @@ def _authorize(runtime, name: str, resource: str, values: dict[str, Any]) -> Non
         raise ToolError(ToolErrorCode.PERMISSION_DENIED, str(exc)) from None
 
 
-def _machine(runtime, machine_id: str | None) -> str:
-    if machine_id and machine_id.strip():
-        return machine_id.strip()
-    from agent.modules.tools.builtin.workspace import get_workspace
-
-    workspace = get_workspace(runtime)
-    if workspace.backend != "instabox":
+async def _target(runtime, machine_id: str | None) -> ExecutionTarget:
+    target = await resolve_target(runtime, machine_id, backend=BACKEND)
+    if target.backend != BACKEND:
         raise ToolError(
             ToolErrorCode.INVALID_INPUT,
             "Pass machine_id: the current workspace does not run on an Instabox machine.",
         )
-    return workspace.locator
+    return target
+
+
+def _thread_id(runtime) -> str:
+    from agent.modules.tools.runtime.context import get_thread_id
+
+    return get_thread_id(runtime.config) or ""
 
 
 def _owner(runtime) -> str:
-    from agent.modules.tools.runtime.context import get_context_value, get_thread_id
+    from agent.modules.tools.runtime.context import get_context_value
 
-    return str(get_context_value(runtime.context, "browser_owner_id", None) or get_thread_id(runtime.config) or "agent")
+    return str(get_context_value(runtime.context, "browser_owner_id", None) or _thread_id(runtime) or "agent")
 
 
 async def _call(coro):
@@ -94,17 +99,73 @@ def _json(value: Any) -> str:
     return json.dumps(redact(value), ensure_ascii=False, default=str)
 
 
-def registered(name: str, coroutine, description: str, *, mutates: bool = False, desktop: bool = False) -> BaseTool:
+def registered(name: str, coroutine, description: str, *, mutates: bool = False, machines: bool = False) -> BaseTool:
     capabilities = [ToolCapability.NETWORK, ToolCapability.ASYNC_ONLY]
     if mutates:
         capabilities.append(ToolCapability.MUTATES_STATE)
-    if desktop:
-        capabilities += [ToolCapability.REQUIRES_THREAD]
-    tool = register_tool(category=ToolCategory.SANDBOX, capabilities=capabilities, tags=["instabox"])(
+    tags = ["instabox", AUXILIARY_MACHINES_TAG] if machines else ["instabox"]
+    if machines:
+        capabilities.append(ToolCapability.REQUIRES_THREAD)
+    tool = register_tool(category=ToolCategory.SANDBOX, capabilities=capabilities, tags=tags)(
         StructuredTool.from_function(name=name, coroutine=coroutine, description=description)
     )
     INSTABOX_TOOLS[name] = tool
     return tool
+
+
+# Auxiliary machines ------------------------------------------------------- #
+
+
+def _ownership_metadata(runtime, root: str) -> dict[str, str]:
+    from agent.modules.workspaces import root_thread_id
+
+    return {"k41_created_by": "agent", "k41_role": "auxiliary",
+            "k41_thread_id": root_thread_id(_thread_id(runtime)), "k41_root": root}
+
+
+async def _reserve(runtime, purpose: str | None, root: str) -> int:
+    from agent.modules.workspaces import ThreadMachineLimitError, reserve_thread_machine
+
+    if not _thread_id(runtime):
+        raise ToolError(ToolErrorCode.INVALID_INPUT, "Auxiliary machines belong to a conversation; this run has none.")
+    limit = get_instabox_service().settings().max_machines_per_thread
+    if limit <= 0:
+        raise ToolError(ToolErrorCode.PERMISSION_DENIED,
+                        "Agents may not create Instabox machines (workspace.instabox.max_machines_per_thread is 0).")
+    try:
+        return await reserve_thread_machine(_thread_id(runtime), BACKEND, limit=limit, purpose=purpose or "", root=root)
+    except ThreadMachineLimitError as exc:
+        raise ToolError(ToolErrorCode.INVALID_INPUT, str(exc)) from None
+
+
+async def _settle(reservation: int, record: dict[str, Any], root: str) -> dict[str, Any]:
+    """Bind the reservation to the new machine and prepare it for coding tools."""
+    from agent.modules.workspaces import WorkspaceRef, activate_thread_machine, cancel_reservation, create_workspace_runtime_backend
+
+    machine_id = str(record.get("machine_id") or "")
+    if record.get("status") != "succeeded" or not machine_id:
+        await asyncio.shield(cancel_reservation(reservation))
+        return record
+    await activate_thread_machine(reservation, machine_id, root=root)
+    auxiliary: dict[str, Any] = {"target": machine_id, "root": root}
+    try:
+        backend = await create_workspace_runtime_backend(
+            WorkspaceRef(backend=BACKEND, locator=machine_id, metadata={"root": root}))
+        await backend.prepare()
+        auxiliary["coding_tools"] = "ready"
+        auxiliary["hint"] = (f"Pass target={machine_id} to bash, read, write, edit, grep, glob, list_dir, "
+                             "process and computer_* tools. Files there are temporary until copied back with copy_files.")
+    except Exception as exc:
+        auxiliary["coding_tools"] = f"unavailable: {redact(str(exc))}"
+        auxiliary["hint"] = "Port, snapshot and computer_* tools still work on this machine."
+    return {**record, "auxiliary": auxiliary}
+
+
+async def _create_reserved(reservation: int, create, root: str) -> dict[str, Any]:
+    # The durable operation owns the reservation until its terminal result,
+    # even if this waiter is cancelled or times out.
+    record = await _call(create)
+    return await _settle(reservation, record, root)
 
 
 # Machines ---------------------------------------------------------------- #
@@ -112,40 +173,51 @@ def registered(name: str, coroutine, description: str, *, mutates: bool = False,
 
 async def _machine_list(runtime: Runtime):
     _authorize(runtime, "instabox_machine_list", "*", {})
-    return _json(await _call(get_instabox_service().list_machines()))
+    scope = {target.locator: target for target in await owned_targets(runtime, backend=BACKEND)}
+    machines = await _call(get_instabox_service().list_machines())
+    return _json([{**machine, "role": "auxiliary" if scope[machine["id"]].auxiliary else "workspace"}
+                  for machine in machines if machine.get("id") in scope])
 
 
 async def _machine_get(runtime: Runtime, machine_id: MachineId = None):
-    target = _machine(runtime, machine_id)
-    _authorize(runtime, "instabox_machine_get", target, {})
-    return _json(await _call(get_instabox_service().get_machine(target)))
+    target = await _target(runtime, machine_id)
+    _authorize(runtime, "instabox_machine_get", target.locator, {})
+    return _json(await _call(get_instabox_service().get_machine(target.locator)))
 
 
 async def _machine_create(
     runtime: Runtime,
     name: Annotated[str | None, Field(description="Optional machine name: lowercase letters, digits and '-'.")] = None,
     template: Annotated[str | None, Field(description="Template ID. Defaults to the configured template.")] = None,
-    snapshot_id: Annotated[str | None, Field(description="Start from a ready snapshot instead of a template.")] = None,
+    snapshot_id: Annotated[str | None, Field(description="Start from a ready snapshot of this conversation instead of a template.")] = None,
+    purpose: Annotated[str | None, Field(description="Short note on what the machine is for, shown to the user.")] = None,
 ):
-    values = {"name": name, "template": template, "snapshot_id": snapshot_id}
+    if snapshot_id:
+        await _require_snapshot(runtime, snapshot_id)
+    values = {"name": name, "template": template, "snapshot_id": snapshot_id, "purpose": purpose}
     _authorize(runtime, "instabox_machine_create", name or "*", values)
     service = get_instabox_service()
+    root = service.settings().workspace_root
+    reservation = await _reserve(runtime, purpose, root)
+    metadata = _ownership_metadata(runtime, root)
     if snapshot_id:
-        record = await _call(service.create_machine_from_snapshot(snapshot_id, name=name, created_by=_owner(runtime), wait=True))
+        create = service.create_machine_from_snapshot(snapshot_id, name=name, metadata=metadata,
+                                                      created_by=_owner(runtime), wait=True,
+                                                      auxiliary_reservation_id=reservation)
     else:
-        record = await _call(service.create_machine(
-            name=name, template=template, metadata={"k41_created_by": "agent"}, created_by=_owner(runtime), wait=True,
-        ))
-    return _json(record)
+        create = service.create_machine(name=name, template=template, metadata=metadata,
+                                        created_by=_owner(runtime), wait=True, auxiliary_reservation_id=reservation)
+    return _json(await _create_reserved(reservation, create, root))
 
 
 def _action_tool(action: str):
     async def run(runtime: Runtime, machine_id: MachineId = None):
-        target = _machine(runtime, machine_id)
-        _authorize(runtime, f"instabox_machine_{action}", target, {})
-        return _json(await _call(get_instabox_service().machine_action(
-            target, action, created_by=_owner(runtime), wait=True,
-        )))
+        target = await _target(runtime, machine_id)
+        _authorize(runtime, f"instabox_machine_{action}", target.locator, {})
+        result = await _call(get_instabox_service().machine_action(
+            target.locator, action, created_by=_owner(runtime), wait=True,
+        ))
+        return _json(result)
 
     return run
 
@@ -154,10 +226,15 @@ async def _machine_fork(
     runtime: Runtime,
     machine_id: MachineId = None,
     name: Annotated[str | None, Field(description="Name of the new independent machine.")] = None,
+    purpose: Annotated[str | None, Field(description="Short note on what the copy is for, shown to the user.")] = None,
 ):
-    target = _machine(runtime, machine_id)
-    _authorize(runtime, "instabox_machine_fork", target, {"name": name})
-    record = await _call(get_instabox_service().fork_machine(target, name=name, created_by=_owner(runtime), wait=True))
+    source = await _target(runtime, machine_id)
+    _authorize(runtime, "instabox_machine_fork", source.locator, {"name": name, "purpose": purpose})
+    root = source.root or get_instabox_service().settings().workspace_root
+    reservation = await _reserve(runtime, purpose, root)
+    record = await _create_reserved(reservation, get_instabox_service().fork_machine(
+        source.locator, name=name, created_by=_owner(runtime), wait=True,
+        auxiliary_reservation_id=reservation), root)
     if record.get("status") == "failed" and "fork_unavailable" in json.dumps(record.get("error") or {}):
         record["hint"] = "Fork is unavailable on this host. Create a snapshot, then create a machine from it."
     return _json(record)
@@ -165,34 +242,48 @@ async def _machine_fork(
 
 async def _machine_delete(
     runtime: Runtime,
-    machine_id: Annotated[str, Field(description="Exact machine ID to delete.")],
+    machine_id: Annotated[str, Field(description="Exact ID of an auxiliary machine of this conversation.")],
     confirm: Annotated[str, Field(description="Repeat the exact machine ID to confirm deletion.")],
 ):
-    _authorize(runtime, "instabox_machine_delete", machine_id, {"confirm": confirm})
-    return _json(await _call(get_instabox_service().delete_machine(
-        machine_id, confirm=confirm, created_by=_owner(runtime), wait=True,
-    )))
+    target = await _target(runtime, machine_id)
+    if not target.auxiliary:
+        raise ToolError(ToolErrorCode.PERMISSION_DENIED,
+                        "The machine of the current workspace can only be deleted from the dashboard.")
+    _authorize(runtime, "instabox_machine_delete", target.locator, {"confirm": confirm})
+    result = await _call(get_instabox_service().delete_machine(
+        target.locator, confirm=confirm, created_by=_owner(runtime), wait=True,
+    ))
+    if result.get("status") == "succeeded":
+        await forget_machine(BACKEND, target.locator, deleted=True)
+    return _json(result)
 
 
 # Ports ------------------------------------------------------------------- #
 
 
 async def _port_list(runtime: Runtime, machine_id: MachineId = None):
-    target = _machine(runtime, machine_id)
-    _authorize(runtime, "instabox_port_list", target, {})
-    return _json(await _call(get_instabox_service().list_ports(target)))
+    target = await _target(runtime, machine_id)
+    _authorize(runtime, "instabox_port_list", target.locator, {})
+    return _json(await _call(get_instabox_service().list_ports(target.locator)))
+
+
+def _authorize_access(runtime, name: str, resource: str, access: str) -> None:
+    _authorize(runtime, name, resource, {"access": access})
+    if access == "public":
+        # Opening a port to anyone asks by default, whatever rule allows the tool.
+        _authorize(runtime, "instabox_port_public", resource, {})
 
 
 async def _port_publish(
     runtime: Runtime,
     port: Annotated[int, Field(ge=1024, le=65535, description="HTTP port of a server running in the machine.")],
     machine_id: MachineId = None,
-    access: Annotated[Literal["private", "public"], Field(description="private (default) needs a token link; public is open to anyone.")] = "private",
+    access: Annotated[Literal["private", "public"], Field(description="private (default) needs a token link; public is open to anyone and asks the user.")] = "private",
     name: Annotated[str | None, Field(description="Optional display name.")] = None,
 ):
-    target = _machine(runtime, machine_id)
-    _authorize(runtime, "instabox_port_publish", f"{target}:{port}", {"access": access})
-    return _json(await _call(get_instabox_service().publish_port(target, port, access=access, name=name)))
+    target = await _target(runtime, machine_id)
+    _authorize_access(runtime, "instabox_port_publish", f"{target.locator}:{port}", access)
+    return _json(await _call(get_instabox_service().publish_port(target.locator, port, access=access, name=name)))
 
 
 async def _port_set_access(
@@ -201,33 +292,53 @@ async def _port_set_access(
     access: Literal["private", "public"],
     machine_id: MachineId = None,
 ):
-    target = _machine(runtime, machine_id)
-    _authorize(runtime, "instabox_port_set_access", f"{target}:{port}", {"access": access})
-    return _json(await _call(get_instabox_service().set_port_access(target, port, access)))
+    target = await _target(runtime, machine_id)
+    _authorize_access(runtime, "instabox_port_set_access", f"{target.locator}:{port}", access)
+    return _json(await _call(get_instabox_service().set_port_access(target.locator, port, access)))
 
 
 async def _port_rotate_token(runtime: Runtime, port: Annotated[int, Field(ge=1024, le=65535)], machine_id: MachineId = None):
-    target = _machine(runtime, machine_id)
-    _authorize(runtime, "instabox_port_rotate_token", f"{target}:{port}", {})
-    return _json(await _call(get_instabox_service().rotate_port_token(target, port)))
+    target = await _target(runtime, machine_id)
+    _authorize(runtime, "instabox_port_rotate_token", f"{target.locator}:{port}", {})
+    return _json(await _call(get_instabox_service().rotate_port_token(target.locator, port)))
 
 
 async def _port_close(runtime: Runtime, port: Annotated[int, Field(ge=1024, le=65535)], machine_id: MachineId = None):
-    target = _machine(runtime, machine_id)
-    _authorize(runtime, "instabox_port_close", f"{target}:{port}", {})
-    await _call(get_instabox_service().close_port(target, port))
+    target = await _target(runtime, machine_id)
+    _authorize(runtime, "instabox_port_close", f"{target.locator}:{port}", {})
+    await _call(get_instabox_service().close_port(target.locator, port))
     return _json({"closed": True, "port": port})
 
 
 # Snapshots --------------------------------------------------------------- #
 
 
+async def _snapshot_scope(runtime) -> set[str]:
+    """Snapshots of this conversation plus the configured default snapshot."""
+    from agent.modules.workspaces import SNAPSHOT, list_thread_resources
+
+    scope = {record.locator for record in await list_thread_resources(_thread_id(runtime), kind=SNAPSHOT, backend=BACKEND)}
+    default = get_instabox_service().settings().snapshot_id
+    if default:
+        scope.add(default)
+    return scope
+
+
+async def _require_snapshot(runtime, snapshot_id: str) -> None:
+    if snapshot_id not in await _snapshot_scope(runtime):
+        raise ToolError(ToolErrorCode.PERMISSION_DENIED,
+                        f"Snapshot {snapshot_id} was not created in this conversation and is not the configured default.")
+
+
 async def _snapshot_list(runtime: Runtime):
     _authorize(runtime, "instabox_snapshot_list", "*", {})
-    return _json(await _call(get_instabox_service().list_snapshots()))
+    scope = await _snapshot_scope(runtime)
+    snapshots = await _call(get_instabox_service().list_snapshots())
+    return _json([snapshot for snapshot in snapshots if snapshot.get("id") in scope])
 
 
 async def _snapshot_get(runtime: Runtime, snapshot_id: str):
+    await _require_snapshot(runtime, snapshot_id)
     _authorize(runtime, "instabox_snapshot_get", snapshot_id, {})
     return _json(await _call(get_instabox_service().get_snapshot(snapshot_id)))
 
@@ -238,11 +349,13 @@ async def _snapshot_create(
     machine_id: MachineId = None,
     description: str | None = None,
 ):
-    target = _machine(runtime, machine_id)
-    _authorize(runtime, "instabox_snapshot_create", target, {"name": name})
-    return _json(await _call(get_instabox_service().create_snapshot(
-        target, name=name, description=description, created_by=_owner(runtime), wait=True,
-    )))
+    target = await _target(runtime, machine_id)
+    _authorize(runtime, "instabox_snapshot_create", target.locator, {"name": name})
+    record = await _call(get_instabox_service().create_snapshot(
+        target.locator, name=name, description=description, created_by=_owner(runtime), wait=True,
+        owner_thread_id=_thread_id(runtime), workspace_root=target.root,
+    ))
+    return _json(record)
 
 
 async def _snapshot_delete(
@@ -250,8 +363,12 @@ async def _snapshot_delete(
     snapshot_id: str,
     confirm: Annotated[str, Field(description="Repeat the exact snapshot ID to confirm deletion.")],
 ):
+    from agent.modules.workspaces import SNAPSHOT, mark_resource_deleted
+
+    await _require_snapshot(runtime, snapshot_id)
     _authorize(runtime, "instabox_snapshot_delete", snapshot_id, {"confirm": confirm})
     await _call(get_instabox_service().delete_snapshot(snapshot_id, confirm=confirm))
+    await mark_resource_deleted(BACKEND, snapshot_id, kind=SNAPSHOT)
     return _json({"deleted": True, "snapshot_id": snapshot_id})
 
 
@@ -260,174 +377,54 @@ async def _snapshot_restore(
     machine_id: Annotated[str, Field(description="Exact machine ID to restore in place.")],
     snapshot_id: Annotated[str, Field(description="Exact ID of a ready snapshot.")],
 ):
+    target = await _target(runtime, machine_id)
+    await _require_snapshot(runtime, snapshot_id)
     # Restore always asks the user through the application approval step.
-    _authorize(runtime, "instabox_snapshot_restore", f"{machine_id}<-{snapshot_id}", {})
+    _authorize(runtime, "instabox_snapshot_restore", f"{target.locator}<-{snapshot_id}", {})
     return _json(await _call(get_instabox_service().restore_machine(
-        machine_id, snapshot_id, confirm_machine=machine_id, confirm_snapshot=snapshot_id, created_by=_owner(runtime),
+        target.locator, snapshot_id, confirm_machine=target.locator, confirm_snapshot=snapshot_id,
+        created_by=_owner(runtime),
     )))
 
 
-# Desktop ----------------------------------------------------------------- #
-
-
-async def _desktop_start(runtime: Runtime, machine_id: MachineId = None):
-    target = _machine(runtime, machine_id)
-    _authorize(runtime, "instabox_desktop_start", target, {})
-    return _json(await _call(get_instabox_service().desktop.ensure_started(target)))
-
-
-async def _save_screenshot(runtime, data: bytes) -> str | None:
-    from agent.modules.tools.builtin.workspace import get_workspace
-    from agent.modules.tools.runtime.context import get_thread_id
-    from agent.modules.workspaces import get_workspace_file_io
-
-    path = f".k41-agent/instabox/screenshots/{uuid.uuid4().hex}.png"
-    try:
-        workspace = get_workspace(runtime)
-        if workspace.backend == "local":
-            from agent.modules.tools.runtime.thread_storage import ensure_physical_workspace_storage
-
-            ensure_physical_workspace_storage(workspace.locator)
-        file_io = await get_workspace_file_io(workspace, thread_id=get_thread_id(runtime.config))
-        await file_io.write_bytes(path, data)
-    except Exception:
-        return None
-    return path
-
-
-async def _desktop_screenshot(runtime: Runtime, machine_id: MachineId = None):
-    target = _machine(runtime, machine_id)
-    _authorize(runtime, "instabox_desktop_screenshot", target, {})
-    data = await _call(get_instabox_service().desktop.screenshot(target))
-    path = await _save_screenshot(runtime, data)
-    text = "Desktop screenshot captured." + (f"\nSaved to workspace: {path}" if path else "")
-    return ToolMessage(
-        content=[{"type": "text", "text": text},
-                 {"type": "image", "base64": base64.b64encode(data).decode("ascii"), "mime_type": "image/png"}],
-        name="instabox_desktop_screenshot",
-        tool_call_id=runtime.tool_call_id,
-        artifact={"display_content": text, "instabox": {"machine_id": target, "workspace_path": path}},
-    )
-
-
-def _desktop_action(action: str):
-    async def run(runtime: Runtime, machine_id: MachineId = None, **values: Any):
-        target = _machine(runtime, machine_id)
-        _authorize(runtime, f"instabox_desktop_{action}", target, values)
-        return _json(await _call(get_instabox_service().desktop.act(target, action, **values)))
-
-    return run
-
-
-async def _desktop_open_url(runtime: Runtime, url: str, machine_id: MachineId = None):
-    return await _desktop_action("open_url")(runtime, machine_id, url=url)
-
-
-async def _desktop_click(
-    runtime: Runtime,
-    x: Annotated[int, Field(ge=0, description="Pixels from the left edge.")],
-    y: Annotated[int, Field(ge=0, description="Pixels from the top edge.")],
-    button: Literal["left", "middle", "right"] = "left",
-    double: bool = False,
-    machine_id: MachineId = None,
-):
-    return await _desktop_action("click")(runtime, machine_id, x=x, y=y, button=button, double=double)
-
-
-async def _desktop_move(runtime: Runtime, x: Annotated[int, Field(ge=0)], y: Annotated[int, Field(ge=0)], machine_id: MachineId = None):
-    return await _desktop_action("move")(runtime, machine_id, x=x, y=y)
-
-
-async def _desktop_drag(
-    runtime: Runtime,
-    x1: Annotated[int, Field(ge=0)],
-    y1: Annotated[int, Field(ge=0)],
-    x2: Annotated[int, Field(ge=0)],
-    y2: Annotated[int, Field(ge=0)],
-    machine_id: MachineId = None,
-):
-    return await _desktop_action("drag")(runtime, machine_id, x1=x1, y1=y1, x2=x2, y2=y2)
-
-
-async def _desktop_scroll(
-    runtime: Runtime,
-    direction: Literal["up", "down", "left", "right"] = "down",
-    amount: Annotated[int, Field(ge=1, le=50)] = 3,
-    x: int | None = None,
-    y: int | None = None,
-    machine_id: MachineId = None,
-):
-    return await _desktop_action("scroll")(runtime, machine_id, direction=direction, amount=amount, x=x, y=y)
-
-
-async def _desktop_type(runtime: Runtime, text: Annotated[str, Field(min_length=1, max_length=4000)], machine_id: MachineId = None):
-    return await _desktop_action("type")(runtime, machine_id, text=text)
-
-
-async def _desktop_press(
-    runtime: Runtime,
-    keys: Annotated[list[str], Field(min_length=1, description="Key or chord, e.g. ['Return'] or ['ctrl', 'l'] (xdotool key names).")],
-    machine_id: MachineId = None,
-):
-    return await _desktop_action("press")(runtime, machine_id, keys=keys)
-
-
 instabox_machine_list = registered("instabox_machine_list", _machine_list,
-    "List Instabox machines with their normalized status. Listing never wakes a machine.")
+    "List the Instabox machines this conversation may use: the workspace machine and its auxiliary machines. Listing never wakes a machine.", machines=True)
 instabox_machine_get = registered("instabox_machine_get", _machine_get,
-    "Show one Instabox machine: state, size, template and labels. Never wakes the machine.")
+    "Show one Instabox machine: state, size, template and labels. Never wakes the machine.", machines=True)
 instabox_machine_create = registered("instabox_machine_create", _machine_create,
-    "Create an Instabox machine from the configured template or from a ready snapshot and wait until it runs. The machine appears in the list; attach it to a workspace from the dashboard.", mutates=True)
+    "Create an auxiliary Instabox machine for this conversation and wait until it runs. Asks the user by default and is limited per conversation. "
+    "Work on it by passing its ID as target to the coding and computer_* tools; its files are temporary until copied back with copy_files.", mutates=True, machines=True)
 instabox_machine_start = registered("instabox_machine_start", _action_tool("start"),
-    "Start a stopped Instabox machine and wait until it runs.", mutates=True)
+    "Start a stopped Instabox machine and wait until it runs.", mutates=True, machines=True)
 instabox_machine_stop = registered("instabox_machine_stop", _action_tool("stop"),
-    "Stop a running Instabox machine. Running programs end; files are kept.", mutates=True)
+    "Stop a running Instabox machine. Running programs end; files are kept.", mutates=True, machines=True)
 instabox_machine_suspend = registered("instabox_machine_suspend", _action_tool("suspend"),
-    "Pause a running Instabox machine, keeping its running programs.", mutates=True)
+    "Pause a running Instabox machine, keeping its running programs.", mutates=True, machines=True)
 instabox_machine_resume = registered("instabox_machine_resume", _action_tool("resume"),
-    "Resume a paused Instabox machine where it left off.", mutates=True)
+    "Resume a paused Instabox machine where it left off.", mutates=True, machines=True)
 instabox_machine_fork = registered("instabox_machine_fork", _machine_fork,
-    "Copy a running Instabox machine's disks into a new independent machine on the same host. Memory and running programs are not copied. If fork is unavailable, create a snapshot and start a machine from it.", mutates=True)
+    "Copy a running Instabox machine's disks into a new auxiliary machine of this conversation. Memory and running programs are not copied. Asks the user by default. If fork is unavailable, create a snapshot and start a machine from it.", mutates=True, machines=True)
 instabox_machine_delete = registered("instabox_machine_delete", _machine_delete,
-    "Permanently delete an Instabox machine and its storage. Requires the exact machine ID twice and asks the user by default.", mutates=True)
+    "Permanently delete an auxiliary Instabox machine of this conversation and its storage. Copy needed files back first. Requires the exact machine ID twice and asks the user by default.", mutates=True, machines=True)
 
 instabox_port_list = registered("instabox_port_list", _port_list,
     "List the published HTTPS preview ports of an Instabox machine.")
 instabox_port_publish = registered("instabox_port_publish", _port_publish,
     "Give an HTTP port of an Instabox machine an HTTPS preview URL. Private by default: the returned link carries a token. Use this instead of localhost to view apps running in the machine.", mutates=True)
 instabox_port_set_access = registered("instabox_port_set_access", _port_set_access,
-    "Switch a published preview port between private and public access.", mutates=True)
+    "Switch a published preview port between private and public access. Public access asks the user.", mutates=True)
 instabox_port_rotate_token = registered("instabox_port_rotate_token", _port_rotate_token,
     "Issue a new token for a private preview port and end connections using the old link.", mutates=True)
 instabox_port_close = registered("instabox_port_close", _port_close,
     "Remove a port's preview URL and close its active connections.", mutates=True)
 
 instabox_snapshot_list = registered("instabox_snapshot_list", _snapshot_list,
-    "List Instabox snapshots and their state (pending, ready or failed).")
+    "List the Instabox snapshots of this conversation and the configured default snapshot, with their state (pending, ready or failed).")
 instabox_snapshot_get = registered("instabox_snapshot_get", _snapshot_get,
-    "Show one Instabox snapshot.")
+    "Show one Instabox snapshot of this conversation.")
 instabox_snapshot_create = registered("instabox_snapshot_create", _snapshot_create,
     "Save an Instabox machine's system files and storage as a snapshot and wait until it is ready.", mutates=True)
 instabox_snapshot_delete = registered("instabox_snapshot_delete", _snapshot_delete,
-    "Delete an Instabox snapshot. Machines created from it are not affected. Asks the user by default.", mutates=True)
+    "Delete an Instabox snapshot of this conversation. Machines created from it are not affected. Asks the user by default.", mutates=True)
 instabox_snapshot_restore = registered("instabox_snapshot_restore", _snapshot_restore,
     "Put an Instabox machine's disks back to a ready snapshot in place. Everything written since the snapshot is lost. Always asks the user to confirm the exact machine and snapshot; refuses while tasks or processes run on the machine.", mutates=True)
-
-instabox_desktop_start = registered("instabox_desktop_start", _desktop_start,
-    "Start the Instabox machine's desktop at 1280x800, installing it first if the template lacks one.", mutates=True, desktop=True)
-instabox_desktop_screenshot = registered("instabox_desktop_screenshot", _desktop_screenshot,
-    "Capture the Instabox desktop as an image visible to the model and save it under .k41-agent/instabox/screenshots/ in the active workspace. Call desktop tools one per turn.", desktop=True)
-instabox_desktop_open_url = registered("instabox_desktop_open_url", _desktop_open_url,
-    "Open an http(s) URL in the Instabox desktop browser.", mutates=True, desktop=True)
-instabox_desktop_click = registered("instabox_desktop_click", _desktop_click,
-    "Click at pixel coordinates on the Instabox desktop. Take a screenshot first. Refused while a person controls the desktop.", mutates=True, desktop=True)
-instabox_desktop_move = registered("instabox_desktop_move", _desktop_move,
-    "Move the mouse pointer on the Instabox desktop.", mutates=True, desktop=True)
-instabox_desktop_drag = registered("instabox_desktop_drag", _desktop_drag,
-    "Drag with the left mouse button between two points on the Instabox desktop.", mutates=True, desktop=True)
-instabox_desktop_scroll = registered("instabox_desktop_scroll", _desktop_scroll,
-    "Scroll the Instabox desktop, optionally at a pointer position.", mutates=True, desktop=True)
-instabox_desktop_type = registered("instabox_desktop_type", _desktop_type,
-    "Type text into the focused window of the Instabox desktop. Never type secrets.", mutates=True, desktop=True)
-instabox_desktop_press = registered("instabox_desktop_press", _desktop_press,
-    "Press a key or key chord on the Instabox desktop.", mutates=True, desktop=True)

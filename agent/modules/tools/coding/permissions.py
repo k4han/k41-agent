@@ -15,7 +15,17 @@ from agent.modules.tools.coding.storage import OutputStore, atomic_json, digest
 logger = logging.getLogger(__name__)
 
 # Destructive actions ask by default; rules may still allow or deny them.
-ASK_BY_DEFAULT_ACTIONS = frozenset({"external_directory", "instabox_machine_delete", "instabox_snapshot_delete"})
+ASK_BY_DEFAULT_ACTIONS = frozenset({
+    "external_directory",
+    "instabox_machine_create", "instabox_machine_fork", "instabox_machine_delete",
+    "instabox_snapshot_delete",
+    # Checked in addition to the tool's own action when a port becomes public.
+    "instabox_port_public",
+    # Untrusted pages can carry instructions aimed at the agent.
+    "computer_open_url",
+    # The focused window may not be the one the agent expects.
+    "computer_type_secret",
+})
 # Always confirmed by the user, even when a rule allows them.
 APPROVAL_REQUIRED_ACTIONS = frozenset({"instabox_snapshot_restore"})
 
@@ -59,7 +69,14 @@ class Permissions(PathPermissions):
         self.storage = storage
 
     def assert_allowed(self, context: InvocationContext, action: str, resource: str,
-                       *, allow_interrupt: bool = True, **metadata: Any) -> None:
+                       *, allow_interrupt: bool = True, details: dict[str, Any] | None = None,
+                       **metadata: Any) -> None:
+        """Apply rules and ask the user when needed.
+
+        ``metadata`` is part of what an "allow for this conversation" grant
+        covers; ``details`` is only shown in the approval request, so values
+        such as click coordinates do not make every call ask again.
+        """
         effect = "ask" if action in ASK_BY_DEFAULT_ACTIONS else "allow"
         for rule in context.permission_rules:
             path_action = action in {"read", "edit", "external_directory"}
@@ -95,7 +112,7 @@ class Permissions(PathPermissions):
             response = interrupt({
                 "type": "permission_request", "request_id": request_id,
                 "tool_call_id": context.tool_call_id, "action": action,
-                "resource": resource, "metadata": metadata,
+                "resource": resource, "metadata": {**(details or {}), **metadata},
             })
             approval = PermissionResume.model_validate(response)
             if approval.request_id == request_id:

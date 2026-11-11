@@ -103,7 +103,19 @@ class ToolPolicy:
         return [d for d in descriptors if self.is_allowed(d)]
 
 
-INSTABOX_DESKTOP_TOOL_PREFIX = "instabox_desktop_"
+COMPUTER_TOOL_TAG = "computer"
+DEFAULT_COMPUTER_TOOLS = frozenset({"computer_action", "computer_screenshot"})
+
+
+def computer_tool_names() -> frozenset[str]:
+    """Tools tagged ``computer``; they drive one desktop at a time."""
+    try:
+        from agent.modules.tools.registry_service import get_registry_service
+
+        names = frozenset(d.name for d in get_registry_service().find(tags=[COMPUTER_TOOL_TAG]))
+    except Exception:
+        names = frozenset()
+    return names or DEFAULT_COMPUTER_TOOLS
 
 
 def is_browser_tool(name: str) -> bool:
@@ -118,10 +130,18 @@ def browser_batch_error(calls: Sequence[Mapping[str, object]]) -> str | None:
     selected = [call for call in calls if call.get("name") in BROWSER_TOOLS]
     if len(selected) > 1 or (any(call.get("name") == "browser_handoff" for call in selected) and len(calls) > 1):
         return "Call browser tools sequentially, one per turn. Call browser_handoff alone. No tools in this batch were executed."
-    desktop = [call for call in calls if str(call.get("name") or "").startswith(INSTABOX_DESKTOP_TOOL_PREFIX)]
-    if len(desktop) > 1:
-        return "Call Instabox desktop tools sequentially, one per turn. No tools in this batch were executed."
+    computer_tools = computer_tool_names()
+    machines: dict[str, int] = {}
+    for call in calls:
+        if call.get("name") in computer_tools:
+            args = call.get("args")
+            target = str((args.get("target") if isinstance(args, Mapping) else None) or "").strip()
+            machines[target] = machines.get(target, 0) + 1
+    if any(count > 1 for count in machines.values()):
+        return ("Call one computer tool per machine per turn; send several inputs in one computer_action call instead. "
+                "No tools in this batch were executed.")
     return None
 
 
-__all__ = ["ACP_UNAVAILABLE_TOOL_NAMES", "ToolPolicy", "browser_batch_error", "is_browser_tool"]
+__all__ = ["ACP_UNAVAILABLE_TOOL_NAMES", "COMPUTER_TOOL_TAG", "ToolPolicy", "browser_batch_error",
+           "computer_tool_names", "is_browser_tool"]

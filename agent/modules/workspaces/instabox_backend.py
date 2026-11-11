@@ -10,14 +10,25 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
+
 from agent.modules.instabox import (
     InstaboxApiError,
+    InstaboxConfirmationError,
+    InstaboxConflictError,
     InstaboxDisabledError,
     get_instabox_service,
     normalize_machine_state,
     redact,
 )
 from agent.modules.workspaces.backends import CommandResult, WorkspaceUnavailableError
+from agent.modules.workspaces.computer import (
+    ComputerError,
+    ComputerScreenshot,
+    ComputerStep,
+    ViewerEndpoint,
+    xdotool_input,
+)
 from agent.modules.workspaces.constants import GIT_TIMEOUT_SECONDS, MAX_LIST_FILES_ENTRIES
 from agent.modules.workspaces.git_utils import WORKSPACE_STORAGE_EXCLUDE_COMMAND
 from agent.modules.workspaces.posix_utils import normalize_posix_path, resolve_remote_path
@@ -173,13 +184,26 @@ async def create_instabox_backend(ref: WorkspaceRef, *, thread_id: str | None = 
 
 
 async def delete_instabox_workspace(ref: WorkspaceRef, *, thread_id: str | None = None) -> str:
+    from agent.modules.workspaces.thread_machines import mark_resource_deleted
+
     service = get_instabox_service()
     try:
-        await service.delete_machine(ref.locator, confirm=ref.locator, wait=True)
+        result = await service.delete_machine(ref.locator, confirm=ref.locator, wait=True)
     except InstaboxApiError as exc:
-        if exc.is_not_found:
-            return "destroyed"
-        raise
+        if not exc.is_not_found:
+            raise
+    else:
+        if result.get("status") != "succeeded":
+            error = result.get("error") or {}
+            raise RuntimeError(f"Instabox machine deletion failed: {redact(str(error or result.get('status')))}")
+    from agent.modules.workspaces.registry import invalidate_workspace_computer
+
+    await invalidate_workspace_computer(INSTABOX_BACKEND, ref.locator)
+    try:
+        # Auxiliary machines are deleted from the Sandboxes page too.
+        await mark_resource_deleted(INSTABOX_BACKEND, ref.locator)
+    except Exception as exc:
+        logger.debug("Could not mark auxiliary machine %s deleted: %s", ref.locator, exc)
     return "destroyed"
 
 
@@ -244,6 +268,12 @@ async def list_instabox_cloud_sandboxes() -> list[dict[str, Any]] | None:
     except Exception as exc:
         logger.warning("Instabox machine listing failed: %s", redact(str(exc)))
         return None
+    try:
+        from agent.modules.workspaces.thread_machines import thread_machine_owners
+
+        owners = await thread_machine_owners(INSTABOX_BACKEND)
+    except Exception:
+        owners = {}
     results: list[dict[str, Any]] = []
     for machine in machines:
         machine_id = str(machine.get("id") or "")
@@ -259,7 +289,8 @@ async def list_instabox_cloud_sandboxes() -> list[dict[str, Any]] | None:
                 "root": metadata.get("k41_root") or DEFAULT_INSTABOX_ROOT,
                 "status": status,
                 "state": machine.get("state"),
-                "thread_id": metadata.get("thread_id") or None,
+                "thread_id": owners.get(machine_id) or metadata.get("thread_id") or None,
+                "role": "auxiliary" if machine_id in owners else None,
                 "repository_full_name": metadata.get("repository_full_name") or None,
                 "last_used_at": machine.get("updated_at"),
                 "last_started_at": None,
@@ -268,7 +299,7 @@ async def list_instabox_cloud_sandboxes() -> list[dict[str, Any]] | None:
                 "created_at": machine.get("created_at"),
                 "updated_at": machine.get("updated_at"),
                 "on_cloud": status != "destroyed",
-                "is_orphan": True,
+                "is_orphan": machine_id not in owners,
                 "metadata": metadata,
                 "name": machine.get("name"),
                 "template": machine.get("template"),
@@ -580,12 +611,87 @@ class InstaboxWorkspaceBackend(SandboxBackendBase):
         return [_file_info(item, path) for item in payload.get("entries") or []]
 
 
+# ---------------------------------------------------------------------- #
+#  Desktop
+# ---------------------------------------------------------------------- #
+
+
+class InstaboxComputer:
+    """``WorkspaceComputer`` over the Instabox desktop: an X11 display driven by ``xdotool``."""
+
+    def __init__(self, service: Any = None) -> None:
+        self._service = service
+
+    @property
+    def service(self):
+        return self._service or get_instabox_service()
+
+    @property
+    def desktop(self):
+        return self.service.desktop
+
+    async def status(self, locator: str) -> dict[str, Any]:
+        return await _computer_call(self.desktop.status(locator))
+
+    async def start(self, locator: str, *, width: int, height: int) -> dict[str, Any]:
+        return await _computer_call(self.desktop.ensure_started(locator, width=width, height=height))
+
+    async def screenshot(self, locator: str) -> ComputerScreenshot:
+        return ComputerScreenshot.from_png(await _computer_call(self.desktop.screenshot(locator)))
+
+    async def act(self, locator: str, step: ComputerStep) -> dict[str, Any]:
+        shell = xdotool_input(step)
+        await _computer_call(self.desktop.run(locator, shell.command, envs=shell.env, timeout=shell.timeout))
+        return {"action": step.action, "ok": True}
+
+    async def set_human_control(self, locator: str, active: bool) -> dict[str, Any]:
+        return await _computer_call(self.desktop.set_control(locator, active))
+
+    async def viewer_endpoint(self, locator: str) -> ViewerEndpoint:
+        client = await _computer_call(self.service.client())
+        return ViewerEndpoint(client.vnc_url(locator), client.vnc_headers())
+
+    def invalidate(self, locator: str) -> None:
+        self.desktop.invalidate(locator)
+
+
+async def _computer_call(coro):
+    try:
+        return await coro
+    except ComputerError:
+        raise
+    except InstaboxDisabledError as exc:
+        raise ComputerError("disabled", str(exc)) from None
+    except InstaboxConfirmationError as exc:
+        raise ComputerError("invalid_input", str(exc)) from None
+    except InstaboxConflictError as exc:
+        raise ComputerError("upstream", str(exc)) from None
+    except InstaboxApiError as exc:
+        code = "not_found" if exc.is_not_found else "permission_denied" if exc.is_auth_error else "upstream"
+        hint = f" Retry after {exc.retry_after:.0f}s." if exc.retry_after else ""
+        raise ComputerError(code, f"{exc.code or exc.status}: {redact(str(exc))}.{hint}") from None
+    except (ValueError, LookupError, KeyError) as exc:
+        raise ComputerError("invalid_input", str(exc)) from None
+    except TimeoutError as exc:
+        raise ComputerError("timeout", str(exc) or "The desktop did not answer in time.") from None
+    except RuntimeError as exc:
+        raise ComputerError("upstream", redact(str(exc))) from None
+    except (OSError, httpx.TransportError) as exc:
+        raise ComputerError("upstream", f"Instabox could not be reached: {redact(str(exc))}") from None
+
+
+def create_instabox_computer() -> InstaboxComputer:
+    return InstaboxComputer()
+
+
 __all__ = [
     "INSTABOX_BACKEND",
+    "InstaboxComputer",
     "InstaboxWorkspaceBackend",
     "archive_instabox_workspace",
     "attach_instabox_workspace",
     "create_instabox_backend",
+    "create_instabox_computer",
     "create_instabox_workspace",
     "delete_instabox_workspace",
     "instabox_metadata",

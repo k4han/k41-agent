@@ -7,7 +7,11 @@ TOOL_ALIASES = {"call_agent": "delegate_task",
                 "read_file": "read", "write_file": "write", "edit_file": "edit",
                 "exec_command": "bash", "run_bash": "bash",
                 "bash_read_output": "read_process_output", "bash_send_input": "write_process_input",
-                "bash_interrupt": "stop_process", "bash_close": "stop_process"}
+                "bash_interrupt": "stop_process", "bash_close": "stop_process",
+                # The Instabox desktop tools became the shared computer tools.
+                "instabox_desktop_start": "computer_screenshot", "instabox_desktop_screenshot": "computer_screenshot",
+                **{f"instabox_desktop_{action}": "computer_action"
+                   for action in ("open_url", "click", "move", "drag", "scroll", "type", "press")}}
 REMOVED_TOOLS = frozenset({"bash_list_sessions", "apply_patch", "read_tool_output"})
 
 

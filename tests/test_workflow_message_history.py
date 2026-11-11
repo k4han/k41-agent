@@ -214,6 +214,33 @@ def test_normalize_tool_image_url_blocks_preserved():
     assert normalized[0].content == content
 
 
+def test_only_recent_desktop_screenshots_reach_the_model():
+    def shot(index, name="computer_action"):
+        return ToolMessage(
+            content=[{"type": "text", "text": f"Saved to workspace: shot-{index}.png"},
+                     {"type": "image", "base64": "YWJjZA==", "mime_type": "image/png"}],
+            name=name, tool_call_id=f"call-{index}")
+
+    def visible(count):
+        history = [shot(index, "computer_screenshot" if index == 0 else "computer_action") for index in range(count)]
+        normalized = normalize_messages_for_chat_model(history)
+        assert all(isinstance(message.content, list) for message in history), "saved history is untouched"
+        return [isinstance(message.content, list) for message in normalized], normalized
+
+    # Screenshots leave three at a time, so the request prefix is stable between drops.
+    assert visible(5)[0] == [True] * 5
+    kept, normalized = visible(6)
+    assert kept == [False] * 3 + [True] * 3
+    assert normalized[0].content.startswith("Saved to workspace: shot-0.png")
+    assert "image content omitted" in normalized[0].content
+    assert visible(8)[0] == [False] * 3 + [True] * 5
+    assert visible(9)[0] == [False] * 6 + [True] * 3
+
+    # Images of other tools are not screenshots of a desktop that changed since.
+    other = [shot(index, "read") for index in range(9)]
+    assert all(isinstance(message.content, list) for message in normalize_messages_for_chat_model(other))
+
+
 def test_ui_history_keeps_assistant_thinking_separate_from_answer():
     from agent.modules.conversations.history import _serialize_thread_messages
 

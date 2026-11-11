@@ -17,7 +17,7 @@ import {
 } from "lucide-solid";
 
 import { DataGate } from "@/components/State";
-import { InstaboxDesktop } from "@/components/InstaboxDesktop";
+import { WorkspaceDesktop } from "@/components/WorkspaceDesktop";
 import { TypedConfirmDialog } from "@/components/TypedConfirmDialog";
 import { useToast } from "@/components/Toast";
 import {
@@ -367,7 +367,7 @@ export function InstaboxMachinePage() {
               <section class="instabox-panel">
                 <p class="instabox-hint">You watch by default. Take control to pause the agent's desktop tools; control returns to the agent when you hand back or stop sending heartbeats for 30 seconds.</p>
                 <div class="instabox-desktop-page">
-                  <InstaboxDesktop machineId={machineId()} active={tab() === "desktop" && state() === "running"} />
+                  <WorkspaceDesktop backend="instabox" locator={machineId()} active={tab() === "desktop" && state() === "running"} />
                 </div>
                 <Show when={state() !== "running"}><p class="instabox-hint">Start or resume the machine to open its desktop.</p></Show>
               </section>

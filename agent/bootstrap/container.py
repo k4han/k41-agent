@@ -179,6 +179,7 @@ class AppContainer:
     _acp_installer: Any = field(default=None, repr=False)
     _project_workspace_service: Any = field(default=None, repr=False)
     _instabox_service: Any = field(default=None, repr=False)
+    _computer_control: Any = field(default=None, repr=False)
     _mcp_loaded: bool = field(default=False, repr=False)
     _mcp_load_lock: Any = field(default=None, repr=False)
     _mcp_load_task: Any = field(default=None, repr=False)
@@ -742,6 +743,8 @@ class AppContainer:
         if self._instabox_service is not None:
             await self._instabox_service.close()
             self._instabox_service = None
+        if self._computer_control is not None:
+            self._computer_control.close()
         await close_checkpointer(container=self)
         await close_async_engine(container=self)
         try:

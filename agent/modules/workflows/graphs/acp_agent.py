@@ -17,10 +17,11 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.config import get_stream_writer
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.runtime import Runtime
-from langgraph.types import interrupt
+from langgraph.types import Command, interrupt
 from pydantic import ValidationError
 
 from agent.modules.acp import (
@@ -31,6 +32,7 @@ from agent.modules.acp import (
     AcpNotInstalled,
     AcpTurn,
     PendingHandoff,
+    PendingToolPermission,
     ToolOutput,
     TurnRequest,
     describe_failure,
@@ -38,7 +40,14 @@ from agent.modules.acp import (
     tool_output,
 )
 from agent.modules.browser import BROWSER_HANDOFF_WAIT_KEY, BrowserHandoffResume, abandon_thread_handoffs
-from agent.modules.tools import AcpPermissionResume, ToolResolver, coding_message_for_model, get_thread_id, is_browser_tool
+from agent.modules.tools import (
+    AcpPermissionResume,
+    PermissionResume,
+    ToolResolver,
+    coding_message_for_model,
+    get_thread_id,
+    is_browser_tool,
+)
 from agent.modules.workflows.checkpoint import get_checkpointer
 from agent.modules.workflows.constants import ACP_AGENT_GRAPH_TYPE
 from agent.modules.workflows.nodes.tool import tool_node
@@ -98,13 +107,13 @@ def prompt_blocks(message: HumanMessage) -> list[dict[str, Any]]:
 
 
 class CardToolProvider:
-    """Run a card's tools through the regular tool node, outside any graph run.
+    """Run a card's tools through an isolated, resumable tool graph.
 
     Reusing the node keeps policy, tool configs, coding permissions and output
-    retention identical to other agents. No node is active here, so a tool cannot
-    interrupt for approval and ``approval_supported`` stays off: "ask" rules fail
-    closed. The agent's own approval request covers the call as a whole. A browser
-    handoff waits on the turn instead, and ``acp_permission`` asks the user for it.
+    retention identical to other agents. K41 operation approvals and browser
+    handoffs wait on the turn, and ``acp_permission`` asks the user for them.
+    Each call has its own in-memory checkpoint so resuming one cannot replay
+    another call or the external agent's prompt.
     """
 
     def __init__(self, context: WorkflowContext, config: RunnableConfig, turn_id: str) -> None:
@@ -115,7 +124,7 @@ class CardToolProvider:
         self._config: RunnableConfig = {
             "configurable": {
                 "thread_id": get_thread_id(config),
-                "approval_supported": False,
+                "approval_supported": self._can_interrupt,
                 BROWSER_HANDOFF_WAIT_KEY: self._wait_for_handoff,
             },
             "metadata": dict(config.get("metadata") or {}),
@@ -172,7 +181,26 @@ class CardToolProvider:
     async def _invoke(self, name: str, arguments: dict[str, Any]) -> ToolOutput:
         call = {"id": uuid.uuid4().hex, "name": name, "args": arguments, "type": "tool_call"}
         state = {"messages": [AIMessage(content="", id=uuid.uuid4().hex, tool_calls=[call])]}
-        result = await tool_node(state, self._config, Runtime(context=self._context))
+        graph = StateGraph(MessagesState, context_schema=WorkflowContext)
+        graph.add_node("tools", tool_node)
+        graph.add_edge(START, "tools")
+        graph.add_edge("tools", END)
+        compiled = graph.compile(checkpointer=InMemorySaver())
+        result = await compiled.ainvoke(state, self._config, context=self._context)
+        while result.get("__interrupt__"):
+            pending = result["__interrupt__"][0]
+            payload = pending.value
+            if not isinstance(payload, dict) or payload.get("type") != "permission_request":
+                return ToolOutput("This tool requires an unsupported user interaction.", is_error=True)
+            turn = get_acp_service().turn(self._turn_id)
+            if turn is None or turn.done or turn.cancel_requested:
+                return ToolOutput("The tool call was cancelled.", is_error=True)
+            decision = await turn.wait_for_tool_permission(payload)
+            if turn.done or turn.cancel_requested:
+                return ToolOutput("The tool call was cancelled.", is_error=True)
+            result = await compiled.ainvoke(Command(resume={pending.id: {
+                "action": "permission", "request_id": payload["request_id"], "decision": decision,
+            }}), self._config, context=self._context)
         message = coding_message_for_model(result["messages"][-1])
         return tool_output(message.content, is_error=message.status == "error")
 
@@ -241,9 +269,9 @@ async def _start_turn(state: AcpState, config: RunnableConfig, runtime: Runtime[
 
 
 async def _commit_stopped_turn(turn: AcpTurn) -> None:
-    """Record a turn stopped during a handoff and release the graph paused on that handoff.
+    """Record a turn stopped during a K41 input request and release its paused graph.
 
-    No run can do this: the handoff's request is gone, so the dashboard has nothing
+    No run can do this: the input request is gone, so the dashboard has nothing
     left to answer. The graph is moved directly, the way forking moves one.
     """
     from agent.modules.agent_runtime import get_active_session_registry
@@ -318,6 +346,14 @@ async def acp_turn_node(state: AcpState, config: RunnableConfig, runtime: Runtim
 
 def _apply_answer(turn: AcpTurn, pending: Any, response: Any) -> bool:
     """Apply a resume value. False means the question has to be asked again."""
+    if isinstance(pending, PendingToolPermission):
+        try:
+            permission = PermissionResume.model_validate(response)
+        except ValidationError:
+            return False
+        if permission.request_id != pending.request_id:
+            return False
+        return turn.answer_tool_permission(pending.request_id, permission.decision) or turn.next_pending() is None or turn.done
     if isinstance(pending, PendingHandoff):
         try:
             handoff = BrowserHandoffResume.model_validate(response)

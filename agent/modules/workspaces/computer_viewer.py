@@ -1,4 +1,4 @@
-"""Relay a dashboard WebSocket to an Instabox machine's VNC WebSocket."""
+"""Relay a dashboard WebSocket to the RFB (VNC) WebSocket of a workspace desktop."""
 
 from __future__ import annotations
 
@@ -7,25 +7,26 @@ import contextlib
 import logging
 from typing import Any
 
+from agent.modules.workspaces.computer import ViewerEndpoint
+
 logger = logging.getLogger(__name__)
 
 UPSTREAM_OPEN_TIMEOUT = 15.0
 
 
-async def relay_vnc(websocket: Any, service: Any, machine_id: str, closer: asyncio.Event) -> None:
+async def relay_viewer(websocket: Any, endpoint: ViewerEndpoint, closer: asyncio.Event) -> None:
     """Pump RFB frames both ways until either side leaves or the machine is invalidated.
 
-    The browser never receives Instabox credentials; the server authenticates
-    upstream with its own API key.
+    The browser never receives backend credentials; the server authenticates
+    upstream with the headers of the endpoint.
     """
     from websockets.asyncio.client import connect
     from websockets.exceptions import InvalidStatus
 
-    client = await service.client()
     try:
         upstream_cm = connect(
-            client.vnc_url(machine_id),
-            additional_headers=client.vnc_headers(),
+            endpoint.url,
+            additional_headers=endpoint.headers,
             max_size=None,
             open_timeout=UPSTREAM_OPEN_TIMEOUT,
             ping_interval=20,
@@ -68,9 +69,9 @@ async def relay_vnc(websocket: Any, service: Any, machine_id: str, closer: async
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
     finally:
-        # Viewers count toward the per-user Instabox connection limit; close upstream promptly.
+        # Viewers may count toward provider connection limits; close upstream promptly.
         with contextlib.suppress(Exception):
             await upstream_cm.__aexit__(None, None, None)
 
 
-__all__ = ["relay_vnc"]
+__all__ = ["relay_viewer"]

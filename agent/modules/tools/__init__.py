@@ -314,6 +314,7 @@ from agent.modules.tools.runtime.secret_policy import (
     validate_secret_value,
 )
 from agent.modules.tools.coding.paths import comparable_path
+from agent.modules.tools.runtime.targets import forget_machine
 
 __all__ += [
     "prepare_tool_batch",
@@ -328,6 +329,7 @@ __all__ += [
     "validate_secret_name",
     "validate_secret_value",
     "comparable_path",
+    "forget_machine",
 ]
 
 

@@ -198,8 +198,8 @@ def create_app(bootstrap_config: BootstrapConfig | None = None, container=None) 
         fastapi_app.include_router(dashboard_router)
         from agent.delivery.http.dashboard.routes.browser import viewer_router
         fastapi_app.include_router(viewer_router)
-        from agent.delivery.http.dashboard.routes.instabox import viewer_router as instabox_viewer_router
-        fastapi_app.include_router(instabox_viewer_router)
+        from agent.delivery.http.dashboard.routes.computers import viewer_router as computer_viewer_router
+        fastapi_app.include_router(computer_viewer_router)
         dashboard_assets_app = CachedStaticFiles(directory=STATIC_DIR, check_dir=False)
         fastapi_app.mount(
             "/dashboard-assets",

@@ -97,6 +97,23 @@ def _checkpoint_tuple_thread_id(checkpoint_tuple: object) -> str:
     return str(configurable.get("thread_id", "") or "")
 
 
+async def _release_thread_machines(thread_id: str) -> None:
+    """Detach auxiliary machines of a deleted conversation; they are never deleted silently."""
+    if ":sub:" in thread_id:
+        return
+    try:
+        from agent.modules.workspaces import release_thread_resources
+
+        released = await release_thread_resources(thread_id)
+    except Exception as exc:
+        logger.warning("Failed to release auxiliary machines of thread %s: %s", thread_id, exc)
+        return
+    machines = [record.locator for record in released if record.kind == "machine"]
+    if machines:
+        logger.warning("Deleted thread %s left auxiliary machines %s; remove them from the Sandboxes page.",
+                       thread_id, ", ".join(machines))
+
+
 async def _list_workflow_child_thread_ids(checkpointer: object, thread_id: str) -> set[str]:
     thread_id = resolve_thread_id(thread_id)
     child_prefix = f"{thread_id}:sub:"
@@ -133,6 +150,7 @@ async def _delete_workflow_thread_tree_reserved(thread_id: str) -> None:
     if acp_service is not None:
         acp_service.forget_thread(thread_id)
     await delete_thread_browsers(thread_id)
+    await _release_thread_machines(thread_id)
     await clear_conversation_storage(thread_id)
     checkpointer = get_checkpointer()
     thread_ids = {thread_id}

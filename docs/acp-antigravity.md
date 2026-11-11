@@ -60,8 +60,11 @@ to use them.
 - **K41's credentials.** These tools run inside K41 and can use its connections, such as calendar or
   GitHub access, which the agent does not otherwise have. Select only what the card needs, because
   text the agent reads can try to make it use them.
-- **Permission rules.** `tool_permissions` still apply. A rule set to `ask` is refused, because a tool
-  cannot pause for approval on this path. Use `allow` or `deny` for these tools.
+- **Permission rules.** `tool_permissions` and the tools' default permission checks still apply.
+  Operations that require approval, such as creating an Instabox machine or restoring a snapshot,
+  pause in dashboard conversations until you approve or deny them. This is separate from ACP's
+  approval of the tool call: `permission_mode: auto_allow` does not bypass K41 operation approvals.
+  Surfaces without an approval UI refuse these operations unless their permission rules allow them.
 - **Browser handoff.** `browser_handoff` works as for other agents, in dashboard conversations: the
   turn pauses until you choose **Return control to agent** or **Cancel browser task**, and the agent
   then receives the result. Stopping the turn, or sending a new message, cancels the handoff and closes

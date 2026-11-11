@@ -160,6 +160,10 @@ def turn_body(session_id, name, cancel, text):
     if name == "mcp_call":
         chunk(session_id, run_mcp_tool(session_id, "m1", "get_current_time", {}))
         return "end_turn"
+    if name == "mcp_tool":
+        invocation = json.loads(text.split("input:", 1)[1])
+        chunk(session_id, run_mcp_tool(session_id, "m1", invocation["name"], invocation.get("arguments", {})))
+        return "end_turn"
     if name == "mcp_call_without_input":
         chunk(session_id, run_mcp_tool(session_id, "m1", "get_current_time", {}, report_input=False))
         return "end_turn"

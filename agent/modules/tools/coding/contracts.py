@@ -75,6 +75,9 @@ class InvocationContext:
     project_id: int | None = None
     project_workspace_id: int | None = None
     runtime_generation: int | None = None
+    # An auxiliary machine of the conversation: temporary data outside project
+    # bindings, host capture and checkpoints.
+    auxiliary: bool = False
 
     @property
     def owner(self) -> str:

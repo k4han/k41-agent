@@ -60,16 +60,6 @@ export type InstaboxSnapshot = {
   sizeBytes?: number | null;
 };
 
-export type InstaboxDesktopState = {
-  installed?: boolean;
-  installing?: boolean;
-  running?: boolean;
-  failed?: boolean;
-  controller?: string | null;
-  app_controller: string | null;
-  app_controller_expires_in: number;
-};
-
 export const ACTIVE_OPERATION_STATUSES = new Set(["submitting", "queued", "running", "pending"]);
 
 const machinePath = (machineId: string) => `${BASE}/machines/${encodeURIComponent(machineId)}`;
@@ -121,18 +111,7 @@ export const instaboxApi = {
       confirm_snapshot: confirmSnapshot,
     }),
 
-  desktop: (machineId: string) => apiFetch<InstaboxDesktopState>(`${machinePath(machineId)}/desktop`),
-  startDesktop: (machineId: string) => postJson<InstaboxDesktopState>(`${machinePath(machineId)}/desktop/start`, {}),
-  takeControl: (machineId: string) => postJson<InstaboxDesktopState>(`${machinePath(machineId)}/desktop/takeover`),
-  heartbeat: (machineId: string) => postJson<InstaboxDesktopState>(`${machinePath(machineId)}/desktop/heartbeat`),
-  handBack: (machineId: string) => postJson<InstaboxDesktopState>(`${machinePath(machineId)}/desktop/handback`),
-  viewerTicket: (machineId: string) => postJson<{ ticket: string }>(`${machinePath(machineId)}/desktop/viewer-ticket`),
 };
-
-export function instaboxViewerUrl(): string {
-  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${scheme}://${window.location.host}${BASE}/desktop/viewer`;
-}
 
 export function instaboxMachineHref(machineId: string): string {
   return `/settings/sandboxes/instabox/${encodeURIComponent(machineId)}`;

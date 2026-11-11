@@ -10,6 +10,7 @@ from agent.delivery.http.dashboard.routes import (
     browser as browser_routes,
     catalog as catalog_routes,
     channels as channels_routes,
+    computers as computers_routes,
     conversations as conversations_routes,
     dashboard as dashboard_routes,
     generated_images as generated_images_routes,
@@ -64,6 +65,7 @@ for child_router in (
     mcp_routes.router,
     sandboxes_routes.router,
     instabox_routes.router,
+    computers_routes.router,
     skills_routes.router,
     skill_packages_routes.router,
 ):

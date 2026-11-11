@@ -48,6 +48,20 @@ async def _thread_workspaces(machine_id: str) -> list[Any]:
         return list(rows)
 
 
+async def _auxiliary_roots(machine_id: str) -> list[str]:
+    from agent.modules.workspaces import MACHINE, ThreadMachine
+    from agent.shared.infrastructure.db import get_async_session_maker
+
+    async with get_async_session_maker()() as session:
+        roots = (await session.execute(select(ThreadMachine.root).where(
+            ThreadMachine.kind == MACHINE,
+            ThreadMachine.backend == INSTABOX_BACKEND,
+            ThreadMachine.locator == machine_id,
+        ))).scalars().all()
+        # Released machines can still run processes and be restored from the dashboard.
+        return [root for root in roots if root]
+
+
 async def _running_tasks(machine_id: str) -> int:
     from agent.modules.agent_runtime import BackgroundTaskRecord
     from agent.shared.infrastructure.db import get_async_session_maker
@@ -78,14 +92,6 @@ async def _running_processes(machine_id: str, roots: list[str]) -> int:
     return running
 
 
-def _drop_coding_clients(machine_id: str) -> None:
-    from agent.modules.tools import get_coding_service
-
-    remote = get_coding_service().remote
-    for key in [key for key in remote.clients if len(key) > 1 and key[0] == INSTABOX_BACKEND and key[1] == machine_id]:
-        remote.clients.pop(key, None)
-
-
 async def restore_machine(
     service: Any,
     machine_id: str,
@@ -109,7 +115,7 @@ async def restore_machine(
     workspaces = get_project_workspace_service()
     project_workspaces = await _project_workspaces(machine_id)
     thread_rows = await _thread_workspaces(machine_id)
-    roots: list[str] = []
+    roots = await _auxiliary_roots(machine_id)
     for row in thread_rows:
         with contextlib.suppress(Exception):
             metadata = json.loads(row.execution_metadata_json or "{}")
@@ -158,8 +164,10 @@ async def _invalidate_runtime(
         # A new generation makes in-flight writes against the old disk fail as stale.
         await workspaces._publish_runtime(project, workspace, ref, runtime.generation + 1, runtime.status)
         workspaces._notify_runtime_changed(project_id, workspace_id)
-    _drop_coding_clients(machine_id)
-    service.desktop.invalidate(machine_id)
+    from agent.modules.tools import forget_machine
+
+    # The restored disk invalidates cached coding workers and desktop state.
+    await forget_machine(INSTABOX_BACKEND, machine_id)
 
 
 __all__ = ["restore_machine"]

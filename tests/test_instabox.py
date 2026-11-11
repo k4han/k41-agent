@@ -460,71 +460,47 @@ async def test_private_port_token_is_stored_and_never_returned_raw(fake, service
 # Desktop ----------------------------------------------------------------- #
 
 
-class Clock:
-    def __init__(self):
-        self.now = 1000.0
-
-    def __call__(self):
-        return self.now
-
-
 @pytest.mark.asyncio
-async def test_desktop_control_blocks_agent_input_and_expires(fake, service):
-    from agent.modules.instabox.desktop import DesktopService
+async def test_desktop_starts_once_and_runs_input_on_the_display(fake, service):
+    from agent.modules.workspaces import ComputerStep
+    from agent.modules.workspaces.instabox_backend import InstaboxComputer
 
-    clock = Clock()
-    service._desktop = DesktopService(service, clock=clock)
     machine_id = fake.add_machine()
-    await service.desktop.ensure_started(machine_id)
+    computer = InstaboxComputer(service)
+    await computer.act(machine_id, ComputerStep.parse({"action": "click", "x": 10, "y": 20, "button": "right"}))
     assert fake.desktop[machine_id]["running"] is True
-
-    await service.desktop.take_control(machine_id, "admin:alice")
-    with pytest.raises(InstaboxConflictError) as other:
-        await service.desktop.take_control(machine_id, "admin:bob")
-    assert other.value.code == "desktop_controlled_by_other"
-    with pytest.raises(InstaboxConflictError) as blocked:
-        await service.desktop.act(machine_id, "click", x=10, y=20)
-    assert blocked.value.code == "human_in_control"
-
-    clock.now += 31
-    await service.desktop.act(machine_id, "click", x=10, y=20, button="right")
     command = fake.exec_calls[-1]["cmd"]
     assert command.startswith('export DISPLAY="${DESKTOP_DISPLAY:-:1}"; ')
     assert command.endswith("xdotool mousemove 10 20 click 3")
 
+    await computer.set_human_control(machine_id, True)
+    assert fake.desktop[machine_id]["controller"] == "human"
+    await computer.set_human_control(machine_id, False)
+    assert fake.desktop[machine_id]["controller"] == "agent"
+
 
 @pytest.mark.asyncio
 async def test_desktop_typing_passes_text_through_environment(fake, service):
+    from agent.modules.workspaces import ComputerError, ComputerStep
+    from agent.modules.workspaces.instabox_backend import InstaboxComputer
+
     machine_id = fake.add_machine()
-    await service.desktop.act(machine_id, "type", text="hello'; rm -rf /")
+    await InstaboxComputer(service).act(machine_id, ComputerStep.parse({"action": "type", "text": "hello'; rm -rf /"}))
     call = fake.exec_calls[-1]
     assert call["envs"] == {"K41_DESKTOP_TEXT": "hello'; rm -rf /"}
     assert "rm -rf" not in call["cmd"]
-    with pytest.raises(ValueError):
-        await service.desktop.act(machine_id, "open_url", url="file:///etc/passwd")
+    with pytest.raises(ComputerError):
+        ComputerStep.parse({"action": "open_url", "url": "file:///etc/passwd"})
 
 
-def test_viewer_tickets_are_single_use_and_expire():
-    from agent.modules.instabox.desktop import DesktopService
-
-    clock = Clock()
-    desktop = DesktopService(SimpleNamespace(), clock=clock)
-    ticket = desktop.issue_ticket("m_1", "admin:a")
-    assert desktop.consume_ticket(ticket).machine_id == "m_1"
-    with pytest.raises(PermissionError):
-        desktop.consume_ticket(ticket)
-    late = desktop.issue_ticket("m_1", "admin:a")
-    clock.now += 61
-    with pytest.raises(PermissionError):
-        desktop.consume_ticket(late)
-
-
-def test_desktop_tools_must_run_one_per_turn():
+def test_computer_tools_must_run_one_per_machine_per_turn():
     from agent.modules.tools.policy import browser_batch_error
 
-    calls = [{"name": "instabox_desktop_click"}, {"name": "instabox_desktop_screenshot"}]
-    assert "sequentially" in browser_batch_error(calls)
-    assert browser_batch_error([{"name": "instabox_desktop_click"}, {"name": "instabox_port_list"}]) is None
+    calls = [{"name": "computer_action", "args": {}}, {"name": "computer_screenshot", "args": {}}]
+    assert "one computer tool per machine" in browser_batch_error(calls)
+    assert browser_batch_error([{"name": "computer_action", "args": {}},
+                                {"name": "computer_screenshot", "args": {"target": "m_2"}}]) is None
+    assert browser_batch_error([{"name": "computer_action"}, {"name": "instabox_port_list"}]) is None
 
 
 def test_restore_always_requires_user_approval(tmp_path):
@@ -636,7 +612,8 @@ def _dashboard(fake, isolated_container, *, enabled=True):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from agent.delivery.http.dashboard.routes.instabox import router, viewer_router
+    from agent.delivery.http.dashboard.routes.computers import viewer_router
+    from agent.delivery.http.dashboard.routes.instabox import router
     from agent.modules.admin_auth import get_current_admin
     from agent.shared.config import ConfigService
     from agent.shared.config.default_source import DefaultConfigSource
@@ -693,10 +670,10 @@ def test_desktop_viewer_requires_origin_and_ticket(fake, isolated_container):
 
     client = _dashboard(fake, isolated_container)
     with pytest.raises(WebSocketDisconnect) as rejected:
-        with client.websocket_connect("/dashboard-api/instabox/desktop/viewer", headers={"origin": "https://evil.test"}):
+        with client.websocket_connect("/dashboard-api/computers/viewer", headers={"origin": "https://evil.test"}):
             pass
     assert rejected.value.code == 1008
 
-    with client.websocket_connect("/dashboard-api/instabox/desktop/viewer", headers={"origin": "http://testserver"}) as ws:
+    with client.websocket_connect("/dashboard-api/computers/viewer", headers={"origin": "http://testserver"}) as ws:
         ws.send_text(json.dumps({"ticket": "forged"}))
         assert ws.receive_json()["code"] == "ticket_invalid"

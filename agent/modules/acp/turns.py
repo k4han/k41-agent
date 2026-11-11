@@ -101,6 +101,18 @@ class PendingHandoff:
         return self.payload
 
 
+@dataclass
+class PendingToolPermission:
+    """A K41 operation waiting for its own permission decision."""
+
+    request_id: str
+    payload: dict[str, Any]
+    decision: Future[str]
+
+    def interrupt_value(self) -> dict[str, Any]:
+        return self.payload
+
+
 def _public_option(option: dict[str, Any]) -> dict[str, str]:
     public = {
         "id": str(option.get("optionId") or ""),
@@ -187,7 +199,7 @@ class AcpTurn:
         self.transcript = TurnTranscript(turn_id, thread_id=thread_id, provider_label=agent_id)
         self._lock = threading.Lock()
         self._events: list[dict[str, Any]] = []
-        self._pending: OrderedDict[str, PendingPermission | PendingHandoff] = OrderedDict()
+        self._pending: OrderedDict[str, PendingPermission | PendingHandoff | PendingToolPermission] = OrderedDict()
         self._waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
         self._done = threading.Event()
 
@@ -229,7 +241,7 @@ class AcpTurn:
         try:
             self.client.cancel(self.session_id)
             for request in pending:
-                # A pending handoff ends with its tool call, cancelled above.
+                # K41 input requests end with their tool call, cancelled above.
                 if isinstance(request, PendingPermission):
                     self.client.respond_permission(request.rpc_id, CANCELLED_OUTCOME)
         except Exception:
@@ -305,7 +317,7 @@ class AcpTurn:
             events, self._events = self._events, []
             return events
 
-    def next_pending(self) -> PendingPermission | PendingHandoff | None:
+    def next_pending(self) -> PendingPermission | PendingHandoff | PendingToolPermission | None:
         with self._lock:
             return next(iter(self._pending.values()), None)
 
@@ -335,9 +347,17 @@ class AcpTurn:
     async def wait_for_handoff(self, payload: dict[str, Any]) -> str:
         """Show a browser handoff to the user and return their decision."""
         request = PendingHandoff(str(payload["handoff_id"]), payload, Future())
+        return await self._wait_for_input(request, cancelled="cancel")
+
+    async def wait_for_tool_permission(self, payload: dict[str, Any]) -> str:
+        """Keep an MCP call open while the dashboard approves its K41 operation."""
+        request = PendingToolPermission(str(payload["request_id"]), payload, Future())
+        return await self._wait_for_input(request, cancelled="deny")
+
+    async def _wait_for_input(self, request: PendingHandoff | PendingToolPermission, *, cancelled: str) -> str:
         with self._lock:
             if self.done or self.transcript.cancel_requested:
-                return "cancel"
+                return cancelled
             self._pending[request.request_id] = request
         self._notify()
         try:
@@ -348,15 +368,22 @@ class AcpTurn:
             self._notify()
 
     def answer_handoff(self, request_id: str, decision: str) -> bool:
+        return self._answer_input(request_id, decision, PendingHandoff)
+
+    def answer_tool_permission(self, request_id: str, decision: str) -> bool:
+        return self._answer_input(request_id, decision, PendingToolPermission)
+
+    def _answer_input(self, request_id: str, decision: str,
+                      request_type: type[PendingHandoff] | type[PendingToolPermission]) -> bool:
         with self._lock:
             request = self._pending.get(request_id)
-            if not isinstance(request, PendingHandoff):
+            if not isinstance(request, request_type):
                 return False
             del self._pending[request_id]
         try:
             request.decision.set_result(decision)
         except InvalidStateError:
-            # The tool call was cancelled at the same moment, which already released the browser.
+            # The tool call was cancelled at the same moment, releasing its input request.
             return False
         self._notify()
         return True

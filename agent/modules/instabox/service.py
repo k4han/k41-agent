@@ -146,28 +146,36 @@ class InstaboxService:
         created_by: str | None = None,
         wait: bool = False,
         timeout: float = OPERATION_TIMEOUT_SECONDS,
+        auxiliary_reservation_id: int | None = None,
     ) -> dict[str, Any]:
         """Persist, send and track one asynchronous change.
 
         The record (with its ``Idempotency-Key``) is stored before the request
         so that a crash can be recovered by resending the same request.
         """
-        client = await self.client()
-        key = new_idempotency_key()
-        request_spec = {"method": method, "path": path, "body": body, "headers": headers or {}}
-        record = await self.repository.create_operation(
-            idempotency_key=key,
-            kind=kind,
-            target={**(target or {}), "request": request_spec},
-            machine_id=machine_id,
-            created_by=created_by,
-        )
+        try:
+            client = await self.client()
+            key = new_idempotency_key()
+            request_spec = {"method": method, "path": path, "body": body, "headers": headers or {}}
+            operation_target = {**(target or {}), "request": request_spec}
+            if auxiliary_reservation_id is not None:
+                operation_target["auxiliary_reservation_id"] = auxiliary_reservation_id
+            record = await self.repository.create_operation(
+                idempotency_key=key,
+                kind=kind,
+                target=operation_target,
+                machine_id=machine_id,
+                created_by=created_by,
+            )
+        except BaseException:
+            await self._cancel_reservation(auxiliary_reservation_id)
+            raise
         try:
             response = await client.request(
                 method, path, json=body, headers=headers, idempotency_key=key
             )
         except InstaboxApiError as exc:
-            await self.repository.update_operation(key, status="failed", error=exc.to_payload())
+            await self._update_operation(key, status="failed", error=exc.to_payload())
             raise
         record = await self._record_response(key, kind, response, machine_id)
         if record["status"] in {"succeeded", "failed"}:
@@ -177,6 +185,56 @@ class InstaboxService:
             return await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
         return record
 
+    async def _cancel_reservation(self, record_id: int | None) -> None:
+        if record_id is not None:
+            from agent.modules.workspaces import cancel_reservation
+
+            await asyncio.shield(cancel_reservation(record_id))
+
+    async def _update_operation(self, key: str, **fields: Any) -> dict[str, Any]:
+        """Settle resource ownership before marking an operation terminal.
+
+        Pending operations retain their reservation across cancellation, timeout
+        and restart. If settlement fails, startup can retry the pending record.
+        """
+        if fields.get("status") in {"succeeded", "failed"}:
+            record = await self.repository.get_operation_by_key(key)
+            if record is not None:
+                settled = {**record, **fields}
+                target = settled.get("target") or {}
+                reservation = target.get("auxiliary_reservation_id")
+                if reservation is not None:
+                    if settled["status"] == "failed":
+                        await self._cancel_reservation(reservation)
+                    elif settled.get("machine_id"):
+                        from agent.modules.workspaces import activate_thread_machine
+
+                        try:
+                            await activate_thread_machine(reservation, settled["machine_id"])
+                        except LookupError:
+                            logger.warning("Completed Instabox machine %s has a released reservation %s.",
+                                           settled["machine_id"], reservation)
+                if settled["status"] == "succeeded" and settled["kind"] == "snapshot_create":
+                    ownership = target.get("snapshot_owner")
+                    snapshot_id = (settled.get("result") or {}).get("id") or settled.get("operation_id")
+                    if ownership and snapshot_id:
+                        from agent.modules.workspaces import SNAPSHOT, record_thread_resource
+
+                        await record_thread_resource(
+                            ownership["thread_id"], SNAPSHOT, "instabox", snapshot_id,
+                            root=ownership.get("root") or "", purpose=f"snapshot of {settled.get('machine_id')}",
+                        )
+                if settled["status"] == "succeeded" and settled["kind"] in {"stop", "delete"}:
+                    from agent.modules.tools import forget_machine
+
+                    machine_id = settled.get("machine_id")
+                    if machine_id:
+                        await forget_machine("instabox", machine_id, deleted=settled["kind"] == "delete")
+                        if settled["kind"] == "delete":
+                            with contextlib.suppress(Exception):
+                                await self.repository.delete_port_token(machine_id)
+        return await self.repository.update_operation(key, **fields)
+
     async def _record_response(
         self, key: str, kind: str, response: Any, machine_id: str | None
     ) -> dict[str, Any]:
@@ -184,7 +242,7 @@ class InstaboxService:
         if kind in {"snapshot_create"}:
             state = str(payload.get("state") or payload.get("status") or "pending")
             status = "succeeded" if state == "ready" else "failed" if state == "failed" else "running"
-            return await self.repository.update_operation(
+            return await self._update_operation(
                 key,
                 operation_id=payload.get("id"),
                 machine_id=machine_id,
@@ -194,7 +252,7 @@ class InstaboxService:
             )
         if not payload:
             # 204 responses (for example a delete already finished) have no operation.
-            return await self.repository.update_operation(key, status="succeeded", result=None)
+            return await self._update_operation(key, status="succeeded", result=None)
         operation_state = str(payload.get("state") or "queued")
         fields: dict[str, Any] = {
             "operation_id": payload.get("id"),
@@ -206,7 +264,7 @@ class InstaboxService:
             fields["result"] = redact(payload)
             if operation_state == "failed":
                 fields["error"] = redact(payload.get("error"))
-        return await self.repository.update_operation(key, **fields)
+        return await self._update_operation(key, **fields)
 
     def _watch(self, key: str) -> asyncio.Task:
         existing = self._watchers.get(key)
@@ -230,13 +288,13 @@ class InstaboxService:
                 operation = await client.get_operation(operation_id, wait_seconds=25)
             except InstaboxApiError as exc:
                 if exc.is_not_found:
-                    return await self.repository.update_operation(
+                    return await self._update_operation(
                         key, status="failed", error=exc.to_payload()
                     )
                 raise
             state = str(operation.get("state") or "")
             if state in {"succeeded", "failed"}:
-                return await self.repository.update_operation(
+                return await self._update_operation(
                     key,
                     status=state,
                     phase=operation.get("phase"),
@@ -244,7 +302,7 @@ class InstaboxService:
                     result=redact(operation),
                     error=redact(operation.get("error")) if state == "failed" else None,
                 )
-            await self.repository.update_operation(
+            await self._update_operation(
                 key, status=state or "running", phase=operation.get("phase")
             )
         raise asyncio.CancelledError
@@ -256,7 +314,7 @@ class InstaboxService:
             snapshot = await client.get_snapshot(snapshot_id)
             state = str(snapshot.get("state") or snapshot.get("status") or "")
             if state in {"ready", "failed"}:
-                return await self.repository.update_operation(
+                return await self._update_operation(
                     key,
                     status="succeeded" if state == "ready" else "failed",
                     phase=state,
@@ -290,7 +348,7 @@ class InstaboxService:
         if record["status"] == "submitting" or not record.get("operation_id"):
             request = (record.get("target") or {}).get("request") or {}
             if not request.get("method") or not request.get("path"):
-                await self.repository.update_operation(
+                await self._update_operation(
                     key, status="failed", error={"code": "unrecoverable", "message": "Request details were lost."}
                 )
                 return
@@ -362,8 +420,13 @@ class InstaboxService:
         metadata: dict[str, str] | None = None,
         created_by: str | None = None,
         wait: bool = False,
+        auxiliary_reservation_id: int | None = None,
     ) -> dict[str, Any]:
-        body = self.create_body(name=name, snapshot_id=snapshot_id, template=template, metadata=metadata)
+        try:
+            body = self.create_body(name=name, snapshot_id=snapshot_id, template=template, metadata=metadata)
+        except BaseException:
+            await self._cancel_reservation(auxiliary_reservation_id)
+            raise
         return await self.submit(
             kind="create",
             method="POST",
@@ -372,6 +435,7 @@ class InstaboxService:
             target={"name": body.get("name"), "snapshot_id": body.get("snapshotId"), "template": body.get("templateId")},
             created_by=created_by,
             wait=wait,
+            auxiliary_reservation_id=auxiliary_reservation_id,
         )
 
     async def machine_action(
@@ -382,6 +446,7 @@ class InstaboxService:
         body: dict[str, Any] | None = None,
         created_by: str | None = None,
         wait: bool = False,
+        auxiliary_reservation_id: int | None = None,
     ) -> dict[str, Any]:
         if action not in {"start", "stop", "suspend", "resume", "fork", "restore"}:
             raise ValueError(f"Unsupported machine action: {action}")
@@ -394,22 +459,25 @@ class InstaboxService:
             target={"source_machine_id": machine_id} if action == "fork" else {"machine_id": machine_id},
             created_by=created_by,
             wait=wait,
+            auxiliary_reservation_id=auxiliary_reservation_id,
         )
 
     async def fork_machine(
-        self, machine_id: str, *, name: str | None = None, created_by: str | None = None, wait: bool = False
+        self, machine_id: str, *, name: str | None = None, created_by: str | None = None, wait: bool = False,
+        auxiliary_reservation_id: int | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {}
         if name:
             body["name"] = instabox_name(name)
-        return await self.machine_action(machine_id, "fork", body=body, created_by=created_by, wait=wait)
+        return await self.machine_action(machine_id, "fork", body=body, created_by=created_by, wait=wait,
+                                         auxiliary_reservation_id=auxiliary_reservation_id)
 
     async def delete_machine(
         self, machine_id: str, *, confirm: str, created_by: str | None = None, wait: bool = False
     ) -> dict[str, Any]:
         if not confirm or confirm.strip() != machine_id.strip():
             raise InstaboxConfirmationError("Type the machine ID to confirm deletion.")
-        record = await self.submit(
+        return await self.submit(
             kind="delete",
             method="DELETE",
             path=f"/v1/machines/{machine_id}",
@@ -419,9 +487,6 @@ class InstaboxService:
             created_by=created_by,
             wait=wait,
         )
-        with contextlib.suppress(Exception):
-            await self.repository.delete_port_token(machine_id)
-        return record
 
     async def ensure_running(self, machine_id: str, *, timeout: float = 600.0) -> dict[str, Any]:
         """Start or resume a machine when a workspace needs it, then wait until it runs."""
@@ -568,19 +633,26 @@ class InstaboxService:
         root_only: bool = False,
         created_by: str | None = None,
         wait: bool = False,
+        owner_thread_id: str | None = None,
+        workspace_root: str = "",
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"name": instabox_name(name, prefix="snap")}
         if description:
             body["description"] = description
         if root_only:
             body["rootOnly"] = True
+        target: dict[str, Any] = {"machine_id": machine_id, "name": body["name"]}
+        if owner_thread_id:
+            from agent.modules.workspaces import root_thread_id
+
+            target["snapshot_owner"] = {"thread_id": root_thread_id(owner_thread_id), "root": workspace_root}
         return await self.submit(
             kind="snapshot_create",
             method="POST",
             path=f"/v1/machines/{machine_id}/snapshots",
             body=body,
             machine_id=machine_id,
-            target={"machine_id": machine_id, "name": body["name"]},
+            target=target,
             created_by=created_by,
             wait=wait,
         )
@@ -603,10 +675,24 @@ class InstaboxService:
         )
 
     async def create_machine_from_snapshot(
-        self, snapshot_id: str, *, name: str | None = None, created_by: str | None = None, wait: bool = False
+        self,
+        snapshot_id: str,
+        *,
+        name: str | None = None,
+        metadata: dict[str, str] | None = None,
+        created_by: str | None = None,
+        wait: bool = False,
+        auxiliary_reservation_id: int | None = None,
     ) -> dict[str, Any]:
-        await self.require_ready_snapshot(snapshot_id)
-        return await self.create_machine(name=name, snapshot_id=snapshot_id, created_by=created_by, wait=wait)
+        try:
+            await self.require_ready_snapshot(snapshot_id)
+        except BaseException:
+            await self._cancel_reservation(auxiliary_reservation_id)
+            raise
+        return await self.create_machine(
+            name=name, snapshot_id=snapshot_id, metadata=metadata, created_by=created_by, wait=wait,
+            auxiliary_reservation_id=auxiliary_reservation_id,
+        )
 
     async def restore_machine(
         self,

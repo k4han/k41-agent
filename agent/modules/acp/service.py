@@ -19,7 +19,7 @@ from agent.modules.acp.client import AcpClient
 from agent.modules.acp.errors import AcpError, AcpNotInstalled, AcpRpcError
 from agent.modules.acp.process import AgentCommand
 from agent.modules.acp.tool_bridge import SessionTools, ToolBridge, ToolProvider
-from agent.modules.acp.turns import AcpTurn, PendingHandoff
+from agent.modules.acp.turns import AcpTurn, PendingHandoff, PendingToolPermission
 
 logger = logging.getLogger(__name__)
 
@@ -421,15 +421,15 @@ class AcpService:
     def _stop_turn(self, turn: AcpTurn) -> bool:
         """Cancel a turn and return whether it gets committed without a graph run.
 
-        A permission card outlives the cancel, and answering it resumes the graph.
-        A handoff ends with its tool call, which leaves nothing to resume a graph
-        paused on it, so its output would stay uncommitted and the graph paused.
+        An ACP permission card outlives the cancel; answering it resumes the graph.
+        K41 input requests end with their tool calls, which leaves nothing to
+        resume the paused graph, so their output would stay uncommitted.
         """
         stranded = (
             not turn.attached
             and turn.commit_stopped is not None
             and self._loop is not None
-            and isinstance(turn.next_pending(), PendingHandoff)
+            and isinstance(turn.next_pending(), (PendingHandoff, PendingToolPermission))
         )
         turn.cancel()
         if stranded:

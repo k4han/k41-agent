@@ -33,8 +33,17 @@ class WorkspaceBackendDescriptor(IntegrationDescriptor):
     sweeper_start_loader: str = ""
     sweeper_stop_loader: str = ""
     sweeper_run_loader: str = ""
+    # Returns a WorkspaceComputer. Setting it is what gives a backend the
+    # "desktop" capability; the capability is derived, never declared.
+    computer_loader: str = ""
     requires_api_key: bool = False
     default_root: str = ""
+
+    def __post_init__(self) -> None:
+        capabilities = set(self.capabilities) - {"desktop"}
+        if self.computer_loader:
+            capabilities.add("desktop")
+        object.__setattr__(self, "capabilities", frozenset(capabilities))
 
 
 BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS = (
@@ -146,7 +155,6 @@ BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS = (
                 "archive",
                 "machines",
                 "ports",
-                "desktop",
                 "snapshots",
                 "fork",
                 "restore",
@@ -166,6 +174,7 @@ BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS = (
         archive_loader="agent.modules.workspaces.instabox_backend:archive_instabox_workspace",
         inventory_loader="agent.modules.workspaces.instabox_backend:list_instabox_cloud_sandboxes",
         status_probe_loader="agent.modules.workspaces.instabox_backend:probe_instabox_sandbox",
+        computer_loader="agent.modules.workspaces.instabox_backend:create_instabox_computer",
         default_root="/data/home/workspace",
     ),
 )
@@ -297,6 +306,39 @@ async def call_workspace_backend_loader(
     return result
 
 
+def has_workspace_computer(backend: str) -> bool:
+    try:
+        descriptor = get_workspace_backend_registry().descriptor(backend)
+    except Exception:
+        return False
+    return descriptor is not None and bool(descriptor.computer_loader)
+
+
+async def get_workspace_computer(backend: str):
+    """Return the ``WorkspaceComputer`` of ``backend`` or raise ``ComputerError``."""
+    from agent.modules.workspaces.computer import ComputerError
+
+    descriptor = get_workspace_backend_registry().descriptor(backend)
+    if descriptor is None or not descriptor.computer_loader:
+        raise ComputerError("unsupported", f"Workspace backend {backend} has no desktop.")
+    return await call_workspace_backend_loader(backend, descriptor.computer_loader)
+
+
+async def invalidate_workspace_computer(backend: str, locator: str) -> None:
+    """Forget desktop state of a machine that stopped, was restored or was deleted."""
+    import logging
+
+    from agent.modules.workspaces.computer import get_computer_control
+
+    get_computer_control().invalidate(backend, locator)
+    if not has_workspace_computer(backend):
+        return
+    try:
+        (await get_workspace_computer(backend)).invalidate(locator)
+    except Exception as exc:
+        logging.getLogger(__name__).debug("Could not invalidate desktop of %s:%s: %s", backend, locator, exc)
+
+
 __all__ = [
     "BUILTIN_WORKSPACE_BACKEND_DESCRIPTORS",
     "DAYTONA_BACKEND",
@@ -308,6 +350,9 @@ __all__ = [
     "call_workspace_backend_loader",
     "ensure_builtin_workspace_backend_descriptors",
     "get_workspace_backend_registry",
+    "get_workspace_computer",
+    "has_workspace_computer",
+    "invalidate_workspace_computer",
     "is_registered_workspace_backend",
     "list_workspace_backend_catalog",
 ]

@@ -23,12 +23,6 @@ from agent.modules.instabox.service import InstaboxService, get_instabox_service
 from agent.modules.instabox.states import machine_summary, normalize_machine_state, status_from_error
 
 
-async def relay_vnc(*args, **kwargs):
-    from agent.modules.instabox.vnc_proxy import relay_vnc as _relay_vnc
-
-    return await _relay_vnc(*args, **kwargs)
-
-
 __all__ = [
     "DEFAULT_INSTABOX_API_URL",
     "DEFAULT_INSTABOX_ROOT",
@@ -53,6 +47,5 @@ __all__ = [
     "new_idempotency_key",
     "normalize_machine_state",
     "redact",
-    "relay_vnc",
     "status_from_error",
 ]

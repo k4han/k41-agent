@@ -38,4 +38,29 @@ class ThreadWorkspace(BaseModel):
     )
 
 
-__all__ = ["ThreadWorkspace"]
+class ThreadMachine(BaseModel):
+    """A machine or snapshot that an agent created for one conversation.
+
+    This table, not provider metadata, decides which auxiliary resources a
+    conversation may use: provider metadata can be edited from outside.
+    ``thread_id`` is always the root conversation so sub-agents share it.
+    """
+
+    __tablename__ = "thread_machines"
+
+    thread_id = Column(String(512), nullable=False, index=True)
+    kind = Column(String(16), nullable=False, default="machine")
+    backend = Column(String(50), nullable=False)
+    locator = Column(String(255), nullable=False)
+    root = Column(Text, nullable=False, default="")
+    purpose = Column(Text, nullable=False, default="")
+    status = Column(String(16), nullable=False, default="creating", index=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    last_used_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("kind", "backend", "locator", name="uq_thread_machines_resource"),
+    )
+
+
+__all__ = ["ThreadMachine", "ThreadWorkspace"]

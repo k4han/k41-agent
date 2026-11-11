@@ -1,11 +1,13 @@
 """LangChain adapter preserving structured artifacts and error status."""
 
 import os
+from dataclasses import replace
 from typing import Annotated, Any
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolArg, StructuredTool
 from langgraph.prebuilt import ToolRuntime
+from pydantic import Field, create_model
 
 from agent.modules.tools.coding.models import CodingError, CodingInvocation, InvocationContext, PermissionRule, ToolDefinition, ToolResult
 from agent.modules.tools.coding.schemas import (EditInput, ExecInput, GlobInput, GrepInput, ListInput,
@@ -31,6 +33,13 @@ DESCRIPTIONS = {
     "glob": "Find workspace paths by glob pattern, including brace alternatives. Results are bounded; ignored directories and external symlinks are excluded.",
     "grep": "Search file contents using regex or fixed_strings. Invalid regex is an error. Returns bounded file/line matches and search-engine metadata.",
 }
+TARGET_NOTE = (
+    "target: ID of an auxiliary machine created in this conversation; omit for the main workspace. "
+    "Auxiliary machines run Linux with a POSIX shell, paths are relative to that machine's root, and their files "
+    "are temporary until copied back with copy_files. Processes and retained output paths live on the machine "
+    "that produced them: pass the same target to read them."
+)
+TARGET_DESCRIPTION = "ID of an auxiliary machine created in this conversation. Omit for the main workspace."
 
 
 def invocation_context(runtime: Any) -> InvocationContext:
@@ -66,6 +75,48 @@ def invocation_context(runtime: Any) -> InvocationContext:
         permission_rules=tuple(PermissionRule.model_validate(rule) for rule in rules),
         skill_roots=skill_roots, skill_environment=skill_environment,
         skill_cache_root=str(packages.cache_root) if workspace.backend == "local" else "")
+
+
+def apply_target(context: InvocationContext, target: Any) -> InvocationContext:
+    """Point an invocation at an auxiliary machine, outside project and skill state."""
+    if not target.auxiliary:
+        return context
+    return replace(context, backend=target.backend, locator=target.locator, workspace=target.root,
+                   auxiliary=True, skill_roots=(), skill_environment=(), skill_cache_root="",
+                   project_id=None, project_workspace_id=None, runtime_generation=None)
+
+
+async def targeted_context(runtime: Any, target: str | None) -> InvocationContext:
+    context = invocation_context(runtime)
+    if not target:
+        return context
+    from agent.modules.tools.result import ToolError
+    from agent.modules.tools.runtime.targets import resolve_target
+    try:
+        resolved = await resolve_target(runtime, target)
+    except ToolError as exc:
+        raise CodingError("permission_denied", exc.message) from None
+    return apply_target(context, resolved)
+
+
+def targeted_schema(name: str):
+    base = SCHEMAS[name]
+    return create_model(f"Targeted{base.__name__}", __base__=base,
+                        target=(str | None, Field(default=None, description=TARGET_DESCRIPTION)))
+
+
+def _target_hints(name: str, result: ToolResult, target: str | None) -> ToolResult:
+    """Remind the model which machine owns processes and outputs."""
+    if target:
+        result.data["target"] = target
+        if result.status == "running" and result.data.get("process_id") and isinstance(result.content, str):
+            result.content += f"\n[target] The process runs on {target}; pass target={target} to observe or stop it."
+        elif result.output_paths and isinstance(result.content, str):
+            result.content += f"\n[target] Output paths are on {target}; pass target={target} to read them."
+    elif (name in {"read_process_output", "write_process_input", "stop_process"} and result.error is not None
+          and result.error.code == "not_found" and isinstance(result.content, str)):
+        result.content += "\nIf the process was started on an auxiliary machine, pass its target."
+    return result
 
 
 class CodingStructuredTool(StructuredTool):
@@ -106,6 +157,7 @@ async def prepare_tool_batch(tools, calls, runtime) -> ToolResult | None:
     from types import SimpleNamespace
 
     definitions = {tool.name: getattr(tool, "coding_definition", None) for tool in tools}
+    targeted = {tool.name: bool(getattr(tool, "coding_targeted", False)) for tool in tools}
     if not any(definitions.get(call["name"]) for call in calls):
         return None
     service = get_coding_service()
@@ -128,11 +180,13 @@ async def prepare_tool_batch(tools, calls, runtime) -> ToolResult | None:
         for call in calls:
             definition = definitions.get(call["name"])
             if definition is not None:
-                context = invocation_context(SimpleNamespace(
+                args = dict(call["args"] or {})
+                target = args.pop("target", None) if targeted.get(call["name"]) else None
+                context = await targeted_context(SimpleNamespace(
                     context=runtime.context, state=runtime.state,
                     config=runtime.config, tool_call_id=call["id"],
-                ))
-                invocations.append(CodingInvocation(definition, call["args"], context))
+                ), target)
+                invocations.append(CodingInvocation(definition, args, context))
     except (CodingError, ValueError, OSError) as exc:
         result = service.failure(exc)
         result.data["batch_stopped_before_execution"] = True
@@ -152,7 +206,7 @@ async def prepare_tool_batch(tools, calls, runtime) -> ToolResult | None:
     return await service.prepare_batch(invocations)
 
 
-def make_coding_tool(name: str, *, retained_only: bool = False) -> StructuredTool:
+def make_coding_tool(name: str, *, retained_only: bool = False, targeted: bool = False) -> StructuredTool:
     async def execute(params: Any, context: InvocationContext, service: Any) -> ToolResult:
         if retained_only:
             import posixpath
@@ -163,12 +217,16 @@ def make_coding_tool(name: str, *, retained_only: bool = False) -> StructuredToo
         return await service.execute(name, params.model_dump(), context)
 
     description = DESCRIPTIONS[name] if not retained_only else "Read retained tool output under .k41-agent/outputs/ only. Use offset/limit or byte_offset and next_byte_offset for long lines."
+    # Journals and fingerprints keep the base schema; target only selects the machine.
     definition = ToolDefinition(name, description, SCHEMAS[name], execute)
+    if targeted:
+        description = f"{description} {TARGET_NOTE}"
 
     async def invoke(runtime: Annotated[ToolRuntime[Any, Any], InjectedToolArg], **kwargs: Any) -> Any:
         service = get_coding_service()
+        target = kwargs.pop("target", None) if targeted else None
         try:
-            context = invocation_context(runtime)
+            context = await targeted_context(runtime, target)
             result = await service.invoke(definition, kwargs, context)
         except (ValueError, OSError) as exc:
             result = service.failure(exc)
@@ -177,6 +235,8 @@ def make_coding_tool(name: str, *, retained_only: bool = False) -> StructuredToo
             if not isinstance(exc, CodingError):
                 raise
             result = service.failure(exc)
+        if targeted:
+            result = _target_hints(name, result, target)
         call_id = getattr(runtime, "tool_call_id", None)
         if call_id:
             return ToolMessage(content=result.content, artifact=result.model_dump(exclude={"content"}),
@@ -185,6 +245,8 @@ def make_coding_tool(name: str, *, retained_only: bool = False) -> StructuredToo
         return result.content
 
     tool = CodingStructuredTool.from_function(name=name, description=description, coroutine=invoke,
-                                       args_schema=SCHEMAS[name], infer_schema=False)
+                                       args_schema=targeted_schema(name) if targeted else SCHEMAS[name],
+                                       infer_schema=False)
     object.__setattr__(tool, "coding_definition", definition)
+    object.__setattr__(tool, "coding_targeted", targeted)
     return tool

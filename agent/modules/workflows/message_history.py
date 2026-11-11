@@ -10,6 +10,11 @@ _SKIPPED_ASSISTANT_BLOCK_TYPES = {
     "thinking",
     "tool_use",
 }
+# The model sees the latest desktop screenshots only; each stays saved in the workspace.
+# Older ones are dropped a chunk at a time, so the request prefix (and a provider's prompt
+# cache) stays the same between drops.
+KEPT_SCREENSHOTS = 3
+SCREENSHOT_DROP_CHUNK = 3
 
 
 def _assistant_text_from_part(part: Any) -> tuple[str, bool]:
@@ -211,11 +216,31 @@ def _tool_text_from_content_list(content: list[Any]) -> str:
     return text_content or "[tool returned non-text content]"
 
 
+def _stale_screenshot_indexes(messages: list[BaseMessage]) -> set[int]:
+    """Positions of desktop screenshots that the model no longer needs to see."""
+    names: frozenset[str] | None = None
+    indexes: list[int] = []
+    for index, message in enumerate(messages):
+        if not isinstance(message, ToolMessage) or not isinstance(message.content, list):
+            continue
+        if not _tool_content_has_image(message.content):
+            continue
+        if names is None:
+            from agent.modules.tools.policy import computer_tool_names
+
+            names = computer_tool_names()
+        if message.name in names:
+            indexes.append(index)
+    dropped = max(0, (len(indexes) - KEPT_SCREENSHOTS) // SCREENSHOT_DROP_CHUNK) * SCREENSHOT_DROP_CHUNK
+    return set(indexes[:dropped])
+
+
 def normalize_messages_for_chat_model(messages: list[BaseMessage]) -> list[BaseMessage]:
     """Normalize persisted message history before sending it to chat providers."""
     normalized_messages: list[BaseMessage] = []
+    stale_screenshots = _stale_screenshot_indexes(messages)
 
-    for message in messages:
+    for index, message in enumerate(messages):
         if isinstance(message, ToolMessage):
             from agent.modules.tools import coding_message_for_model
 
@@ -230,7 +255,7 @@ def normalize_messages_for_chat_model(messages: list[BaseMessage]) -> list[BaseM
                 continue
 
         if isinstance(message, ToolMessage) and isinstance(content, list):
-            if _tool_content_has_image(content):
+            if _tool_content_has_image(content) and index not in stale_screenshots:
                 normalized_messages.append(
                     message.model_copy(
                         update={

@@ -1,19 +1,18 @@
-"""Dashboard API for Instabox machines, preview ports, snapshots, operations and the desktop."""
+"""Dashboard API for Instabox machines, preview ports, snapshots and operations.
+
+The desktop is served by the backend-neutral ``computers`` routes.
+"""
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import json
 import logging
 from typing import Any, Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from agent.bootstrap.container import get_container
-from agent.delivery.http.dashboard.routes.browser import origin_allowed
 from agent.modules.admin_auth import get_current_admin
 from agent.modules.instabox import (
     InstaboxApiError,
@@ -22,13 +21,10 @@ from agent.modules.instabox import (
     InstaboxDisabledError,
     get_instabox_service,
     redact,
-    relay_vnc,
 )
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard-api/instabox")
-viewer_router = APIRouter()
-VIEWER_SEND_TIMEOUT = 5.0
 
 
 def service(request: Request):
@@ -110,11 +106,6 @@ class RestoreBody(BaseModel):
     confirm_snapshot: str = Field(min_length=1, max_length=200)
 
 
-class DesktopStartBody(BaseModel):
-    width: int = Field(default=1280, ge=800, le=2560)
-    height: int = Field(default=800, ge=600, le=1600)
-
-
 # Machines ---------------------------------------------------------------- #
 
 
@@ -172,9 +163,7 @@ async def fork_machine(machine_id: str, body: ForkBody, admin: str = Depends(get
 
 @router.delete("/machines/{machine_id}")
 async def delete_machine(machine_id: str, body: ConfirmBody, admin: str = Depends(get_current_admin), ibx=Depends(service)):
-    result = await checked(ibx.delete_machine(machine_id, confirm=body.confirm, created_by=owner(admin)))
-    ibx.desktop.invalidate(machine_id)
-    return result
+    return await checked(ibx.delete_machine(machine_id, confirm=body.confirm, created_by=owner(admin)))
 
 
 # Operations -------------------------------------------------------------- #
@@ -272,77 +261,4 @@ async def restore_machine(machine_id: str, body: RestoreBody, admin: str = Depen
     ))
 
 
-# Desktop ----------------------------------------------------------------- #
-
-
-@router.get("/machines/{machine_id}/desktop")
-async def desktop_status(machine_id: str, ibx=Depends(service)):
-    return await checked(ibx.desktop.status(machine_id))
-
-
-@router.post("/machines/{machine_id}/desktop/start")
-async def desktop_start(machine_id: str, body: DesktopStartBody, ibx=Depends(service)):
-    return await checked(ibx.desktop.ensure_started(machine_id, width=body.width, height=body.height))
-
-
-@router.post("/machines/{machine_id}/desktop/takeover")
-async def desktop_takeover(machine_id: str, admin: str = Depends(get_current_admin), ibx=Depends(service)):
-    return await checked(ibx.desktop.take_control(machine_id, owner(admin)))
-
-
-@router.post("/machines/{machine_id}/desktop/heartbeat")
-async def desktop_heartbeat(machine_id: str, admin: str = Depends(get_current_admin), ibx=Depends(service)):
-    return await checked(ibx.desktop.heartbeat(machine_id, owner(admin)))
-
-
-@router.post("/machines/{machine_id}/desktop/handback")
-async def desktop_handback(machine_id: str, admin: str = Depends(get_current_admin), ibx=Depends(service)):
-    return await checked(ibx.desktop.release_control(machine_id, owner(admin)))
-
-
-@router.post("/machines/{machine_id}/desktop/viewer-ticket")
-async def desktop_viewer_ticket(machine_id: str, admin: str = Depends(get_current_admin), ibx=Depends(service)):
-    await checked(ibx.client())
-    return {"ticket": ibx.desktop.issue_ticket(machine_id, owner(admin))}
-
-
-@viewer_router.websocket("/dashboard-api/instabox/desktop/viewer")
-async def desktop_viewer(websocket: WebSocket):
-    """Ticket-authenticated VNC relay; the first text message must carry the ticket."""
-    container = get_container(websocket)
-    if not origin_allowed(websocket, container.config_service):
-        await websocket.close(code=1008)
-        return
-    await websocket.accept()
-    ibx = get_instabox_service(container)
-    machine_id = None
-    closer = None
-    try:
-        raw = await asyncio.wait_for(websocket.receive_text(), 8)
-        if len(raw) > 1024:
-            raise PermissionError("Invalid viewer ticket.")
-        payload = json.loads(raw)
-        if not isinstance(payload, dict):
-            raise PermissionError("Invalid viewer ticket.")
-        ticket = ibx.desktop.consume_ticket(payload.get("ticket", ""))
-        machine_id = ticket.machine_id
-        _, closer = ibx.desktop.register_viewer(machine_id)
-        await relay_vnc(websocket, ibx, machine_id, closer)
-    except (WebSocketDisconnect, ConnectionError, TimeoutError):
-        pass
-    except PermissionError as exc:
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(websocket.send_json({"type": "error", "code": "ticket_invalid", "message": str(exc)}), VIEWER_SEND_TIMEOUT)
-    except Exception:
-        logger.warning("Instabox desktop viewer ended with an error.", exc_info=True)
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(websocket.send_json({"type": "error", "code": "viewer_failed",
-                                                        "message": "Desktop connection ended. Reconnect to try again."}), VIEWER_SEND_TIMEOUT)
-    finally:
-        if machine_id and closer is not None:
-            ibx.desktop.unregister_viewer(machine_id, closer)
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(websocket.close(), VIEWER_SEND_TIMEOUT)
-
-
-__all__ = ["router", "viewer_router"]
+__all__ = ["router"]

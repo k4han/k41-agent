@@ -13,14 +13,21 @@ from dataclasses import replace
 from langchain_core.tools import BaseTool
 
 from agent.modules.tools.config import materialize_tool
-from agent.modules.tools.domain import ToolDescriptor, ToolSource
-from agent.modules.tools.policy import ToolPolicy
+from agent.modules.tools.domain import AUXILIARY_MACHINES_TAG, ToolDescriptor, ToolSource
+from agent.modules.tools.policy import COMPUTER_TOOL_TAG, ToolPolicy
 from agent.modules.tools.registry_service import (
     ensure_mcp_loaded,
     get_registry_service,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _tool_tags(tool: BaseTool) -> frozenset[str]:
+    from agent.modules.tools.decorators import META_ATTR
+
+    meta = getattr(tool, META_ATTR, None)
+    return frozenset(getattr(meta, "tags", ()) or ())
 
 
 class ToolResolver:
@@ -30,15 +37,22 @@ class ToolResolver:
         self._include_mcp = include_mcp
 
     def for_workspace(self, tools: list[BaseTool], workspace) -> list[BaseTool]:
-        """Use the same coding definitions on every workspace backend."""
+        """Use the same coding definitions on every workspace backend.
+
+        Desktop tools are dropped when neither the workspace nor an auxiliary
+        machine the agent can reach has a desktop.
+        """
         from agent.modules.tools.coding.adapter import make_coding_tool
-        from agent.modules.workspaces import normalize_workspace_ref
+        from agent.modules.workspaces import has_workspace_computer, normalize_workspace_ref
         from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
-        normalize_workspace_ref(workspace, default_locator=DEFAULT_WORKSPACE_ROOT)
+        ref = normalize_workspace_ref(workspace, default_locator=DEFAULT_WORKSPACE_ROOT)
         result = list(tools)
+        auxiliary_machines = any(AUXILIARY_MACHINES_TAG in _tool_tags(tool) for tool in result)
+        if not has_workspace_computer(ref.backend) and not auxiliary_machines:
+            result = [tool for tool in result if COMPUTER_TOOL_TAG not in _tool_tags(tool)]
         control_tools = {"ask_user", "request_plan_review", "plan_mode_respond", "write_todos"}
         if result and not any(tool.name == "read" for tool in result) and any(tool.name not in control_tools for tool in result):
-            result.append(make_coding_tool("read", retained_only=True))
+            result.append(make_coding_tool("read", retained_only=True, targeted=auxiliary_machines))
         return list({tool.name: tool for tool in result}.values())
 
     async def aresolve_for_agent(
@@ -123,10 +137,14 @@ class ToolResolver:
             if config is not None
             else None
         )
-        return [
-            materialize_tool(d, agent_tool_configs)
-            for d in self.resolve_for_policy(policy)
-        ]
+        descriptors = self.resolve_for_policy(policy)
+        tools = [materialize_tool(d, agent_tool_configs) for d in descriptors]
+        if any(d.has_tag(AUXILIARY_MACHINES_TAG) for d in descriptors):
+            # Only agents that can reach auxiliary machines see the extra argument.
+            from agent.modules.tools.builtin.coding_tools import targeted_tool
+
+            tools = [targeted_tool(tool.name) or tool for tool in tools]
+        return tools
 
     @staticmethod
     def _load_agent_config(agent_name: str):

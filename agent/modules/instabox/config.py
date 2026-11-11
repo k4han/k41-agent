@@ -11,6 +11,7 @@ DEFAULT_INSTABOX_ROOT = "/data/home/workspace"
 DEFAULT_INSTABOX_TEMPLATE = "agent-browser"
 DEFAULT_DESKTOP_WIDTH = 1280
 DEFAULT_DESKTOP_HEIGHT = 800
+DEFAULT_MAX_MACHINES_PER_THREAD = 2
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class InstaboxSettings:
     vcpus: int = 0
     mem_mib: int = 0
     auto_suspend_after_seconds: int = 0
+    max_machines_per_thread: int = DEFAULT_MAX_MACHINES_PER_THREAD
 
     @property
     def fingerprint(self) -> tuple[str, str]:
@@ -70,6 +72,9 @@ def load_instabox_settings() -> InstaboxSettings:
         auto_suspend_after_seconds=max(
             0, service.get_int("workspace.instabox.auto_suspend_after_seconds", 0)
         ),
+        max_machines_per_thread=max(
+            0, service.get_int("workspace.instabox.max_machines_per_thread", DEFAULT_MAX_MACHINES_PER_THREAD)
+        ),
     )
 
 
@@ -79,6 +84,7 @@ __all__ = [
     "DEFAULT_INSTABOX_API_URL",
     "DEFAULT_INSTABOX_ROOT",
     "DEFAULT_INSTABOX_TEMPLATE",
+    "DEFAULT_MAX_MACHINES_PER_THREAD",
     "InstaboxSettings",
     "load_instabox_settings",
 ]

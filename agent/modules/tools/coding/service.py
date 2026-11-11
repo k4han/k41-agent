@@ -28,6 +28,10 @@ class CodingService(CodingEngine):
         from agent.modules.projects import resolve_execution_secrets
         return await resolve_execution_secrets(context)
 
+    async def resolve_project_secrets(self, context: InvocationContext) -> dict[str, str]:
+        """Project secrets of the main workspace, for tools that are not processes."""
+        return await self.resolve_process_secrets(await self._resolve_context("bash", context))
+
     def __init__(self, root: Path, *, shell: str | None = None) -> None:
         self.storage = OutputStore(root, result_loader=ToolResult.model_validate)
         self.permissions = Permissions(self.storage)
@@ -58,7 +62,7 @@ class CodingService(CodingEngine):
         else:
             result = await super().execute(name, values, context)
             result = ToolResult.model_validate(result.to_dict())
-        if result.status == "running" and result.data.get("process_id"):
+        if result.status == "running" and result.data.get("process_id") and not context.auxiliary:
             if not context.project_workspace_id:
                 from agent.bootstrap.container import get_active_container
                 container = get_active_container()
@@ -137,6 +141,9 @@ class CodingService(CodingEngine):
             return await projects.persist_result(context, result)
 
     async def _resolve_context(self, name: str, context: InvocationContext) -> InvocationContext:
+        if context.auxiliary:
+            # Project bindings would replace the machine with the main workspace.
+            return context
         from agent.modules.projects import get_project_workspace_service
         return await get_project_workspace_service().resolve_context(
             context, allow_unready=name in {"read", "list_dir", "glob", "grep", "read_process_output", "stop_process"})
@@ -272,9 +279,10 @@ class CodingService(CodingEngine):
                 result = self.storage.bound(result, context, tail=definition.name in PROCESS_TOOLS)
                 if use_journal:
                     self.storage.complete(context, fingerprint, result)
-                if not context.project_workspace_id and context.backend != "local" and context.thread_id and definition.name in {
+                if (not context.project_workspace_id and not context.auxiliary and context.backend != "local"
+                        and context.thread_id and definition.name in {
                     "write", "edit", "bash", "write_process_input", "stop_process",
-                }:
+                }):
                     # Settle effects before checkpointing so a failed save cannot replay the command.
                     await self._persist_thread_result(context, result)
                     if use_journal:
@@ -319,6 +327,13 @@ class CodingService(CodingEngine):
         code = getattr(exc, "code", "not_found" if isinstance(exc, FileNotFoundError) else "invalid_input" if isinstance(exc, (ValueError, ValidationError)) else "execution_error")
         error = ResultError(code=code, message=str(exc), details=getattr(exc, "details", {}))
         return ToolResult(status="error", error=error, content=f"[error] {code}: {exc}")
+
+
+def active_coding_service(container: Any = None) -> CodingService | None:
+    """The coding service if one was created, without creating it."""
+    from agent.bootstrap.container import get_active_container
+    active = container or get_active_container()
+    return getattr(active, "_coding_service", None) if active is not None else None
 
 
 def get_coding_service(container: Any = None) -> CodingService:

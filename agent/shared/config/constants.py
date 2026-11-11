@@ -153,7 +153,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^workspace\.project_storage_root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
-    r"^workspace\.instabox\.(enabled|api_key|api_url|workspace_root|template|snapshot_id|org_id|vcpus|mem_mib|auto_suspend_after_seconds)$",
+    r"^workspace\.instabox\.(enabled|api_key|api_url|workspace_root|template|snapshot_id|org_id|vcpus|mem_mib|auto_suspend_after_seconds|max_machines_per_thread)$",
     r"^google_calendar\.enabled$",
     r"^skills\.(repository_dir|additional_roots|disabled_ids|max_files|max_bytes|max_file_bytes|local_execution_mode|cache_root)$",
     r"^database\.url$",
@@ -190,7 +190,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^workspace\.project_storage_root$",
     r"^workspace\.daytona\.(enabled|api_key|default_root|target|image|cpu|memory|disk|language|auto_stop_minutes|auto_archive_days|sweeper_interval_seconds|start_timeout_seconds|stop_timeout_seconds|sandbox_auto_stop_minutes|sandbox_auto_archive_minutes|sandbox_auto_delete_minutes|ephemeral|network_block_all|network_allow_list)$",
     r"^workspace\.modal\.(enabled|token_id|token_secret|app_name|default_root|image|sandbox_timeout_seconds|idle_timeout_seconds)$",
-    r"^workspace\.instabox\.(enabled|api_key|api_url|workspace_root|template|snapshot_id|org_id|vcpus|mem_mib|auto_suspend_after_seconds)$",
+    r"^workspace\.instabox\.(enabled|api_key|api_url|workspace_root|template|snapshot_id|org_id|vcpus|mem_mib|auto_suspend_after_seconds|max_machines_per_thread)$",
     r"^google_calendar\.enabled$",
     r"^skills\.(repository_dir|additional_roots|disabled_ids|max_files|max_bytes|max_file_bytes|local_execution_mode|cache_root)$",
     rf"^{re.escape(DISPLAY_TIMEZONE_CONFIG_KEY)}$",
@@ -334,6 +334,7 @@ def _expand_runtime_keys() -> set[str]:
     keys.add("workspace.instabox.vcpus")
     keys.add("workspace.instabox.mem_mib")
     keys.add("workspace.instabox.auto_suspend_after_seconds")
+    keys.add("workspace.instabox.max_machines_per_thread")
     keys.add(REPOSITORY_SKILLS_DIR_KEY)
     keys.update({"skills.additional_roots", "skills.disabled_ids", "skills.max_files", "skills.max_bytes", "skills.max_file_bytes",
                  "skills.local_execution_mode", "skills.cache_root"})
@@ -451,6 +452,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "workspace.instabox.vcpus": 0,
     "workspace.instabox.mem_mib": 0,
     "workspace.instabox.auto_suspend_after_seconds": 0,
+    "workspace.instabox.max_machines_per_thread": 2,
     REPOSITORY_SKILLS_DIR_KEY: ".agent/skills",
     "skills.additional_roots": [],
     "skills.disabled_ids": [],
@@ -883,6 +885,15 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "min": 0,
         "max": 604800,
         "step": 60,
+    },
+    "workspace.instabox.max_machines_per_thread": {
+        "type": "number",
+        "description": "Auxiliary machines an agent may keep per conversation. Use 0 to forbid agents from creating machines.",
+        "category": "workspace",
+        "label": "Instabox Machines per Conversation",
+        "min": 0,
+        "max": 20,
+        "step": 1,
     },
     REPOSITORY_SKILLS_DIR_KEY: {
         "type": "text",

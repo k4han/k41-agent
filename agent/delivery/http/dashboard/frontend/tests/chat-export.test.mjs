@@ -58,6 +58,23 @@ test('tool activity can be included in both readable formats', () => {
   }
 });
 
+test('tool call arguments are exported without the null fields a model did not use', () => {
+  const call = { id: 'desk-1', name: 'computer_action', args: {
+    actions: [{ action: 'click', x: 0, y: 20, x2: null, text: null, keys: null, modifiers: [] }], target: null, screenshot: false,
+  } };
+  const used = { actions: [{ action: 'click', x: 0, y: 20, modifiers: [] }], screenshot: false };
+  const withCall = { ...thread, messages: [thread.messages[0], { id: 'call', role: 'assistant', content: '', tool_calls: [call] }] };
+  const before = structuredClone(withCall);
+  for (const format of ['markdown', 'text']) {
+    const content = createChatExport(withCall, format, true, exportedAt).content;
+    assert.ok(!content.includes('null'));
+    assert.ok(content.includes('"x": 0') && content.includes('"screenshot": false') && content.includes('"modifiers": []'));
+  }
+  const data = JSON.parse(createChatExport(withCall, 'json', false, exportedAt).content);
+  assert.deepEqual(data.messages[1].tool_calls, [{ ...call, args: used }]);
+  assert.deepEqual(withCall, before);
+});
+
 test('text exports keep literal labels and the original message content', () => {
   const file = createChatExport(thread, 'text', false, exportedAt);
   assert.ok(file.filename.endsWith('.txt'));

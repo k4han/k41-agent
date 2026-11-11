@@ -117,6 +117,11 @@ class ToolConfigSchema:
         return {"fields": [field.to_dict() for field in self.fields]}
 
 
+# Tools with this tag reach auxiliary machines, so agents that have one get
+# coding tools with a ``target`` argument.
+AUXILIARY_MACHINES_TAG = "auxiliary_machines"
+
+
 @dataclass(frozen=True)
 class ToolDescriptor:
     """Metadata wrapper around a concrete tool instance."""
@@ -144,6 +149,7 @@ class ToolDescriptor:
 
 
 __all__ = [
+    "AUXILIARY_MACHINES_TAG",
     "ToolCapability",
     "ToolCategory",
     "ToolConfigField",
