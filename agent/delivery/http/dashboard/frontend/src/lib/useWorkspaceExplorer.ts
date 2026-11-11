@@ -10,7 +10,7 @@ import {
 } from "@/lib/chatTypes";
 
 export function useWorkspaceExplorer(getShellRef: () => HTMLDivElement | undefined) {
-  const [open, setOpen] = createSignal(true);
+  const [open, setOpen] = createSignal(false);
   const [width, setWidth] = createSignal(WORKSPACE_EXPLORER_DEFAULT_WIDTH);
   const [resizing, setResizing] = createSignal(false);
   const [justResized, setJustResized] = createSignal(false);
@@ -102,9 +102,6 @@ export function useWorkspaceExplorer(getShellRef: () => HTMLDivElement | undefin
   };
 
   onMount(() => {
-    const savedOpen = window.localStorage.getItem(WORKSPACE_EXPLORER_OPEN_KEY);
-    setOpen(savedOpen !== "closed");
-
     const shellWidth = getShellRef()?.getBoundingClientRect().width;
     const savedWidth = Number(window.localStorage.getItem(WORKSPACE_EXPLORER_WIDTH_KEY));
     if (Number.isFinite(savedWidth) && savedWidth > 0) {
