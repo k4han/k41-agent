@@ -17,7 +17,7 @@ const computerPath = (backend: string, locator: string) =>
   `${BASE}/${encodeURIComponent(backend)}/${encodeURIComponent(locator)}`;
 
 export const computerApi = {
-  status: (backend: string, locator: string) => apiFetch<ComputerState>(computerPath(backend, locator)),
+  status: (backend: string, locator: string, signal?: AbortSignal) => apiFetch<ComputerState>(computerPath(backend, locator), { signal }),
   start: (backend: string, locator: string) => postJson<ComputerState>(`${computerPath(backend, locator)}/start`, {}),
   takeControl: (backend: string, locator: string) => postJson<ComputerState>(`${computerPath(backend, locator)}/takeover`),
   heartbeat: (backend: string, locator: string) => postJson<ComputerState>(`${computerPath(backend, locator)}/heartbeat`),

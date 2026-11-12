@@ -29,6 +29,13 @@ class DesktopService:
         self._clock = clock or time.monotonic
         self._ready: set[str] = set()
 
+    def _notify_session(self, machine_id: str, *, reset: bool = False) -> None:
+        from agent.modules.agent_runtime import get_active_session_registry
+
+        get_active_session_registry(self.service.container).publish(
+            "computer_session_changed", {"backend": "instabox", "locator": machine_id, **({"reset": True} if reset else {})},
+        )
+
     async def status(self, machine_id: str) -> dict[str, Any]:
         client = await self.service.client()
         return redact(dict(await client.desktop(machine_id, "status") or {}))
@@ -59,6 +66,7 @@ class DesktopService:
             if state.get("installed") is False:
                 raise RuntimeError(str(state.get("hint") or "Desktop is not installed."))
         self._ready.add(machine_id)
+        self._notify_session(machine_id)
         return redact(dict(state))
 
     async def set_control(self, machine_id: str, human: bool) -> dict[str, Any]:
@@ -97,6 +105,7 @@ class DesktopService:
     def invalidate(self, machine_id: str) -> None:
         """Forget that the desktop runs; the next input starts it again."""
         self._ready.discard(machine_id)
+        self._notify_session(machine_id, reset=True)
 
     async def close(self) -> None:
         self._ready.clear()

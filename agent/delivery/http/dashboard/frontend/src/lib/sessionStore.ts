@@ -45,6 +45,7 @@ function connect() {
         receivedLiveData = true;
         setSessions(payload.sessions);
         notify(CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED);
+        notify(CUSTOM_DOM_EVENTS.SESSIONS_RECONNECTED);
       }
     } catch (error) {
       console.error("Failed to parse sessions snapshot", error);
@@ -80,11 +81,18 @@ function connect() {
     try {
       const detail = JSON.parse(event.data);
       notify(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED, detail);
-      notify(CUSTOM_DOM_EVENTS.WORKSPACE_CHANGED, { threadId: detail.thread_id });
+      notify(CUSTOM_DOM_EVENTS.WORKSPACE_CHANGED, { ...detail, threadId: detail.thread_id });
     } catch (error) {
       console.error("Failed to parse workspace file event", error);
     }
   });
+  for (const name of ["BROWSER_SESSION_CHANGED", "COMPUTER_SESSION_CHANGED"] as const) {
+    connection.addEventListener(SESSION_EVENTS[name], (event) => {
+      if (source !== connection) return;
+      try { notify(CUSTOM_DOM_EVENTS[name], JSON.parse(event.data)); }
+      catch (error) { console.error("Failed to parse service event", error); }
+    });
+  }
   connection.addEventListener(SESSION_EVENTS.WORKSPACE_RUNTIME_CHANGED, (event) => {
     if (source !== connection) return;
     try {

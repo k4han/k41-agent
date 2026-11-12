@@ -17,6 +17,8 @@ export const STREAM_ERROR_CODES = {
 } as const;
 
 export const SESSION_EVENTS = {
+  BROWSER_SESSION_CHANGED: "browser_session_changed",
+  COMPUTER_SESSION_CHANGED: "computer_session_changed",
   WORKSPACE_FILES_CHANGED: "workspace_files_changed",
   SNAPSHOT: "snapshot",
   SESSION_STARTED: "session_started",
@@ -32,6 +34,9 @@ export const BACKGROUND_TASK_EVENTS = {
 } as const;
 
 export const CUSTOM_DOM_EVENTS = {
+  BROWSER_SESSION_CHANGED: "k41:browser-session-changed",
+  COMPUTER_SESSION_CHANGED: "k41:computer-session-changed",
+  SESSIONS_RECONNECTED: "k41:sessions-reconnected",
   WORKSPACE_FILES_CHANGED: "k41:workspace-files-changed",
   SESSION_STARTED: "k41:session-started",
   SESSION_STOPPED: "k41:session-stopped",

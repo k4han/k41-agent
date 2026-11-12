@@ -790,6 +790,13 @@ test('workspace runtime events and reconnect snapshots refresh shared workspace 
   const count = f.events.length;
   f.connections[0].emit(f.SESSION_EVENTS.SNAPSHOT, { sessions: [] });
   assert.ok(f.events.slice(count).some(event => event.type === f.CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED));
+  assert.ok(f.events.slice(count).some(event => event.type === f.CUSTOM_DOM_EVENTS.SESSIONS_RECONNECTED));
+  f.connections[0].emit(f.SESSION_EVENTS.BROWSER_SESSION_CHANGED, { thread_id: 'browser-thread' });
+  f.connections[0].emit(f.SESSION_EVENTS.COMPUTER_SESSION_CHANGED, { backend: 'instabox', locator: 'machine' });
+  assert.equal(f.events.find(event => event.type === f.CUSTOM_DOM_EVENTS.BROWSER_SESSION_CHANGED).detail.thread_id, 'browser-thread');
+  assert.equal(f.events.find(event => event.type === f.CUSTOM_DOM_EVENTS.COMPUTER_SESSION_CHANGED).detail.locator, 'machine');
+  f.connections[0].emit(f.SESSION_EVENTS.WORKSPACE_FILES_CHANGED, { project_id: 7, project_workspace_id: 8 });
+  assert.equal(f.events.findLast(event => event.type === f.CUSTOM_DOM_EVENTS.WORKSPACE_CHANGED).detail.project_workspace_id, 8);
 });
 
 function runtimeFixture() {
@@ -810,20 +817,74 @@ function runtimeFixture() {
   }, runtime: { status: 'ready', generation: 1, transition: null } };
   let read = async () => result;
   const constants = loadModule('../src/lib/eventConstants.ts');
+  const refresh = loadModule('../src/lib/workspaceRefresh.ts');
   const module = loadModule('../src/lib/useWorkspaceRuntime.ts', {
     '@/lib/api': { apiFetch: (...args) => { reads.push(args); return read(...args); }, postJson: async (path, body) => {
       sent.push({ path, body });
       return { transition: { operation_id: 'switch', phase: 'saving', target_backend: body.backend } };
-    } }, '@/lib/eventConstants': constants,
-  }, { document, window: {
+    } }, '@/lib/eventConstants': constants, '@/lib/workspaceRefresh': refresh,
+  }, { document, AbortController, window: {
     addEventListener: (name, handler) => listeners.set(name, handler),
     removeEventListener: name => listeners.delete(name),
     setInterval: (handler, delay) => { const id = ++nextTimer; timers.set(id, handler); intervals.set(id, delay); return id; },
     clearInterval: id => { timers.delete(id); intervals.delete(id); },
+    setTimeout: (handler, delay) => { const id = ++nextTimer; timers.set(id, () => { timers.delete(id); intervals.delete(id); return handler(); }); intervals.set(id, delay); return id; },
+    clearTimeout: id => { timers.delete(id); intervals.delete(id); },
   } });
   return { ...module, ...constants, listeners, document, documentListeners, timers, intervals, applied, sent, reads,
+    flushEvents: () => { for (const [id, handler] of [...timers]) if (intervals.get(id) === 300) handler(); },
     apply: binding => applied.push(binding), setRead: value => { read = value; }, setResult: value => { result = value; }, getResult: () => result };
 }
+
+for (const { name, threadId, projectId, detail } of [
+  { name: 'thread_id', threadId: 'thread', detail: { thread_id: 'thread', project_id: 7, project_workspace_id: 8 } },
+  { name: 'threadId', threadId: 'thread', detail: { threadId: 'thread', project_id: 7, project_workspace_id: 8 } },
+  { name: 'draft project', threadId: '', projectId: 7, detail: { project_id: 7, project_workspace_id: 8 } },
+]) {
+  test(`runtime events recover a failed initial read for ${name}`, async t => {
+    const f = runtimeFixture();
+    f.setRead(async () => { throw new Error('Disconnected'); });
+    const { value } = mount(t, () => f.useWorkspaceRuntime(() => threadId, f.apply, () => projectId));
+    await tick();
+    assert.equal(f.reads.length, 1);
+    assert.equal(value.payload().workspace, null);
+    assert.equal(f.timers.size, 0);
+
+    f.setRead(async () => f.getResult());
+    f.listeners.get(f.CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED)({ detail: {
+      thread_id: 'other', project_id: 99, project_workspace_id: 99,
+    } });
+    f.flushEvents();
+    await tick();
+    assert.equal(f.reads.length, 1, 'unrelated events must not retry the request');
+
+    f.listeners.get(f.CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED)({ detail });
+    f.listeners.get(f.CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED)({ detail });
+    f.flushEvents();
+    await tick();
+    assert.equal(f.reads.length, 2, 'matching events coalesce into one recovery request');
+    assert.deepEqual(value.payload().workspace, f.getResult().workspace);
+    assert.equal(f.applied.length, 1);
+    assert.deepEqual([...f.intervals.values()], [60000], 'polling resumes after recovery');
+  });
+}
+
+test('runtime events follow the current conversation to a different workspace', async t => {
+  const f = runtimeFixture();
+  const { value } = mount(t, () => f.useWorkspaceRuntime(() => 'thread', f.apply));
+  await tick();
+  const workspace = { ...f.getResult().workspace, project_workspace_id: 9,
+    execution: { backend: 'daytona', locator: 'new-sandbox' } };
+  f.setResult({ ...f.getResult(), workspace });
+  f.listeners.get(f.CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED)({ detail: {
+    thread_id: 'thread', project_id: 7, project_workspace_id: 9,
+  } });
+  f.flushEvents();
+  await tick();
+  assert.equal(f.reads.length, 2);
+  assert.deepEqual(value.payload().workspace, workspace);
+  assert.deepEqual(f.applied.at(-1), workspace);
+});
 
 test('runtime switching retains accepted progress across a connection loss and applies the new generation', async t => {
   const f = runtimeFixture();
@@ -840,11 +901,12 @@ test('runtime switching retains accepted progress across a connection loss and a
   f.setRead(async () => ({ workspace: binding, kind: 'shared', runtime: { status: 'ready', generation: 2,
     transition: { operation_id: 'switch', phase: 'completed', target_backend: 'daytona' } } }));
   f.listeners.get(f.CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED)({ detail: { project_workspace_id: 8 } });
+  f.flushEvents();
   await tick();
   assert.equal(value.busy(), false);
   assert.equal(f.applied.at(-1).execution.locator, 'new-sandbox');
   assert.equal(f.timers.size, 1);
-  assert.deepEqual([...f.intervals.values()], [30000]);
+  assert.deepEqual([...f.intervals.values()], [60000]);
 });
 
 test('storage polling refreshes save state without resetting the working location', async t => {
@@ -852,8 +914,7 @@ test('storage polling refreshes save state without resetting the working locatio
   const { value, dispose } = mount(t, () => f.useWorkspaceRuntime(() => 'thread', f.apply));
   await tick();
   assert.equal(f.applied.length, 1);
-  assert.deepEqual([...f.intervals.values()], [30000]);
-  const timerId = [...f.timers.keys()][0];
+  assert.deepEqual([...f.intervals.values()], [60000]);
   f.setResult({ ...f.getResult(), persistence: { status: 'error', last_error: 'Disk full' },
     workspace_name: 'main', local_link: { path: '/original', status: 'pending' } });
   [...f.timers.values()][0]();
@@ -862,7 +923,8 @@ test('storage polling refreshes save state without resetting the working locatio
   assert.equal(value.payload().workspace_name, 'main');
   assert.equal(value.payload().local_link.path, '/original');
   assert.equal(f.applied.length, 1);
-  assert.equal([...f.timers.keys()][0], timerId);
+  assert.equal(f.timers.size, 1);
+  assert.deepEqual([...f.intervals.values()], [60000]);
   dispose();
   assert.equal(f.timers.size, 0);
 });
@@ -873,8 +935,8 @@ test('runtime polling pauses in hidden tabs and refreshes on return and workspac
   await tick();
   assert.equal(f.reads.length, 1);
   f.document.visibilityState = 'hidden';
-  [...f.timers.values()][0]();
   f.documentListeners.get('visibilitychange')();
+  assert.equal(f.timers.size, 0);
   await tick();
   assert.equal(f.reads.length, 1);
   f.document.visibilityState = 'visible';
@@ -882,6 +944,7 @@ test('runtime polling pauses in hidden tabs and refreshes on return and workspac
   await tick();
   assert.equal(f.reads.length, 2);
   f.listeners.get(f.CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED)({ detail: { project_workspace_id: 8 } });
+  f.flushEvents();
   await tick();
   assert.equal(f.reads.length, 3);
   dispose();
@@ -907,6 +970,27 @@ test('runtime status responses cannot overwrite a newly selected conversation', 
   assert.equal(f.applied.length, 1);
   dispose();
   assert.equal(f.listeners.size, 0);
+});
+
+test('runtime polling slows down when the workspace closes and filters unrelated file events', async t => {
+  const f = runtimeFixture();
+  const { value } = mount(t, () => {
+    const [visible, setVisible] = solid.createSignal(true);
+    return { setVisible, runtime: f.useWorkspaceRuntime(() => 'thread', f.apply, () => undefined, visible) };
+  });
+  await tick();
+  assert.deepEqual([...f.intervals.values()], [60000]);
+  value.setVisible(false);
+  assert.deepEqual([...f.intervals.values()], [120000]);
+  f.listeners.get(f.CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED)({ detail: { thread_id: 'other' } });
+  f.listeners.get(f.CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED)({ detail: { project_workspace_id: 99 } });
+  f.flushEvents();
+  await tick();
+  assert.equal(f.reads.length, 1);
+  for (let index = 0; index < 3; index++) f.listeners.get(f.CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED)({ detail: { project_workspace_id: 8 } });
+  f.flushEvents();
+  await tick();
+  assert.equal(f.reads.length, 2);
 });
 
 test('Markdown consumers share a theme observer and clean it up together', t => {

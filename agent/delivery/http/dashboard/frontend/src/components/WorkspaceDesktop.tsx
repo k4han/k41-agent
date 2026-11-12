@@ -1,5 +1,5 @@
 import { Hand, LoaderCircle, Monitor, MousePointer2, Power, RefreshCw } from "lucide-solid";
-import { createEffect, createSignal, on, onCleanup, Show } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, onMount, Show } from "solid-js";
 
 import { computerApi, computerViewerUrl, type ComputerState } from "@/lib/computers";
 import { errorText } from "@/lib/instabox";
@@ -55,6 +55,12 @@ export function WorkspaceDesktop(props: { backend: string; locator: string; acti
   const [controlling, setControlling] = createSignal(false);
   const [working, setWorking] = createSignal(false);
   const [error, setError] = createSignal("");
+  const [documentVisible, setDocumentVisible] = createSignal(document.visibilityState !== "hidden");
+  onMount(() => {
+    const changed = () => setDocumentVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", changed);
+    onCleanup(() => document.removeEventListener("visibilitychange", changed));
+  });
   let screen: HTMLDivElement | undefined;
   let rfb: RfbInstance | undefined;
   let heartbeat: number | undefined;
@@ -85,7 +91,8 @@ export function WorkspaceDesktop(props: { backend: string; locator: string; acti
     if (!controlling()) return;
     setControlling(false);
     try {
-      setState(await computerApi.handBack(backend, locator));
+      const next = await computerApi.handBack(backend, locator);
+      if (props.backend === backend && props.locator === locator) setState(next);
     } catch {
       // Control expires on the server after 30 seconds without a heartbeat.
     }
@@ -99,13 +106,15 @@ export function WorkspaceDesktop(props: { backend: string; locator: string; acti
     setError("");
     try {
       setConnection("starting");
-      setState(await computerApi.start(backend, locator));
+      const next = await computerApi.start(backend, locator);
       if (current !== session) return;
+      setState(next);
       setConnection("connecting");
       const [{ ticket }, module] = await Promise.all([
         computerApi.viewerTicket(backend, locator),
         import("@novnc/novnc/lib/rfb"),
       ]);
+      if (current !== session) return;
       const socket = await openViewerSocket(ticket);
       if (current !== session || !screen) {
         socket.close();
@@ -135,27 +144,39 @@ export function WorkspaceDesktop(props: { backend: string; locator: string; acti
   };
 
   const takeControl = async () => {
+    const current = session;
+    const { backend, locator } = props;
     setWorking(true);
     setError("");
     try {
-      setState(await computerApi.takeControl(props.backend, props.locator));
+      const next = await computerApi.takeControl(backend, locator);
+      if (current !== session) {
+        await computerApi.handBack(backend, locator);
+        return;
+      }
+      setState(next);
       setControlling(true);
       if (rfb) {
         rfb.viewOnly = false;
         rfb.focus();
       }
       stopHeartbeat();
-      const { backend, locator } = props;
+      let renewing = false;
       heartbeat = window.setInterval(() => {
-        computerApi.heartbeat(backend, locator).then(setState).catch((err) => {
+        if (renewing) return;
+        renewing = true;
+        computerApi.heartbeat(backend, locator).then(next => {
+          if (current === session && controlling()) setState(next);
+        }).catch((err) => {
+          if (current !== session || !controlling()) return;
           stopHeartbeat();
           setControlling(false);
           if (rfb) rfb.viewOnly = true;
           setError(errorText(err, "Desktop control was lost."));
-        });
+        }).finally(() => { renewing = false; });
       }, HEARTBEAT_MS);
     } catch (err) {
-      setError(errorText(err, "Could not take control."));
+      if (current === session) setError(errorText(err, "Could not take control."));
     } finally {
       setWorking(false);
     }
@@ -167,7 +188,7 @@ export function WorkspaceDesktop(props: { backend: string; locator: string; acti
     setWorking(false);
   };
 
-  createEffect(on(() => [props.backend, props.locator, props.active] as const, ([backend, locator, active], previous) => {
+  createEffect(on(() => [props.backend, props.locator, props.active && documentVisible()] as const, ([backend, locator, active], previous) => {
     const changed = previous !== undefined && (previous[0] !== backend || previous[1] !== locator);
     if (changed && previous[0] && previous[1]) void handBack(previous[0], previous[1]);
     if (!active || !backend || !locator) {

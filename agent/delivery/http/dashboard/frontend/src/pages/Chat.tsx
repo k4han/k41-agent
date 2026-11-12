@@ -659,7 +659,7 @@ export function ChatPage() {
   };
 
   const draftProjectId = () => !currentThreadId() ? location.state?.projectId : undefined;
-  const workspaceRuntime = useWorkspaceRuntime(currentThreadId, setWorkspace, draftProjectId);
+  const workspaceRuntime = useWorkspaceRuntime(currentThreadId, setWorkspace, draftProjectId, explorer.open);
 
   const runtimeDecision = () => workspaceRuntime.payload().runtime?.decision || null;
   const decisionBackendLabel = () => getBackendDisplayName(runtimeDecision()?.backend || "local");

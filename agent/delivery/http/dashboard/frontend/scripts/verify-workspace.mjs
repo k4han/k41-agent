@@ -36,7 +36,7 @@ const server = await createServer({
           }
           return;
         }
-        if (req.url !== '/__workspace') return next();
+        if (req.url.split('?')[0] !== '/__workspace') return next();
         res.setHeader('Content-Type', 'text/html');
         res.end('<!doctype html><html><body><div id="root"></div><script type="module" src="/tests/fixtures/workspace.tsx"></script></body></html>');
       });
@@ -96,12 +96,13 @@ try {
   };
   await call('Page.enable');
   await call('Runtime.enable');
+  const row = path => `Array.from(document.querySelectorAll('.workspace-tree-row')).find(row => row.title === ${JSON.stringify(path)})`;
+  const tab = title => `Array.from(document.querySelectorAll('.workspace-tab')).find(tab => tab.title === ${JSON.stringify(title)})`;
+  if (!process.argv.includes('--services-only')) {
   await call('Page.navigate', { url: base + '/__workspace' });
 
   await until(() => js('!!window.workspaceTest && document.querySelectorAll(".workspace-tree-row").length === 201'), 'initial workspace tree');
   await until(() => js('!workspaceTest.refreshing()'), 'initial workspace load');
-  const row = path => `Array.from(document.querySelectorAll('.workspace-tree-row')).find(row => row.title === ${JSON.stringify(path)})`;
-  const tab = title => `Array.from(document.querySelectorAll('.workspace-tab')).find(tab => tab.title === ${JSON.stringify(title)})`;
   const refreshDone = () => js('!workspaceTest.refreshing()');
 
   const initialReads = await js('workspaceTest.requests.length');
@@ -212,7 +213,7 @@ try {
   await delay(400);
   assert.equal(await js('workspaceTest.requests.length'), beforeFocus, 'focus must not refetch a fresh workspace');
 
-  await js('workspaceTest.setRunning(true); workspaceTest.updateContent();');
+  await js('workspaceTest.setRunning(true); workspaceTest.updateContent(); workspaceTest.poll();');
   await until(() => js('document.querySelector(".workspace-file-panel").textContent.includes("revision 4")'), 'running tools refresh before a result arrives', 18000);
   await js('workspaceTest.setRunning(false);');
   await until(() => js('workspaceTest.pollCount() === 1'), 'idle polling restored');
@@ -242,6 +243,8 @@ try {
   console.log('PASS: tool results refresh previews and diffs; fallback polling and visibility resume cover external changes.');
 
   // Events arriving during a slow refresh must produce one follow-up read.
+  await js(`${tab('Files Explorer')}.click();`);
+  await delay(400);
   await js('workspaceTest.hold("tree:"); workspaceTest.toolResult();');
   await until(() => js('workspaceTest.pendingCount("tree:") === 1'), 'slow refresh');
   const slowRoots = await js('workspaceTest.requests.filter(request => request.kind === "tree" && !request.path).length');
@@ -323,7 +326,7 @@ try {
   await until(refreshDone, 'new workspace load');
   assert.ok(await js('workspaceTest.aborted()') >= 2, 'workspace changes must abort old requests');
   assert.equal(await js('workspaceTest.requests.some(request => request.locator === "/next" && request.path === "src")'), false, 'expanded paths must not leak across workspaces');
-  assert.equal(await js('document.querySelectorAll(".workspace-tab").length'), 1);
+  assert.equal(await js('document.querySelectorAll(".workspace-tab").length'), 2, 'existing changes add their background tab in the new workspace');
   assert.equal(await js('!!document.querySelector(".workspace-file-panel")'), false);
 
   await js('workspaceTest.emptyWorkspace(); workspaceTest.refresh();');
@@ -338,7 +341,8 @@ try {
     window.emptyObserver = new MutationObserver(records => emptyMutations.push(...records));
     emptyObserver.observe(document.querySelector('.workspace-explorer-body'), { childList: true, subtree: true });
     workspaceTest.hold('tree:'); workspaceTest.hold('changes:'); workspaceTest.poll();`);
-  await until(() => js('workspaceTest.pendingCount("tree:") === 1 && workspaceTest.pendingCount("changes:") === 1'), 'empty workspace background refresh');
+  await until(() => js('workspaceTest.pendingCount("changes:") === 1'), 'empty changes background refresh');
+  assert.equal(await js('workspaceTest.pendingCount("tree:")'), 0, 'the hidden file tree must not poll');
   assert.equal(await js('document.querySelector(".workspace-explorer-body").textContent.includes("Loading")'), false, 'empty states must remain visible during background reads');
   assert.equal(await js('document.querySelector(".workspace-empty-tree-actions") === emptyTree && emptyChanges.isConnected && gitHint.isConnected'), true, 'empty states and Git hint must retain their DOM');
   assert.equal(await js('emptyMutations.length'), 0, 'empty workspace must not flash while polling');
@@ -354,6 +358,44 @@ try {
   assert.equal(await js('workspaceTest.pollCount()'), 0, 'polling must stop after unmount');
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: workspace changes cancel obsolete reads, reset tabs and expansion, and disposed explorers ignore queued refresh.');
+  }
+
+  await call('Page.navigate', { url: base + '/__workspace?services=1' });
+  await until(() => js('!!window.workspaceTest && document.querySelectorAll(".workspace-tree-row").length === 201 && workspaceTest.serviceRequests.length >= 2'), 'service discovery fixture');
+  await delay(400);
+  assert.equal(await js('document.querySelectorAll(".workspace-primary-tabs .workspace-tab").length'), 1, 'an idle workspace starts with Files only');
+  assert.equal(await js('workspaceTest.serviceRequests.every(request => request.method === "GET")'), true, 'service discovery must never start a service');
+  await js(`${row('file-0.txt')}.click(); workspaceTest.setBrowser('first'); workspaceTest.setComputer(true); workspaceTest.setChanges(true); workspaceTest.refresh();`);
+  await until(() => js('document.querySelectorAll(".workspace-primary-tabs .workspace-tab").length === 4'), 'service tabs added in the background');
+  assert.equal(await js(`${tab('Files Explorer')}.getAttribute('aria-selected')`), 'true');
+  assert.equal(await js(`${tab('file-0.txt')}.getAttribute('aria-selected')`), 'true');
+  assert.equal(await js('!!document.querySelector(".workspace-browser-panel, .workspace-desktop-panel")'), false, 'background tabs do not mount viewers');
+  for (const title of ['Browser', 'Desktop', 'Git Changes']) await js(`${tab(title)}.querySelector('.workspace-tab-close').click()`);
+  await js(`workspaceTest.setBrowser('first'); workspaceTest.setComputer(true); workspaceTest.refresh();`);
+  await delay(500);
+  assert.equal(await js('document.querySelectorAll(".workspace-primary-tabs .workspace-tab").length'), 1, 'dismissed tabs stay closed for the same episode');
+  await js(`workspaceTest.setBrowser('second'); workspaceTest.setComputer(false); workspaceTest.setChanges(false); workspaceTest.refresh();`);
+  await delay(500);
+  await js('workspaceTest.setComputer(true); workspaceTest.setChanges(true); workspaceTest.refresh();');
+  await until(() => js('document.querySelectorAll(".workspace-primary-tabs .workspace-tab").length === 4'), 'new service episodes reopen tabs');
+  await js('workspaceTest.setBrowser(null); workspaceTest.setComputer(false);');
+  await delay(500);
+  assert.equal(await js('document.querySelectorAll(".workspace-primary-tabs .workspace-tab").length'), 4, 'tabs survive service shutdown');
+  await js(`${tab('Browser')}.click();`);
+  await until(() => js('!!document.querySelector(".browser-panel")'), 'browser panel lazily mounted');
+  await delay(400);
+  const hiddenContentReads = await js('workspaceTest.requests.filter(request => ["tree", "file", "diff"].includes(request.kind)).length');
+  await js('workspaceTest.setRunning(true); workspaceTest.advanceTime(120000); workspaceTest.poll(); workspaceTest.toolResult();');
+  await delay(500);
+  assert.equal(await js('workspaceTest.requests.filter(request => ["tree", "file", "diff"].includes(request.kind)).length'), hiddenContentReads,
+    'Browser polling and file events must not load hidden trees, files or diffs');
+  await js('workspaceTest.setVisible(false); workspaceTest.setBrowser(null, true);');
+  await until(() => js('workspaceTest.isVisible() && document.querySelector(".browser-handoff")'), 'handoff reopens a collapsed workspace');
+  await js('workspaceTest.unmount();');
+  await delay(100);
+  assert.equal(await js('workspaceTest.pollCount()'), 0);
+  assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
+  console.log('PASS: idle Files default, background service tabs, manual dismissals, new episodes, inactive polling, lazy viewers and collapsed-workspace handoffs.');
 } finally {
   if (call && ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
   ws?.close();

@@ -1,27 +1,13 @@
 import { ArrowLeft, ArrowRight, Camera, ChevronDown, Globe, LoaderCircle, Power, RefreshCw, Settings2, ShieldCheck } from "lucide-solid";
 import { A } from "@solidjs/router";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack } from "solid-js";
-import { apiFetch, postJson } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import { browserModifiers, browserPointer, connectBrowserViewer, createBrowserFrameRenderer, createBrowserInputSender,
   type BrowserConnectionState, type BrowserHandoffResume, type BrowserViewerConnection } from "@/lib/browserViewer";
 import { API_PATHS } from "@/lib/endpoints";
-import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
+import { useBrowserSession, type BrowserSession } from "@/lib/useBrowserSession";
 import type { BrowserProfile } from "@/types";
 import "@/styles/browser.css";
-
-type BrowserStatus = {
-  open: boolean;
-  profile_id: string | null;
-  profile_mode?: "inherit" | "profile";
-  selected_profile_id?: string | null;
-  generation: string | null;
-  revision?: number;
-  mode: "agent" | "human";
-  tabs: { id: string; title: string; url: string }[];
-  handoff: { handoff_id: string; reason: string; expired?: boolean } | null;
-  handoff_expired: boolean;
-  images: { artifact_id: string; image_url: string }[];
-};
 
 export function BrowserPanel(props: {
   threadId: string | null;
@@ -31,8 +17,13 @@ export function BrowserPanel(props: {
   onResume: (payload: BrowserHandoffResume) => void;
   onHandoffChange: (pending: boolean, threadId: string) => void;
   onSessionChange?: (active: boolean, threadId: string | null) => void;
+  session?: BrowserSession;
 }) {
-  const [status, setStatus] = createSignal<BrowserStatus | null>(null);
+  const session = props.session ?? useBrowserSession({ threadId: () => props.threadId, visible: () => props.open,
+    active: () => props.open, busy: () => props.busy, onOpen: () => props.onOpen(),
+    onHandoffChange: (pending, thread) => props.onHandoffChange(pending, thread),
+    onSessionChange: (active, thread) => props.onSessionChange?.(active, thread) });
+  const status = session.status;
   const [profiles, setProfiles] = createSignal<BrowserProfile[]>([]);
   const [error, setError] = createSignal("");
   const [working, setWorking] = createSignal(false);
@@ -56,7 +47,6 @@ export function BrowserPanel(props: {
   const [profilesOpen, setProfilesOpen] = createSignal(false);
   const selectedProfileId = createMemo(() => status()?.profile_mode === "inherit" ? "" : status()?.selected_profile_id ?? status()?.profile_id ?? "");
   const sessionGeneration = createMemo(() => status()?.generation);
-  const sessionActive = createMemo(() => Boolean(status()?.open));
   const currentPageUrl = createMemo(() => status()?.tabs.find((tab) => tab.id === selectedTab())?.url || "");
   const connectionLabel = () => !status()?.open ? "No active session"
     : connectionState() === "paused" ? "Stream paused"
@@ -71,8 +61,6 @@ export function BrowserPanel(props: {
   let profileSelect: HTMLSelectElement | undefined;
   let width = 1280;
   let height = 720;
-  let announcedHandoff = "";
-  let statusRevision = 0;
   let viewerSession = "";
   const endpoint = () => `/dashboard-api/browser/threads/${encodeURIComponent(props.threadId || "")}`;
   const renderer = createBrowserFrameRenderer(() => screen);
@@ -82,86 +70,22 @@ export function BrowserPanel(props: {
   const send = input.send;
   const resetFrame = () => { renderer.reset(); input.reset(); setHasFrame(false); setFrameFresh(false); };
   const staleFrame = () => { renderer.reset(); input.reset(); setFrameFresh(false); };
-  const applyStatus = (next: BrowserStatus, thread: string) => {
-    if (props.threadId !== thread) return;
-    const previous = untrack(status);
-    if (previous?.generation === next.generation && (next.revision ?? 0) < (previous?.revision ?? 0)) return;
-    statusRevision++;
-    setStatus(next);
-    if (next.handoff || !props.busy) props.onHandoffChange(Boolean(next.handoff), thread);
-    if (next.handoff && next.handoff.handoff_id !== announcedHandoff) {
-      announcedHandoff = next.handoff.handoff_id;
-      props.onOpen();
-    }
-  };
+  const applyStatus = session.applyStatus;
+  createEffect(() => { const message = session.error(); if (message) setError(message); });
+  createEffect(() => session.setConnected(connected()));
+  onCleanup(() => session.setConnected(false));
   onCleanup(resetFrame);
   createEffect(() => { if (!canControl()) input.reset(); });
 
   createEffect(on(currentPageUrl, (value) => setUrl(value)));
 
-  createEffect(() => {
-    const thread = props.threadId;
-    statusRevision++;
-    setStatus(null);
+  createEffect(on(() => props.threadId, () => {
     resetFrame();
     setError("");
+    setWorking(false);
     setSelectedTab("");
     setUrl("");
-    announcedHandoff = "";
-    if (!thread) return;
-    let disposed = false;
-    let polling = false;
-    let refreshQueued = false;
-    const refresh = async () => {
-      if (polling) { refreshQueued = true; return; }
-      polling = true;
-      const requestRevision = statusRevision;
-      try {
-        const next = await apiFetch<BrowserStatus>(`/dashboard-api/browser/threads/${encodeURIComponent(thread)}`);
-        // Discard status captured before a newly streamed handoff.
-        if (disposed || requestRevision !== statusRevision) return;
-        applyStatus(next, thread);
-      } catch (cause) {
-        if (!disposed) setError(cause instanceof Error ? cause.message : "Could not load browser status.");
-      } finally {
-        polling = false;
-        if (refreshQueued && !disposed) {
-          refreshQueued = false;
-          void refresh();
-        }
-      }
-    };
-    void refresh();
-    let lastRefresh = Date.now();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "hidden") return;
-      const interval = connected() || (!props.open && !props.busy) ? 30000 : 5000;
-      if (Date.now() - lastRefresh < interval) return;
-      if (props.open || props.busy || status()?.open || status()?.handoff) { lastRefresh = Date.now(); void refresh(); }
-    }, 5000);
-    const handoff = (event: Event) => {
-      if ((event as CustomEvent).detail?.threadId === thread) {
-        statusRevision += 1;
-        void refresh();
-      }
-    };
-    const runStopped = (event: Event) => {
-      if ((event as CustomEvent).detail?.threadId === thread) void refresh();
-    };
-    const visibilityChanged = () => { if (document.visibilityState !== "hidden") void refresh(); };
-    document.addEventListener("visibilitychange", visibilityChanged);
-    window.addEventListener("k41-browser-handoff", handoff);
-    window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, runStopped);
-    onCleanup(() => {
-      disposed = true;
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", visibilityChanged);
-      window.removeEventListener("k41-browser-handoff", handoff);
-      window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, runStopped);
-    });
-  });
-
-  createEffect(() => props.onSessionChange?.(sessionActive(), props.threadId));
+  }));
 
   createEffect(() => {
     // Opening the settings shows which conversations hold each profile now.
@@ -185,10 +109,10 @@ export function BrowserPanel(props: {
     attempt();
     setConnected(false);
     setControlAllowed(false);
-    const session = `${thread || ""}:${generation || ""}`;
-    if (viewerSession !== session) {
+    const viewerKey = `${thread || ""}:${generation || ""}`;
+    if (viewerSession !== viewerKey) {
       resetFrame(); setSelectedTab(""); setFollowAgent(true);
-      viewerSession = session;
+      viewerSession = viewerKey;
     } else staleFrame();
     if (!visible || !thread || !generation) return;
     const activeConnection = connectBrowserViewer({
@@ -213,7 +137,6 @@ export function BrowserPanel(props: {
       },
       onMessage: (data) => {
         if (data.type === "status") {
-          statusRevision++;
           if (data.generation && data.generation !== generation) return;
           const nextTab = data.tab_id || data.tabs[0]?.id || "";
           if (nextTab !== selectedTab()) resetFrame();
@@ -225,13 +148,10 @@ export function BrowserPanel(props: {
           if (previous) applyStatus({ ...previous, ...data }, thread);
           setSelectedTab(nextTab);
         } else if (data.type === "session_closed") {
-          statusRevision++;
           resetFrame(); setControlAllowed(false);
-          setStatus((previous) => previous ? { ...previous, open: false, generation: null } : previous);
-          const revision = statusRevision;
-          void apiFetch<BrowserStatus>(`/dashboard-api/browser/threads/${encodeURIComponent(thread)}`)
-            .then((next) => { if (props.threadId === thread && revision === statusRevision) applyStatus(next, thread); })
-            .catch((cause) => { if (props.threadId === thread) setError(String(cause)); });
+          const previous = status();
+          if (previous) applyStatus({ ...previous, open: false, generation: null }, thread);
+          session.invalidate();
         } else if (data.type === "error") setError(data.message);
       },
     });
@@ -263,13 +183,11 @@ export function BrowserPanel(props: {
     try {
       await operation();
       if (refreshThread && thread && props.threadId === thread) {
-        const revision = statusRevision;
-        const next = await apiFetch<BrowserStatus>(`/dashboard-api/browser/threads/${encodeURIComponent(thread)}`);
-        if (revision === statusRevision) applyStatus(next, thread);
+        await session.refresh(true);
       }
     }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Browser operation failed."); }
-    finally { setWorking(false); }
+    catch (cause) { if (props.threadId === thread) setError(cause instanceof Error ? cause.message : "Browser operation failed."); }
+    finally { if (props.threadId === thread) setWorking(false); }
   };
   const mouse = (event: PointerEvent | WheelEvent, type: string) => {
     if (!canControl() || !screen) return;

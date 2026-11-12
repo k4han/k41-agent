@@ -212,13 +212,29 @@ try {
   };
   await call('Page.enable');
   await call('Runtime.enable');
+  await call('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
+    const timers = new Map();
+    const nativeSet = window.setTimeout.bind(window);
+    const nativeClear = window.clearTimeout.bind(window);
+    window.setTimeout = (handler, delay, ...args) => {
+      let id;
+      const callback = () => { timers.delete(id); if (typeof handler === 'function') handler(...args); };
+      id = nativeSet(callback, delay);
+      if (delay === 60000 || delay === 120000) timers.set(id, { delay, callback });
+      return id;
+    };
+    window.clearTimeout = id => { timers.delete(id); nativeClear(id); };
+    window.workspacePolling = { poll(delay) {
+      for (const [id, timer] of [...timers]) if (!delay || timer.delay === delay) { nativeClear(id); timer.callback(); }
+    } };
+  })();` });
   composerScenario = true;
   await call('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
   await call('Page.navigate', { url: base + '/chat' });
   await until(() => js('!!document.querySelector(".composer-workspace-trigger")'), 'composer project picker');
   await js(`document.querySelector('button[aria-label="Close workspace explorer"]')?.click()`);
   await delay(300);
-  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'Temporary');
+  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'No workspace');
   assert.equal(await js('!!document.querySelector(".chat-welcome-hero .workspace-selector")'), false, 'welcome must not duplicate project selection');
   const click = async selector => {
     await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
@@ -258,6 +274,7 @@ try {
     await until(() => js(`!!document.querySelector('button[aria-label="Send message"]')`), 'composer stream completed');
   };
   if (!process.argv.includes('--runtime-only')) {
+  if (!process.argv.includes('--workspace-only')) {
   for (const dark of [false, true]) {
     await js(`document.documentElement.classList.toggle('dark', ${dark})`);
     for (const width of [320, 375, 399, 400, 480, 559, 560, 960]) {
@@ -343,8 +360,8 @@ try {
   assert.equal(workspaceResolutions.length, 0, 'unselected project must preserve automatic temporary provisioning');
   assert.equal(sentMessages.at(-1).workspace ?? null, null);
   await openPicker();
-  await source('Temporary');
-  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'Temporary');
+  await source('No workspace');
+  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'No workspace');
   await source('Local Folder');
   await js(`(() => {
     const input = document.querySelector('.workspace-path-input');
@@ -353,7 +370,7 @@ try {
   })()`);
   await click('.chat-header-title');
   assert.equal(await js('!!document.querySelector(".composer-workspace-popover")'), false);
-  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'Temporary', 'closing must not commit a typed path');
+  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'No workspace', 'closing must not commit a typed path');
   await openPicker();
   await source('Local Folder');
   await click('.workspace-browse-btn');
@@ -424,6 +441,7 @@ try {
   await escape();
   failRepositories = false;
   console.log('PASS: composer container widths, themes, project popover, nested folder browser, backend selection, temporary/local/GitHub/sandbox sends, and repository errors.');
+  }
   composerScenario = false;
   await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await call('Page.navigate', { url: base + '/c/workspace-chat' });
@@ -453,7 +471,7 @@ try {
   await js('document.documentElement.classList.toggle("dark");');
   await delay(100);
   assert.equal(await js('!chatWasDetached && chatTranscript.scrollTop === chatScrollTop'), true, 'changing preview theme must preserve the chat scroll position');
-  await js('document.querySelector(".workspace-tab.active .workspace-tab-close").click();');
+  await js('document.querySelector(".workspace-file-tab.active .workspace-tab-close").click();');
   await until(() => js('!!document.querySelector(".workspace-tree-row")'), 'file tab closed');
   await js('document.querySelector(".workspace-tree-row").click();');
   await until(() => js('!!document.querySelector(".workspace-file-view-shiki")'), 'file preview reopened');
@@ -470,6 +488,38 @@ try {
     Array.from(document.querySelectorAll('.workspace-plus-menu-item')).find(item => item.textContent.includes('Git Changes')).click();
     Array.from(document.querySelectorAll('.workspace-tab')).find(tab => tab.title.endsWith('source.txt')).click();`);
   await until(() => js('!!document.querySelector(".workspace-file-view-shiki")'), 'cached code rendering');
+  if (process.argv.includes('--workspace-only')) {
+    await js('Array.from(document.querySelectorAll(".workspace-tab")).find(tab => tab.title === "Files Explorer").click()');
+    await delay(400);
+    await js(`(() => {
+      const input = document.querySelector('.chat-prompt-input');
+      input.value = 'Update source.txt';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('button[aria-label="Send message"]').click();
+    })()`);
+    await until(() => Boolean(chatResponse), 'workspace chat stream starts');
+    await js('window.workspaceCode = document.querySelector(".workspace-file-view-shiki").firstChild');
+    const quietReads = requests.filter(request => request.kind === 'tree').length;
+    for (let index = 1; index <= 2; index++) {
+      await js('workspacePolling.poll(60000)');
+      await until(() => requests.filter(request => request.kind === 'tree').length >= quietReads + index, 'running workspace poll');
+      await delay(150);
+    }
+    assert.equal(await js('document.querySelector(".workspace-file-view-shiki").firstChild === workspaceCode'), true, 'unchanged polls retain the preview DOM');
+    fs.writeFileSync(filePath, 'written while tool is running');
+    fs.writeFileSync(path.join(root, 'created.txt'), 'new file');
+    await js('workspacePolling.poll(60000)');
+    await until(() => js('document.querySelector(".workspace-file-panel")?.textContent.includes("written while tool is running")'), 'fallback updates external writes during streaming');
+    assert.equal(chatResponse.writableEnded, false);
+    fs.writeFileSync(filePath, 'written at tool completion');
+    chatResponse.write(JSON.stringify({ type: 'tool_result', tool_call_id: 'write-source', name: 'shell', content: 'Command exited with code 0.' }) + '\n');
+    await until(() => js('document.querySelector(".workspace-file-panel")?.textContent.includes("written at tool completion")'), 'tool events update the preview immediately');
+    assert.equal(await js('Array.from(document.querySelectorAll(".workspace-tree-row")).some(row => row.textContent.includes("created.txt"))'), true);
+    chatResponse.write(JSON.stringify({ type: 'final', content: 'Done.' }) + '\n');
+    chatResponse.end();
+    await until(() => js(`!!document.querySelector('button[aria-label="Send message"]')`), 'workspace stream finishes');
+    console.log('PASS: production workspace preserves chat scroll and cached previews, polls external writes at 60 seconds, and applies tool events during streaming.');
+  } else {
   await js(`(() => {
     const input = document.querySelector('.chat-prompt-input');
     input.value = 'Update source.txt';
@@ -627,7 +677,11 @@ try {
       childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'disabled', 'title'],
     });`);
   const quietReads = requests.filter(request => request.kind === 'tree').length;
-  await until(() => requests.filter(request => request.kind === 'tree').length >= quietReads + 2, 'two unchanged running polls', 25000);
+  for (let index = 1; index <= 2; index++) {
+    await js('workspacePolling.poll(60000)');
+    await until(() => requests.filter(request => request.kind === 'tree').length >= quietReads + index, 'unchanged running poll');
+    await delay(150);
+  }
   await delay(150);
   assert.equal(await js('backgroundMutations.length'), 0, 'unchanged running polls must not flash loading states or rebuild content');
   assert.equal(await js('document.querySelector(".workspace-file-view-shiki").firstChild === previewNode'), true, 'unchanged polling must preserve code DOM');
@@ -635,6 +689,7 @@ try {
   const readsBeforeWrite = requests.filter(request => request.kind === 'tree').length;
   fs.writeFileSync(filePath, 'written while tool is running');
   fs.writeFileSync(path.join(root, 'created.txt'), 'new file');
+  await js('workspacePolling.poll(60000)');
   await until(() => js('document.querySelector(".workspace-file-panel")?.textContent.includes("written while tool is running")'), 'live preview before tool_result', 18000);
   assert.equal(chatResponse.writableEnded, false, 'chat must still be streaming');
   assert.ok(requests.filter(request => request.kind === 'tree').length > readsBeforeWrite, 'running chat refreshes the tree');
@@ -734,6 +789,7 @@ try {
   await click('.activity-group-toggle');
   assert.equal(await js('historicalTool === document.querySelector(".tool-call") && historicalTool.open'), true, 'group toggles preserve visited tool state');
   }
+  }
   runtimeScenario = true;
   await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   await call('Page.navigate', { url: base + '/c/workspace-chat' });
@@ -748,6 +804,7 @@ try {
   await chooseBackend('Daytona');
   assert.equal(await js('!!document.querySelector(".composer-runtime-picker")'), true, 'backend menu remains inside the project popover');
   const beforeStoragePoll = runtimeStatusRequests;
+  await js('workspacePolling.poll()');
   await until(() => runtimeStatusRequests > beforeStoragePoll, 'idle storage status refresh');
   assert.equal(await js(`document.querySelector('.composer-runtime-picker button[aria-label="Execution backend"]').textContent.includes('Daytona')`), true,
     'storage polling keeps the selected destination backend');

@@ -112,6 +112,49 @@ async def test_launch_failure_reports_setup_command_and_logs_original_error(brow
 
 
 @pytest.mark.asyncio
+async def test_browser_lifecycle_notifies_dashboard_without_a_viewer(browser):
+    registry = browser.container.active_session_registry
+    queue = registry.subscribe()
+    try:
+        current = await browser.ensure("lifecycle", "admin:1")
+        await asyncio.sleep(0)
+        assert queue.get_nowait() == {"type": "browser_session_changed", "data": {"thread_id": "lifecycle"}}
+        assert await browser.ensure("lifecycle", "admin:1") is current
+        assert queue.empty()
+
+        _, handoff, _ = await browser._open_handoff("lifecycle", "admin:1", "handoff-call", "Sign in")
+        await asyncio.sleep(0)
+        assert handoff["generation"] == current.generation
+        assert queue.get_nowait()["type"] == "browser_session_changed"
+        await browser._settle_handoff("lifecycle", "handoff-call", "Sign in", handoff, None, "cancel", None)
+        await asyncio.sleep(0)
+        assert "lifecycle" not in browser.sessions
+        notifications = []
+        while not queue.empty():
+            notifications.append(queue.get_nowait())
+        assert notifications
+        assert all(event == {"type": "browser_session_changed", "data": {"thread_id": "lifecycle"}} for event in notifications)
+    finally:
+        registry.unsubscribe(queue)
+
+
+@pytest.mark.asyncio
+async def test_browser_session_loss_notifies_dashboard(browser):
+    registry = browser.container.active_session_registry
+    queue = registry.subscribe()
+    try:
+        current = await browser.ensure("lost-session", "admin:1")
+        await asyncio.sleep(0)
+        queue.get_nowait()
+        current.driver.closed = True
+        assert (await browser.status("lost-session", "admin:1"))["open"] is False
+        await asyncio.sleep(0)
+        assert queue.get_nowait() == {"type": "browser_session_changed", "data": {"thread_id": "lost-session"}}
+    finally:
+        registry.unsubscribe(queue)
+
+
+@pytest.mark.asyncio
 async def test_session_observer_pushes_revisions_and_stops_with_session(browser):
     started = asyncio.Event()
     stopped = asyncio.Event()

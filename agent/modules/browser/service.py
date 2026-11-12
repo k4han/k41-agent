@@ -147,6 +147,11 @@ class ProfileBrowser:
 
 
 class BrowserService:
+    def _notify_session(self, thread_id):
+        from agent.modules.agent_runtime import get_active_session_registry
+
+        get_active_session_registry(self.container).publish("browser_session_changed", {"thread_id": thread_id})
+
     def __init__(self, container, *, root: Path | None = None, launcher=None):
         self.container = container
         self.repository = BrowserRepository(container)
@@ -247,6 +252,7 @@ class BrowserService:
             shared.threads.add(thread_id)
             if hasattr(driver, "watch_tabs"):
                 current.observer = asyncio.create_task(self._observe_tabs(current))
+            self._notify_session(thread_id)
             return current
 
     async def _session_profile(self, thread_id, owner_id, binding):
@@ -436,6 +442,7 @@ class BrowserService:
             self.sessions.pop(current.thread_id, None)
         self.tickets = {token: ticket for token, ticket in self.tickets.items()
                         if ticket[0] != current.thread_id or ticket[2] != current.generation}
+        self._notify_session(current.thread_id)
 
     async def _dispose(self, current, *, fatal=False):
         async with self.operation_scope(f"profile:{current.profile_key}"):
@@ -824,6 +831,7 @@ class BrowserService:
                 raise
             finally:
                 current.notify()
+                self._notify_session(thread_id)
         return None, payload, None
 
     async def _settle_handoff(self, thread_id, call_id, reason, payload, expired_receipt, decision, authorize_snapshot):
@@ -867,6 +875,7 @@ class BrowserService:
         await self.repository.record(thread_id, call_id, self._handoff_fingerprint(reason), "completed", result)
         if current:
             current.notify()
+        self._notify_session(thread_id)
         return result
 
     async def abandon_handoffs(self, thread_id, *, expired_only=False):
@@ -879,6 +888,7 @@ class BrowserService:
             return
         async with self.thread_scope(thread_id):
             await self.repository.finish_handoffs(thread_id, HANDOFF_CANCELLED, expired_only=expired_only)
+            self._notify_session(thread_id)
             current = self.sessions.get(thread_id)
             if not expired_only and current and current.handoff_id:
                 await self._close_session(current)
@@ -968,6 +978,8 @@ class BrowserService:
 
     async def _expire_handoffs(self, thread_id):
         expired = await self.repository.expire_handoffs(thread_id)
+        if expired:
+            self._notify_session(thread_id)
         current = self.sessions.get(thread_id)
         if current and (any(payload["handoff_id"] == current.handoff_id for payload in expired)
                         or (current.handoff_expires_at is not None and current.handoff_expires_at <= time.time())):

@@ -265,8 +265,10 @@ def fake():
 
 @pytest_asyncio.fixture
 async def service(fake):
+    from agent.modules.agent_runtime.active_sessions import ActiveSessionRegistry
+
     settings = InstaboxSettings(enabled=True, api_key=API_KEY)
-    ibx = InstaboxService(SimpleNamespace(), repository=MemoryRepository(), http_client=fake.client(),
+    ibx = InstaboxService(SimpleNamespace(active_session_registry=ActiveSessionRegistry()), repository=MemoryRepository(), http_client=fake.client(),
                           settings_loader=lambda: settings)
     yield ibx
     await ibx.close()
@@ -477,6 +479,33 @@ async def test_desktop_starts_once_and_runs_input_on_the_display(fake, service):
     assert fake.desktop[machine_id]["controller"] == "human"
     await computer.set_human_control(machine_id, False)
     assert fake.desktop[machine_id]["controller"] == "agent"
+
+
+@pytest.mark.asyncio
+async def test_implicit_desktop_start_and_invalidation_notify_dashboard(fake, service):
+    from agent.modules.workspaces import ComputerStep
+    from agent.modules.workspaces.instabox_backend import InstaboxComputer
+
+    machine_id = fake.add_machine()
+    registry = service.container.active_session_registry
+    queue = registry.subscribe()
+    try:
+        computer = InstaboxComputer(service)
+        await computer.status(machine_id)
+        assert not fake.desktop[machine_id]["running"]
+        assert queue.empty()
+        step = ComputerStep.parse({"action": "click", "x": 10, "y": 20})
+        await computer.act(machine_id, step)
+        await asyncio.sleep(0)
+        expected = {"type": "computer_session_changed", "data": {"backend": "instabox", "locator": machine_id}}
+        assert queue.get_nowait() == expected
+        await computer.act(machine_id, step)
+        assert queue.empty()
+        computer.invalidate(machine_id)
+        await asyncio.sleep(0)
+        assert queue.get_nowait() == {"type": "computer_session_changed", "data": {**expected["data"], "reset": True}}
+    finally:
+        registry.unsubscribe(queue)
 
 
 @pytest.mark.asyncio

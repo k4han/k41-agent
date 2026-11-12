@@ -26,20 +26,20 @@ import {
   X,
   Zap,
 } from "lucide-solid";
-import { batch, createEffect, createMemo, createResource, createSelector, createSignal, For, Match, on, onCleanup, onMount, Show, Suspense, Switch, untrack } from "solid-js";
+import { batch, createEffect, createMemo, createResource, createSelector, createSignal, For, lazy, Match, on, onCleanup, onMount, Show, Suspense, Switch, untrack } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { Portal } from "solid-js/web";
 
 import { Dialog } from "@/components/Dialog";
-import { BrowserPanel } from "@/components/BrowserPanel";
-import { WorkspaceDesktop } from "@/components/WorkspaceDesktop";
 import { WorkspaceFilePreview } from "@/components/WorkspaceFilePreview";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
 import type { BrowserHandoffResume } from "@/lib/browserViewer";
 import { getBackends } from "@/lib/catalogStore";
 import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
-import { renderUnifiedDiffHtml } from "@/lib/diffView";
+import { useBrowserSession } from "@/lib/useBrowserSession";
+import { useComputerSession } from "@/lib/useComputerSession";
+import { matchesWorkspaceEvent, singleFlight, visibleWorkspaceDirectories, WORKSPACE_IDLE_POLL_MS, WORKSPACE_RUNNING_POLL_MS, WORKSPACE_REFRESH_DELAY_MS, type WorkspaceEventIdentity } from "@/lib/workspaceRefresh";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { createDarkMode } from "@/lib/theme";
 import { localWorkspaceRef } from "@/lib/workspace";
@@ -111,10 +111,9 @@ type WorkspaceResolvePayload = {
 
 type WorkspaceTab = "changes" | "files" | "browser" | "desktop" | `file:${string}`;
 
-const WORKSPACE_POLL_INTERVAL_MS = 15_000;
-// Fallback polling during active tool runs (10-15s).
-const WORKSPACE_RUNNING_POLL_INTERVAL_MS = 10_000;
-const WORKSPACE_REFRESH_DELAY_MS = 300;
+const BrowserPanel = lazy(() => import("@/components/BrowserPanel").then(module => ({ default: module.BrowserPanel })));
+const WorkspaceDesktop = lazy(() => import("@/components/WorkspaceDesktop").then(module => ({ default: module.WorkspaceDesktop })));
+const DiffView = lazy(() => import("@/components/WorkspaceDiffView"));
 
 function buildWorkspaceQuery(threadId: string, workspace: WorkspaceRef | null, extra?: Record<string, string>, binding?: WorkspaceBinding | null) {
   const params = new URLSearchParams();
@@ -171,11 +170,6 @@ function fileTabPath(tab: WorkspaceTab): string {
 
 function fileName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() || path;
-}
-
-function DiffView(props: { diff: string; path: string }) {
-  const html = createMemo(() => renderUnifiedDiffHtml(props.diff, props.path, { sideBySide: true }));
-  return <div class="workspace-diff2html" innerHTML={html()} />;
 }
 
 function FileCodeView(props: { content: string; path: string; dark: boolean }) {
@@ -265,7 +259,7 @@ export function WorkspaceExplorer(props: {
   const [diffPayload, setDiffPayload] = createSignal<WorkspaceDiffPayload | null>(null);
   const [diffLoading, setDiffLoading] = createSignal(false);
   const [diffError, setDiffError] = createSignal("");
-  const defaultTabs = (): WorkspaceTab[] => props.onBrowserResume ? ["files", "browser"] : ["files"];
+  const defaultTabs = (): WorkspaceTab[] => ["files"];
   const [openTabs, setOpenTabs] = createSignal<WorkspaceTab[]>(defaultTabs());
   const [activeTab, setActiveTab] = createSignal<WorkspaceTab>("files");
   const [lastPrimaryTab, setLastPrimaryTab] = createSignal<WorkspaceTab>("files");
@@ -281,6 +275,9 @@ export function WorkspaceExplorer(props: {
     return getBackends().find((item) => item.name === backend)?.capabilities?.includes("desktop") ? backend : "";
   };
   const desktopLocator = () => desktopBackend() ? (props.workspace?.locator || "").trim() : "";
+  const [browserMounted, setBrowserMounted] = createSignal(false);
+  const [desktopMounted, setDesktopMounted] = createSignal(false);
+  createEffect(() => { if (browserActive()) setBrowserMounted(true); if (desktopActive()) setDesktopMounted(true); });
   let explorerRef: HTMLElement | undefined;
   const [containerWidth, setContainerWidth] = createSignal(
     typeof window !== "undefined" ? window.innerWidth : 640
@@ -443,10 +440,19 @@ export function WorkspaceExplorer(props: {
   const [reconnectingModal, setReconnectingModal] = createSignal(false);
   let generation = 0;
   let requestController = new AbortController();
+  let diffController = new AbortController();
   const treeRequestIds = new Map<string, number>();
   const fileRequestIds = new Map<string, number>();
   // Retain inactive previews until a workspace refresh invalidates them.
   const fileVersions = new Map<string, number>();
+  const treeVersions = new Map<string, number>();
+  const treeReadAt = new Map<string, number>();
+  const fileReadAt = new Map<string, number>();
+  const treeRequests = new Map<string, Promise<void>>();
+  const changesRequests = new Map<string, Promise<void>>();
+  let changesVersion = -1;
+  let changesReadAt = 0;
+  let diffReadAt = 0;
   let workspaceVersion = 0;
   let diffVersion = -1;
   let lastRefreshAt = 0;
@@ -457,11 +463,42 @@ export function WorkspaceExplorer(props: {
   let pollTimer: number | undefined;
   let refreshRunning = false;
   let refreshPending = false;
+  type RefreshReason = "activate" | "poll" | "event" | "manual";
+  let queuedReason: RefreshReason = "activate";
   const [documentVisible, setDocumentVisible] = createSignal(
     typeof document !== "undefined" && document.visibilityState !== "hidden",
   );
   const canAutoRefresh = () => props.visible !== false && documentVisible();
-  const pollInterval = () => props.running ? WORKSPACE_RUNNING_POLL_INTERVAL_MS : WORKSPACE_POLL_INTERVAL_MS;
+  const pollInterval = () => props.running ? WORKSPACE_RUNNING_POLL_MS : WORKSPACE_IDLE_POLL_MS;
+  const treeVisible = () => openTabs().includes("files") && lastPrimaryTab() === "files"
+    && !(splitLayout() && fileExpanded()) && !(isCompact() && activeTab().startsWith("file:") && treeCollapsed());
+  const changesVisible = () => openTabs().includes("changes") && lastPrimaryTab() === "changes" && !(splitLayout() && fileExpanded());
+  const fileVisible = () => activeTab().startsWith("file:") && !panelActive() && !(splitLayout() && fileCollapsed());
+  const browserSession = useBrowserSession({
+    threadId: () => props.onBrowserResume ? props.threadId || null : null,
+    visible: canAutoRefresh, active: browserActive, busy: () => Boolean(props.running),
+    onOpen: () => openBrowser(),
+    onHandoffChange: (pending, thread) => props.onBrowserHandoffChange?.(pending, thread),
+    onSessionChange: (active, thread) => props.onBrowserSessionChange?.(active, thread),
+  });
+  const computerSession = useComputerSession(desktopBackend, desktopLocator, canAutoRefresh);
+  const dismissedBrowsers = new Map<string, string>();
+  let changesDismissed = false;
+  let desktopDismissed = false;
+  const addBackgroundTab = (tab: WorkspaceTab) => setOpenTabs(current => current.includes(tab) ? current : [...current, tab]);
+  const syncBrowserTab = () => {
+    const current = browserSession.status();
+    if (current?.open && current.generation && dismissedBrowsers.get(props.threadId) !== current.generation) addBackgroundTab("browser");
+  };
+  createEffect(on(() => [props.threadId, browserSession.status()?.open, browserSession.status()?.generation] as const, () => syncBrowserTab()));
+  createEffect(on(() => changes().length > 0, (changed) => {
+    if (!changed) changesDismissed = false;
+    else if (!changesDismissed) addBackgroundTab("changes");
+  }));
+  createEffect(on(() => [desktopBackend(), desktopLocator(), computerSession.state()?.running] as const, ([backend, locator, running], previous) => {
+    if (!previous || previous[0] !== backend || previous[1] !== locator || running === false) desktopDismissed = false;
+    if (running && !desktopDismissed) addBackgroundTab("desktop");
+  }));
   const isActiveTab = createSelector(activeTab);
   const isActionMenuOpen = createSelector(actionMenuPath);
   const isChangeExpanded = createSelector(expandedChangePath);
@@ -485,6 +522,7 @@ export function WorkspaceExplorer(props: {
   };
   const rootPath = () => workspaceRoot() || "";
   const rootEntries = () => entriesByPath[rootPath()] || entriesByPath[""] || [];
+  const visibleDirectories = createMemo(() => visibleWorkspaceDirectories(rootEntries(), entriesByPath, expandedByPath));
   const rootLoaded = () => entriesByPath[rootPath()] !== undefined || entriesByPath[""] !== undefined;
   const rootTreeTruncated = () =>
     treeTruncatedByPath[rootPath()] || treeTruncatedByPath[""] || false;
@@ -499,10 +537,12 @@ export function WorkspaceExplorer(props: {
   const activeFilePayload = () => filePayloads[activeFilePath()];
   const activeFileRevision = () => `${activeFilePayload()?.modified_at || 0}:${activeFilePayload()?.size || 0}`;
 
-  const loadTree = async (path = "", targetGeneration = generation) => {
+  const loadTree = (path = "", targetGeneration = generation) => singleFlight(treeRequests, `${targetGeneration}:${path}`, async () => {
     if (disposed || !canQuery()) {
       return;
     }
+    if (treeVersions.get(path) === workspaceVersion && Date.now() - (treeReadAt.get(path) || 0) < pollInterval()) return;
+    const targetVersion = workspaceVersion;
     const requestId = (treeRequestIds.get(path) || 0) + 1;
     treeRequestIds.set(path, requestId);
     const isCurrent = () => targetGeneration === generation && treeRequestIds.get(path) === requestId;
@@ -520,6 +560,8 @@ export function WorkspaceExplorer(props: {
         return;
       }
       batch(() => {
+        treeVersions.set(path, targetVersion);
+        treeReadAt.set(path, Date.now());
         setEntriesByPath(payload.path, reconcile(payload.entries, { key: "path" }));
         setTreeTruncatedByPath(payload.path, payload.truncated);
         if (payload.root) setWorkspaceRoot(payload.root);
@@ -531,23 +573,26 @@ export function WorkspaceExplorer(props: {
     } finally {
       if (isCurrent()) {
         setTreeLoadingByPath(path, false);
+        if (targetVersion !== workspaceVersion && treeVisible()) scheduleRefresh();
       }
     }
-  };
+  });
 
   const reloadPath = async (path: string) => {
     const targetGeneration = generation;
+    workspaceVersion++;
     await loadTree(path, targetGeneration);
     if (targetGeneration === generation) {
       await loadChanges(targetGeneration);
     }
   };
 
-  const loadChanges = async (targetGeneration = generation) => {
+  const loadChanges = (targetGeneration = generation) => singleFlight(changesRequests, String(targetGeneration), async () => {
     if (disposed || !canQuery()) {
       return;
     }
     const requestId = ++changesRequestId;
+    const targetVersion = workspaceVersion;
     const isCurrent = () => targetGeneration === generation && requestId === changesRequestId;
     setChangesLoading(true);
     setChangesError("");
@@ -561,6 +606,8 @@ export function WorkspaceExplorer(props: {
         return;
       }
       batch(() => {
+        changesVersion = targetVersion;
+        changesReadAt = Date.now();
         setChangeState("items", reconcile(payload.changes || [], { key: "path" }));
         setGitMessage(payload.message || "");
         setIsGitRepo(payload.is_git_repo);
@@ -573,17 +620,20 @@ export function WorkspaceExplorer(props: {
     } finally {
       if (isCurrent()) {
         setChangesLoading(false);
+        if (targetVersion !== workspaceVersion) scheduleRefresh();
       }
     }
-  };
+  });
 
   const loadDiff = async (path: string, targetGeneration = generation) => {
     if (disposed || !path || !canQuery()) {
       return;
     }
     if (expandedChangePath() === path && (
-      diffLoading() || (diffPayload()?.path === path && diffVersion === workspaceVersion)
+      diffLoading() || (diffPayload()?.path === path && diffVersion === workspaceVersion && Date.now() - diffReadAt < pollInterval())
     )) return;
+    diffController.abort();
+    diffController = new AbortController();
     const targetVersion = workspaceVersion;
     const requestId = ++diffRequestId;
     const isCurrent = () => targetGeneration === generation && requestId === diffRequestId;
@@ -597,10 +647,11 @@ export function WorkspaceExplorer(props: {
       const query = workspaceQuery(props.threadId, queryWorkspace(), { path });
       const payload = await apiFetch<WorkspaceDiffPayload>(
         `/dashboard-api/workspace/diff?${query}`,
-        { signal: requestController.signal },
+        { signal: AbortSignal.any([requestController.signal, diffController.signal]) },
       );
       if (isCurrent() && expandedChangePath() === path) {
         diffVersion = targetVersion;
+        diffReadAt = Date.now();
         const current = diffPayload();
         if (
           !current
@@ -628,7 +679,7 @@ export function WorkspaceExplorer(props: {
     if (disposed || !path || !canQuery()) {
       return;
     }
-    if (fileLoadingByPath[path] || (filePayloads[path] && fileVersions.get(path) === workspaceVersion)) return;
+    if (fileLoadingByPath[path] || (filePayloads[path] && fileVersions.get(path) === workspaceVersion && Date.now() - (fileReadAt.get(path) || 0) < pollInterval())) return;
     const targetVersion = workspaceVersion;
     const requestId = (fileRequestIds.get(path) || 0) + 1;
     fileRequestIds.set(path, requestId);
@@ -645,6 +696,7 @@ export function WorkspaceExplorer(props: {
         return;
       }
       fileVersions.set(path, targetVersion);
+      fileReadAt.set(path, Date.now());
       const current = filePayloads[path];
       if (
         !current
@@ -668,19 +720,25 @@ export function WorkspaceExplorer(props: {
     } finally {
       if (isCurrent()) {
         setFileLoadingByPath(path, false);
-        if (activeFilePath() === path && targetVersion !== workspaceVersion) scheduleRefresh();
+        if (fileVisible() && activeFilePath() === path && targetVersion !== workspaceVersion) scheduleRefresh();
       }
     }
   };
 
   const hardRefresh = () => {
     generation += 1;
-    const targetGeneration = generation;
     requestController.abort();
     requestController = new AbortController();
     treeRequestIds.clear();
     fileRequestIds.clear();
     fileVersions.clear();
+    fileReadAt.clear();
+    treeVersions.clear();
+    treeReadAt.clear();
+    changesVersion = -1;
+    changesReadAt = 0;
+    changesDismissed = false;
+    desktopDismissed = false;
     workspaceVersion += 1;
     diffVersion = -1;
     lastRefreshAt = 0;
@@ -706,22 +764,18 @@ export function WorkspaceExplorer(props: {
       setDiffPayload(null);
       setDiffLoading(false);
       setDiffError("");
-      const keepBrowser = untrack(browserActive);
       setOpenTabs(defaultTabs());
-      setActiveTab(keepBrowser ? "browser" : "files");
-      setLastPrimaryTab(keepBrowser ? "browser" : "files");
+      setActiveTab("files");
+      setLastPrimaryTab("files");
+      syncBrowserTab();
+      if (computerSession.state()?.running) addBackgroundTab("desktop");
       setActionMenuPath(null);
       setPlusMenuOpen(false);
       setFilePayloads(reconcile({}));
       setFileLoadingByPath(reconcile({}));
       setFileErrorByPath(reconcile({}));
-      if (canAutoRefresh()) {
-        void Promise.all([loadTree(), loadChanges()]).then(() => {
-          if (!disposed && targetGeneration === generation) lastRefreshAt = Date.now();
-        });
-      }
     });
-    schedulePoll();
+    void softRefresh("event");
   };
 
   const schedulePoll = () => {
@@ -730,11 +784,12 @@ export function WorkspaceExplorer(props: {
     if (disposed || !canQuery() || !canAutoRefresh()) return;
     pollTimer = window.setTimeout(() => {
       pollTimer = undefined;
-      void softRefresh();
-    }, pollInterval());
+      void softRefresh("poll");
+    }, treeVisible() || fileVisible() || changesVisible() ? pollInterval() : WORKSPACE_IDLE_POLL_MS);
   };
 
-  const scheduleRefresh = () => {
+  const scheduleRefresh = (reason: RefreshReason = "event") => {
+    if (reason !== "activate" || queuedReason === "activate") queuedReason = reason;
     if (disposed || !canQuery() || !canAutoRefresh()) return;
     if (refreshRunning) {
       refreshPending = true;
@@ -744,14 +799,17 @@ export function WorkspaceExplorer(props: {
     if (refreshTimer !== undefined) return;
     refreshTimer = window.setTimeout(() => {
       refreshTimer = undefined;
-      void softRefresh();
+      const nextReason = queuedReason;
+      queuedReason = "activate";
+      void softRefresh(nextReason);
     }, WORKSPACE_REFRESH_DELAY_MS);
   };
 
-  const softRefresh = async () => {
+  const softRefresh = async (reason: RefreshReason = "event") => {
     if (!canQuery() || disposed || !canAutoRefresh()) return;
     if (refreshRunning) {
       refreshPending = true;
+      if (reason !== "activate" || queuedReason === "activate") queuedReason = reason;
       return;
     }
     window.clearTimeout(refreshTimer);
@@ -759,23 +817,28 @@ export function WorkspaceExplorer(props: {
     window.clearTimeout(pollTimer);
     pollTimer = undefined;
     refreshRunning = true;
-    workspaceVersion += 1;
+    if (reason === "poll" || reason === "manual") workspaceVersion += 1;
     const targetGeneration = generation;
-    const paths = untrack(() => Object.keys(expandedByPath).filter((path) => path && expandedByPath[path]));
+    const paths = untrack(visibleDirectories);
     // Expansion remains user-owned, including changes made during the request.
     const reloadWithExpansion = async () => {
+      if (!treeVisible()) return;
       await loadTree("", targetGeneration);
       for (const path of paths) {
         if (disposed || targetGeneration !== generation || !canAutoRefresh()) return;
-        if (expandedByPath[path]) await loadTree(path, targetGeneration);
+        if (!treeVisible()) return;
+        if (untrack(visibleDirectories).includes(path)) await loadTree(path, targetGeneration);
       }
     };
-    const filePath = activeFilePath();
-    const diffPath = lastPrimaryTab() === "changes" ? expandedChangePath() : "";
+    const filePath = fileVisible() ? activeFilePath() : "";
+    const diffPath = changesVisible() ? expandedChangePath() : "";
+    const discover = reason === "event" || reason === "manual" || !changesLoaded()
+      || Date.now() - changesReadAt >= WORKSPACE_IDLE_POLL_MS
+      || changesVisible() && (changesVersion !== workspaceVersion || Date.now() - changesReadAt >= pollInterval());
     try {
       await Promise.all([
         reloadWithExpansion(),
-        loadChanges(targetGeneration),
+        discover ? loadChanges(targetGeneration) : undefined,
         filePath ? loadFile(filePath, targetGeneration) : undefined,
         diffPath ? loadDiff(diffPath, targetGeneration) : undefined,
       ]);
@@ -785,7 +848,7 @@ export function WorkspaceExplorer(props: {
         lastRefreshAt = Date.now();
         if (refreshPending) {
           refreshPending = false;
-          scheduleRefresh();
+          scheduleRefresh(queuedReason);
         }
         schedulePoll();
       }
@@ -795,12 +858,13 @@ export function WorkspaceExplorer(props: {
   const refresh = async () => {
     if (refreshRunning) {
       refreshPending = true;
+      queuedReason = "manual";
       return;
     }
     const targetGeneration = generation;
     setManualRefreshing(true);
     try {
-      await softRefresh();
+      await softRefresh("manual");
     } finally {
       if (targetGeneration === generation) setManualRefreshing(false);
     }
@@ -836,7 +900,7 @@ export function WorkspaceExplorer(props: {
   const toggleDirectory = (path: string) => {
     const isOpen = Boolean(expandedByPath[path]);
     setExpandedByPath(path, !isOpen);
-    if (isOpen || entriesByPath[path] || treeLoadingByPath[path]) {
+    if (isOpen || treeLoadingByPath[path]) {
       return;
     }
     void loadTree(path);
@@ -844,6 +908,7 @@ export function WorkspaceExplorer(props: {
 
   const toggleChangeDiff = (path: string) => {
     if (expandedChangePath() === path) {
+      diffController.abort();
       diffRequestId += 1;
       diffVersion = -1;
       setExpandedChangePath("");
@@ -871,6 +936,9 @@ export function WorkspaceExplorer(props: {
 
   const closeTab = (tab: WorkspaceTab, event?: MouseEvent) => {
     event?.stopPropagation();
+    if (tab === "browser") dismissedBrowsers.set(props.threadId, browserSession.status()?.generation || "");
+    if (tab === "desktop") desktopDismissed = true;
+    if (tab === "changes") changesDismissed = true;
     const current = openTabs();
     const nextTabs = current.filter((t) => t !== tab);
     setOpenTabs(nextTabs);
@@ -912,14 +980,15 @@ export function WorkspaceExplorer(props: {
     openTab(tab);
   };
 
-  createEffect(on(activeTab, (tab) => {
-    const path = fileTabPath(tab);
-    if (path) void loadFile(path);
-  }, { defer: true }));
-
-  createEffect(on(lastPrimaryTab, (tab) => {
-    if (tab === "changes" && expandedChangePath()) void loadDiff(expandedChangePath());
-  }, { defer: true }));
+  createEffect(on(() => [treeVisible(), changesVisible(), fileVisible() ? activeFilePath() : "", browserActive(), desktopActive()] as const,
+    () => {
+      if (canAutoRefresh()) {
+        if (fileVisible()) void loadFile(activeFilePath());
+        if (changesVisible() && expandedChangePath()) void loadDiff(expandedChangePath());
+      }
+      scheduleRefresh("activate");
+      schedulePoll();
+    }, { defer: true }));
 
   const toggleActionMenu = (path: string, event: MouseEvent) => {
     event.stopPropagation();
@@ -1121,29 +1190,26 @@ export function WorkspaceExplorer(props: {
   // Tool completion is the primary signal; polling covers external writes.
   if (typeof window !== "undefined") {
     const handleWorkspaceRefreshEvent = (event: Event) => {
-      const custom = event as CustomEvent<{ threadId?: string }>;
-      const tid = custom.detail?.threadId;
-      // Only refresh the explorer that belongs to the affected thread (or
-      // the global explorer when no thread filter is present).
-      if (tid && tid !== props.threadId) {
-        return;
-      }
+      const custom = event as CustomEvent<WorkspaceEventIdentity>;
+      if (!matchesWorkspaceEvent(custom.detail, { thread_id: props.threadId,
+        project_id: props.binding?.project_id ?? undefined, project_workspace_id: props.binding?.project_workspace_id ?? undefined,
+        backend: queryWorkspace()?.backend, locator: queryWorkspace()?.locator })) return;
       workspaceVersion += 1;
       scheduleRefresh();
     };
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleWorkspaceRefreshEvent);
-    window.addEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleWorkspaceRefreshEvent);
     window.addEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_CHANGED, handleWorkspaceRefreshEvent);
+    window.addEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED, handleWorkspaceRefreshEvent);
     const handleVisibilityChange = () => setDocumentVisible(document.visibilityState !== "hidden");
     const handleFocus = () => {
-      if (Date.now() - lastRefreshAt >= pollInterval()) scheduleRefresh();
+      if (Date.now() - lastRefreshAt >= pollInterval()) scheduleRefresh("activate");
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("focus", handleFocus);
     onCleanup(() => {
       window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, handleWorkspaceRefreshEvent);
-      window.removeEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleWorkspaceRefreshEvent);
       window.removeEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_CHANGED, handleWorkspaceRefreshEvent);
+      window.removeEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED, handleWorkspaceRefreshEvent);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("focus", handleFocus);
     });
@@ -1177,12 +1243,34 @@ export function WorkspaceExplorer(props: {
   });
   createEffect(on(workspaceRefreshKey, hardRefresh));
 
-  createEffect(on(() => props.threadId, (newTid, prevTid) => {
-    // When switching threads within the same workspace, sync changes softly
-    // without resetting expanded folders or closing open tabs.
-    if (newTid && prevTid && newTid !== prevTid) {
-      scheduleRefresh();
-    }
+  createEffect(on(() => [props.threadId, props.binding?.runtime_generation] as const, ([newTid], previous) => {
+    // Keep workspace-owned views while rejecting reads from the previous conversation or runtime.
+    generation++;
+    requestController.abort();
+    requestController = new AbortController();
+    treeRequestIds.clear();
+    fileRequestIds.clear();
+    changesRequestId++;
+    diffRequestId++;
+    workspaceVersion++;
+    refreshRunning = false;
+    refreshPending = false;
+    batch(() => {
+      setTreeLoadingByPath(reconcile({}));
+      setFileLoadingByPath(reconcile({}));
+      setChangesLoading(false);
+      setDiffLoading(false);
+      if (previous && newTid !== previous[0]) {
+        setOpenTabs(current => current.filter(tab => tab !== "browser"));
+        if (lastPrimaryTab() === "browser") {
+          addBackgroundTab("files");
+          setLastPrimaryTab("files");
+          if (!activeTab().startsWith("file:")) setActiveTab("files");
+        }
+        syncBrowserTab();
+      }
+    });
+    scheduleRefresh();
   }, { defer: true }));
 
   onCleanup(() => {
@@ -1711,17 +1799,16 @@ export function WorkspaceExplorer(props: {
           </div>
         </Show>
 
-        <Show when={props.onBrowserResume}>
+        <Show when={props.onBrowserResume && browserMounted() && openTabs().includes("browser")}>
           <section class="workspace-browser-panel workspace-tab-panel" role="tabpanel" aria-label="Browser" hidden={!browserActive()}>
-            <BrowserPanel threadId={props.threadId || null} open={props.visible !== false && browserActive()} busy={Boolean(props.running)}
+            <Suspense><BrowserPanel session={browserSession} threadId={props.threadId || null} open={props.visible !== false && browserActive()} busy={Boolean(props.running)}
               onOpen={openBrowser} onResume={(payload) => props.onBrowserResume?.(payload)}
-              onSessionChange={props.onBrowserSessionChange}
-              onHandoffChange={(pending, threadId) => props.onBrowserHandoffChange?.(pending, threadId)} />
+              onHandoffChange={(pending, threadId) => props.onBrowserHandoffChange?.(pending, threadId)} /></Suspense>
           </section>
         </Show>
-        <Show when={desktopLocator() && openTabs().includes("desktop")}>
+        <Show when={desktopLocator() && desktopMounted() && openTabs().includes("desktop")}>
           <section class="workspace-desktop-panel workspace-tab-panel" role="tabpanel" aria-label="Desktop" hidden={!desktopActive()}>
-            <WorkspaceDesktop backend={desktopBackend()} locator={desktopLocator()} active={props.visible !== false && desktopActive()} compact={isCompact()} />
+            <Suspense><WorkspaceDesktop backend={desktopBackend()} locator={desktopLocator()} active={canAutoRefresh() && desktopActive()} compact={isCompact()} /></Suspense>
           </section>
         </Show>
         <Show when={openTabs().includes("changes")}>
@@ -1798,10 +1885,10 @@ export function WorkspaceExplorer(props: {
                                       </div>
                                     }
                                   >
-                                    <DiffView
+                                    <Suspense><DiffView
                                       diff={diffPayload()?.diff || ""}
                                       path={diffPayload()?.path || change.path}
-                                    />
+                                    /></Suspense>
                                     <Show when={diffPayload()?.truncated}>
                                       <div class="hint workspace-hint">Diff truncated.</div>
                                     </Show>
