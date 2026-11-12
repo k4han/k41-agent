@@ -299,7 +299,7 @@ test('closing and reopening a background stream rejects queued events from the p
   const events = [];
   const { useBackgroundStream } = loadModule('../src/lib/useBackgroundStream.ts', {
     '@/lib/endpoints': { API_PATHS: { backgroundTaskStream: id => id } },
-    '@/lib/chatStreamHandler': { handleStreamEvent: event => events.push(event) },
+    '@/lib/protocolStreamHandler': { handleProtocolEvent: event => events.push(event) },
     '@/lib/eventConstants': { CUSTOM_DOM_EVENTS: {} },
   }, { EventSource: FakeEventSource });
   mount(t, () => {

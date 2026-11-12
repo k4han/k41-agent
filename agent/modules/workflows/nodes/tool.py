@@ -248,4 +248,6 @@ async def tool_node(
             result["active_skills"] = active
         elif isinstance(result, list):
             result.append(Command(update={"active_skills": active}))
+    from agent.modules.agent_runtime.delegation import annotate_delegation_results
+    result = await annotate_delegation_results(result, str(next_config.get("configurable", {}).get("thread_id") or ""))
     return await retain_tool_messages(result, SimpleNamespace(context=runtime.context, config=next_config))

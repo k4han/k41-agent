@@ -1,4 +1,4 @@
-import type { TranscriptItem } from "@/components/Transcript";
+import type { TranscriptItem, TranscriptTool } from "@/components/Transcript";
 import {
   PLAN_MODE_TOOL_NAME,
   createTranscriptPlanReview,
@@ -10,6 +10,7 @@ import type { ContextUsage } from "@/lib/chatStreamStore";
 import { parseContextBreakdown, type WorkspaceRef } from "@/types";
 import { CUSTOM_DOM_EVENTS, recursionLimitStorageKey, STREAM_ERROR_CODES, STREAM_EVENTS } from "@/lib/eventConstants";
 import { GENERATE_IMAGE_TOOL_NAME } from "@/lib/generatedImages";
+import type { ProtocolState } from "@/lib/protocolStreamHandler";
 import {
   ASK_USER_TOOL_NAME,
   normalizeUserInputRequest,
@@ -32,11 +33,25 @@ export interface StreamCallbacks {
   onThreadTitle?: (threadId: string, title: string) => void;
   onContextUsage?: (usage: ContextUsage, threadId: string) => void;
   onBrowserHandoffChange?: (pending: boolean, threadId: string) => void;
+  updateToolActivity?: (toolCallId: string, patch: Partial<TranscriptTool>, threadId: string) => void;
+}
+
+export function mergeToolActivity<T extends TranscriptTool>(item: T, patch: Partial<TranscriptTool>): T {
+  return {
+    ...item,
+    ...patch,
+    subagent: patch.subagent ? {
+      ...item.subagent,
+      ...patch.subagent,
+      items: patch.subagent.items?.length ? patch.subagent.items : item.subagent?.items ?? patch.subagent.items,
+    } : item.subagent,
+  };
 }
 
 // ── Mutable refs shared across event handling ──
 
 export type AssistantIdRef = {
+  protocol?: ProtocolState;
   id: number | null;
   /** Thinking block that is still receiving reasoning deltas. */
   thinkingId?: number | null;
@@ -125,7 +140,7 @@ export function settleStreamThinking(
 
 // ── Core event handler ──
 
-export function handleStreamEvent(
+export function applyApplicationEvent(
   event: Record<string, unknown>,
   assistantIdRef: AssistantIdRef,
   streamedRef: StreamedRef,

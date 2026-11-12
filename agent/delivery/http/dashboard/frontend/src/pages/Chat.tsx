@@ -1,3 +1,4 @@
+import { handleProtocolEvent } from "@/lib/protocolStreamHandler";
 import { useLocation, useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import {
   Menu,
@@ -66,7 +67,7 @@ import {
   toPayloadAttachment,
 } from "@/lib/chatAttachments";
 import {
-  handleStreamEvent,
+  mergeToolActivity,
   settleStreamThinking,
   readNDJSONStream,
   type StreamCallbacks,
@@ -855,6 +856,10 @@ export function ChatPage() {
   });
 
   const streamCallbacks: StreamCallbacks = {
+    updateToolActivity: (toolCallId, patch, threadId) => {
+      setItems((current) => current.map((item) => item.type === "tool" && item.tool_call_id === toolCallId
+        ? mergeToolActivity(item, patch) : item), threadId);
+    },
     appendItem,
     updateMessage,
     replaceMessage,
@@ -1143,7 +1148,7 @@ export function ChatPage() {
       },
     };
     return (event: Record<string, unknown>) =>
-      handleStreamEvent(event, assistantIdRef, streamedRef, streamThreadIdRef, callbacks);
+      handleProtocolEvent(event, assistantIdRef, streamedRef, streamThreadIdRef, callbacks);
   };
 
   const markLocalStreamFinished = (threadId: string) => {

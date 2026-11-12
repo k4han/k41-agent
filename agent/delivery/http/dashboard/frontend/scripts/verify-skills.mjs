@@ -44,7 +44,7 @@ const detail = { id: 'demo-id', name: 'demo', description: 'A skill with resourc
   file_version: documentVersion, frontmatter: { name: 'demo', description: 'A skill with resources.', custom: 'keep', metadata: { version: '1' } }, body: '# Instructions' };
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (url.pathname === '/api/chat/events' && req.method === 'POST') {
+  if (url.pathname === '/v2/api/chat/events' && req.method === 'POST') {
     let body = ''; for await (const chunk of req) body += chunk;
     sentChat = JSON.parse(body); res.setHeader('Content-Type', 'application/x-ndjson'); res.end(); return;
   }

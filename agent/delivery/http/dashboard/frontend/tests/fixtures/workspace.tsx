@@ -1,3 +1,4 @@
+import { handleProtocolEvent } from "@/lib/protocolStreamHandler";
 import { createSignal, Show } from "solid-js";
 import { render } from "solid-js/web";
 
@@ -5,7 +6,7 @@ import { ToastProvider } from "@/components/Toast";
 import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { fetchCatalog } from "@/lib/catalogStore";
-import { handleStreamEvent, readNDJSONStream } from "@/lib/chatStreamHandler";
+import { readNDJSONStream } from "@/lib/chatStreamHandler";
 import type { StreamCallbacks } from "@/lib/chatStreamHandler";
 import "@/styles/workspace.css";
 
@@ -168,7 +169,7 @@ function WorkspaceFixture() {
           controller.enqueue(encoded.slice(20));
           controller.close();
         } }),
-        (event) => handleStreamEvent(
+        (event) => handleProtocolEvent(
           event, { id: null }, { received: false }, { id: threadId, message: "" },
           { updateToolResult: () => {} } as unknown as StreamCallbacks,
         ),

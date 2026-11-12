@@ -4,7 +4,9 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 import openai
-from langchain_core.messages import AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages.block_translators import register_translator
+from langchain_core.messages.block_translators.openai import translate_content, translate_content_chunk
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_openai import ChatOpenAI
 from openai.types.completion_usage import PromptTokensDetails
@@ -44,6 +46,22 @@ def _attach_reasoning(message: Any, reasoning: str) -> None:
         message.additional_kwargs["reasoning_content"] = reasoning
 
 
+def _gateway_content_blocks(message: AIMessage) -> list[dict[str, Any]]:
+    """Expose gateway reasoning without changing the content merged by callers."""
+    blocks = translate_content_chunk(message) if isinstance(message, AIMessageChunk) else translate_content(message)
+    if isinstance(message.content, str):
+        # Stable identities keep text in one block when reasoning shares a delta.
+        blocks = [{**block, "index": "lc_gateway_text"} if block.get("type") == "text" else block
+                  for block in blocks]
+        reasoning = _reasoning_text(message.additional_kwargs)
+        if reasoning:
+            blocks.insert(0, {"type": "reasoning", "reasoning": reasoning, "index": "lc_gateway_reasoning"})
+    return blocks
+
+
+register_translator("k41_openai_compatible", _gateway_content_blocks, _gateway_content_blocks)
+
+
 class OpenAICompatibleChatModel(ChatOpenAI):
     """Count the final Chat Completions usage snapshot once per request.
 
@@ -61,10 +79,12 @@ class OpenAICompatibleChatModel(ChatOpenAI):
         if usage is not chunk.get("usage"):
             chunk = {**chunk, "usage": usage}
         generation = super()._convert_chunk_to_generation_chunk(chunk, default_chunk_class, base_generation_info)
+        if generation is not None:
+            generation.message.response_metadata["model_provider"] = "k41_openai_compatible"
         choices = chunk.get("choices") or []
         if generation is not None and choices and isinstance(choices[0], dict):
-            # Chunks merge string kwargs by concatenation, so the final message keeps all of it.
-            _attach_reasoning(generation.message, _reasoning_text(choices[0].get("delta")))
+            reasoning = _reasoning_text(choices[0].get("delta"))
+            _attach_reasoning(generation.message, reasoning)
         return generation
 
     def _create_chat_result(
@@ -86,6 +106,7 @@ class OpenAICompatibleChatModel(ChatOpenAI):
         for generation, choice in zip(result.generations, choices or []):
             message = choice.get("message") if isinstance(choice, dict) else getattr(choice, "message", None)
             _attach_reasoning(generation.message, _reasoning_text(message))
+            generation.message.response_metadata["model_provider"] = "k41_openai_compatible"
         return result
 
     def _stream(self, *args: Any, **kwargs: Any) -> Iterator[ChatGenerationChunk]:

@@ -181,11 +181,13 @@ def create_app(bootstrap_config: BootstrapConfig | None = None, container=None) 
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
-        expose_headers=[CSRF_HEADER_NAME],
+        expose_headers=[CSRF_HEADER_NAME, "X-Run-ID", "X-Thread-ID", "X-Stream-Version"],
     )
 
     if bootstrap_config.enable_api:
         fastapi_app.include_router(api_router)
+        from agent.delivery.http.api.events_v2 import router as events_v2_router
+        fastapi_app.include_router(events_v2_router)
         # Backward compatibility: redirect /api/* to /v1/api/*
         fastapi_app.middleware("http")(redirect_legacy_api)
 

@@ -1,12 +1,9 @@
+import { handleProtocolEvent } from "@/lib/protocolStreamHandler";
 import { createSignal, onCleanup } from "solid-js";
 
 import { API_PATHS } from "@/lib/endpoints";
 import type { ThreadMessagesPayload } from "@/lib/chatThreads";
-import {
-  handleStreamEvent,
-  type AssistantIdRef,
-  type StreamCallbacks,
-} from "@/lib/chatStreamHandler";
+import type { AssistantIdRef, StreamCallbacks } from "@/lib/chatStreamHandler";
 import type { BackgroundTaskSnapshot } from "@/lib/chatTypes";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import type { ActiveSession, BackgroundTask } from "@/types";
@@ -61,6 +58,7 @@ export function useBackgroundStream(params: UseBackgroundStreamParams) {
         return;
       }
       assistantIdRef.id = null;
+      assistantIdRef.protocol = undefined;
       assistantIdRef.thinkingId = null;
       streamedRef.received = false;
       setBackgroundStreamError("");
@@ -70,7 +68,7 @@ export function useBackgroundStream(params: UseBackgroundStreamParams) {
       if (backgroundEventSource !== source || backgroundEventThreadId !== threadId) {
         return;
       }
-      handleStreamEvent(
+      handleProtocolEvent(
         JSON.parse(event.data) as Record<string, unknown>,
         assistantIdRef,
         streamedRef,

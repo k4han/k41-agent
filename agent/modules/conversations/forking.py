@@ -266,6 +266,7 @@ async def _fork_reserved(thread_id: str, checkpoint_id: str, message_index: int)
         new_binding = binding
         temp = None
         skill_snapshots = None
+        copied_subthreads = []
         try:
             state = copy.deepcopy(snapshot.values)
             state["messages"] = copy.deepcopy(messages)
@@ -291,6 +292,9 @@ async def _fork_reserved(thread_id: str, checkpoint_id: str, message_index: int)
                     for key, entry in state.get("active_skills", {}).items():
                         replacements.append((key, activation_key(entry["agent_name"], temp, entry["name"])))
             state = _rebind_storage_references(state, replacements)
+            from agent.modules.agent_runtime.delegation import copy_delegated_history
+            await copy_delegated_history(state, thread_id, new_id,
+                created=copied_subthreads, replacements=replacements)
             if state.get("active_skills"):
                 from agent.modules.skills import get_skill_packages
 
@@ -319,6 +323,7 @@ async def _fork_reserved(thread_id: str, checkpoint_id: str, message_index: int)
             # Never run lifecycle cleanup against a shared project workspace.
             async def cleanup():
                 for operation in (
+                    *(lambda child_id=child_id: checkpointer.adelete_thread(child_id) for child_id in copied_subthreads),
                     lambda: repository.delete(new_id),
                     lambda: checkpointer.adelete_thread(new_id),
                     lambda: workspaces.delete(new_id),

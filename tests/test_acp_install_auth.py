@@ -749,9 +749,11 @@ def test_edit_route_rejects_acp_whichever_agent_the_request_names(monkeypatch, s
     monkeypatch.setattr(router_module, "build_run_params", lambda **_params: pytest.fail("The edit must be rejected first."))
     app = FastAPI()
     app.include_router(router_module.router)
+    from agent.delivery.http.api.events_v2 import router as events_router
+    app.include_router(events_router)
     app.dependency_overrides[get_current_admin] = lambda: "admin"
 
-    response = TestClient(app).post("/v1/api/chat/events/edit", json={
+    response = TestClient(app).post("/v2/api/chat/events/edit", json={
         "message": "edited", "thread_id": "t", "user_id": "u", "message_index": 0, "source_checkpoint_id": "c", **payload,
     })
     assert response.status_code == 409

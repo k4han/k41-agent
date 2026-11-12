@@ -63,7 +63,7 @@ def extract_message_thinking(message: object) -> str:
     additional = getattr(message, "additional_kwargs", None)
     if isinstance(additional, dict):
         reasoning = additional.get("reasoning_content")
-        if isinstance(reasoning, str):
+        if isinstance(reasoning, str) and reasoning not in pieces:
             pieces.append(reasoning)
     return "\n\n".join(piece for piece in pieces if piece.strip())
 

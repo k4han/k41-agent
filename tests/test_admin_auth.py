@@ -117,7 +117,7 @@ async def test_default_password_session_requires_change_before_console_access(
     async def protected():
         return {"status": "ok"}
 
-    paths = ["/dashboard-api/protected", "/v1/api/protected", "/api/protected", "/"]
+    paths = ["/dashboard-api/protected", "/v1/api/protected", "/v2/api/protected", "/api/protected", "/"]
     for path in paths:
         app.add_api_route(path, protected, dependencies=[Depends(auth.get_current_admin)])
 
@@ -150,6 +150,42 @@ async def test_default_password_session_requires_change_before_console_access(
         response = await client.post("/login", json={"password": "Private123!"})
         assert response.json()["password_change_required"] is False
         assert (await client.get(paths[0])).status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/dashboard-api/protected", "/api/protected", "/v1/api/protected", "/v2/api/protected", "/"])
+@pytest.mark.parametrize("credentials", ["missing", "invalid", "expired"])
+async def test_authentication_failures_preserve_api_errors_and_page_redirects(monkeypatch, path, credentials):
+    from datetime import datetime, timedelta, timezone
+    from fastapi import Depends, FastAPI
+    from httpx import ASGITransport, AsyncClient
+    import jwt
+    from agent.modules.admin_auth import auth
+
+    secret = "test-only-secret-" * 4
+    monkeypatch.setattr(auth, "get_secret_key", lambda: secret)
+    token = "invalid"
+    if credentials == "expired":
+        token = jwt.encode({"sub": "1", "ver": 0, "exp": datetime.now(timezone.utc) - timedelta(minutes=1)},
+                           secret, algorithm="HS256")
+    headers = {} if credentials == "missing" else {"Authorization": f"Bearer {token}"}
+    app = FastAPI()
+
+    @app.get(path, dependencies=[Depends(auth.get_current_admin)])
+    async def protected():
+        return {"status": "ok"}
+
+    async with AsyncClient(transport=ASGITransport(app), base_url="https://test") as client:
+        response = await client.get(path, headers=headers)
+    if path == "/":
+        assert response.status_code == 302
+        assert response.headers["location"] == "/login"
+    else:
+        assert response.status_code == 401
+        assert "location" not in response.headers
+        assert response.json()["detail"] == (
+            "Not authenticated" if credentials == "missing" else "Could not validate credentials"
+        )
 
 
 @pytest.mark.asyncio

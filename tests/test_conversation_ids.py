@@ -1,3 +1,5 @@
+from tests.stream_fixtures import EventGraph
+
 from dataclasses import replace
 import re
 from types import SimpleNamespace
@@ -51,8 +53,8 @@ async def test_dashboard_runs_keep_stored_identity_and_approval_support(isolated
     thread_id = create_thread_id(platform="api", user_id="dashboard")
     captured = {}
 
-    class FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             captured.update(kwargs["config"])
             yield {"messages": [AIMessage(content="Done")]}
 

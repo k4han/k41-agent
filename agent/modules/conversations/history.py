@@ -617,6 +617,8 @@ def _serialize_thread_messages(
             entry["content"] = extract_tool_display_content(msg) or ""
             if isinstance(msg.artifact, dict) and msg.artifact.get("browser"):
                 entry["browser_artifact"] = msg.artifact["browser"]
+            if isinstance(msg.artifact, dict) and msg.artifact.get("subagent"):
+                entry["subagent"] = msg.artifact["subagent"]
         else:
             entry["role"] = "system"
             entry["content"] = str(getattr(msg, "content", ""))
@@ -657,8 +659,9 @@ async def get_thread_messages_payload(
 
     active_checkpoint_id = _checkpoint_id_from_tuple(checkpoint_tuple)
     messages = _checkpoint_messages(checkpoint_tuple)
+    from agent.modules.agent_runtime.delegation import enrich_delegated_calls
     if not include_branch_metadata:
-        return _serialize_thread_messages(messages), active_checkpoint_id
+        return await enrich_delegated_calls(_serialize_thread_messages(messages), thread_id), active_checkpoint_id
 
     checkpoint_tuples = await _list_checkpoint_tuples(thread_id)
     checkpoint_ids = {
@@ -678,11 +681,11 @@ async def get_thread_messages_payload(
         leaf_tuples=_leaf_checkpoint_tuples(checkpoint_tuples),
     )
     return (
-        _serialize_thread_messages(
+        await enrich_delegated_calls(_serialize_thread_messages(
             messages,
             sources=sources,
             branches=branches,
-        ),
+        ), thread_id),
         active_checkpoint_id,
     )
 

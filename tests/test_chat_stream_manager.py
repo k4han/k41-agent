@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from contextvars import ContextVar
 from types import SimpleNamespace
 
@@ -7,6 +7,23 @@ import pytest
 import pytest_asyncio
 
 from agent.modules.agent_runtime.chat_stream_manager import ChatStreamManager, ChatStreamSession
+from agent.modules.agent_runtime.protocol import application_event, protocol_event
+
+
+def _wire_event(event):
+    return protocol_event("custom:k41", {**event, "projection": "ui"})
+
+
+async def _subscribe_updates(session):
+    last_seq = 0
+    async with aclosing(session.subscribe()) as events:
+        async for event in events:
+            assert event["type"] == "event"
+            assert event["seq"] > last_seq
+            assert event["event_id"] == f"{session.run_id}:{event['seq']}"
+            last_seq = event["seq"]
+            yield application_event(event)
+
 
 
 @pytest_asyncio.fixture
@@ -45,7 +62,7 @@ async def test_chat_stream_session_emits_classified_error(monkeypatch, persist_f
     session.start()
 
     error_event = None
-    async for event in session.subscribe():
+    async for event in _subscribe_updates(session):
         if event.get("type") == "error":
             error_event = event
             break
@@ -74,13 +91,13 @@ async def test_chat_stream_session_saves_custom_error_before_delivery(monkeypatc
         recorded.append((thread_id, event))
 
     async def run_fn(**params):
-        yield original_error
+        yield _wire_event(original_error)
 
     monkeypatch.setattr("agent.modules.conversations.record_thread_run_error", record_error)
     session = ChatStreamSession("custom-error", {}, run_fn)
     session.start()
     try:
-        async for event in session.subscribe():
+        async for event in _subscribe_updates(session):
             assert event == original_error
             assert recorded == [("custom-error", event)]
             break
@@ -101,7 +118,7 @@ async def test_superseded_stream_does_not_replace_saved_error(monkeypatch) -> No
     try:
         await session._push_error_event({"type": "error", "content": "Chat execution stopped."})
         session.done = True
-        assert [event async for event in session.subscribe()] == [
+        assert [event async for event in _subscribe_updates(session)] == [
             {"type": "error", "content": "Chat execution stopped.", "message": "Chat execution stopped."},
         ]
     finally:
@@ -121,7 +138,7 @@ async def test_chat_stream_session_emits_error_for_base_exception_group() -> Non
     session.start()
 
     error_event = None
-    async for event in session.subscribe():
+    async for event in _subscribe_updates(session):
         if event.get("type") == "error":
             error_event = event
             break
@@ -143,9 +160,9 @@ async def test_replay_keeps_all_events_and_final_after_spilling_to_disk(monkeypa
     events.append({"type": "final", "content": "complete"})
     try:
         for event in events:
-            await session.push_event(event)
+            await session.push_event(_wire_event(event))
         session.done = True
-        assert [event async for event in session.subscribe()] == events
+        assert [event async for event in _subscribe_updates(session)] == events
     finally:
         session.close()
 
@@ -155,9 +172,9 @@ async def test_slow_and_fast_subscribers_keep_independent_cursors_and_bounded_wa
     monkeypatch.setattr("agent.modules.agent_runtime.chat_stream_manager.MAX_BUFFER_BYTES", 128)
     session = ChatStreamSession("slow-reader", {})
     first = {"type": "message", "content": "initial"}
-    await session.push_event(first)
-    slow = session.subscribe()
-    fast = session.subscribe()
+    await session.push_event(_wire_event(first))
+    slow = _subscribe_updates(session)
+    fast = _subscribe_updates(session)
     try:
         assert await anext(slow) == first
         assert await anext(fast) == first
@@ -165,7 +182,7 @@ async def test_slow_and_fast_subscribers_keep_independent_cursors_and_bounded_wa
         for index in range(100):
             event = {"type": "message", "sequence": index}
             expected.append(event)
-            await session.push_event(event)
+            await session.push_event(_wire_event(event))
             assert await anext(fast) == event
         assert all(queue.qsize() <= 1 and queue.maxsize == 1 for queue in session.queues)
         session.done = True
@@ -180,12 +197,12 @@ async def test_slow_and_fast_subscribers_keep_independent_cursors_and_bounded_wa
 @pytest.mark.asyncio
 async def test_waiting_subscriber_wakes_when_an_event_arrives() -> None:
     session = ChatStreamSession("waiting-reader", {})
-    subscriber = session.subscribe()
+    subscriber = _subscribe_updates(session)
     waiting = asyncio.create_task(anext(subscriber))
     try:
         await asyncio.sleep(0)
         event = {"type": "final", "content": "complete"}
-        await session.push_event(event)
+        await session.push_event(_wire_event(event))
         assert await asyncio.wait_for(waiting, timeout=1) == event
     finally:
         waiting.cancel()
@@ -199,16 +216,16 @@ async def test_removing_a_session_releases_its_log_after_subscribers_finish() ->
     manager = ChatStreamManager()
     session = ChatStreamSession("closing-reader", {})
     manager._sessions[session.thread_id] = session
-    await session.push_event({"type": "message", "content": "first"})
-    await session.push_event({"type": "final", "content": "complete"})
+    await session.push_event(_wire_event({"type": "message", "content": "first"}))
+    await session.push_event(_wire_event({"type": "final", "content": "complete"}))
     session.done = True
-    subscriber = session.subscribe()
+    subscriber = _subscribe_updates(session)
     assert (await anext(subscriber))["content"] == "first"
     await manager.remove_session(session.thread_id, session)
     assert not session._event_log.closed
     assert [event async for event in subscriber] == [{"type": "final", "content": "complete"}]
     assert session._event_log.closed
-    assert [event async for event in session.subscribe()] == []
+    assert [event async for event in _subscribe_updates(session)] == []
 
 
 @pytest.mark.asyncio
@@ -217,18 +234,18 @@ async def test_detached_execution_finishes_and_replays_without_subscribers(strea
     events = [{"type": "message", "content": "first"}, {"type": "final", "content": "complete"}]
 
     async def run(**params):
-        yield events[0]
+        yield _wire_event(events[0])
         await proceed.wait()
-        yield events[1]
+        yield _wire_event(events[1])
 
     session = await stream_manager.get_or_create_session("detached", {}, run)
-    subscriber = session.subscribe()
+    subscriber = _subscribe_updates(session)
     assert await anext(subscriber) == events[0]
     await subscriber.aclose()
     assert not session.task.done()
     proceed.set()
     await asyncio.wait_for(session.task, timeout=1)
-    assert [event async for event in session.subscribe()] == events
+    assert [event async for event in _subscribe_updates(session)] == events
 
 
 @pytest.mark.asyncio
@@ -252,7 +269,7 @@ async def test_replacement_waits_for_cleanup_without_blocking_other_threads(stre
     async def new_run(**params):
         calls.append("new-started")
         new_started.set()
-        yield {"type": "final", "content": "complete"}
+        yield _wire_event({"type": "final", "content": "complete"})
 
     old = await stream_manager.get_or_create_session("shared", {}, old_run)
     await old_started.wait()
@@ -329,7 +346,7 @@ async def test_repeated_dashboard_stop_cancels_a_run_that_swallowed_cancellation
         except asyncio.CancelledError:
             swallowed.set()
             await release.wait()
-        yield {"type": "final"}
+        yield _wire_event({"type": "final"})
 
     monkeypatch.setattr(dashboard, "get_chat_stream_manager", lambda: stream_manager)
     monkeypatch.setattr(dashboard, "peek_acp_service", lambda: None)
@@ -374,11 +391,11 @@ async def test_stream_stop_retries_swallowed_cancellation(stream_manager, monkey
                 await release.wait()
         finally:
             calls.append("old-cleaned")
-        yield {"type": "final"}
+        yield _wire_event({"type": "final"})
 
     async def new_run(**params):
         calls.append("new-started")
-        yield {"type": "final"}
+        yield _wire_event({"type": "final"})
 
     old = await stream_manager.get_or_create_session("swallowed-cancel", {}, old_run)
     await started.wait()
@@ -424,12 +441,12 @@ async def test_stream_stop_times_out_without_forgetting_a_running_task(stream_ma
                 await release.wait()
             except asyncio.CancelledError:
                 pass
-        yield {"type": "final"}
+        yield _wire_event({"type": "final"})
 
     async def new_run(**params):
         nonlocal new_started
         new_started = True
-        yield {"type": "final"}
+        yield _wire_event({"type": "final"})
 
     old = await stream_manager.get_or_create_session("ignores-cancel", {}, old_run)
     await started.wait()
@@ -461,7 +478,7 @@ async def test_queued_replacements_never_execute_together(stream_manager):
     peak_active = 0
     cleaned = []
 
-    async def run(turn):
+    async def run(turn, **params):
         nonlocal active, peak_active
         active += 1
         peak_active = max(peak_active, active)
@@ -502,7 +519,7 @@ async def test_shutdown_prevents_a_waiting_replacement_from_starting(stream_mana
     release_cleanup = asyncio.Event()
     calls = []
 
-    async def run(turn):
+    async def run(turn, **params):
         calls.append(turn)
         started.set()
         try:
@@ -539,14 +556,14 @@ async def test_cancel_before_task_start_ends_subscriptions_and_releases_log(stre
     async def run(**params):
         nonlocal called
         called = True
-        yield {"type": "final"}
+        yield _wire_event({"type": "final"})
 
     session = await stream_manager.get_or_create_session("cancel-before-start", {}, run)
     session.cancel()
     await asyncio.gather(session.task, return_exceptions=True)
 
     async def read_events():
-        return [event async for event in session.subscribe()]
+        return [event async for event in _subscribe_updates(session)]
 
     assert await asyncio.wait_for(read_events(), timeout=1) == []
     await asyncio.sleep(0)
@@ -563,14 +580,14 @@ async def test_completed_run_keeps_replay_until_expiry(stream_manager, monkeypat
     event = {"type": "final", "content": "complete"}
 
     async def run(**params):
-        yield event
+        yield _wire_event(event)
 
     session = await stream_manager.get_or_create_session("retained", {}, run)
     await asyncio.wait_for(session.task, timeout=1)
     if cancel_after_completion:
         session.cancel()
     assert await stream_manager.get_session(session.thread_id) is session
-    assert [item async for item in session.subscribe()] == [event]
+    assert [item async for item in _subscribe_updates(session)] == [event]
 
     await asyncio.sleep(0.1)
     assert await stream_manager.get_session(session.thread_id) is None
@@ -583,7 +600,7 @@ async def test_replacing_completed_run_cannot_expire_its_successor(stream_manage
     started = asyncio.Event()
 
     async def completed_run(**params):
-        yield {"type": "final"}
+        yield _wire_event({"type": "final"})
 
     async def running(**params):
         started.set()
@@ -616,10 +633,10 @@ async def test_cancel_during_event_delivery_closes_run_in_its_original_context(s
             calls.append("workspace-closed")
 
     @workspace_admission.guard_workspace_run
-    async def run():
+    async def run(**params):
         token = scope.set("running")
         try:
-            yield {"type": "message", "content": "first"}
+            yield _wire_event({"type": "message", "content": "first"})
         finally:
             scope.reset(token)
             calls.append("run-closed")
@@ -629,7 +646,7 @@ async def test_cancel_during_event_delivery_closes_run_in_its_original_context(s
     original_push = session.push_event
 
     async def push(event):
-        if event["type"] == "message":
+        if application_event(event).get("type") == "message":
             delivering.set()
             await asyncio.Event().wait()
         await original_push(event)
@@ -651,14 +668,14 @@ async def test_shutdown_rejects_new_runs_and_waits_for_cleanup(stream_manager):
     async def run(**params):
         started.set()
         try:
-            yield {"type": "message", "content": "first"}
+            yield _wire_event({"type": "message", "content": "first"})
             await asyncio.Event().wait()
         finally:
             cleanup_started.set()
             await release_cleanup.wait()
 
     session = await stream_manager.get_or_create_session("shutdown", {}, run)
-    subscriber = session.subscribe()
+    subscriber = _subscribe_updates(session)
     await anext(subscriber)
     shutdown = asyncio.create_task(stream_manager.shutdown())
     try:

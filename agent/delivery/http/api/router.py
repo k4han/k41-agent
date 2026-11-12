@@ -21,16 +21,12 @@ from agent.delivery.http.api.schemas import (
     PairingCodeResponse,
     ProviderListResponse,
     ProviderSummary,
-    ReconnectRequest,
 )
 from agent.delivery.http.api.mcp import router as mcp_router
 from agent.modules.agent_runtime import (
     build_run_params,
     run_agent,
-    run_agent_edit_stream,
     run_agent_full,
-    run_agent_stream,
-    get_chat_stream_manager,
 )
 from agent.modules.conversations import create_thread_id
 from agent.shared.thread_ids import resolve_thread_id
@@ -50,6 +46,7 @@ from agent.modules.workspaces import (
 )
 from agent.modules.workflows import list_registered_workflows
 from agent.shared.infrastructure.errors import classify_agent_error
+
 
 logger = logging.getLogger(__name__)
 
@@ -278,37 +275,8 @@ async def chat_stream(request: ChatRequest, admin: str = Depends(get_current_adm
     )
 
 
-@router.post("/chat/events")
-async def chat_events(request: ChatRequest, admin: str = Depends(get_current_admin)):
-    """Stream UI events (thread created, message deltas, tool calls, etc.) as newline-delimited JSON."""
-    params = await prepare_run_params(request, browser_owner_id=f"admin:{admin}")
-    created_thread = bool(request.new_thread and not request.thread_id)
-    thread_id = str(params["thread_id"])
-    # The dashboard always receives reasoning; its own toggle decides display.
-    params["emit_thinking"] = True
-
-    manager = get_chat_stream_manager()
-    session = await manager.get_or_create_session(thread_id, params, run_fn=run_agent_stream)
-
-    async def event_generator():
-        if created_thread:
-            yield json.dumps(
-                {"type": "thread_created", "thread_id": thread_id},
-                ensure_ascii=False,
-            ) + "\n"
-        async for event in session.subscribe():
-            yield json.dumps(event, ensure_ascii=False) + "\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="application/x-ndjson",
-        headers=STREAM_RESPONSE_HEADERS,
-    )
-
-
-@router.post("/chat/events/edit")
-async def chat_events_edit(request: EditChatRequest, admin: str = Depends(get_current_admin)):
-    """Fork a thread from an edited user message and stream UI events as newline-delimited JSON."""
+async def prepare_edit_params(request: EditChatRequest, admin: str):
+    """Validate an edit and prepare the shared runtime parameters."""
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="Edited message cannot be empty.")
 
@@ -346,52 +314,7 @@ async def chat_events_edit(request: EditChatRequest, admin: str = Depends(get_cu
             raise workspace_http_error(exc) from exc
         raise
 
-    manager = get_chat_stream_manager()
-    session = await manager.get_or_create_session(
-        request.thread_id,
-        params,
-        run_fn=run_agent_edit_stream,
-    )
-
-    async def event_generator():
-        async for event in session.subscribe():
-            yield json.dumps(event, ensure_ascii=False) + "\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="application/x-ndjson",
-        headers=STREAM_RESPONSE_HEADERS,
-    )
-
-
-@router.post("/chat/events/reconnect")
-async def chat_events_reconnect(request: ReconnectRequest):
-    """Reconnect to an active chat stream and continue receiving UI events."""
-    thread_id = resolve_thread_id(request.thread_id) if request.thread_id else None
-    manager = get_chat_stream_manager()
-    session = await manager.get_session(thread_id)
-
-    if not session:
-        # If no active session found (already finished), return empty stream
-        # so client immediately finishes and loads thread history from database
-        async def empty_generator():
-            return
-            yield  # noqa: makes this an async generator
-        return StreamingResponse(
-            empty_generator(),
-            media_type="application/x-ndjson",
-            headers=STREAM_RESPONSE_HEADERS,
-        )
-
-    async def event_generator():
-        async for event in session.subscribe():
-            yield json.dumps(event, ensure_ascii=False) + "\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="application/x-ndjson",
-        headers=STREAM_RESPONSE_HEADERS,
-    )
+    return params
 
 
 @router.get("/graphs", response_model=GraphListResponse)

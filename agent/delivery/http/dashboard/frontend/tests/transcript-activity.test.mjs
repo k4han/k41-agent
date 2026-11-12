@@ -43,6 +43,10 @@ const userInputRequest = (id) => ({
 
 const groupIds = (view, key) =>
   Array.from(view.entries.get(key).items, item => item.id);
+
+test('delegated activity stays visible outside collapsed tool groups', () => {
+  assert.equal(isTranscriptActivityBoundary(toolCall(1, 'delegate_task')), true);
+});
 const rowKeys = (view) => Array.from(view.keys);
 
 test('tool runs are independent groups and assistant messages retain chronological order', () => {

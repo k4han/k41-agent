@@ -85,6 +85,21 @@ async def delegate_task(
         )
 
     sub_thread_id = _make_subagent_thread_id(runtime, sub_agent)
+    delegation_id = uuid.uuid4().hex
+    parent_thread_id = str(runtime.config.get("configurable", {}).get("thread_id") or "")
+    metadata = {"k41_parent_thread_id": parent_thread_id,
+        "k41_parent_tool_call_id": str(getattr(runtime, "tool_call_id", "") or ""),
+        "k41_delegation_id": delegation_id, "k41_agent_name": sub_agent}
+    parent_messages = (getattr(runtime, "state", None) or {}).get("messages", [])
+    if parent_messages:
+        metadata["k41_parent_message_id"] = str(getattr(parent_messages[-1], "id", "") or "")
+
+    def forward(event):
+        writer = getattr(runtime, "stream_writer", None)
+        if callable(writer):
+            writer({"type": "subagent_event", "event": event, "agent_name": sub_agent,
+                "delegation_id": delegation_id, "thread_id": sub_thread_id,
+                "tool_call_id": metadata["k41_parent_tool_call_id"]})
     try:
         result = await run_agent_full(
             user_input=task,
@@ -97,6 +112,8 @@ async def delegate_task(
             browser_owner_id=get_context_value(runtime.context, "browser_owner_id", None),
             allowed_skill_names=inherited_allowed_skills,
             usage_context=usage_context_from_config(runtime.config).to_dict(),
+            _checkpoint_metadata=metadata,
+            _event_writer=forward,
         )
         return result or "(empty response)"
     except Exception as e:

@@ -81,7 +81,7 @@ function createStream(placeholderText = 'Thinking...') {
   const assistantIdRef = { id: placeholderId };
   const streamedRef = { received: false };
   const threadRef = { id: 'thread-a', message: '' };
-  const send = (event) => handler.handleStreamEvent(event, assistantIdRef, streamedRef, threadRef, callbacks);
+  const send = (event) => handler.applyApplicationEvent(event, assistantIdRef, streamedRef, threadRef, callbacks);
   return { items, finished, send, assistantIdRef, threadRef, callbacks };
 }
 

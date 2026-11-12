@@ -37,7 +37,7 @@ def _delta(**delta) -> dict:
 def gateway_model():
     clients = []
 
-    def create(field: str):
+    def create(field: str, *, deltas: list[dict] | None = None):
         def handle(request: httpx.Request) -> httpx.Response:
             payload = json.loads(request.content)
             if not payload.get("stream"):
@@ -47,7 +47,7 @@ def gateway_model():
                         "role": "assistant", "content": "No.", field: "7 x 143 = 1001.",
                     }}],
                 })
-            return httpx.Response(200, headers={"content-type": "text/event-stream"}, text=_sse([
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, text=_sse(deltas if deltas is not None else [
                 _delta(role="assistant", content="", **{field: "7 x 143"}),
                 _delta(content="", **{field: " = 1001."}),
                 _delta(content="No."),
@@ -70,6 +70,33 @@ def gateway_model():
     yield create
     for client in clients:
         client.close()
+
+
+def _mixed_reasoning_deltas(field: str, layout: str) -> list[dict]:
+    first = {"role": "assistant", "content": "First "}
+    finish = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+    if layout == "interleaved":
+        return [_delta(**first, **{field: "Reason."}), _delta(content="sec"),
+                _delta(content="ond.", **{field: " More."}), finish]
+    if layout == "mixed":
+        chunks = [_delta(**first, **{field: "Reason."})]
+    else:
+        chunks = [_delta(**first), _delta(content="", **{field: "Reason."})]
+    return [*chunks, _delta(content="second."), finish]
+
+
+@pytest.mark.parametrize("field", ["reasoning_content", "reasoning"])
+@pytest.mark.parametrize("layout", ["mixed", "text_first", "interleaved"])
+@pytest.mark.parametrize("mode", ["stream", "astream"])
+@pytest.mark.asyncio
+async def test_mixed_gateway_deltas_preserve_the_complete_answer(gateway_model, field, layout, mode):
+    model = gateway_model(field, deltas=_mixed_reasoning_deltas(field, layout))
+    chunks = list(model.stream(MESSAGES)) if mode == "stream" else [
+        chunk async for chunk in model.astream(MESSAGES)
+    ]
+    message = reduce(lambda left, right: left + right, chunks)
+    assert extract_final_text_content(message.content) == "First second."
+    assert extract_message_thinking(message) == ("Reason. More." if layout == "interleaved" else "Reason.")
 
 
 @pytest.mark.parametrize("field", ["reasoning_content", "reasoning"])
@@ -113,6 +140,39 @@ def test_streaming_extractor_reads_gateway_reasoning_kwargs() -> None:
     delta = _StreamingChunkExtractor().extract((chunk, {}))
 
     assert (delta.text, delta.thinking) == ("", "step")
+
+
+@pytest.mark.parametrize("field", ["reasoning_content", "reasoning"])
+@pytest.mark.parametrize("layout", [None, "mixed", "text_first", "interleaved"])
+@pytest.mark.asyncio
+async def test_gateway_reasoning_reaches_v3_protocol(gateway_model, field, layout):
+    from langgraph.graph import END, START, MessagesState, StateGraph
+    from agent.modules.agent_runtime.protocol import stream_graph
+    model = gateway_model(field, deltas=_mixed_reasoning_deltas(field, layout) if layout else None)
+    async def work(state):
+        return {"messages": [await model.ainvoke(state["messages"])]}
+    builder = StateGraph(MessagesState)
+    builder.add_node("llm", work)
+    builder.add_edge(START, "llm")
+    builder.add_edge("llm", END)
+    deltas = []
+    final_message = None
+    async for mode, event in stream_graph(builder.compile(), {"messages": MESSAGES}, config={},
+            stream_mode=["messages", "values"], protocol_events=True):
+        if mode == "protocol" and event["method"] == "messages":
+            data = event["params"]["data"][0]
+            if data.get("event") == "content-block-delta":
+                deltas.append(data["delta"])
+        elif mode == "values" and isinstance(event["messages"][-1], AIMessage):
+            final_message = event["messages"][-1]
+    expected_reasoning = "7 x 143 = 1001." if layout is None else (
+        "Reason. More." if layout == "interleaved" else "Reason."
+    )
+    expected_text = "No." if layout is None else "First second."
+    assert "".join(delta.get("reasoning", "") for delta in deltas) == expected_reasoning
+    assert "".join(delta.get("text", "") for delta in deltas) == expected_text
+    assert final_message is not None
+    assert extract_final_text_content(final_message.content) == expected_text
 
 
 @pytest.mark.parametrize(("model_name", "expected"), [

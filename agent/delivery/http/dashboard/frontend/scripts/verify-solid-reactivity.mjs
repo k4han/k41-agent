@@ -1,3 +1,4 @@
+import { protocolFixture } from './protocol-fixture.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -83,11 +84,12 @@ const server = http.createServer(async (req, res) => {
     res.on('close', () => sessionResponses.delete(res));
     return;
   }
-  if (url.pathname === '/api/chat/events') {
+  if (url.pathname === '/v2/api/chat/events') {
     for await (const chunk of req) { void chunk; }
     chatResponse = res;
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-cache' });
     res.flushHeaders();
+    protocolFixture(res, "reactivity-test");
     return;
   }
   if (url.pathname === '/agents/cards/default' && req.method === 'PUT') {

@@ -41,6 +41,7 @@ from agent.modules.agent_runtime.chat_stream_manager import (
     ChatStreamSession,
     get_chat_stream_manager,
 )
+from agent.modules.agent_runtime.protocol import run_agent_protocol_stream, run_agent_edit_protocol_stream
 from agent.modules.agent_runtime.input_messages import (
     DEFAULT_IMAGE_PROMPT,
     MISSING_IMAGE_PROMPT,
@@ -73,6 +74,8 @@ __all__ = [
     "run_agent_edit_stream",
     "run_agent_full",
     "run_agent_stream",
+    "run_agent_protocol_stream",
+    "run_agent_edit_protocol_stream",
     "track_active_session",
     "ChatStreamManager",
     "ChatStreamSession",

@@ -1,3 +1,4 @@
+import { protocolFixture } from './protocol-fixture.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -94,7 +95,7 @@ function sendStatus(socket, reset = false) {
 }
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (url.pathname === '/api/chat/events' || url.pathname === '/v1/api/chat/events') {
+  if (url.pathname === '/v2/api/chat/events') {
     let raw = ''; for await (const data of req) raw += data;
     const request = JSON.parse(raw);
     if (!request.resume_payload) {
@@ -104,6 +105,7 @@ const server = http.createServer(async (req, res) => {
       status.handoff = handoff; status.mode = 'human';
       history.pending_browser_handoffs = [handoff];
       res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+      protocolFixture(res, history.thread_id);
       res.end(JSON.stringify(handoff) + '\n'); return;
     }
     resumes.push(request);
@@ -113,6 +115,7 @@ const server = http.createServer(async (req, res) => {
     for (const socket of viewers) sendStatus(socket);
     history.messages.push({ id: 'answer', role: 'assistant', content: 'Browser task resumed' });
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    protocolFixture(res, history.thread_id);
     res.end(JSON.stringify({ type: 'final', content: 'Browser task resumed' }) + '\n'); return;
   }
   if (url.pathname.startsWith('/dashboard-api/') || url.pathname === '/health') {

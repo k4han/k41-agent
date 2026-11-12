@@ -81,7 +81,7 @@ const fixtures = {
 };
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (url.pathname === '/api/chat/events') {
+  if (url.pathname === '/v2/api/chat/events') {
     let raw = '';
     for await (const chunk of req) raw += chunk;
     chatRequests.push(JSON.parse(raw));

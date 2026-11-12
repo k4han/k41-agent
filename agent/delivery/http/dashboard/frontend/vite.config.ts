@@ -44,6 +44,7 @@ export default defineConfig({
     proxy: {
       "/health": fastApiTarget,
       "/api": fastApiTarget,
+      "/v2/api": fastApiTarget,
       "/dashboard-api": fastApiTarget,
       "/services": fastApiTarget,
       "/agents/cards": fastApiTarget,

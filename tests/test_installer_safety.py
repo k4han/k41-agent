@@ -3,8 +3,10 @@
 import hashlib
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -105,6 +107,103 @@ touch replaced
     assert result.returncode == 17, result.stdout + result.stderr
     assert "Installation was aborted" in result.stderr
     assert not (tmp_path / "replaced").exists()
+
+
+@pytest.fixture
+def legacy_runtime(tmp_path):
+    package = tmp_path / "agent" / "bootstrap"
+    package.mkdir(parents=True)
+    (package.parent / "__init__.py").touch()
+    (package / "__init__.py").touch()
+    (package / "cli.py").write_text('''
+from pathlib import Path
+
+PID_FILE = Path("server.pid")
+
+def _health_url(host, port):
+    return f"http://{host}:{port}/health"
+
+def _is_tray_running():
+    return Path("runtime-state").read_text() == "tray"
+
+if __name__ == "__main__":
+    Path("stop-requested").touch()
+''', encoding="utf-8")
+    (package / "process_utils.py").write_text('''
+from pathlib import Path
+
+def is_server_running(pid_file):
+    return Path("runtime-state").read_text() == "server"
+''', encoding="utf-8")
+    (package / "settings.py").write_text('''
+from pathlib import Path
+from types import SimpleNamespace
+
+def load_bootstrap_config():
+    state = Path("runtime-state").read_text()
+    if state == "invalid-config":
+        raise ValueError("Invalid configuration")
+    return SimpleNamespace(enable_web=state != "headless", host="127.0.0.1", port=4141)
+''', encoding="utf-8")
+    (package / "tray.py").write_text('''
+from pathlib import Path
+
+def disable_autostart():
+    Path("autostart-disabled").touch()
+''', encoding="utf-8")
+    (tmp_path / "httpx.py").write_text('''
+from pathlib import Path
+from types import SimpleNamespace
+
+class RequestError(Exception):
+    pass
+
+def get(url, **kwargs):
+    assert url == "http://127.0.0.1:4141/health"
+    Path("health-probed").touch()
+    if Path("runtime-state").read_text() in {"health", "headless"}:
+        return SimpleNamespace(status_code=200)
+    raise RequestError("No listener")
+''', encoding="utf-8")
+    return tmp_path
+
+
+@pytest.mark.parametrize("installer", ["powershell", "shell"])
+@pytest.mark.parametrize("state", ["stopped", "headless", "server", "tray", "health", "invalid-config"])
+def test_installers_verify_shutdown_with_legacy_runtime(legacy_runtime, installer, state):
+    directory = legacy_runtime
+    (directory / "runtime-state").write_text(state, encoding="utf-8")
+    if installer == "powershell":
+        executable = sys.executable.replace("'", "''")
+        script = (
+            _ps_function("Stop-ExistingApp")
+            + f"\n$PythonExe = '{executable}'\n"
+            + """
+function Get-RunningServerPid { return $null }
+Stop-ExistingApp
+Set-Content -LiteralPath 'replaced' -Value 'verified'
+"""
+        )
+        result = _powershell(script, directory)
+    else:
+        executable = shlex.quote(sys.executable.replace("\\", "/"))
+        script = (
+            _sh_function("stop_existing_app")
+            + f"\nPythonExe={executable}\n"
+            + """
+systemctl() { return 1; }
+wait_for_pid_exit() { return 0; }
+stop_existing_app || exit 17
+touch replaced
+"""
+        )
+        result = _bash(script, directory)
+    stopped = state in {"stopped", "headless"}
+    assert (result.returncode == 0) is stopped, result.stdout + result.stderr
+    assert (directory / "stop-requested").exists()
+    assert (directory / "replaced").exists() is stopped
+    assert (directory / "autostart-disabled").exists() is stopped
+    assert (directory / "health-probed").exists() is (state in {"stopped", "health"})
 
 
 @pytest.mark.parametrize("valid", [True, False])

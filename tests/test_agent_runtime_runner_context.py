@@ -1,3 +1,5 @@
+from tests.stream_fixtures import EventGraph
+
 import asyncio
 import base64
 import importlib
@@ -240,10 +242,10 @@ async def test_run_agent_omits_context_for_graph_without_context_schema(monkeypa
                 tools=["list_dir"],
             )
 
-    class _FakeGraph:
+    class _FakeGraph(EventGraph):
         context_schema = None
 
-        async def astream(self, payload, **kwargs):
+        async def events(self, payload, **kwargs):
             captured["payload"] = payload
             captured["kwargs"] = kwargs
             yield {"messages": [AIMessage(content="done")]}
@@ -286,8 +288,8 @@ async def test_run_agent_passes_model_override_to_context(monkeypatch, allowed_t
                 tools=["list_dir"],
             )
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             captured["payload"] = payload
             captured["kwargs"] = kwargs
             yield {"messages": [AIMessage(content="done")]}
@@ -337,8 +339,8 @@ async def test_run_agent_resume_payload_marks_run_as_resume(monkeypatch):
                 tools=["list_dir"],
             )
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             captured["payload"] = payload
             captured["kwargs"] = kwargs
             yield {"messages": [AIMessage(content="revised done", id="ai-final")]}
@@ -395,8 +397,8 @@ async def test_run_agent_stream_builds_multimodal_user_message(monkeypatch, allo
                 tools=["list_dir"],
             )
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             captured["payload"] = payload
             captured["kwargs"] = kwargs
             yield {"messages": [AIMessage(content="done", id="ai-final")]}
@@ -530,10 +532,10 @@ async def test_run_agent_stream_omits_context_for_graph_without_context_schema(
                 tools=["list_dir"],
             )
 
-    class _FakeGraph:
+    class _FakeGraph(EventGraph):
         context_schema = None
 
-        async def astream(self, payload, **kwargs):
+        async def events(self, payload, **kwargs):
             captured["payload"] = payload
             captured["kwargs"] = kwargs
             yield {"messages": [AIMessage(content="stream-done", id="msg-1")]}
@@ -573,10 +575,10 @@ async def test_run_agent_extracts_last_text_from_structured_content(monkeypatch)
                 tools=["list_dir"],
             )
 
-    class _FakeGraph:
+    class _FakeGraph(EventGraph):
         context_schema = None
 
-        async def astream(self, payload, **kwargs):
+        async def events(self, payload, **kwargs):
             yield {
                 "messages": [
                     AIMessage(
@@ -622,10 +624,10 @@ async def test_run_agent_stream_extracts_last_text_from_structured_content(monke
                 tools=["list_dir"],
             )
 
-    class _FakeGraph:
+    class _FakeGraph(EventGraph):
         context_schema = None
 
-        async def astream(self, payload, **kwargs):
+        async def events(self, payload, **kwargs):
             yield {
                 "messages": [
                     AIMessage(
@@ -675,11 +677,11 @@ async def test_run_agent_stream_emits_message_chunks_and_final(monkeypatch, resu
                 tools=["list_dir"],
             )
 
-    class _FakeGraph:
+    class _FakeGraph(EventGraph):
         async def aget_state(self, config):
             return SimpleNamespace(values={"messages": []})
 
-        async def astream(self, payload, **kwargs):
+        async def events(self, payload, **kwargs):
             captured["kwargs"] = kwargs
             yield ("custom", {"type": "ignored_event"})
             yield ("custom", {
@@ -719,7 +721,7 @@ async def test_run_agent_stream_emits_message_chunks_and_final(monkeypatch, resu
         )
     ]
 
-    assert captured["kwargs"]["stream_mode"] == ["messages", "values", "custom"]
+    assert captured["kwargs"]["version"] == "v3"
     assert events == [
         {
             "type": "context_usage", "thread_id": "thread-1",
@@ -742,8 +744,8 @@ async def test_run_agent_stream_skips_checkpoint_messages_before_current_user(mo
                 tools=["list_dir"],
             )
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             user_message = payload["messages"][0]
             checkpoint_messages = [
                 HumanMessage(content="old request", id="old-user"),
@@ -796,8 +798,8 @@ async def test_run_agent_stream_emits_tool_call_and_result(monkeypatch, display_
                 tools=["list_dir"],
             )
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             yield {
                 "messages": [
                     AIMessage(
@@ -874,8 +876,8 @@ async def test_run_agent_stream_emits_text_attached_to_tool_call(monkeypatch):
                 tools=["list_dir"],
             )
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             yield {
                 "messages": [
                     AIMessage(
@@ -954,7 +956,7 @@ async def test_run_agent_stream_resume(monkeypatch):
                 tools=["list_dir"],
             )
 
-    class _FakeGraph:
+    class _FakeGraph(EventGraph):
         async def aget_state(self, config):
             class FakeState:
                 values = {
@@ -965,7 +967,7 @@ async def test_run_agent_stream_resume(monkeypatch):
                 }
             return FakeState()
 
-        async def astream(self, payload, **kwargs):
+        async def events(self, payload, **kwargs):
             captured["payload"] = payload
             captured["kwargs"] = kwargs
             # Yield events as if continuing from the previous run
@@ -1091,8 +1093,8 @@ async def test_run_agent_stream_emits_plan_review_interrupt(monkeypatch):
             "plan": plan,
         }
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             yield (
                 "values",
                 {
@@ -1175,8 +1177,8 @@ async def test_run_agent_stream_emits_user_input_request_interrupt(monkeypatch):
             "submit_label": "Continue",
         }
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             yield (
                 "values",
                 {
@@ -1250,7 +1252,7 @@ async def test_run_agent_stream_answer_resume_payload_does_not_switch_agent(
                 tools=[ASK_USER_TOOL_NAME],
             )
 
-    class _FakeGraph:
+    class _FakeGraph(EventGraph):
         async def aget_state(self, config):
             return SimpleNamespace(
                 values={
@@ -1261,7 +1263,7 @@ async def test_run_agent_stream_answer_resume_payload_does_not_switch_agent(
                 }
             )
 
-        async def astream(self, payload, **kwargs):
+        async def events(self, payload, **kwargs):
             captured["payload"] = payload
             captured["kwargs"] = kwargs
             yield (
@@ -1345,7 +1347,7 @@ async def test_run_agent_stream_resume_payload_switches_agent(monkeypatch):
                 return SimpleNamespace(internal=False, valid=True)
             return None
 
-    class _FakeGraph:
+    class _FakeGraph(EventGraph):
         async def aget_state(self, config):
             return SimpleNamespace(
                 values={
@@ -1356,7 +1358,7 @@ async def test_run_agent_stream_resume_payload_switches_agent(monkeypatch):
                 }
             )
 
-        async def astream(self, payload, **kwargs):
+        async def events(self, payload, **kwargs):
             captured["payload"] = payload
             captured["kwargs"] = kwargs
             yield (
@@ -1510,7 +1512,7 @@ async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments
                 tools=["list_dir"],
             )
 
-    class _FakeGraph:
+    class _FakeGraph(EventGraph):
         async def aget_state_history(self, config):
             yield SimpleNamespace(
                 config={
@@ -1532,7 +1534,7 @@ async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments
             captured["state_config"] = config
             return SimpleNamespace(values={"messages": []})
 
-        async def astream(self, payload, **kwargs):
+        async def events(self, payload, **kwargs):
             captured["payload"] = payload
             captured["kwargs"] = kwargs
             edited = payload["messages"][0]
@@ -1568,7 +1570,7 @@ async def test_run_agent_edit_stream_forks_from_parent_and_preserves_attachments
         {"type": "context_usage", "current_context_tokens": 120, "context_window": 128000},
         {"type": "final", "content": "edited response"},
     ]
-    assert captured["kwargs"]["stream_mode"] == ["messages", "values", "custom"]
+    assert captured["kwargs"]["version"] == "v3"
     assert captured["kwargs"]["context"]["permission_mode"] == "ask"
     assert captured["kwargs"]["context"]["allowed_tool_names"] == allowed_tools
     assert captured["kwargs"]["config"]["configurable"]["checkpoint_id"] == "parent-1"
@@ -1620,8 +1622,8 @@ async def test_run_agent_stream_emits_thread_title_while_generating(monkeypatch)
         fake_record_conversation_thread,
     )
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             yield ("messages", (AIMessageChunk(content="working"), {"langgraph_node": "llm"}))
             # Give the title task a few loop ticks to land mid-stream.
             for _ in range(5):
@@ -1667,8 +1669,8 @@ async def test_run_agent_stream_delivers_late_thread_title_before_close(monkeypa
         fake_record_conversation_thread,
     )
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             yield ("values", {"messages": [AIMessage(content="quick answer", id="ai-1")]})
 
     monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
@@ -1705,8 +1707,8 @@ async def test_run_agent_stream_without_title_task_has_no_title_events(monkeypat
         fake_record_conversation_thread,
     )
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             yield ("values", {"messages": [AIMessage(content="hello", id="ai-1")]})
 
     monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())

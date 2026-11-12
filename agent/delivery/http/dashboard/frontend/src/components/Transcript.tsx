@@ -40,6 +40,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { browserImageUrl } from "@/lib/browserViewer";
 import { Markdown } from "@/components/Markdown";
 import { StatusIndicator } from "@/components/StatusIndicator";
+import { SubagentDetails } from "@/components/SubagentDetails";
 import { TranscriptThinkingBlock } from "@/components/TranscriptThinkingBlock";
 import { useToast } from "@/components/Toast";
 import { isChatStatusText } from "@/lib/chatStatus";
@@ -123,6 +124,18 @@ export type TranscriptMessage = {
   attachments?: TranscriptAttachment[];
 };
 
+export type SubagentActivity = {
+  delegation_id: string;
+  agent_name: string;
+  parent_thread_id: string;
+  thread_id: string;
+  tool_call_id: string;
+  checkpoint_id?: string;
+  status: string;
+  error?: string;
+  items?: TranscriptItem[];
+};
+
 export type TranscriptTool = {
   type: "tool";
   tool_call_id?: string | null;
@@ -130,6 +143,9 @@ export type TranscriptTool = {
   args: unknown;
   result: unknown;
   resultReceived?: boolean;
+  subagent?: SubagentActivity;
+  executionStatus?: "running" | "completed" | "failed";
+  outputDelta?: unknown;
 };
 
 /** Model reasoning that preceded the next answer or tool call. */
@@ -1793,6 +1809,7 @@ export function TranscriptItemView(props: TranscriptItemViewProps) {
     );
   }
   return (
+    <>
     <ToolCallDetail
       name={props.item.name}
       args={props.item.args}
@@ -1801,5 +1818,10 @@ export function TranscriptItemView(props: TranscriptItemViewProps) {
       itemId={props.itemId}
       threadId={props.threadId}
     />
+    <Show when={props.item.subagent}>{(subagent) => <SubagentDetails activity={subagent()} />}</Show>
+    <Show when={props.item.executionStatus === "running" && props.item.outputDelta !== undefined}>
+      <pre class="tool-call-progress">{formatValue(props.item.outputDelta)}</pre>
+    </Show>
+    </>
   );
 }

@@ -25,6 +25,7 @@ from agent.modules.agent_runtime.active_sessions import (
     current_session_id_var,
     get_active_session_registry,
 )
+from agent.modules.agent_runtime.protocol import EventSequence, application_event, protocol_event
 from agent.modules.notifications import send_notification as _send_notification
 from agent.modules.workspaces import (
     WorkspaceRef,
@@ -107,6 +108,7 @@ class BackgroundTask:
     max_retries: int = 0
     retry_count: int = 0
     _async_task: asyncio.Task | None = field(default=None, repr=False)
+    _event_sequence: EventSequence = field(default_factory=EventSequence, repr=False)
 
     def elapsed_seconds(self) -> float:
         """Return elapsed time since creation."""
@@ -325,7 +327,7 @@ class BackgroundTaskManager:
 
         Returns the task_id.
         """
-        from agent.modules.agent_runtime.runner import run_agent_stream
+        from agent.modules.agent_runtime.protocol import run_agent_protocol_stream
 
         if workspace is not None:
             from agent.modules.projects import get_project_workspace_service
@@ -395,7 +397,7 @@ class BackgroundTaskManager:
         self._publish_task_event(task)
 
         async_task = asyncio.create_task(
-            self._execute(task, run_agent_stream),
+            self._execute(task, run_agent_protocol_stream),
             name=f"bg-task-{task.task_id}",
         )
         task._async_task = async_task
@@ -422,6 +424,7 @@ class BackgroundTaskManager:
 
         task.status = TaskStatus.RUNNING
         task.started_at = time.time()
+        task._event_sequence = EventSequence()
         try:
             await self._persist_task(task)
         except Exception as exc:
@@ -470,7 +473,7 @@ class BackgroundTaskManager:
 
                 task.status = TaskStatus.FAILED
                 task.error = f"Task timed out after {task.task_timeout}s"
-                self._publish_agent_event(task, {"type": "error", "content": task.error})
+                self._publish_error_event(task, {"type": "error", "content": task.error})
                 logger.error(
                     "Background task %s timed out after %d retries.",
                     task.task_id,
@@ -479,7 +482,7 @@ class BackgroundTaskManager:
             except asyncio.CancelledError:
                 task.status = TaskStatus.CANCELLED
                 task.error = "Task was cancelled."
-                self._publish_agent_event(task, {"type": "error", "content": task.error})
+                self._publish_error_event(task, {"type": "error", "content": task.error})
                 logger.info("Background task %s was cancelled.", task.task_id)
             except BaseException as exc:
                 from agent.shared.infrastructure.errors import classify_agent_error
@@ -504,7 +507,7 @@ class BackgroundTaskManager:
 
                 task.status = TaskStatus.FAILED
                 task.error = _truncate_stored_text(error_message)
-                self._publish_agent_event(
+                self._publish_error_event(
                     task,
                     {
                         "type": "error",
@@ -573,6 +576,7 @@ class BackgroundTaskManager:
             task.workspace = binding.execution
 
         async for event in run_fn(
+            _run_id=task._event_sequence.run_id,
             user_input=task.request,
             thread_id=task.thread_id,
             agent_name=task.agent_name,
@@ -584,14 +588,16 @@ class BackgroundTaskManager:
             model=task.model,
             usage_context=_task_usage_context(task),
         ):
-            if isinstance(event, dict):
-                event_type = str(event.get("type") or "")
-                content = event.get("content")
-                if event_type == "message" and isinstance(content, str):
-                    message_chunks.append(content)
-                elif event_type == "final" and isinstance(content, str):
-                    final_content = content
-                self._publish_agent_event(task, event)
+            self._publish_protocol_event(task, event)
+            event = application_event(event)
+            if event is None:
+                continue
+            event_type = str(event.get("type") or "")
+            content = event.get("content")
+            if event_type == "message" and isinstance(content, str):
+                message_chunks.append(content)
+            elif event_type == "final" and isinstance(content, str):
+                final_content = content
 
         return final_content or "".join(message_chunks)
 
@@ -770,8 +776,13 @@ class BackgroundTaskManager:
         for task in completed[:excess]:
             self._tasks.pop(task.task_id, None)
 
-    def _publish_agent_event(self, task: BackgroundTask, event: dict[str, Any]) -> None:
-        self._publish_event(task.thread_id, "agent", event)
+    def _publish_error_event(self, task: BackgroundTask, event: dict[str, Any]) -> None:
+        self._publish_protocol_event(task, protocol_event(
+            "custom:k41", {**event, "projection": "ui"},
+        ))
+
+    def _publish_protocol_event(self, task: BackgroundTask, event: dict[str, Any]) -> None:
+        self._publish_event(task.thread_id, "agent", task._event_sequence.stamp(event))
 
     def _publish_task_event(self, task: BackgroundTask) -> None:
         self._publish_event(task.thread_id, "task", {"task": task.to_dict()})

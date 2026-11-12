@@ -1,3 +1,5 @@
+from tests.stream_fixtures import EventGraph
+
 """Context percentage configuration, automatic compaction and channel retention."""
 
 import asyncio
@@ -396,8 +398,8 @@ async def test_runner_emits_only_response_after_internal_summary(monkeypatch, st
     from agent.modules.agent_runtime import runner
     from agent.modules.usage.service import build_usage_context
     summary, acknowledgement = compaction._build_summary_message_pair("internal history")
-    class Graph:
-        async def astream(self, payload, **kwargs):
+    class Graph(EventGraph):
+        async def events(self, payload, **kwargs):
             if not streaming:
                 yield {"messages": [summary, acknowledgement]}
                 yield {"messages": [summary, acknowledgement, AIMessage(content="visible response", id="final")]}

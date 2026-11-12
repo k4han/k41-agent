@@ -5,6 +5,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { protocolFixture } from './protocol-fixture.mjs';
 
 const staticRoot = fileURLToPath(new URL('../../static/', import.meta.url));
 const executable = process.env.BROWSER_EXECUTABLE || [
@@ -45,15 +46,17 @@ fixtures['/dashboard-api/nav-projects'] = {
 };
 let resumeResponse;
 let historyRefreshes = 0;
+let childHistoryRequests = 0;
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (url.pathname === '/api/chat/events') {
+  if (url.pathname === '/v2/api/chat/events') {
     let body = '';
     for await (const chunk of req) body += chunk;
     const payload = JSON.parse(body);
     sentMessages.push(payload);
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
     res.flushHeaders();
+    protocolFixture(res, payload.thread_id);
     if (payload.resume) {
       resumeResponse = res;
     } else {
@@ -68,6 +71,12 @@ const server = http.createServer(async (req, res) => {
       ];
       res.end(JSON.stringify({ type: 'error', code: 'unknown', content: originalErrorText, message: friendlyErrorText }) + '\n');
     }
+    return;
+  }
+  if (url.pathname === '/v2/api/chat/failed-turn/subagents/child') {
+    childHistoryRequests += 1;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ messages: [{ id: 'child-answer', role: 'assistant', content: 'Saved child answer' }] }));
     return;
   }
   if (url.pathname.startsWith('/dashboard-api/') || url.pathname === '/health') {
@@ -221,6 +230,24 @@ try {
   await call('Page.reload', { ignoreCache: true });
   await until(() => js('document.body.textContent.includes("Task recovered successfully")'), 'completed conversation reloaded');
   assert.equal(await js(`!!${continueButton}`), false, 'completed runs must stay completed after reload');
+  history.messages.push(
+    { id: 'delegation-call', role: 'assistant', content: '', tool_calls: [
+      { id: 'delegate-tool', name: 'delegate_task', args: { sub_agent: 'Researcher' } },
+    ] },
+    { id: 'delegation-result', role: 'tool', name: 'delegate_task', tool_call_id: 'delegate-tool', content: 'Summary',
+      subagent: { delegation_id: 'child', agent_name: 'Researcher', parent_thread_id: 'failed-turn',
+        thread_id: 'child-thread', tool_call_id: 'delegate-tool', status: 'completed' } },
+  );
+  await call('Page.reload', { ignoreCache: true });
+  await until(() => js('!!document.querySelector(".subagent-details")'), 'saved subagent activity');
+  assert.equal(await js('document.querySelector(".subagent-details").open'), false);
+  assert.equal(childHistoryRequests, 0, 'collapsed history is loaded lazily');
+  await js('document.querySelector(".subagent-details").open = true');
+  await until(() => js('document.querySelector(".subagent-details").textContent.includes("Saved child answer")'), 'expanded child history');
+  assert.equal(childHistoryRequests, 1);
+  await js('document.querySelector(".subagent-details").open = false');
+  await js('document.querySelector(".subagent-details").open = true');
+  assert.equal(childHistoryRequests, 1, 'reopening reuses the loaded child transcript');
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: continuation survives reloads and conversation switches, resumes repeated failures, and stays cleared after completion.');
 } finally {

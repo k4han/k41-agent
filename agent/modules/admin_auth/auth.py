@@ -42,7 +42,7 @@ async def get_current_admin(request: Request) -> str:
             token = auth_header.split(" ", 1)[1]
 
     if not token:
-        if request.url.path.startswith(("/api/", "/v1/api/", "/dashboard-api/")):
+        if request.url.path.startswith(("/api/", "/v1/api/", "/v2/api/", "/dashboard-api/")):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Not authenticated",
@@ -69,7 +69,7 @@ async def get_current_admin(request: Request) -> str:
             raise ValueError("Admin not found")
 
     except Exception:
-        if request.url.path.startswith(("/api/", "/v1/api/", "/dashboard-api/")):
+        if request.url.path.startswith(("/api/", "/v1/api/", "/v2/api/", "/dashboard-api/")):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
@@ -81,7 +81,7 @@ async def get_current_admin(request: Request) -> str:
     if payload.get("password_change_required") and request.url.path not in {
         "/change-password", "/logout",
     }:
-        if request.url.path.startswith(("/api/", "/v1/api/", "/dashboard-api/")):
+        if request.url.path.startswith(("/api/", "/v1/api/", "/v2/api/", "/dashboard-api/")):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={

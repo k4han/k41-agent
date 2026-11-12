@@ -63,6 +63,7 @@ from agent.modules.tools import (
 )
 from agent.modules.workspaces import WorkspaceRef
 from agent.modules.agent_runtime.workspace_admission import guard_workspace_run
+from agent.modules.agent_runtime.protocol import stream_graph
 
 logger = logging.getLogger(__name__)
 
@@ -580,15 +581,6 @@ async def _record_conversation_thread(
     return None
 
 
-def _coerce_stream_event(event: Any) -> tuple[str, Any]:
-    if isinstance(event, tuple):
-        if len(event) == 2 and isinstance(event[0], str):
-            return event[0], event[1]
-        if len(event) == 3 and isinstance(event[1], str):
-            return event[1], event[2]
-    return "values", event
-
-
 class _StreamingChunkExtractor:
     """Extract (visible, thinking) deltas from a stream of ``AIMessageChunk`` events.
 
@@ -629,7 +621,7 @@ class _StreamingChunkExtractor:
         thinking_delta = "".join(part.thinking for part in parts if part.thinking)
         # Chat Completions gateways stream reasoning beside the content.
         reasoning = (getattr(chunk, "additional_kwargs", None) or {}).get("reasoning_content")
-        if isinstance(reasoning, str):
+        if isinstance(reasoning, str) and reasoning != thinking_delta:
             thinking_delta += reasoning
         if thinking_delta:
             return ContentWithThinking(
@@ -697,6 +689,16 @@ def _split_chunk_part(value: Any) -> ContentWithThinking:
     return ContentWithThinking(text="", thinking="")
 
 
+def _extract_stream_chunk(event: Any, extractors: dict) -> tuple[str, ContentWithThinking]:
+    metadata = event[1] if isinstance(event, tuple) and len(event) > 1 else {}
+    message_id = str(metadata.get("run_id") or "")
+    extractor = extractors.setdefault(message_id, _StreamingChunkExtractor())
+    if metadata.get("message_finished"):
+        extractors.pop(message_id, None)
+        return message_id, extractor.flush()
+    return message_id, extractor.extract(event)
+
+
 def _coerce_thinking_value(value: Any) -> str:
     if value is None:
         return ""
@@ -760,6 +762,8 @@ def _tool_result_event(message: ToolMessage) -> dict[str, Any]:
              "name": message.name, "content": extract_tool_display_content(message)}
     if isinstance(message.artifact, dict) and message.artifact.get("browser"):
         event["browser_artifact"] = message.artifact["browser"]
+    if isinstance(message.artifact, dict) and message.artifact.get("subagent"):
+        event["subagent"] = message.artifact["subagent"]
     return event
 
 
@@ -1262,8 +1266,8 @@ async def run_agent(
         input_data = {"messages": [_make_user_message(user_input, attachments, workspace=workspace)]}
 
     with track_active_session(thread_id, agent_name, usage_context=usage_context) as session_id:
-        async for event in graph.astream(
-            input_data,
+        async for event in stream_graph(
+            graph, input_data,
             **stream_kwargs,
         ):
             for last in reversed(event.get("messages", [])):
@@ -1307,6 +1311,8 @@ async def run_agent_stream(
     resume_payload: dict[str, Any] | None = None,
     checkpoint_id: str | None = None,
     emit_thinking: bool = False,
+    _protocol_events: bool = False,
+    _checkpoint_metadata: dict[str, Any] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run a workflow graph and stream UI events (tool calls and text chunks).
 
@@ -1367,6 +1373,8 @@ async def run_agent_stream(
     thread_id = resolve_thread_id(thread_id)
     await _assert_thread_graph_family(thread_id, resolved_workflow, agent_config)
     approval_supported = resolve_approval_supported(usage_context, thread_id, surfaces_interrupts=True)
+    if _checkpoint_metadata and _checkpoint_metadata.get("k41_parent_thread_id"):
+        approval_supported = False
     usage_context = (await load_usage_context(thread_id, usage_context)).to_dict()
     graph = get_workflow_graph(resolved_workflow)
     config = attach_usage_context(
@@ -1391,6 +1399,8 @@ async def run_agent_stream(
         browser_owner_id=browser_owner_id,
         acp_config_options=acp_config_options,
     )
+    if _checkpoint_metadata:
+        config["metadata"] = {**config.get("metadata", {}), **_checkpoint_metadata}
     conversation_title_task: asyncio.Task[dict[str, Any] | None] | None = None
     if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
         await _update_thread_agent(thread_id, agent_name, graph_family_for(resolved_workflow))
@@ -1471,14 +1481,18 @@ async def run_agent_stream(
     title_watcher = asyncio.create_task(_publish_generated_title())
     try:
         with track_active_session(thread_id, agent_name, usage_context=usage_context) as session_id:
-            chunk_extractor = _StreamingChunkExtractor()
+            chunk_extractors: dict[str, _StreamingChunkExtractor] = {}
+            thinking_message_ids: set[str] = set()
             # The values event repeats reasoning that was already streamed as deltas.
             thinking_streamed = False
-            async for event in graph.astream(
-                input_data,
+            async for event in stream_graph(
+                graph, input_data, protocol_events=_protocol_events,
                 **stream_kwargs,
             ):
-                stream_mode, event_data = _coerce_stream_event(event)
+                stream_mode, event_data = event
+                if stream_mode == "protocol":
+                    yield {"type": "protocol_event", "event": event_data}
+                    continue
                 while not title_event_queue.empty():
                     yield title_event_queue.get_nowait()
                 if stream_mode == "custom":
@@ -1505,19 +1519,24 @@ async def run_agent_stream(
                         logger.debug("Ignoring unsupported custom stream event: %r", event_data)
                     continue
                 if stream_mode == "messages":
-                    delta = chunk_extractor.extract(event_data)
+                    source_id, delta = _extract_stream_chunk(event_data, chunk_extractors)
+                    identity = {"message_id": source_id} if _protocol_events and source_id else {}
                     # Reasoning precedes the text it led to, even within one chunk.
                     if emit_thinking and delta.thinking:
                         thinking_streamed = True
+                        if source_id:
+                            thinking_message_ids.update({source_id, "lc_run--" + source_id})
                         yield {
                             "type": "thinking",
                             "content": delta.thinking,
+                            **identity,
                         }
                     if delta.text:
                         registry.update_step(session_id, SESSION_STEP_RESPONDING)
                         yield {
                             "type": "message",
                             "content": delta.text,
+                            **identity,
                         }
                     continue
 
@@ -1574,7 +1593,7 @@ async def run_agent_stream(
                         content = extract_final_text_content(getattr(message, "content", None))
                         thinking = (
                             extract_message_thinking(message)
-                            if emit_thinking and not thinking_streamed
+                            if emit_thinking and not thinking_streamed and message_id not in thinking_message_ids
                             else ""
                         )
                         thinking_streamed = False
@@ -1582,12 +1601,14 @@ async def run_agent_stream(
                             yield {
                                 "type": "thinking",
                                 "content": thinking,
+                                **({"message_id": message_id} if _protocol_events else {}),
                             }
                         if content:
                             registry.update_step(session_id, SESSION_STEP_RESPONDING)
                             yield {
                                 "type": "final",
                                 "content": content,
+                                **({"message_id": message_id} if _protocol_events else {}),
                             }
                         if tool_calls:
                             for tc in tool_calls:
@@ -1649,6 +1670,7 @@ async def run_agent_edit_stream(
     usage_context: dict[str, Any] | None = None,
     resume: bool = False,
     emit_thinking: bool = False,
+    _protocol_events: bool = False,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Fork a thread from the checkpoint before a user message and stream the result."""
     from agent.modules.agents import get_catalog_service
@@ -1730,14 +1752,18 @@ async def run_agent_edit_stream(
     current_user_seen = False
 
     with track_active_session(thread_id, agent_name, usage_context=usage_context) as session_id:
-        chunk_extractor = _StreamingChunkExtractor()
+        chunk_extractors: dict[str, _StreamingChunkExtractor] = {}
+        thinking_message_ids: set[str] = set()
         # The values event repeats reasoning that was already streamed as deltas.
         thinking_streamed = False
-        async for event in graph.astream(
-            {"messages": [edited_message]},
+        async for event in stream_graph(
+            graph, {"messages": [edited_message]}, protocol_events=_protocol_events,
             **stream_kwargs,
         ):
-            stream_mode, event_data = _coerce_stream_event(event)
+            stream_mode, event_data = event
+            if stream_mode == "protocol":
+                yield {"type": "protocol_event", "event": event_data}
+                continue
             if stream_mode == "custom":
                 # Only context_usage custom events are forwarded to the client today.
                 if isinstance(event_data, dict) and event_data.get("type") == "context_usage":
@@ -1754,19 +1780,24 @@ async def run_agent_edit_stream(
                     logger.debug("Ignoring unsupported custom stream event: %r", event_data)
                 continue
             if stream_mode == "messages":
-                delta = chunk_extractor.extract(event_data)
+                source_id, delta = _extract_stream_chunk(event_data, chunk_extractors)
+                identity = {"message_id": source_id} if _protocol_events and source_id else {}
                 # Reasoning precedes the text it led to, even within one chunk.
                 if emit_thinking and delta.thinking:
                     thinking_streamed = True
+                    if source_id:
+                        thinking_message_ids.update({source_id, "lc_run--" + source_id})
                     yield {
                         "type": "thinking",
                         "content": delta.thinking,
+                        **identity,
                     }
                 if delta.text:
                     registry.update_step(session_id, SESSION_STEP_RESPONDING)
                     yield {
                         "type": "message",
                         "content": delta.text,
+                        **identity,
                     }
                 continue
 
@@ -1819,7 +1850,7 @@ async def run_agent_edit_stream(
                     content = extract_final_text_content(getattr(message, "content", None))
                     thinking = (
                         extract_message_thinking(message)
-                        if emit_thinking and not thinking_streamed
+                        if emit_thinking and not thinking_streamed and message_id not in thinking_message_ids
                         else ""
                     )
                     thinking_streamed = False
@@ -1827,12 +1858,14 @@ async def run_agent_edit_stream(
                         yield {
                             "type": "thinking",
                             "content": thinking,
+                            **({"message_id": message_id} if _protocol_events else {}),
                         }
                     if content:
                         registry.update_step(session_id, SESSION_STEP_RESPONDING)
                         yield {
                             "type": "final",
                             "content": content,
+                            **({"message_id": message_id} if _protocol_events else {}),
                         }
                     if tool_calls:
                         for tc in tool_calls:
@@ -1872,6 +1905,8 @@ async def run_agent_full(
     resume: bool = False,
     resume_payload: dict[str, Any] | None = None,
     checkpoint_id: str | None = None,
+    _checkpoint_metadata: dict[str, Any] | None = None,
+    _event_writer: Any = None,
 ) -> str:
     """Run a workflow graph and return the final assistant response.
 
@@ -1893,6 +1928,38 @@ async def run_agent_full(
         model: Override agent card model for this run if needed
         attachments: Optional files attached to the user message
     """
+    if _event_writer is not None:
+        from agent.modules.agent_runtime.protocol import run_agent_protocol_stream, application_event
+        final = ""
+        async for event in run_agent_protocol_stream(
+            user_input=user_input,
+            thread_id=thread_id,
+            agent_name=agent_name,
+            workflow=workflow,
+            workspace=workspace,
+            working_dir=working_dir,
+            context_compact_threshold=context_compact_threshold,
+            channel_context_trim_threshold=channel_context_trim_threshold,
+            allowed_tool_names=allowed_tool_names,
+            allowed_skill_names=allowed_skill_names,
+            provider=provider,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            permission_mode=permission_mode,
+            acp_config_options=acp_config_options,
+            browser_owner_id=browser_owner_id,
+            attachments=attachments,
+            usage_context=usage_context,
+            resume=resume,
+            resume_payload=resume_payload,
+            checkpoint_id=checkpoint_id,
+            _checkpoint_metadata=_checkpoint_metadata,
+        ):
+            _event_writer(event)
+            projected = application_event(event)
+            if projected and projected.get("type") == "final":
+                final = str(projected.get("content") or "")
+        return final
     chunks = []
     async for chunk in run_agent(
         user_input=user_input,

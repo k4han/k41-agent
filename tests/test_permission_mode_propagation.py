@@ -41,30 +41,31 @@ def test_edit_endpoint_passes_mode_to_the_edit_runner(isolated_container, monkey
     import importlib
     from tests.test_api_router import _create_client
     router = importlib.import_module("agent.delivery.http.api.router")
+    events = importlib.import_module("agent.delivery.http.api.events_v2")
     captured = {}
     async def not_acp(*args):
         return False
     async def apply_workspace(*args):
         return None
-    async def subscribe():
+    async def subscribe(**kwargs):
         yield {"type": "final", "content": "done"}
     async def session(thread_id, params, *, run_fn):
         captured.update(params)
         captured["runner"] = run_fn
-        return SimpleNamespace(subscribe=subscribe)
+        return SimpleNamespace(subscribe=subscribe, run_id="run", thread_id=thread_id)
     monkeypatch.setattr(router, "get_catalog_service", lambda: SimpleNamespace(
         get_agent_card=lambda name: SimpleNamespace(graph_type="react_agent")))
     monkeypatch.setattr(router, "_ensure_chat_agent_available", lambda name: None)
     monkeypatch.setattr(router, "_validate_pool_request", lambda request: None)
     monkeypatch.setattr(router, "thread_is_acp", not_acp)
     monkeypatch.setattr(router, "_apply_workspace_to_run_params", apply_workspace)
-    monkeypatch.setattr(router, "get_chat_stream_manager", lambda: SimpleNamespace(get_or_create_session=session))
-    response = _create_client().post("/api/chat/events/edit", json={
+    monkeypatch.setattr(events, "get_chat_stream_manager", lambda: SimpleNamespace(get_or_create_session=session))
+    response = _create_client().post("/v2/api/chat/events/edit", json={
         "message": "edited", "thread_id": "api_test", "message_index": 0,
         "source_checkpoint_id": "checkpoint", "permission_mode": "ask"})
     assert response.status_code == 200
     assert captured["permission_mode"] == "ask"
-    assert captured["runner"] is router.run_agent_edit_stream
+    assert captured["runner"] is events.run_agent_edit_protocol_stream
 
 
 @pytest.mark.parametrize("override", [None, "ask"])

@@ -9,7 +9,7 @@ import {
   parsePlanReviewToolResult,
   parseUserInputRequestToolResult,
 } from "@/components/Transcript";
-import type { TranscriptAttachment, TranscriptItem } from "@/components/Transcript";
+import type { TranscriptAttachment, TranscriptItem, SubagentActivity } from "@/components/Transcript";
 import {
   ASK_USER_TOOL_NAME,
   normalizeUserQuestion,
@@ -79,8 +79,9 @@ export type ThreadMessage = {
   branch?: ThreadMessageBranch;
   name?: string;
   tool_call_id?: string;
-  tool_calls?: Array<{ id: string; name: string; args: unknown }>;
+  tool_calls?: Array<{ id: string; name: string; args: unknown; subagent?: SubagentActivity }>;
   attachments?: TranscriptAttachment[];
+  subagent?: SubagentActivity;
 };
 
 export type ThreadMessageBranchOption = {
@@ -298,6 +299,7 @@ export function toThreadTranscript(
       const target = findTranscriptToolTarget(items, msg.tool_call_id, msg.name);
 
       if (target) {
+        if (msg.subagent) target.subagent = msg.subagent;
         target.result = msg.content;
         target.resultReceived = true;
         target.tool_call_id = target.tool_call_id || msg.tool_call_id || null;
@@ -312,6 +314,7 @@ export function toThreadTranscript(
           name: msg.name,
           result: msg.content,
         }),
+        subagent: msg.subagent,
       });
       return;
     }
@@ -398,6 +401,7 @@ export function toThreadTranscript(
         }
         items.push({
           key: `tool-call-${messageIndex}-${toolCallIndex}-${toolCall.id || "unknown"}`,
+          subagent: toolCall.subagent,
           ...createTranscriptTool({
             toolCallId: toolCall.id,
             name: toolCall.name,

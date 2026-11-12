@@ -5,6 +5,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { protocolFixture } from './protocol-fixture.mjs';
 
 const staticRoot = fileURLToPath(new URL('../../static/', import.meta.url));
 const executable = process.env.BROWSER_EXECUTABLE || [
@@ -76,7 +77,7 @@ const server = http.createServer(async (req, res) => {
     res.end(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\nevent: done\ndata: {}\n\n`);
     return;
   }
-  if (url.pathname.startsWith('/api/chat/events')) {
+  if (url.pathname.startsWith('/v2/api/chat/events')) {
     let body = '';
     for await (const chunk of req) body += chunk;
     const payload = JSON.parse(body);
@@ -84,6 +85,7 @@ const server = http.createServer(async (req, res) => {
     else sentMessages.push(payload);
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
     res.flushHeaders();
+    protocolFixture(res, payload.thread_id);
     responses.set(payload.thread_id || 'pending', res);
     if (payload.thread_id) res.write(JSON.stringify({ type: 'message', content: `${payload.thread_id} live response` }) + '\n');
     return;
@@ -374,7 +376,7 @@ try {
   assert.equal(sentMessages.at(-1).model, 'model-a');
   assert.equal(sentMessages.at(-1).workspace.locator, '/original-project');
   assert.equal(await model(), 'model-b');
-  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'Temporary');
+  assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'No workspace');
   await navigate('/chat');
   await loaded();
   responses.get('pending').write(JSON.stringify({ type: 'thread_created', thread_id: 'created-in-background' }) + '\n');

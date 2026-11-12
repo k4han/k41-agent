@@ -314,6 +314,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 - [Landing page and GitHub Pages](docs/github-pages.md)
 - `docs/configuration.md`
 - [Priority model pools](docs/model-pools.md)
+- [V3 event streaming and delegated history](docs/event-streaming.md)
 - [Project catalog](docs/project-catalog.md)
 - `docs/deployment-verification.md`
 - `docs/agent-quick-reference.md`

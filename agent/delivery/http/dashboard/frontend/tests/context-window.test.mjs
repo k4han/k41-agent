@@ -67,7 +67,7 @@ function createFixture(t, { streaming = true, payload, provider = '', model = ''
     });
   });
   const dispatch = (tokens, limit = 32000, threadId = 'thread-a', estimated = false, breakdown, usage = {}) => {
-    handler.handleStreamEvent({
+    handler.applyApplicationEvent({
       type: 'context_usage', current_context_tokens: tokens,
       context_window: limit, estimated,
       context_breakdown: breakdown,

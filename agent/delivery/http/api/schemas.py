@@ -136,6 +136,14 @@ class ReconnectRequest(BaseModel):
     """Request body for reconnecting to an active chat stream."""
 
     thread_id: str = Field(..., description="The thread ID to reconnect to.")
+    run_id: str | None = Field(default=None, min_length=1)
+    after_seq: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_cursor(self):
+        if (self.run_id is None) != (self.after_seq is None):
+            raise ValueError("run_id and after_seq must be supplied together")
+        return self
 
 
 class EditChatRequest(PoolSelectionValidation):

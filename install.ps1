@@ -655,7 +655,29 @@ function Stop-ExistingApp {
         }
     }
 
-    & $PythonExe -c "import sys; from agent.bootstrap.cli import PID_FILE, _is_tray_running, _server_health_reachable; from agent.bootstrap.process_utils import is_server_running; sys.exit(1 if is_server_running(PID_FILE) or _is_tray_running() or _server_health_reachable() else 0)"
+    # The installed runtime may predate helpers added by this installer.
+    $shutdownCheck = @'
+import sys
+
+import httpx
+
+from agent.bootstrap.cli import PID_FILE, _health_url, _is_tray_running
+from agent.bootstrap.process_utils import is_server_running
+from agent.bootstrap.settings import load_bootstrap_config
+
+if is_server_running(PID_FILE) or _is_tray_running():
+    sys.exit(1)
+config = load_bootstrap_config()
+if config.enable_web:
+    try:
+        response = httpx.get(_health_url(config.host, config.port), timeout=2.0, trust_env=False)
+    except httpx.RequestError:
+        pass
+    else:
+        if response.status_code == 200:
+            sys.exit(1)
+'@
+    & $PythonExe -c $shutdownCheck
     if ($LASTEXITCODE -ne 0) {
         throw "Could not confirm server and tray shutdown. Installation was aborted."
     }

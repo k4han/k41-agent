@@ -13,9 +13,11 @@ import tempfile
 from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing, asynccontextmanager
 from typing import Any, AsyncGenerator
+from uuid import uuid4
 
 from langgraph.errors import GraphRecursionError
 
+from agent.modules.agent_runtime.protocol import application_event, protocol_event, run_agent_protocol_stream
 from agent.shared.infrastructure.errors import (
     classify_agent_error,
     friendly_agent_error_message,
@@ -40,8 +42,10 @@ class ChatStreamSession:
 
     def __init__(self, thread_id: str, params: dict[str, Any], run_fn: Any = None) -> None:
         self.thread_id = thread_id
-        self.params = params
-        self.run_fn = run_fn
+        self.run_fn = run_fn or run_agent_protocol_stream
+        self.run_id = uuid4().hex
+        self.last_seq = 0
+        self.params = {**params, "_run_id": self.run_id}
         self._event_log = tempfile.SpooledTemporaryFile(max_size=MAX_BUFFER_BYTES, mode="w+b")
         self._closed = False
         # Subscribers retain only a cursor and a single coalesced wakeup.
@@ -81,16 +85,13 @@ class ChatStreamSession:
             self._on_done(self)
 
     async def _run_agent_background(self) -> None:
-        logger.info("Starting background chat stream task for thread %s", self.thread_id)
+        logger.info("Starting chat stream run %s for thread %s", self.run_id, self.thread_id)
         try:
-            run_fn = self.run_fn
-            if run_fn is None:
-                from agent.modules.agent_runtime.runner import run_agent_stream
-                run_fn = run_agent_stream
-            async with aclosing(run_fn(**self.params)) as events:
+            async with aclosing(self.run_fn(**self.params)) as events:
                 async for event in events:
-                    if event.get("type") == "error":
-                        await self._push_error_event(event)
+                    update = application_event(event)
+                    if update is not None and update.get("type") == "error":
+                        await self._push_error_event(update)
                     else:
                         await self.push_event(event)
         except asyncio.CancelledError:
@@ -133,19 +134,21 @@ class ChatStreamSession:
                 await record_thread_run_error(self.thread_id, event)
         except Exception:
             logger.warning("Failed to persist chat error for thread %s", self.thread_id, exc_info=True)
-        await self.push_event(event)
+        await self.push_event(protocol_event("custom:k41", {**event, "projection": "ui"}))
 
     async def push_event(self, event: dict[str, Any]) -> None:
         """Append an event to the replay log and wake subscribers."""
-        payload = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
         async with self.lock:
+            self.last_seq += 1
+            event = {**event, "seq": self.last_seq, "event_id": f"{self.run_id}:{self.last_seq}"}
+            payload = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
             self._event_log.seek(0, 2)
             self._event_log.write(payload)
             for q in self.queues:
                 if q.empty():
                     q.put_nowait(None)
 
-    async def subscribe(self) -> AsyncGenerator[dict[str, Any], None]:
+    async def subscribe(self, *, after_seq: int = 0) -> AsyncGenerator[dict[str, Any], None]:
         """Subscribe to stream events. Yields buffered events first, then new ones."""
         q: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         async with self.lock:
@@ -162,7 +165,9 @@ class ChatStreamSession:
                     position = self._event_log.tell()
                     is_done = self.done
                 if line:
-                    yield json.loads(line)
+                    event = json.loads(line)
+                    if event["seq"] > after_seq:
+                        yield event
                     continue
                 if is_done:
                     break

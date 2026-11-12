@@ -11,6 +11,7 @@ from agent.bootstrap.container import (
     create_test_container,
     get_active_container,
 )
+from agent.modules.agent_runtime.protocol import application_event, protocol_event
 from agent.shared.config import get_config_service
 
 
@@ -89,7 +90,7 @@ async def test_reinitializing_persistence_restores_chat_streams(isolated_contain
     event = {"type": "final", "content": "complete"}
 
     async def run(**params):
-        yield event
+        yield protocol_event("custom:k41", {**event, "projection": "ui"})
 
     try:
         await container.initialize_persistence()
@@ -111,7 +112,10 @@ async def test_reinitializing_persistence_restores_chat_streams(isolated_contain
         replacement = container.chat_stream_manager
         session = await replacement.get_or_create_session(session.thread_id, {}, run)
         await asyncio.wait_for(session.task, timeout=1)
-        assert [item async for item in session.subscribe()] == [event]
+        replay = [item async for item in session.subscribe()]
+        assert [application_event(item) for item in replay] == [event]
+        assert replay[0]["seq"] == 1
+        assert replay[0]["event_id"] == f"{session.run_id}:1"
         assert replacement is not manager
         with pytest.raises(RuntimeError, match="shutting down"):
             await manager.get_or_create_session(session.thread_id, {}, run)

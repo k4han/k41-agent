@@ -78,9 +78,9 @@ export const API_PATHS = {
   promptVariablesResource: "/prompt-variables",
   provider: (name: string) => `/dashboard-api/providers/${encodeURIComponent(name)}`,
   providerModels: "/providers/models",
-  chatEvents: "/api/chat/events",
-  chatEventsReconnect: "/api/chat/events/reconnect",
-  chatEventsEdit: "/api/chat/events/edit",
+  chatEvents: "/v2/api/chat/events",
+  chatEventsReconnect: "/v2/api/chat/events/reconnect",
+  chatEventsEdit: "/v2/api/chat/events/edit",
   chatStream: "/api/chat/stream",
   chatStreamRun: "/api/chat/stream/run",
   backgroundTaskStream: (threadId: string) =>

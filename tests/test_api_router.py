@@ -20,6 +20,17 @@ from agent.modules.tools.builtin.utility.plan_mode import PlanModeResumePayload
 
 
 router_module = importlib.import_module("agent.delivery.http.api.router")
+events_module = importlib.import_module("agent.delivery.http.api.events_v2")
+runner_module = importlib.import_module("agent.modules.agent_runtime.runner")
+from agent.modules.agent_runtime.protocol import application_event, protocol_event
+
+
+def application_updates(response):
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert all(event["type"] == "event" for event in events)
+    assert [event["seq"] for event in events] == list(range(1, len(events) + 1))
+    return [update for event in events if (update := application_event(event)) is not None]
+
 
 
 @pytest.mark.parametrize("effort", ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max", "custom_level"])
@@ -55,6 +66,7 @@ def _create_client() -> TestClient:
     app.middleware("http")(redirect_legacy_api)
 
     app.include_router(router_module.router)
+    app.include_router(events_module.router)
 
     async def mock_admin(_: Request) -> str:
         return "test_admin"
@@ -77,9 +89,9 @@ async def test_chat_events_survives_http_disconnect_and_reconnects(monkeypatch):
         return {"thread_id": "http-disconnect"}
 
     async def run(**params):
-        yield events[0]
+        yield protocol_event("custom:k41", {**events[0], "projection": "ui"})
         await proceed.wait()
-        yield events[1]
+        yield protocol_event("custom:k41", {**events[1], "projection": "ui"})
 
     async def receive():
         await disconnect.wait()
@@ -89,12 +101,12 @@ async def test_chat_events_survives_http_disconnect_and_reconnects(monkeypatch):
         if message["type"] == "http.response.body" and message.get("body"):
             disconnect.set()
 
-    monkeypatch.setattr(router_module, "prepare_run_params", prepare)
-    monkeypatch.setattr(router_module, "run_agent_stream", run)
-    monkeypatch.setattr(router_module, "get_chat_stream_manager", lambda: manager)
+    monkeypatch.setattr(events_module, "prepare_run_params", prepare)
+    monkeypatch.setattr(events_module, "run_agent_protocol_stream", run)
+    monkeypatch.setattr(events_module, "get_chat_stream_manager", lambda: manager)
     monkeypatch.setattr(router_module, "resolve_thread_id", lambda value: value)
     try:
-        response = await router_module.chat_events(ChatRequest(message="hello"), admin="test")
+        response = await events_module.chat_events(ChatRequest(message="hello"), admin="test")
         await asyncio.wait_for(response({"type": "http", "asgi": {"spec_version": "2.3"}}, receive, send), timeout=1)
         session = await manager.get_session("http-disconnect")
         assert not session.task.done()
@@ -102,15 +114,15 @@ async def test_chat_events_survives_http_disconnect_and_reconnects(monkeypatch):
 
         proceed.set()
         await asyncio.wait_for(session.task, timeout=1)
-        response = await router_module.chat_events_reconnect(ReconnectRequest(thread_id=session.thread_id))
-        replay = [json.loads(chunk) async for chunk in response.body_iterator]
+        response = await events_module.reconnect(ReconnectRequest(thread_id=session.thread_id))
+        replay = [application_event(json.loads(chunk)) async for chunk in response.body_iterator]
         assert replay == events
     finally:
         proceed.set()
         await manager.shutdown()
 
 
-@pytest.mark.parametrize("path", ["/api/chat", "/api/chat/stream", "/api/chat/events", "/api/chat/events/edit"])
+@pytest.mark.parametrize("path", ["/api/chat", "/api/chat/stream", "/v2/api/chat/events", "/v2/api/chat/events/edit"])
 def test_chat_endpoints_reject_system_only_agents(monkeypatch, path):
     monkeypatch.setattr(
         router_module, "get_catalog_service",
@@ -381,15 +393,16 @@ def test_chat_events_passes_attachments(monkeypatch):
         return dict(built_params)
 
     async def fake_run_agent_stream(**params):
+        assert params.pop("_protocol_events") is True
         assert params == built_params
         yield {"type": "final", "content": "attached"}
 
     monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
-    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
 
     client = _create_client()
     response = client.post(
-        "/api/chat/events",
+        "/v2/api/chat/events",
         json={
             "message": "Review these",
             "user_id": "alice",
@@ -413,7 +426,7 @@ def test_chat_events_passes_attachments(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.text == '{"type": "final", "content": "attached"}\n'
+    assert application_updates(response) == [json.loads(line) for line in ('{"type": "final", "content": "attached"}\n').splitlines()]
 
 
 def test_chat_events_can_resume_existing_thread(monkeypatch):
@@ -446,15 +459,16 @@ def test_chat_events_can_resume_existing_thread(monkeypatch):
         return dict(built_params)
 
     async def fake_run_agent_stream(**params):
+        assert params.pop("_protocol_events") is True
         assert params == built_params
         yield {"type": "final", "content": "resumed"}
 
     monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
-    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
 
     client = _create_client()
     response = client.post(
-        "/api/chat/events",
+        "/v2/api/chat/events",
         json={
             "message": "Continue",
             "user_id": "dashboard",
@@ -463,7 +477,7 @@ def test_chat_events_can_resume_existing_thread(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.text == '{"type": "final", "content": "resumed"}\n'
+    assert application_updates(response) == [json.loads(line) for line in ('{"type": "final", "content": "resumed"}\n').splitlines()]
 
 
 def test_chat_events_can_create_new_thread(monkeypatch, tmp_path):
@@ -510,16 +524,17 @@ def test_chat_events_can_create_new_thread(monkeypatch, tmp_path):
         return workspace
 
     async def fake_run_agent_stream(**params):
+        assert params.pop("_protocol_events") is True
         assert params == {**built_params, "workspace": resolved_workspace}
         yield {"type": "final", "content": "started"}
 
     monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
     monkeypatch.setattr(router_module, "remember_thread_workspace_ref", fake_remember_thread_workspace_ref)
-    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
 
     client = _create_client()
     response = client.post(
-        "/api/chat/events",
+        "/v2/api/chat/events",
         json={
             "message": "Start",
             "user_id": "dashboard",
@@ -529,10 +544,10 @@ def test_chat_events_can_create_new_thread(monkeypatch, tmp_path):
     )
 
     assert response.status_code == 200
-    assert response.text == (
+    assert application_updates(response) == [json.loads(line) for line in ((
         '{"type": "thread_created", "thread_id": "91c23fc6b24a48ef9b804405e1809bde"}\n'
         '{"type": "final", "content": "started"}\n'
-    )
+    )).splitlines()]
     assert remembered == [("91c23fc6b24a48ef9b804405e1809bde", resolved_workspace.model_dump())]
 
 
@@ -573,16 +588,17 @@ def test_chat_events_creates_temp_workspace_for_dashboard_new_thread_without_wor
         return {**built_params, "workspace": params["workspace"]}
 
     async def fake_run_agent_stream(**params):
+        assert params.pop("_protocol_events") is True
         assert params == built_params
         yield {"type": "final", "content": "started"}
 
     monkeypatch.setattr(router_module, "create_temp_workspace", fake_create_temp_workspace)
     monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
-    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
 
     client = _create_client()
     response = client.post(
-        "/api/chat/events",
+        "/v2/api/chat/events",
         json={
             "message": "Start",
             "user_id": "dashboard",
@@ -591,10 +607,10 @@ def test_chat_events_creates_temp_workspace_for_dashboard_new_thread_without_wor
     )
 
     assert response.status_code == 200
-    assert response.text == (
+    assert application_updates(response) == [json.loads(line) for line in ((
         '{"type": "thread_created", "thread_id": "91c23fc6b24a48ef9b804405e1809bde"}\n'
         '{"type": "final", "content": "started"}\n'
-    )
+    )).splitlines()]
 
 
 def test_chat_events_resolves_and_remembers_workspace(monkeypatch, tmp_path):
@@ -623,16 +639,17 @@ def test_chat_events_resolves_and_remembers_workspace(monkeypatch, tmp_path):
         return workspace
 
     async def fake_run_agent_stream(**params):
+        assert params.pop("_protocol_events") is True
         assert params == {**built_params, "workspace": resolved_workspace}
         yield {"type": "final", "content": "done"}
 
     monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
     monkeypatch.setattr(router_module, "remember_thread_workspace_ref", fake_remember_thread_workspace_ref)
-    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
 
     client = _create_client()
     response = client.post(
-        "/api/chat/events",
+        "/v2/api/chat/events",
         json={
             "message": "Work here",
             "user_id": "dashboard",
@@ -642,7 +659,7 @@ def test_chat_events_resolves_and_remembers_workspace(monkeypatch, tmp_path):
     )
 
     assert response.status_code == 200
-    assert response.text == '{"type": "final", "content": "done"}\n'
+    assert application_updates(response) == [json.loads(line) for line in ('{"type": "final", "content": "done"}\n').splitlines()]
     assert remembered == [("api_dashboard_workspace", resolved_workspace.model_dump())]
 
 
@@ -688,17 +705,18 @@ def test_chat_events_keeps_stored_sandbox_dormant_before_stream(monkeypatch, exp
         return workspace
 
     async def fake_run_agent_stream(**params):
+        assert params.pop("_protocol_events") is True
         assert params == {**built_params, "workspace": stored_workspace}
         yield {"type": "final", "content": "continued"}
 
     monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
     monkeypatch.setattr(router_module, "get_thread_workspace_ref", fake_get_thread_workspace_ref)
     monkeypatch.setattr(router_module, "remember_thread_workspace_ref", fake_remember_thread_workspace_ref)
-    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
 
     client = _create_client()
     response = client.post(
-        "/api/chat/events",
+        "/v2/api/chat/events",
         json={
             "message": "Continue",
             "user_id": "dashboard",
@@ -708,7 +726,7 @@ def test_chat_events_keeps_stored_sandbox_dormant_before_stream(monkeypatch, exp
     )
 
     assert response.status_code == 200
-    assert response.text == '{"type": "final", "content": "continued"}\n'
+    assert application_updates(response) == [json.loads(line) for line in ('{"type": "final", "content": "continued"}\n').splitlines()]
     assert remembered == [
         ("api_dashboard_old_thread", stored_workspace.model_dump())
     ]
@@ -732,6 +750,7 @@ def test_chat_events_streams_tool_calls_as_ndjson(monkeypatch):
         return dict(built_params)
 
     async def fake_run_agent_stream(**params):
+        assert params.pop("_protocol_events") is True
         assert params == built_params
         yield {"type": "tool_call", "id": "call-1", "name": "list_dir", "args": {"path": "."}}
         yield {
@@ -743,18 +762,18 @@ def test_chat_events_streams_tool_calls_as_ndjson(monkeypatch):
         yield {"type": "final", "content": "done"}
 
     monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
-    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
 
     client = _create_client()
-    response = client.post("/api/chat/events", json={"message": "Use a tool", "user_id": "alice"})
+    response = client.post("/v2/api/chat/events", json={"message": "Use a tool", "user_id": "alice"})
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/x-ndjson")
-    assert response.text == (
+    assert application_updates(response) == [json.loads(line) for line in ((
         '{"type": "tool_call", "id": "call-1", "name": "list_dir", "args": {"path": "."}}\n'
         '{"type": "tool_result", "tool_call_id": "call-1", "name": "list_dir", "content": "README.md"}\n'
         '{"type": "final", "content": "done"}\n'
-    )
+    )).splitlines()]
 
 
 def test_chat_events_streams_classified_agent_errors(monkeypatch):
@@ -778,22 +797,23 @@ def test_chat_events_streams_classified_agent_errors(monkeypatch):
         return dict(built_params)
 
     async def fake_run_agent_stream(**params):
+        assert params.pop("_protocol_events") is True
         assert params == built_params
         raise FakeRateLimitError("429 too many requests")
         yield  # pragma: no cover - makes this an async generator
 
     monkeypatch.setattr(router_module, "build_run_params", fake_build_run_params)
-    monkeypatch.setattr(router_module, "run_agent_stream", fake_run_agent_stream)
+    monkeypatch.setattr(runner_module, "run_agent_stream", fake_run_agent_stream)
 
     client = _create_client()
     response = client.post(
-        "/api/chat/events",
+        "/v2/api/chat/events",
         json={"message": "Use a busy model", "user_id": "alice"},
     )
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/x-ndjson")
-    event = json.loads(response.text)
+    event, = application_updates(response)
     assert event["type"] == "error"
     assert event["code"] == "rate_limit"
     assert "rate limiting" in event["content"]

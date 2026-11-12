@@ -1,3 +1,4 @@
+import { protocolFixture } from './protocol-fixture.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -71,7 +72,7 @@ const fixtures = {
 };
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (url.pathname === '/api/chat/events') {
+  if (url.pathname === '/v2/api/chat/events') {
     let body = '';
     for await (const chunk of req) body += chunk;
     sentMessages.push(JSON.parse(body));
@@ -83,6 +84,7 @@ const server = http.createServer(async (req, res) => {
     chatResponse = res;
     res.setHeader('Content-Type', 'application/x-ndjson');
     res.setHeader('Cache-Control', 'no-cache');
+    protocolFixture(res, sentMessages.at(-1).thread_id);
     res.write(JSON.stringify({ type: 'tool_call', id: 'write-source', name: 'shell', args: { command: 'write source.txt' } }) + '\n');
     return;
   }

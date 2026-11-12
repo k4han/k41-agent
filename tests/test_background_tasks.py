@@ -73,6 +73,29 @@ async def _wait_for_thread_title(thread_id: str, title: str) -> dict:
 
 
 @pytest.mark.asyncio
+async def test_background_task_publishes_one_v3_stream(background_task_db, monkeypatch):
+    from agent.modules.agent_runtime.protocol import application_event
+
+    async def application_updates(**kwargs):
+        yield {"type": "message", "content": "answer"}
+        yield {"type": "final", "content": "answer"}
+
+    monkeypatch.setattr("agent.modules.agent_runtime.runner.run_agent_stream", application_updates)
+    published = []
+    manager = BackgroundTaskManager()
+    monkeypatch.setattr(manager, "_publish_event", lambda thread, name, data: published.append((name, data)))
+    task_id = await manager.submit("do work")
+    task = await _wait_for_task_status(manager, task_id, "completed")
+
+    assert task["result"] == "answer"
+    assert {name for name, _ in published} == {"agent", "task", "done"}
+    events = [event for name, event in published if name == "agent"]
+    assert all(event["type"] == "event" for event in events)
+    assert [event["seq"] for event in events] == list(range(1, len(events) + 1))
+    assert [update["type"] for event in events if (update := application_event(event))] == ["message", "final"]
+
+
+@pytest.mark.asyncio
 async def test_background_task_restore_preserves_completed_status(
     background_task_db,
     monkeypatch: pytest.MonkeyPatch,
@@ -660,7 +683,10 @@ async def test_background_task_admission_failure_finishes_and_cleans_up(
     assert task["completed_at"] is not None
     assert any(event["event"] == "done" and event["data"]["task"]["status"] == status for event in events)
     if failure == "workspace":
-        assert any(event["event"] == "agent" and event["data"].get("code") == "workspace_switching" for event in events)
+        assert any(event["event"] == "agent" and event["data"]["params"]["data"].get("code") == "workspace_switching" for event in events)
+        error = next(event["data"] for event in events if event["event"] == "agent")
+        assert error["seq"] == 1
+        assert error["event_id"].endswith(":1")
     notified.assert_awaited_once_with(manager._tasks[task_id])
     cleanup.assert_awaited_once_with(manager._tasks[task_id])
     records = await BackgroundTaskRepository().list()

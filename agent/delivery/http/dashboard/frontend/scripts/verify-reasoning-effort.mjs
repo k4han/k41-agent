@@ -60,7 +60,7 @@ let savedAgent;
 let sentChat;
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (url.pathname === '/api/chat/events' && req.method === 'POST') {
+  if (url.pathname === '/v2/api/chat/events' && req.method === 'POST') {
     let body = '';
     for await (const chunk of req) body += chunk;
     sentChat = JSON.parse(body);
