@@ -302,6 +302,7 @@ function Copy-SourceTree {
         ".pytest_cache",
         ".ruff_cache",
         ".mypy_cache",
+        ".runtime-backup",
         ".tmp_*",
         "build",
         "dist",
@@ -346,6 +347,21 @@ function Install-Source {
 
     Write-Host "Downloading $sourceUrl"
     Invoke-WebRequest -Uri $sourceUrl -OutFile $sourceZip
+
+    if (-not $UseBranchSource) {
+        $checksumFile = "$sourceZip.sha256"
+        Invoke-WebRequest -Uri "$sourceUrl.sha256" -OutFile $checksumFile
+        $checksumLine = (Get-Content -LiteralPath $checksumFile -Raw).Trim()
+        $pattern = '^([0-9a-fA-F]{64})[ \t]+\*?' + [regex]::Escape($ArtifactName) + '$'
+        if ($checksumLine -notmatch $pattern) {
+            throw "Release checksum is missing or malformed."
+        }
+        $expectedHash = $Matches[1]
+        $actualHash = (Get-FileHash -LiteralPath $sourceZip -Algorithm SHA256).Hash
+        if ($actualHash -ine $expectedHash) {
+            throw "Release SHA256 mismatch; the installed application was not changed."
+        }
+    }
 
     New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
     Expand-Archive -LiteralPath $sourceZip -DestinationPath $extractDir -Force
@@ -609,6 +625,15 @@ function Backup-AppSource {
 
 function Stop-ExistingApp {
     if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) {
+        foreach ($pidName in @("server.pid", "tray.pid")) {
+            $candidateFile = Join-Path $HOME ".k41-agent\$pidName"
+            if (Test-Path -LiteralPath $candidateFile -PathType Leaf) {
+                $candidatePid = (Get-Content -LiteralPath $candidateFile -Raw).Trim()
+                if ($candidatePid -match '^\d+$' -and (Get-Process -Id ([int]$candidatePid) -ErrorAction SilentlyContinue)) {
+                    throw "A runtime process is still running but its Python environment is missing. Installation was aborted."
+                }
+            }
+        }
         Write-Host "No existing virtual environment found."
         return
     }
@@ -626,8 +651,13 @@ function Stop-ExistingApp {
         if (Wait-ProcessExit -ProcessId $runningPid -TimeoutSeconds 15) {
             Write-Host "Server process $runningPid stopped."
         } else {
-            Write-Host "WARNING: Server process $runningPid is still running. Files may be locked." -ForegroundColor Yellow
+            throw "Server process $runningPid is still running. Installation was aborted."
         }
+    }
+
+    & $PythonExe -c "import sys; from agent.bootstrap.cli import PID_FILE, _is_tray_running, _server_health_reachable; from agent.bootstrap.process_utils import is_server_running; sys.exit(1 if is_server_running(PID_FILE) or _is_tray_running() or _server_health_reachable() else 0)"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not confirm server and tray shutdown. Installation was aborted."
     }
 
     # Remove tray autostart to avoid orphaned entry on reinstall
@@ -702,3 +732,4 @@ Write-Host "Open a new terminal and run:"
 Write-Host "  k41"
 Write-Host "  k41 status"
 Write-Host "  k41 stop"
+Write-Host "First login password: 1234. Set a new password when prompted."

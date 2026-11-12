@@ -356,7 +356,14 @@ def with_async_db(func):
 
             _setup_database()
             await initialize_async_engine(metadata=Base.metadata)
-            return await func(*args, **kwargs)
+            from agent.modules.admin_auth import migrate_admin_auth_tables
+            from agent.shared.infrastructure.db import close_async_engine, get_database_url
+
+            try:
+                migrate_admin_auth_tables(get_database_url())
+                return await func(*args, **kwargs)
+            finally:
+                await close_async_engine()
 
         asyncio.run(_run())
 
@@ -456,7 +463,7 @@ def init() -> None:
                 minimal_config = (
                     "# Kai Agent Configuration\n"
                     "# Runtime provider, MCP, and channel policy settings live in the database.\n\n"
-                    'host: "0.0.0.0"\n'
+                    'host: "127.0.0.1"\n'
                     "port: 4141\n"
                     "enable_web: true\n"
                     "enable_api: true\n"
@@ -709,6 +716,26 @@ async def reset_password() -> None:
     auth_service = get_admin_auth_service()
     await auth_service.set_admin_password(new_pass)
     _echo_success("Admin password has been reset.")
+
+
+@app.command("verify-runtime", hidden=True)
+def verify_runtime() -> None:
+    """Validate migrations and persistence before committing an update."""
+    async def verify():
+        from agent.bootstrap.container import create_app_container
+        from agent.bootstrap.readiness import persistence_is_ready
+
+        container = create_app_container()
+        previous = container.activate()
+        try:
+            await container.initialize_persistence()
+            if not await persistence_is_ready(container):
+                raise RuntimeError("Runtime persistence is not ready.")
+        finally:
+            await container.close_persistence()
+            container.deactivate(previous)
+
+    asyncio.run(verify())
 
 
 @app.command("reset-quota")

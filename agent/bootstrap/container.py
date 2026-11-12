@@ -662,6 +662,7 @@ class AppContainer:
         attach_database_config_source(database_url, service=self.config_service)
 
         from agent.modules.agent_runtime import migrate_agent_runtime_tables
+        from agent.modules.admin_auth import migrate_admin_auth_tables
         from agent.modules.browser import migrate_browser_tables
         from agent.modules.conversations import migrate_conversation_tables
         from agent.modules.github import migrate_github_tables
@@ -676,6 +677,7 @@ class AppContainer:
         # of whatever container happens to be globally active.
         token = activate_context_container(self)
         try:
+            migrate_admin_auth_tables(database_url)
             migrate_workspace_tables(database_url)
             migrate_browser_tables(database_url)
             await self.browser_service.initialize_profiles()

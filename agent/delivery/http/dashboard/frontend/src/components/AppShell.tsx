@@ -1001,10 +1001,17 @@ export function AppShell(props: {
               </button>
               <Show when={menuOpen()}>
                 <div class="user-menu">
-                  <a class="user-menu-item user-menu-danger" href="/logout">
+                  <button class="user-menu-item user-menu-danger" type="button" onClick={async () => {
+                    try {
+                      await postJson("/logout", {});
+                      window.location.href = "/login";
+                    } catch (error) {
+                      showToast(error instanceof Error ? error.message : "Logout failed", "error");
+                    }
+                  }}>
                     <LogOut size={14} />
                     <span>Logout</span>
-                  </a>
+                  </button>
                 </div>
               </Show>
             </div>

@@ -109,6 +109,14 @@ export async function apiFetch<T>(path: string, init: ApiInit = {}): Promise<T> 
     throw new Error("Not authenticated");
   }
 
+  if (response.status === 403) {
+    const payload = await response.clone().json().catch(() => null);
+    if (payload?.detail?.error === "password_change_required") {
+      window.location.href = "/change-password";
+      throw new Error("Change the default admin password before continuing.");
+    }
+  }
+
   if (!response.ok) {
     throw new Error(await readError(response));
   }

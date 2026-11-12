@@ -31,7 +31,7 @@ Biến đã tồn tại trong process environment **không** bị ghi đè, nên
 
 ```yaml
 # Server configuration
-host: "0.0.0.0"
+host: "127.0.0.1"
 port: 4141
 
 # Feature flags
@@ -41,7 +41,7 @@ enable_dashboard: true
 
 # Database configuration
 database:
-  url: "sqlite+aiosqlite://~/.k41-agent/data/agent_state.db"
+  url: ""  # Use the internal SQLite database.
   # For PostgreSQL:
   # url: "postgresql+asyncpg://user:password@localhost:5432/k41_agent"
 
@@ -170,7 +170,7 @@ def my_handler(container: AppContainer):
     config = container.config_service
 
     # Typed getters
-    host = config.get_str("host", "0.0.0.0")
+    host = config.get_str("host", "127.0.0.1")
     port = config.get_int("port", 4141)
     enabled = config.get_bool("enable_web", True)
 

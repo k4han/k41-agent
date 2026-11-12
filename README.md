@@ -70,17 +70,18 @@ Then open:
 http://127.0.0.1:4141
 ```
 
-Sign in with the default admin password shown on the login page:
+Sign in with the first-use password `1234`. You must set a new password before
+opening the dashboard or using protected APIs. After changing it, sign in again.
 
-```text
-1234
-```
-
-Change the password after the first login:
+For forgotten passwords, reset the admin password locally:
 
 ```sh
 k41 reset-password
 ```
+
+The server binds to `127.0.0.1` by default. Existing installations can keep their
+network bind address and complete password setup through the login page.
+Existing sessions are invalidated by this upgrade and by password changes.
 
 ## First Setup
 
@@ -151,7 +152,17 @@ Run:
 k41 update
 ```
 
-The updater checks the latest GitHub release, backs up the installed source, applies the update, and restarts the server if it was running.
+The updater verifies the release SHA-256 checksum, stops the existing runtime,
+and backs up the installed source, database, configuration, environment files,
+and credential encryption key before applying migrations. It validates the new
+runtime and, for a running web server, waits for `/ready` to report the expected
+version. Failed migrations or startup restore both source and persistence.
+The service remains stopped when it was stopped before the update.
+
+PostgreSQL updates require `pg_dump` and `pg_restore` on PATH. Private persistence
+snapshots are stored inside each source backup under `.runtime-backup/`.
+See [deployment verification](docs/deployment-verification.md) for recovery and
+network access requirements.
 
 To only check whether a new release is available:
 

@@ -9,14 +9,18 @@ from agent.modules.admin_auth.auth import (
 )
 from agent.modules.admin_auth.service import (
     AdminAuthService,
+    LoginThrottled,
     get_admin_auth_service,
 )
 from agent.modules.admin_auth.models import AdminCredential
+from agent.modules.admin_auth.migrations import migrate_admin_auth_tables
 
 
 __all__ = [
     "AdminAuthService",
     "AdminCredential",
+    "LoginThrottled",
+    "migrate_admin_auth_tables",
     "create_access_token",
     "get_admin_auth_service",
     "get_current_admin",

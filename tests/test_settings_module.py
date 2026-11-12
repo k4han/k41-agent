@@ -120,7 +120,7 @@ class TestDefaultConfigSource:
         source = DefaultConfigSource()
         source.register_defaults({"host": "1.2.3.4"})
 
-        assert source.get("host") == "0.0.0.0"
+        assert source.get("host") == "127.0.0.1"
 
 
 # =====================================================================
@@ -311,7 +311,7 @@ class TestYamlConfigSource:
         assert source.ensure_default_file() is True
         all_settings = source.get_all_settings_values()
 
-        assert all_settings["host"].value == "0.0.0.0"
+        assert all_settings["host"].value == "127.0.0.1"
         assert all_settings["port"].value == 4141
         assert all_settings["enable_web"].value is True
         assert all_settings["enable_api"].value is True
@@ -329,7 +329,7 @@ class TestYamlConfigSource:
         source.update_setting("security.jwt_secret", "secret")
         all_settings = source.get_all_settings_values()
 
-        assert all_settings["host"].value == "0.0.0.0"
+        assert all_settings["host"].value == "127.0.0.1"
         assert all_settings["port"].value == 4141
         assert all_settings["security.jwt_secret"].value == "secret"
 
@@ -350,7 +350,7 @@ class TestYamlConfigSource:
         all_settings = source.get_all_settings_values()
 
         assert all_settings["security.jwt_secret"].value == "existing-secret"
-        assert all_settings["host"].value == "0.0.0.0"
+        assert all_settings["host"].value == "127.0.0.1"
         assert all_settings["enable_dashboard"].value is True
 
     def test_reads_flat_values(self, tmp_path: Path) -> None:

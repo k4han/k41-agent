@@ -387,6 +387,7 @@ copy_source_tree() {
       --exclude .pytest_cache \
       --exclude .ruff_cache \
       --exclude .mypy_cache \
+      --exclude .runtime-backup \
       --exclude '.tmp_*' \
       --exclude build \
       --exclude dist \
@@ -416,6 +417,7 @@ copy_source_tree() {
       --exclude .pytest_cache \
       --exclude .ruff_cache \
       --exclude .mypy_cache \
+      --exclude .runtime-backup \
       --exclude '.tmp_*' \
       --exclude build \
       --exclude dist \
@@ -499,8 +501,32 @@ install_source() {
     source_url="https://github.com/$Owner/$Repo/releases/download/$ReleaseTag/$ArtifactName"
   fi
 
-  download_file "$source_url" "$source_zip"
-  extract_zip "$source_zip" "$extract_dir"
+  download_file "$source_url" "$source_zip" || return 1
+  if ! normalize_bool "$UseBranchSource"; then
+    download_file "$source_url.sha256" "$source_zip.sha256" || return 1
+    local checksum_line expected_hash actual_hash
+    checksum_line="$(cat "$source_zip.sha256")" || return 1
+    checksum_line="${checksum_line%$'\r'}"
+    if [[ ! "$checksum_line" =~ ^([[:xdigit:]]{64})[[:blank:]]+\*?(.+)$ ]] || [[ "${BASH_REMATCH[2]}" != "$ArtifactName" ]]; then
+      echo "Release checksum is missing or malformed." >&2
+      return 1
+    fi
+    expected_hash="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
+    if command -v sha256sum >/dev/null 2>&1; then
+      actual_hash="$(sha256sum "$source_zip")" || return 1
+    elif command -v shasum >/dev/null 2>&1; then
+      actual_hash="$(shasum -a 256 "$source_zip")" || return 1
+    else
+      echo "sha256sum or shasum is required to verify the release." >&2
+      return 1
+    fi
+    actual_hash="${actual_hash%% *}"
+    if [[ "$actual_hash" != "$expected_hash" ]]; then
+      echo "Release SHA256 mismatch; the installed application was not changed." >&2
+      return 1
+    fi
+  fi
+  extract_zip "$source_zip" "$extract_dir" || return 1
 
   local root
   root="$(find_k41_project_root "$extract_dir" || true)"
@@ -722,10 +748,24 @@ stop_existing_app() {
   if command -v systemctl >/dev/null 2>&1; then
     if systemctl --user is-active --quiet k41-agent.service 2>/dev/null; then
       echo "Stopping systemd service k41-agent.service."
-      systemctl --user stop k41-agent.service 2>/dev/null || true
+      systemctl --user stop k41-agent.service || return 1
+      if systemctl --user is-active --quiet k41-agent.service; then
+        echo "Could not stop systemd service. Installation was aborted." >&2
+        return 1
+      fi
     fi
   fi
   if [[ ! -x "$PythonExe" ]]; then
+    local pid_name candidate_pid
+    for pid_name in server.pid tray.pid; do
+      if [[ -f "$HOME/.k41-agent/$pid_name" ]]; then
+        candidate_pid="$(tr -d '[:space:]' < "$HOME/.k41-agent/$pid_name")"
+        if [[ "$candidate_pid" =~ ^[0-9]+$ ]] && kill -0 "$candidate_pid" 2>/dev/null; then
+          echo "A runtime process is still running but its Python environment is missing. Installation was aborted." >&2
+          return 1
+        fi
+      fi
+    done
     echo "No existing virtual environment found."
     return
   fi
@@ -745,9 +785,15 @@ stop_existing_app() {
     if wait_for_pid_exit "$running_pid" 15; then
       echo "Server process $running_pid stopped."
     else
-      echo "WARNING: Server process $running_pid is still running. Files may be locked." >&2
+      echo "Server process $running_pid is still running. Installation was aborted." >&2
+      return 1
     fi
   fi
+
+  "$PythonExe" -c 'import sys; from agent.bootstrap.cli import PID_FILE, _is_tray_running, _server_health_reachable; from agent.bootstrap.process_utils import is_server_running; sys.exit(1 if is_server_running(PID_FILE) or _is_tray_running() or _server_health_reachable() else 0)' || {
+    echo "Could not confirm server and tray shutdown. Installation was aborted." >&2
+    return 1
+  }
 
   "$PythonExe" -c "from agent.bootstrap.tray import disable_autostart; disable_autostart()" 2>/dev/null || true
 }
@@ -950,5 +996,6 @@ echo "Open a new terminal and run:"
 echo "  k41"
 echo "  k41 status"
 echo "  k41 stop"
+echo "First login password: 1234. Set a new password when prompted."
 echo "  k41 service status"
 echo "  k41 browser install  # Optional browser support on Debian/Ubuntu x86_64 or ARM64"

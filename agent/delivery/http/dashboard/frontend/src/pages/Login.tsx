@@ -3,9 +3,8 @@ import { Bot, LogIn } from "lucide-solid";
 
 import { readError } from "@/lib/api";
 
-const DEFAULT_ADMIN_PASSWORD = "1234";
-
 export function LoginPage() {
+  const passwordChanged = new URLSearchParams(window.location.search).get("status") === "password-changed";
   const [password, setPassword] = createSignal("");
   const [error, setError] = createSignal("");
   const [loading, setLoading] = createSignal(false);
@@ -27,7 +26,8 @@ export function LoginPage() {
       if (!response.ok) {
         throw new Error(await readError(response));
       }
-      window.location.href = "/";
+      const result = await response.json() as { password_change_required?: boolean };
+      window.location.href = result.password_change_required ? "/change-password" : "/";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -46,8 +46,9 @@ export function LoginPage() {
             <div>
               <h1 class="page-title">Kai Console</h1>
               <p class="page-subtitle">Sign in with the admin password.</p>
+              {passwordChanged ? <p class="hint" role="status">Password changed. Sign in with your new password.</p> : null}
               <p class="hint">
-                Default password: <span class="mono">{DEFAULT_ADMIN_PASSWORD}</span>
+                First login password: <span class="mono">1234</span>. You will be asked to set a new password.
               </p>
             </div>
           </div>

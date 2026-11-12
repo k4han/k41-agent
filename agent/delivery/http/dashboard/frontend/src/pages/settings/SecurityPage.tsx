@@ -87,7 +87,7 @@ export function SecurityPage() {
       setConfirmPassword("");
       setErrors({});
       setSuccess(true);
-      showToast("Password changed successfully.");
+      window.location.href = "/login";
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to change password", "error");

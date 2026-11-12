@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -20,6 +21,7 @@ import psutil
 
 from agent.bootstrap.logs import SERVER_LOG_FILE, TRAY_LOG_FILE
 from agent.bootstrap.version import APP_VERSION, PACKAGE_NAME
+from agent.bootstrap.update_backup import backup_runtime, restore_configuration, restore_runtime
 from agent.bootstrap.update_state import (
     UpdateBusyError,
     get_process_start_time,
@@ -211,6 +213,7 @@ def _run_update(
     echo(f"Downloading {release.asset_url}")
     download_release_artifact(release.asset_url, artifact_path)
     echo("Verifying release artifact")
+    verify_release_checksum(release.asset_url, artifact_path)
     source_root = extract_release_artifact(artifact_path, extract_dir)
     artifact_version = read_project_version(source_root)
     if normalize_version(artifact_version) != normalize_version(release.version):
@@ -226,6 +229,10 @@ def _run_update(
     should_restart_tray = running_tray_pid is not None
     systemd_stopped = False
     backup_path: Path | None = None
+    runtime_backup = None
+    source_changed = False
+    new_server_started = False
+    new_launcher = None
     try:
         if systemd_active:
             echo("Stopping systemd service k41-agent.service")
@@ -242,34 +249,75 @@ def _run_update(
             echo(f"Stopping running server (PID {running_pid})")
             stop_running_server(running_pid)
         backup_path = backup_app_source(install, current_version)
+        runtime_backup = backup_runtime(install.app_dir, backup_path)
         echo(f"Backup created at {backup_path}")
 
+        source_changed = True
         replace_app_source(install, source_root)
+        restore_configuration(runtime_backup)
         sync_app(install)
         initialize_app(install)
+        verify_installed_runtime(install)
+        if should_restart_systemd:
+            echo("Restarting systemd service k41-agent.service")
+            refresh_systemd_unit(install)
+            new_server_started = True
+            if not restart_systemd_service():
+                raise UpdateError("Could not restart the systemd service.")
+            should_restart = True
+        elif should_restart:
+            echo("Restarting server")
+            new_server_started = True
+            new_launcher = start_server(install)
+        if should_restart:
+            wait_for_server_ready(install, release.version)
     except Exception as exc:
         rollback_error: Exception | None = None
-        if backup_path is not None:
-            echo("Update failed. Restoring previous source from backup.")
+        safe_to_restore = True
+        restored_persistence = not source_changed
+        if new_server_started:
+            try:
+                if should_restart_systemd and not stop_systemd_service():
+                    raise UpdateError("Could not stop the new systemd service before rollback.")
+                new_pid = get_running_server_pid()
+                if new_pid is not None:
+                    stop_running_server(new_pid)
+                if new_launcher is not None:
+                    try:
+                        new_launcher.wait(timeout=10)
+                    except subprocess.TimeoutExpired as wait_exc:
+                        raise UpdateError("The new runtime launcher is still alive; rollback was refused.") from wait_exc
+            except Exception as stop_exc:
+                safe_to_restore = False
+                rollback_error = stop_exc
+        if source_changed and backup_path is not None and safe_to_restore:
+            echo("Update failed. Restoring previous source and persistence from backup.")
             try:
                 restore_app_source(install, backup_path)
+                restore_runtime(runtime_backup)
+                restored_persistence = True
                 sync_app(install)
             except Exception as rollback_exc:
                 rollback_error = rollback_exc
+        if backup_path is not None and runtime_backup is not None:
             try:
                 prune_backups(install.backup_dir, keep=backup_path)
             except (OSError, UpdateError) as cleanup_exc:
                 echo(f"Warning: Could not prune update backups: {cleanup_exc}")
-        if systemd_stopped:
+        elif backup_path is not None:
+            try:
+                safe_remove_tree(backup_path, install.backup_dir)
+            except (OSError, UpdateError) as cleanup_exc:
+                echo(f"Warning: Could not remove incomplete backup: {cleanup_exc}")
+        if systemd_stopped and safe_to_restore and restored_persistence:
             try:
                 if not refresh_systemd_unit(install):
                     echo("Warning: Could not refresh systemd unit file")
             except Exception as refresh_exc:
                 echo(f"Warning: Could not refresh systemd unit file: {refresh_exc}")
             if not restart_systemd_service():
-                echo("Warning: Could not restart systemd service; starting server directly")
-                start_server(install)
-        elif should_restart and get_running_server_pid() is None:
+                rollback_error = rollback_error or UpdateError("Could not restart the previous systemd service.")
+        elif should_restart and safe_to_restore and restored_persistence and get_running_server_pid() is None:
             start_server(install)
         if should_restart_tray:
             if get_running_tray_pid() is None:
@@ -278,31 +326,11 @@ def _run_update(
                 except Exception as tray_exc:
                     echo(f"Warning: Could not restart tray: {tray_exc}")
         if rollback_error is not None:
-            raise UpdateError(f"Update failed: {exc}. Rollback failed: {rollback_error}") from exc
+            raise UpdateError(f"Update failed: {exc}. Rollback failed: {rollback_error}. Backup: {backup_path}") from exc
         if isinstance(exc, UpdateError):
             raise
         raise UpdateError(f"Update failed: {exc}") from exc
 
-    if should_restart_systemd:
-        echo("Restarting systemd service k41-agent.service")
-        try:
-            if not refresh_systemd_unit(install):
-                echo("Warning: Could not refresh systemd unit file")
-        except Exception as exc:
-            echo(f"Warning: Could not refresh systemd unit file: {exc}")
-        if not restart_systemd_service():
-            echo("Warning: Could not restart systemd service; starting server directly")
-            start_server(install)
-            should_restart = True
-        else:
-            should_restart = True
-        # Brief pause to let server write PID file before checking tray
-        time.sleep(0.5)
-    elif should_restart:
-        echo("Restarting server")
-        start_server(install)
-        # Brief pause to let server write PID file before checking tray
-        time.sleep(0.5)
     if should_restart_tray:
         # Avoid spawning tray twice: server is started with --no-tray so it
         # will not auto-spawn tray; still check pid before explicit start.
@@ -519,6 +547,22 @@ def download_release_artifact(url: str, destination: Path) -> None:
         raise UpdateError(f"Could not write release artifact: {exc}") from exc
 
 
+def verify_release_checksum(url: str, artifact_path: Path) -> None:
+    checksum_path = artifact_path.with_name(artifact_path.name + ".sha256")
+    download_release_artifact(url + ".sha256", checksum_path)
+    try:
+        checksum = checksum_path.read_text(encoding="ascii").strip()
+        match = re.fullmatch(r"([0-9a-fA-F]{64})[ \t]+\*?" + re.escape(artifact_path.name), checksum)
+        if match is None:
+            raise UpdateError("Release checksum is missing or malformed.")
+        with artifact_path.open("rb") as artifact:
+            actual = hashlib.file_digest(artifact, "sha256").hexdigest()
+        if actual != match[1].lower():
+            raise UpdateError("Release SHA256 mismatch; the installed application was not changed.")
+    except (OSError, UnicodeError) as exc:
+        raise UpdateError("Could not read the release checksum.") from exc
+
+
 def extract_release_artifact(zip_path: Path, extract_dir: Path) -> Path:
     if extract_dir.exists():
         safe_remove_tree(extract_dir, extract_dir.parent)
@@ -639,6 +683,7 @@ def copy_tree(source: Path, destination: Path) -> None:
             "*.pyc",
             "*.pyo",
             ".env",
+            ".runtime-backup",
             ".env.*",
         ),
     )
@@ -688,6 +733,47 @@ def initialize_app(install: ManagedInstall) -> None:
         cwd=install.app_dir,
         env=os.environ.copy(),
     )
+
+
+def verify_installed_runtime(install: ManagedInstall) -> None:
+    run_command(
+        [str(install.python_exe), "-m", "agent.bootstrap.cli", "verify-runtime"],
+        cwd=install.app_dir, env=os.environ.copy(),
+    )
+
+
+def wait_for_server_ready(install: ManagedInstall, version: str, timeout: float = 60) -> None:
+    from agent.bootstrap.update_backup import runtime_home
+    from agent.shared.config.factory import create_config_service
+
+    config = create_config_service(yaml_path=runtime_home() / "config.yaml")
+    if not config.get_bool("enable_web", True):
+        # Channel-only runtimes have no HTTP listener. Persistence was probed
+        # in the installed interpreter before starting the managed process.
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if get_running_server_pid() is not None:
+                return
+            time.sleep(0.25)
+        raise UpdateError("The channel runtime did not start before the deadline.")
+    host = config.get_str("host", "127.0.0.1")
+    if host in {"0.0.0.0", "::"}:
+        host = "127.0.0.1" if host == "0.0.0.0" else "::1"
+    if ":" in host:
+        host = f"[{host}]"
+    url = f"http://{host}:{config.get_int('port', 4141)}/ready"
+    deadline = time.monotonic() + timeout
+    with httpx.Client(trust_env=False, timeout=2) as client:
+        while time.monotonic() < deadline:
+            try:
+                response = client.get(url)
+                data = response.json()
+                if response.status_code == 200 and isinstance(data, dict) and data.get("status") == "ready" and normalize_version(str(data.get("version", ""))) == normalize_version(version):
+                    return
+            except (httpx.HTTPError, ValueError):
+                pass
+            time.sleep(0.25)
+    raise UpdateError("The updated server did not become ready with the expected version.")
 
 
 def run_command(command: list[str], *, cwd: Path, env: dict[str, str]) -> None:
@@ -906,12 +992,12 @@ def start_tray(install: ManagedInstall) -> None:
     )
 
 
-def start_server(install: ManagedInstall) -> None:
+def start_server(install: ManagedInstall) -> subprocess.Popen:
     from agent.bootstrap.process_utils import spawn_detached_process
 
     env = os.environ.copy()
     env["K41_DAEMONIZED"] = "1"
-    spawn_detached_process(
+    return spawn_detached_process(
         [str(install.python_exe), "-m", "agent.bootstrap.cli", "--no-tray"],
         SERVER_LOG_FILE,
         env=env,

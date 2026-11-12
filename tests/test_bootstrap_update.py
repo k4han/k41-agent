@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import shutil
 import zipfile
 from pathlib import Path
@@ -11,6 +12,18 @@ import pytest
 from agent.bootstrap import update as update_module
 from agent.bootstrap.update import ReleaseInfo, UpdateError, UpdateOptions
 from agent.bootstrap.update_state import read_update_status, update_lock, write_update_status
+
+
+@pytest.fixture(autouse=True)
+def isolate_runtime_backup(tmp_path, monkeypatch):
+    from agent.bootstrap import update_backup
+    from agent.shared.infrastructure.db import engine
+
+    home = tmp_path / "runtime"
+    monkeypatch.setattr(update_backup, "runtime_home", lambda: home)
+    monkeypatch.setattr(engine, "DEFAULT_DATABASE_URL", f"sqlite+aiosqlite:///{(home / 'data' / 'state.db').as_posix()}")
+    monkeypatch.setattr(update_module, "verify_installed_runtime", lambda install: None)
+    monkeypatch.setattr(update_module, "wait_for_server_ready", lambda install, version: None)
 
 
 def write_project(root: Path, *, version: str, marker: str) -> None:
@@ -80,10 +93,16 @@ def patch_release(
         ),
     )
     if zip_path is not None:
+        def download(url, destination):
+            if str(destination).endswith(".sha256"):
+                destination.write_text(hashlib.sha256(zip_path.read_bytes()).hexdigest() + "  k41-agent-release.zip", encoding="ascii")
+            else:
+                shutil.copyfile(zip_path, destination)
+
         monkeypatch.setattr(
             update_module,
             "download_release_artifact",
-            lambda url, destination: shutil.copyfile(zip_path, destination),
+            download,
         )
 
 
@@ -636,6 +655,137 @@ def test_update_aborts_if_systemd_stop_fails(prepared_update, monkeypatch) -> No
         update_module.run_update(options)
     assert events == []
     assert (app_dir / "marker.txt").read_text() == "old"
+
+
+@pytest.mark.parametrize("checksum", ["missing", "malformed", "mismatch"])
+def test_checksum_failure_prevents_stop_and_source_replacement(prepared_update, monkeypatch, checksum):
+    _, app_dir, options = prepared_update
+    original = update_module.download_release_artifact
+
+    def download(url, destination):
+        if not url.endswith(".sha256"):
+            return original(url, destination)
+        if checksum == "missing":
+            raise UpdateError("checksum missing")
+        destination.write_text("invalid" if checksum == "malformed" else "0" * 64 + "  k41-agent-release.zip")
+
+    monkeypatch.setattr(update_module, "download_release_artifact", download)
+    monkeypatch.setattr(update_module, "get_running_server_pid", lambda: pytest.fail("must verify before stopping"))
+    with pytest.raises(UpdateError, match="checksum|SHA256"):
+        update_module.run_update(options)
+    assert (app_dir / "marker.txt").read_text() == "old"
+
+
+@pytest.mark.parametrize("failed_stage", ["migration", "readiness"])
+def test_failed_upgrade_restores_conversations_keys_config_and_source(prepared_update, monkeypatch, failed_stage):
+    import sqlite3
+    from contextlib import closing
+    from agent.bootstrap import update_backup
+
+    agent_home, app_dir, options = prepared_update
+    home = update_backup.runtime_home()
+    (home / "data").mkdir(parents=True)
+    database = home / "data" / "state.db"
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute("CREATE TABLE messages (message TEXT)")
+        connection.execute("INSERT INTO messages VALUES ('saved conversation')")
+        connection.commit()
+    (home / "config.yaml").write_text("host: 127.0.0.1\n")
+    (home / "data" / "runtime_config.key").write_bytes(b"original-key")
+    (app_dir / ".env").write_text("APP_SECRET=original")
+    running = [123]
+    events = []
+
+    def stop(pid):
+        events.append(f"stop:{pid}")
+        running[0] = None
+
+    def start(install):
+        events.append("start:" + (app_dir / "marker.txt").read_text())
+        running[0] = 456
+
+    def migrate(install):
+        with closing(sqlite3.connect(database)) as connection:
+            connection.execute("DROP TABLE messages")
+            connection.commit()
+        (home / "config.yaml").write_text("host: 0.0.0.0\n")
+        (home / "data" / "runtime_config.key").write_bytes(b"changed-key")
+        if failed_stage == "migration":
+            raise UpdateError("migration failed")
+
+    def failed_ready(*args):
+        raise UpdateError("readiness failed")
+
+    monkeypatch.setattr(update_module, "get_running_server_pid", lambda: running[0])
+    monkeypatch.setattr(update_module, "stop_running_server", stop)
+    monkeypatch.setattr(update_module, "start_server", start)
+    monkeypatch.setattr(update_module, "verify_installed_runtime", migrate)
+    monkeypatch.setattr(update_module, "wait_for_server_ready", failed_ready)
+    with pytest.raises(UpdateError, match=f"{failed_stage} failed"):
+        update_module.run_update(options)
+    assert events == (["stop:123", "start:old"] if failed_stage == "migration" else ["stop:123", "start:new", "stop:456", "start:old"])
+    assert (home / "config.yaml").read_text() == "host: 127.0.0.1\n"
+    assert (home / "data" / "runtime_config.key").read_bytes() == b"original-key"
+    assert (app_dir / ".env").read_text() == "APP_SECRET=original"
+    assert not (app_dir / ".runtime-backup").exists()
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("SELECT message FROM messages").fetchone() == ("saved conversation",)
+    assert read_update_status(agent_home)["status"] == "failed"
+
+
+def test_live_launcher_without_pid_prevents_database_restoration(prepared_update, monkeypatch):
+    from types import SimpleNamespace
+    import subprocess
+
+    _, app_dir, options = prepared_update
+    running = [123]
+    monkeypatch.setattr(update_module, "get_running_server_pid", lambda: running[0])
+    monkeypatch.setattr(update_module, "stop_running_server", lambda pid: running.__setitem__(0, None))
+
+    def wait(**kwargs):
+        raise subprocess.TimeoutExpired("new-runtime", 10)
+
+    monkeypatch.setattr(update_module, "start_server", lambda install: SimpleNamespace(wait=wait))
+    monkeypatch.setattr(update_module, "wait_for_server_ready", lambda *args: (_ for _ in ()).throw(UpdateError("not ready")))
+    monkeypatch.setattr(update_module, "restore_runtime", lambda snapshot: pytest.fail("launcher is still alive"))
+    with pytest.raises(UpdateError, match="launcher is still alive"):
+        update_module.run_update(options)
+    assert (app_dir / "marker.txt").read_text() == "new"
+
+
+def test_snapshot_failure_keeps_previous_backup_and_source(prepared_update, monkeypatch):
+    agent_home, app_dir, options = prepared_update
+    previous = agent_home / "backup" / "app-previous"
+    write_project(previous, version="0.1.1", marker="previous")
+
+    def fail_snapshot(*args):
+        raise RuntimeError("snapshot unavailable")
+
+    monkeypatch.setattr(update_module, "backup_runtime", fail_snapshot)
+    monkeypatch.setattr(update_module, "replace_app_source", lambda *args: pytest.fail("snapshot is required"))
+    with pytest.raises(UpdateError, match="snapshot unavailable"):
+        update_module.run_update(options)
+    assert list((agent_home / "backup").iterdir()) == [previous]
+    assert (app_dir / "marker.txt").read_text() == "old"
+
+
+def test_failed_stop_of_new_server_never_restores_a_live_database(prepared_update, monkeypatch):
+    _, app_dir, options = prepared_update
+    monkeypatch.setattr(update_module, "get_running_server_pid", lambda: 123)
+    calls = []
+
+    def stop(pid):
+        calls.append("stop")
+        if len(calls) > 1:
+            raise UpdateError("new process survived")
+
+    monkeypatch.setattr(update_module, "stop_running_server", stop)
+    monkeypatch.setattr(update_module, "start_server", lambda install: None)
+    monkeypatch.setattr(update_module, "wait_for_server_ready", lambda *args: (_ for _ in ()).throw(UpdateError("not ready")))
+    monkeypatch.setattr(update_module, "restore_runtime", lambda snapshot: pytest.fail("must not restore a live database"))
+    with pytest.raises(UpdateError, match="Rollback failed.*new process survived"):
+        update_module.run_update(options)
+    assert (app_dir / "marker.txt").read_text() == "new"
 
 
 @pytest.mark.parametrize("stage", ["sync_app", "initialize_app"])

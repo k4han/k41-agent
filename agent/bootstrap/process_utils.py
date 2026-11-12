@@ -254,7 +254,7 @@ def spawn_detached_process(
     log_file: Path | None,
     env: dict[str, str] | None = None,
     cwd: Path | None = None,
-) -> None:
+) -> subprocess.Popen:
     """Spawn a detached background process with platform-specific flags.
 
     Capture combined output through a rotating log writer. Pass None when
@@ -277,7 +277,7 @@ def spawn_detached_process(
         if os.name == "nt"
         else {"start_new_session": True}
     )
-    subprocess.Popen(
+    return subprocess.Popen(
         cmd,
         env=spawn_env,
         cwd=str(cwd) if cwd else None,

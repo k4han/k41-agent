@@ -44,7 +44,7 @@ def load_bootstrap_config(config_service=None) -> BootstrapConfig:
         cors_origins = ["http://localhost:4141", "http://127.0.0.1:4141"]
 
     return BootstrapConfig(
-        host=config.get_str(CONFIG_KEY_HOST, "localhost"),
+        host=config.get_str(CONFIG_KEY_HOST, "127.0.0.1"),
         port=config.get_int(CONFIG_KEY_PORT, 4141),
         enable_web=config.get_bool(CONFIG_KEY_ENABLE_WEB, True),
         enable_api=config.get_bool(CONFIG_KEY_ENABLE_API, True),

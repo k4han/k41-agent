@@ -2674,8 +2674,12 @@ def test_login_json_sets_admin_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class Admin:
         id = 123
+        session_version = 0
 
     class FakeAuthService:
+        def check_login_allowed(self, client):
+            pass
+
         async def authenticate(self, password: str):
             return Admin() if password == "secret" else None
 
@@ -2697,7 +2701,7 @@ def test_login_json_sets_admin_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "success"}
+    assert response.json() == {"status": "success", "password_change_required": False}
     assert response.cookies.get("admin_token") == "token-value"
 
 

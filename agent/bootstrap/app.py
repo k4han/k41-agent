@@ -9,7 +9,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
@@ -249,6 +249,16 @@ def create_app(bootstrap_config: BootstrapConfig | None = None, container=None) 
         }
 
     # Outermost middleware: resolve this app's container inside request tasks.
+    @fastapi_app.get("/ready")
+    async def ready():
+        from agent.bootstrap.readiness import persistence_is_ready
+
+        available = runtime._started and await persistence_is_ready(container)
+        return JSONResponse(
+            {"status": "ready" if available else "not_ready", "version": APP_VERSION},
+            status_code=200 if available else 503,
+        )
+
     fastapi_app.add_middleware(ContainerActivationMiddleware, container=container)
 
     return fastapi_app

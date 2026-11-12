@@ -372,7 +372,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "tools.shell": None,
     "tools.storage_root": None,
     # Server configuration
-    "host": "0.0.0.0",
+    "host": "127.0.0.1",
     "port": 4141,
     "enable_web": True,
     "enable_api": True,

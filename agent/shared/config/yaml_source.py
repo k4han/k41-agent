@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -211,7 +213,22 @@ class YamlConfigSource:
         import yaml
 
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=self._path.parent,
+                prefix=self._path.name + ".", suffix=".tmp", delete=False,
+            ) as handle:
+                temporary_path = Path(handle.name)
+                if os.name != "nt":
+                    os.fchmod(handle.fileno(), 0o600)
+                handle.write(yaml.safe_dump(data, sort_keys=False))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, self._path)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
         self.reload()
 
 

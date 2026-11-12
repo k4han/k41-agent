@@ -17,6 +17,9 @@ const ChatPage = lazy(() =>
 const LoginPage = lazy(() =>
   import("@/pages/Login").then((module) => ({ default: module.LoginPage })),
 );
+const ChangePasswordPage = lazy(() =>
+  import("@/pages/ChangePassword").then((module) => ({ default: module.ChangePasswordPage })),
+);
 const HomePage = lazy(() =>
   import("@/pages/Home").then((module) => ({ default: module.HomePage })),
 );
@@ -160,7 +163,7 @@ render(
         <Route path="/tasks" component={() => <Navigate href="/chat" />} />
         <Route path="/channels" component={() => <Navigate href="/settings/channels" />} />
         <Route path="/agents" component={() => <Navigate href="/settings/agents" />} />
-        <Route path="/change-password" component={() => <Navigate href="/settings/security" />} />
+        <Route path="/change-password" component={ChangePasswordPage} />
         <Route path="*404" component={NotFoundPage} />
       </Router>
     </ToastProvider>

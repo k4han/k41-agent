@@ -52,7 +52,7 @@ def test_load_bootstrap_config_uses_defaults(monkeypatch: MonkeyPatch, tmp_path)
     config = load_bootstrap_config()
 
     assert config == BootstrapConfig(
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=4141,
         enable_web=True,
         enable_api=True,

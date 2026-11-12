@@ -2,7 +2,8 @@
 # Copy this file to ~/.k41-agent/config.yaml and customize
 
 # Server configuration
-host: "0.0.0.0"
+# Sign in with 1234 on first use; the console requires a new private password.
+host: "127.0.0.1"
 port: 4141
 
 # Feature flags

@@ -45,12 +45,18 @@ k41
 ```
 
 Open [http://127.0.0.1:4141](http://127.0.0.1:4141).
-For a fresh installation, the default admin password is `1234`, as shown on the
-login page. Change it after the first login:
+Sign in with the initial password `1234`. The console requires a new private
+password before allowing dashboard or API access. Sign in again after saving it.
+
+If you forget your password, reset it locally:
 
 ```sh
 k41 reset-password
 ```
+
+Fresh installations listen on `127.0.0.1`. Existing network listeners can start
+before password setup; default-password sessions can only change the password
+or log out.
 
 Next, [connect a model and start a conversation](./getting-started).
 

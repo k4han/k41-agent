@@ -10,7 +10,9 @@ from agent.modules.admin_auth import (
     create_access_token,
     get_admin_auth_service,
     get_current_admin,
+    LoginThrottled,
 )
+from agent.modules.admin_auth.service import DEFAULT_ADMIN_PASSWORD
 
 router = APIRouter(tags=["auth"])
 
@@ -37,11 +39,23 @@ async def login_get() -> Response:
 
 
 @router.post("/login")
-async def login_post(request: Request, password: str | None = Form(default=None)) -> Response:
+async def login_post(
+    request: Request, password: str | None = Form(default=None)
+) -> Response:
     body = await _read_body(request)
     password_value = str(body.get("password") or password or "")
 
     auth_service = get_admin_auth_service()
+    try:
+        auth_service.check_login_allowed(
+            request.client.host if request.client else "unknown"
+        )
+    except LoginThrottled as exc:
+        return JSONResponse(
+            {"detail": str(exc)},
+            status_code=429,
+            headers={"Retry-After": str(exc.retry_after)},
+        )
     admin = await auth_service.authenticate(password_value)
     if admin is None:
         if _wants_json(request):
@@ -51,18 +65,39 @@ async def login_post(request: Request, password: str | None = Form(default=None)
             )
         return RedirectResponse(url="/login?error=invalid", status_code=302)
 
-    token = create_access_token({"sub": str(admin.id)})
+    password_change_required = password_value == DEFAULT_ADMIN_PASSWORD
+    token = create_access_token({
+        "sub": str(admin.id),
+        "ver": admin.session_version,
+        "password_change_required": password_change_required,
+    })
     if _wants_json(request):
-        response: Response = JSONResponse({"status": "success"})
+        response: Response = JSONResponse({
+            "status": "success",
+            "password_change_required": password_change_required,
+        })
     else:
-        response = RedirectResponse(url="/", status_code=302)
-    response.set_cookie(key="admin_token", value=token, httponly=True)
+        response = RedirectResponse(
+            url="/change-password" if password_change_required else "/", status_code=302
+        )
+    response.set_cookie(
+        key="admin_token",
+        value=token,
+        httponly=True,
+        secure=request.url.scheme == "https",
+        samesite="lax",
+    )
     return response
 
 
-@router.get("/logout")
-async def logout() -> Response:
-    response = RedirectResponse(url="/login")
+@router.post("/logout")
+async def logout(request: Request, admin: str = Depends(get_current_admin)) -> Response:
+    await get_admin_auth_service().revoke_sessions(int(admin))
+    response = (
+        JSONResponse({"status": "success"})
+        if _wants_json(request)
+        else RedirectResponse(url="/login", status_code=303)
+    )
     response.delete_cookie("admin_token")
     return response
 
@@ -107,6 +142,8 @@ async def change_password_post(
         )
 
     if _wants_json(request):
-        return JSONResponse({"status": "success"})
-    return RedirectResponse(url="/change-password?status=success", status_code=302)
-
+        response = JSONResponse({"status": "success"})
+    else:
+        response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie("admin_token")
+    return response

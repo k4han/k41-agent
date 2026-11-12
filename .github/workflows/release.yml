@@ -91,6 +91,7 @@ jobs:
             ".pytest_cache",
             ".ruff_cache",
             ".mypy_cache",
+            ".runtime-backup",
             ".tmp_*",
             "build",
             "dist",
