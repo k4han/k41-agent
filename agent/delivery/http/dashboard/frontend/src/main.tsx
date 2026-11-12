@@ -69,6 +69,9 @@ const AcpAgentsPage = lazy(() =>
 const BrowserPage = lazy(() =>
   import("@/pages/settings/BrowserPage").then((module) => ({ default: module.BrowserPage })),
 );
+const LogsPage = lazy(() =>
+  import("@/pages/settings/LogsPage").then((module) => ({ default: module.LogsPage })),
+);
 const DecisionsPage = lazy(() =>
   import("@/pages/settings/DecisionsPage").then((module) => ({ default: module.DecisionsPage })),
 );
@@ -152,6 +155,7 @@ render(
         <Route path="/settings/security" component={SecurityPage} />
         <Route path="/settings/usage" component={UsagePage} />
         <Route path="/settings/appearance" component={AppearancePage} />
+        <Route path="/settings/logs" component={LogsPage} />
         {/* Legacy redirects */}
         <Route path="/tasks" component={() => <Navigate href="/chat" />} />
         <Route path="/channels" component={() => <Navigate href="/settings/channels" />} />

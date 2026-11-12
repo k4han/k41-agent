@@ -10,6 +10,7 @@ import {
   ChevronsRight,
   CloudCog,
   Cog,
+  FileText,
   KeyRound,
   Link2,
   Globe,
@@ -84,6 +85,7 @@ const settingsNavGroups: SettingsNavGroup[] = [
     id: "system",
     label: "System",
     items: [
+      { href: "/settings/logs", label: "Logs", icon: () => <FileText size={15} />, description: "Server, tray & updater output", keywords: "logs logging output debug errors server tray updater" },
       { href: "/settings/browser", label: "Browser", icon: () => <Globe size={15} />, description: "Login profiles, defaults & browser setup", keywords: "browser chrome chromium install automation executable login profiles default" },
       { href: "/settings/config", label: "Server Runtime", icon: () => <Cog size={15} />, description: "Host, port, DB & bootstrap", keywords: "bootstrap config env runtime server database host port" },
     ],

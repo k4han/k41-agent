@@ -63,6 +63,28 @@ Follow the active server log across rotations with
 After upgrading, restart the server to use rotation. Refresh an existing Linux
 service with `k41 service install --no-now` before restarting it.
 
+Open **Settings > Logs** (`/settings/logs`) to inspect server, system tray, or
+updater output. The viewer opens at the latest output and checks for new logs
+every two seconds. Scroll up to load older output across numbered backups;
+your reading position stays in place. While reading history, use **Latest logs**
+or **New logs available** to return to the end. If rotation has removed the
+history being viewed, return to the latest logs to continue.
+
+A single `server.log` is expected until it reaches 10 MiB. To check an existing
+Linux installation, inspect the file size and the installed service command:
+
+```sh
+ls -lh ~/.k41-agent/logs/server.log*
+systemctl --user cat k41-agent.service
+```
+
+The service's `ExecStart` must invoke `agent.bootstrap.logs`; an older unit using
+`StandardOutput=append:...` bypasses rotation. Refresh it with
+`k41 service install --no-now`, then run `k41 service restart`. A directly started
+`k41 --foreground --no-tray` writes to the terminal; use the managed service or
+background mode for rotating file output. Files from older installations outside
+`~/.k41-agent/logs/` are preserved and are not included in the viewer.
+
 The bootstrap file and the dashboard's runtime settings serve different
 purposes. Manage providers, agents, tools, and channels through their dashboard
 settings pages.

@@ -1,4 +1,6 @@
 export const API_PATHS = {
+  logs: "/dashboard-api/logs",
+  logContent: (source: string) => `/dashboard-api/logs/${encodeURIComponent(source)}`,
   acpAgents: "/dashboard-api/acp/agents",
   acpAgent: (agentId: string) => `/dashboard-api/acp/agents/${encodeURIComponent(agentId)}`,
   browserProfiles: "/dashboard-api/browser/profiles",

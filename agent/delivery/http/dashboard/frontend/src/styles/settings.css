@@ -1,5 +1,57 @@
 /* ── Settings layout shell & compact navigation ── */
 
+.logs-toolbar {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.logs-toolbar select {
+  width: auto;
+  min-width: 130px;
+}
+
+.logs-status, .logs-footer {
+  padding: 10px 16px;
+}
+
+.logs-status {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.logs-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.logs-viewport {
+  height: min(65vh, 760px);
+  min-height: 240px;
+  overflow: auto;
+  overflow-anchor: none;
+  border-block: 1px solid var(--border);
+}
+
+.logs-output {
+  margin: 0;
+  padding: 16px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.logs-empty {
+  padding: 24px 16px;
+}
+
 .settings-app-layout {
   grid-template-columns: 240px minmax(0, 1fr);
   transition: grid-template-columns 200ms ease;
