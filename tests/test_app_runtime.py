@@ -233,6 +233,10 @@ async def test_shutdown_continues_after_step_failure(
     async def ok_workspace_services():
         calls.append("workspace")
 
+    class FakeChatStreamManager:
+        async def shutdown(self):
+            calls.append("chat")
+
     async def ok_close_persistence():
         calls.append("persistence")
 
@@ -242,6 +246,7 @@ async def test_shutdown_continues_after_step_failure(
         workspaces_module, "stop_workspace_background_services", ok_workspace_services
     )
     monkeypatch.setattr(runtime_container, "_channel_manager", FakeChannelManager())
+    monkeypatch.setattr(runtime_container, "_chat_stream_manager", FakeChatStreamManager())
     monkeypatch.setattr(
         runtime_container, "close_persistence", ok_close_persistence
     )
@@ -256,10 +261,58 @@ async def test_shutdown_continues_after_step_failure(
 
         await runtime.shutdown()
 
-        assert calls == ["channels", "scheduler", "workspace", "persistence"]
+        assert calls == ["channels", "scheduler", "chat", "workspace", "persistence"]
         assert runtime._started is False
         assert runtime._activated is False
         assert get_active_container() is holder
     finally:
         holder.deactivate(previous)
         clear_active_container()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_finishes_chat_cleanup_before_workspace_and_persistence(isolated_container, monkeypatch):
+    calls = []
+    started = asyncio.Event()
+    isolated_container._persistence_ready = True
+
+    async def run(**params):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            assert isolated_container._persistence_ready
+            calls.append("run-cleaned")
+        yield  # pragma: no cover
+
+    async def record_error(thread_id, event):
+        assert isolated_container._persistence_ready
+        calls.append("error-saved")
+
+    async def stop_producers():
+        pass
+
+    async def stop_workspace():
+        assert session.task.done()
+        assert session._event_log.closed
+        calls.append("workspace")
+
+    async def close_persistence():
+        assert session.task.done()
+        calls.append("persistence")
+        isolated_container._persistence_ready = False
+
+    runtime = AppRuntime(container=isolated_container)
+    runtime._started = True
+    monkeypatch.setattr("agent.modules.conversations.record_thread_run_error", record_error)
+    monkeypatch.setattr(runtime, "_stop_channels_step", stop_producers)
+    monkeypatch.setattr(runtime, "_stop_scheduler_step", stop_producers)
+    monkeypatch.setattr(runtime, "_stop_workspace_services_step", stop_workspace)
+    monkeypatch.setattr(isolated_container, "close_persistence", close_persistence)
+    session = await isolated_container.chat_stream_manager.get_or_create_session("shutdown-order", {}, run)
+    await started.wait()
+    await asyncio.wait_for(runtime.shutdown(), timeout=1)
+
+    assert calls == ["run-cleaned", "error-saved", "workspace", "persistence"]
+    assert await isolated_container.chat_stream_manager.get_session(session.thread_id) is None

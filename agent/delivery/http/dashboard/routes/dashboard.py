@@ -533,7 +533,7 @@ async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
             manager = get_chat_stream_manager()
             session = await manager.get_session(target_thread_id)
             if session is not None:
-                session.cancel()
+                session.cancel(force=True)
                 success = True
         except Exception:
             logger.debug("Failed to cancel chat stream session for thread %s", target_thread_id, exc_info=True)

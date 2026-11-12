@@ -205,6 +205,7 @@ class AppRuntime:
         try:
             await self._attempt(errors, "stop managed channels", self._stop_channels_step)
             await self._attempt(errors, "stop background scheduler", self._stop_scheduler_step)
+            await self._attempt(errors, "stop chat streams", self._stop_chat_streams_step)
             await self._attempt(
                 errors, "stop workspace background services", self._stop_workspace_services_step
             )
@@ -250,6 +251,12 @@ class AppRuntime:
         from agent.modules.workspaces import stop_workspace_background_services
 
         await stop_workspace_background_services()
+
+    async def _stop_chat_streams_step(self) -> None:
+        manager = self.container._chat_stream_manager
+        if manager is not None:
+            logger.info("Stopping chat streams...")
+            await manager.shutdown()
 
     async def _close_persistence_step(self) -> None:
         if self.container._persistence_ready:

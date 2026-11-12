@@ -10,6 +10,8 @@ import asyncio
 import json
 import logging
 import tempfile
+from collections.abc import AsyncIterator, Callable
+from contextlib import aclosing, asynccontextmanager
 from typing import Any, AsyncGenerator
 
 from langgraph.errors import GraphRecursionError
@@ -29,6 +31,9 @@ MAX_BUFFER_BYTES = 1_048_576
 # This gives reconnecting clients time to subscribe and consume buffered events.
 SESSION_GRACE_PERIOD_SECONDS = 30
 
+# Allow cleanup to finish before retrying cancellation, then bound the retry too.
+CANCELLATION_GRACE_PERIOD_SECONDS = 5
+
 
 class ChatStreamSession:
     """Represents a background agent stream execution session."""
@@ -45,27 +50,49 @@ class ChatStreamSession:
         self.lock = asyncio.Lock()
         self.done = False
         self._superseded = False
+        self._on_done: Callable[[ChatStreamSession], None] | None = None
 
-    def start(self) -> None:
+    def start(self, *, on_done: Callable[[ChatStreamSession], None] | None = None) -> None:
         """Start the agent stream execution in a background task."""
+        self._on_done = on_done
         self.task = asyncio.create_task(
             self._run_agent_background(),
             name=f"chat-stream-{self.thread_id}",
         )
+        self.task.add_done_callback(self._task_finished)
+
+    def _finish(self) -> None:
+        """End subscriptions, including when the task never started."""
+        self.done = True
+        for queue in self.queues:
+            if queue.empty():
+                queue.put_nowait(None)
+
+    def _task_finished(self, task: asyncio.Task[None]) -> None:
+        self._finish()
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                logger.error(
+                    "Chat stream task failed for thread %s", self.thread_id,
+                    exc_info=(type(error), error, error.__traceback__),
+                )
+        if self._on_done is not None:
+            self._on_done(self)
 
     async def _run_agent_background(self) -> None:
-        run_fn = self.run_fn
-        if run_fn is None:
-            from agent.modules.agent_runtime.runner import run_agent_stream
-            run_fn = run_agent_stream
-
         logger.info("Starting background chat stream task for thread %s", self.thread_id)
         try:
-            async for event in run_fn(**self.params):
-                if event.get("type") == "error":
-                    await self._push_error_event(event)
-                else:
-                    await self.push_event(event)
+            run_fn = self.run_fn
+            if run_fn is None:
+                from agent.modules.agent_runtime.runner import run_agent_stream
+                run_fn = run_agent_stream
+            async with aclosing(run_fn(**self.params)) as events:
+                async for event in events:
+                    if event.get("type") == "error":
+                        await self._push_error_event(event)
+                    else:
+                        await self.push_event(event)
         except asyncio.CancelledError:
             logger.info("Background chat stream task cancelled for thread %s", self.thread_id)
             await self._push_error_event({"type": "error", "content": "Chat execution stopped."})
@@ -92,22 +119,7 @@ class ChatStreamSession:
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
         finally:
-            self.done = True
-            # Wait for a grace period so reconnecting clients can consume buffered events.
-            # Check periodically whether any subscribers are still active.
-            elapsed = 0.0
-            interval = 1.0
-            while elapsed < SESSION_GRACE_PERIOD_SECONDS:
-                await asyncio.sleep(interval)
-                elapsed += interval
-                async with self.lock:
-                    has_subscribers = len(self.queues) > 0
-                # If all subscribers have disconnected and we've waited at least a bit, clean up.
-                if not has_subscribers and elapsed >= 2.0:
-                    break
-
-            manager = get_chat_stream_manager()
-            await manager.remove_session(self.thread_id, self)
+            self._finish()
 
     async def _push_error_event(self, event: dict[str, Any]) -> None:
         """Save an error before delivering it so history can restore identical text."""
@@ -170,10 +182,10 @@ class ChatStreamSession:
         if not self.queues:
             self._event_log.close()
 
-    def cancel(self, *, superseded: bool = False) -> None:
-        """Cancel the background task execution."""
+    def cancel(self, *, superseded: bool = False, force: bool = False) -> None:
+        """Request cancellation, optionally interrupting an earlier cancellation."""
         self._superseded = self._superseded or superseded
-        if self.task and not self.task.done():
+        if self.task and not self.task.done() and (force or not self.task.cancelling()):
             self.task.cancel()
 
 
@@ -182,51 +194,126 @@ class ChatStreamManager:
 
     def __init__(self) -> None:
         self._sessions: dict[str, ChatStreamSession] = {}
-        self._lock = asyncio.Lock()
+        self._thread_locks: dict[str, tuple[asyncio.Lock, int]] = {}
+        self._expiry_handles: dict[ChatStreamSession, asyncio.TimerHandle] = {}
+        self._closing = False
+
+    @property
+    def closing(self) -> bool:
+        """Whether shutdown has begun and new runs are rejected."""
+        return self._closing
+
+    @asynccontextmanager
+    async def _lock_thread(self, thread_id: str) -> AsyncIterator[None]:
+        lock_state = self._thread_locks.get(thread_id)
+        if lock_state is None:
+            lock, users = asyncio.Lock(), 0
+        else:
+            lock, users = lock_state
+        self._thread_locks[thread_id] = (lock, users + 1)
+        try:
+            async with lock:
+                yield
+        finally:
+            _, users = self._thread_locks[thread_id]
+            if users == 1:
+                del self._thread_locks[thread_id]
+            else:
+                self._thread_locks[thread_id] = (lock, users - 1)
+
+    def _ensure_open(self) -> None:
+        if self._closing:
+            raise RuntimeError("Chat stream manager is shutting down.")
+
+    def _session_finished(self, session: ChatStreamSession) -> None:
+        """Retain replay independently of execution and cancellation."""
+        if self._closing or self._sessions.get(session.thread_id) is not session:
+            self._remove_session(session.thread_id, session)
+            return
+        self._expiry_handles[session] = asyncio.get_running_loop().call_later(
+            SESSION_GRACE_PERIOD_SECONDS, self._remove_session, session.thread_id, session,
+        )
+
+    def _remove_session(self, thread_id: str, session: ChatStreamSession) -> None:
+        # All registry mutations run synchronously on the manager's event loop.
+        if self._sessions.get(thread_id) is session:
+            self._sessions.pop(thread_id)
+        handle = self._expiry_handles.pop(session, None)
+        if handle is not None:
+            handle.cancel()
+        session.close()
+
+    async def _wait_for_sessions(self, sessions: list[ChatStreamSession]) -> None:
+        """Wait for cleanup, retry cancellation, and fail if execution still runs."""
+        tasks = {session.task for session in sessions if session.task is not None}
+        if not tasks:
+            return
+        # asyncio.wait never propagates a waiting request's cancellation to runs.
+        _, pending = await asyncio.wait(tasks, timeout=CANCELLATION_GRACE_PERIOD_SECONDS)
+        if not pending:
+            return
+        for session in sessions:
+            if session.task in pending:
+                logger.warning("Retrying chat stream cancellation for thread %s", session.thread_id)
+                session.cancel(force=True)
+        _, pending = await asyncio.wait(pending, timeout=CANCELLATION_GRACE_PERIOD_SECONDS)
+        if pending:
+            thread_ids = ", ".join(session.thread_id for session in sessions if session.task in pending)
+            raise TimeoutError(f"Chat stream cancellation timed out for threads: {thread_ids}")
 
     async def get_or_create_session(
         self, thread_id: str, params: dict[str, Any], run_fn: Any = None
     ) -> ChatStreamSession:
         """Get or create an active background stream session for a thread.
 
-        If a session already exists for the thread and is still running,
-        it is cancelled first.
+        Wait for the previous execution to stop before starting its replacement.
+        Cancelling a waiting request must not interrupt the old run's cleanup.
         """
-        async with self._lock:
+        self._ensure_open()
+        async with self._lock_thread(thread_id):
+            self._ensure_open()
             existing = self._sessions.get(thread_id)
-            if existing and not existing.done:
+            if existing and existing.task and not existing.task.done():
                 logger.info("Cancelling existing stream session for thread %s to start new message", thread_id)
                 existing.cancel(superseded=True)
-                # Give it a brief moment to cancel/clean up
-                await asyncio.sleep(0.05)
+                await self._wait_for_sessions([existing])
 
+            self._ensure_open()
+            if existing is not None:
+                self._remove_session(thread_id, existing)
             session = ChatStreamSession(thread_id, params, run_fn)
             self._sessions[thread_id] = session
-            session.start()
+            session.start(on_done=self._session_finished)
             return session
 
     async def get_session(self, thread_id: str) -> ChatStreamSession | None:
         """Retrieve an active stream session for a thread, if any exists."""
-        async with self._lock:
-            return self._sessions.get(thread_id)
+        return self._sessions.get(thread_id)
 
     async def remove_session(self, thread_id: str, session: ChatStreamSession | None = None) -> None:
-        """Remove a session from the manager (thread-safe).
+        """Remove a session on the manager's event loop.
 
         When ``session`` is provided, only remove the entry if it is still the
         same object. This prevents a just-cancelled session's grace-period
         cleanup from deleting a newly created session for the same thread
         (e.g. user cancelled then immediately sent a new message).
         """
-        async with self._lock:
-            if session is not None:
-                existing = self._sessions.get(thread_id)
-                if existing is not session:
-                    session.close()
-                    return
-            removed = self._sessions.pop(thread_id, None)
-            if removed is not None:
-                removed.close()
+        target = session if session is not None else self._sessions.get(thread_id)
+        if target is not None:
+            self._remove_session(thread_id, target)
+
+    async def shutdown(self) -> None:
+        """Reject new runs and finish cancellation before dependencies close."""
+        self._closing = True
+        sessions = list(self._sessions.values())
+        for session in sessions:
+            session.cancel()
+        try:
+            await self._wait_for_sessions(sessions)
+        finally:
+            for session in sessions:
+                if session.task is None or session.task.done():
+                    self._remove_session(session.thread_id, session)
 
 
 def get_chat_stream_manager(container=None) -> ChatStreamManager:

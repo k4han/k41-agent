@@ -1,4 +1,5 @@
 import importlib
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -60,6 +61,53 @@ def _create_client() -> TestClient:
 
     app.dependency_overrides[get_current_admin] = mock_admin
     return TestClient(app)
+
+
+@pytest.mark.asyncio
+async def test_chat_events_survives_http_disconnect_and_reconnects(monkeypatch):
+    from agent.delivery.http.api.schemas import ReconnectRequest
+    from agent.modules.agent_runtime.chat_stream_manager import ChatStreamManager
+
+    manager = ChatStreamManager()
+    disconnect = asyncio.Event()
+    proceed = asyncio.Event()
+    events = [{"type": "message", "content": "first"}, {"type": "final", "content": "complete"}]
+
+    async def prepare(request, browser_owner_id=None):
+        return {"thread_id": "http-disconnect"}
+
+    async def run(**params):
+        yield events[0]
+        await proceed.wait()
+        yield events[1]
+
+    async def receive():
+        await disconnect.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] == "http.response.body" and message.get("body"):
+            disconnect.set()
+
+    monkeypatch.setattr(router_module, "prepare_run_params", prepare)
+    monkeypatch.setattr(router_module, "run_agent_stream", run)
+    monkeypatch.setattr(router_module, "get_chat_stream_manager", lambda: manager)
+    monkeypatch.setattr(router_module, "resolve_thread_id", lambda value: value)
+    try:
+        response = await router_module.chat_events(ChatRequest(message="hello"), admin="test")
+        await asyncio.wait_for(response({"type": "http", "asgi": {"spec_version": "2.3"}}, receive, send), timeout=1)
+        session = await manager.get_session("http-disconnect")
+        assert not session.task.done()
+        assert not session.queues
+
+        proceed.set()
+        await asyncio.wait_for(session.task, timeout=1)
+        response = await router_module.chat_events_reconnect(ReconnectRequest(thread_id=session.thread_id))
+        replay = [json.loads(chunk) async for chunk in response.body_iterator]
+        assert replay == events
+    finally:
+        proceed.set()
+        await manager.shutdown()
 
 
 @pytest.mark.parametrize("path", ["/api/chat", "/api/chat/stream", "/api/chat/events", "/api/chat/events/edit"])

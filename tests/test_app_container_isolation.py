@@ -1,5 +1,6 @@
 """Container isolation: no shared state across AppContainer instances."""
 
+import asyncio
 import threading
 import time
 
@@ -44,6 +45,78 @@ def test_containers_own_isolated_services(tmp_path):
     assert first.google_calendar_service is not second.google_calendar_service
     assert first.cache is not second.cache
     assert first.extension_registry is not second.extension_registry
+
+
+@pytest.mark.asyncio
+async def test_close_persistence_stops_chat_before_closing_dependencies(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    container = create_test_container(tmp_path=tmp_path)
+    started = asyncio.Event()
+    calls = []
+
+    async def run(**params):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            calls.append("run-cleaned")
+        yield  # pragma: no cover
+
+    async def record_error(thread_id, event):
+        calls.append("error-saved")
+
+    async def stop_browser():
+        assert session.task.done()
+        assert session._event_log.closed
+        calls.append("browser")
+
+    monkeypatch.setattr("agent.modules.conversations.record_thread_run_error", record_error)
+    monkeypatch.setattr(container, "_browser_service", SimpleNamespace(shutdown=stop_browser))
+    session = await container.chat_stream_manager.get_or_create_session("direct-close", {}, run)
+    await started.wait()
+    await asyncio.wait_for(container.close_persistence(), timeout=1)
+
+    assert calls == ["run-cleaned", "error-saved", "browser"]
+    assert await container.chat_stream_manager.get_session(session.thread_id) is None
+
+
+@pytest.mark.asyncio
+async def test_reinitializing_persistence_restores_chat_streams(isolated_container):
+    container = isolated_container
+    manager = container.chat_stream_manager
+    event = {"type": "final", "content": "complete"}
+
+    async def run(**params):
+        yield event
+
+    try:
+        await container.initialize_persistence()
+        assert container.chat_stream_manager is manager
+        session = await manager.get_or_create_session("reopened-chat", {}, run)
+        await asyncio.wait_for(session.task, timeout=1)
+
+        await container.initialize_persistence()
+        assert container.chat_stream_manager is manager
+        assert await manager.get_session(session.thread_id) is session
+
+        await container.close_persistence()
+        assert session._event_log.closed
+        assert container.chat_stream_manager is manager
+        with pytest.raises(RuntimeError, match="shutting down"):
+            await container.chat_stream_manager.get_or_create_session(session.thread_id, {}, run)
+
+        await container.initialize_persistence()
+        replacement = container.chat_stream_manager
+        session = await replacement.get_or_create_session(session.thread_id, {}, run)
+        await asyncio.wait_for(session.task, timeout=1)
+        assert [item async for item in session.subscribe()] == [event]
+        assert replacement is not manager
+        with pytest.raises(RuntimeError, match="shutting down"):
+            await manager.get_or_create_session(session.thread_id, {}, run)
+    finally:
+        await container.close_persistence()
 
 
 def test_runtime_settings_are_live_not_snapshotted(tmp_path):

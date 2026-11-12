@@ -706,7 +706,10 @@ class AppContainer:
             get_instabox_service(self).start()
         finally:
             restore_context_container(token)
-        self._persistence_ready = True
+        with self._lazy_lock:
+            if self._chat_stream_manager is not None and self._chat_stream_manager.closing:
+                self._chat_stream_manager = None
+            self._persistence_ready = True
 
     async def initialize_checkpointer(self) -> Any:
         """Create container-scoped LangGraph checkpointer (delegates to store)."""
@@ -719,6 +722,9 @@ class AppContainer:
         from agent.modules.workflows import close_checkpointer
         from agent.shared.config.service import detach_database_config_source
         from agent.shared.infrastructure.db.engine import close_async_engine
+
+        if self._chat_stream_manager is not None:
+            await self._chat_stream_manager.shutdown()
 
         if self._browser_service is not None:
             await self._browser_service.shutdown()

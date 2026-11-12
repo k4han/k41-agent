@@ -1,6 +1,6 @@
 """Reserve a durable workspace for an entire agent run on every channel."""
 
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from functools import wraps
 import inspect
 import asyncio
@@ -74,7 +74,8 @@ def guard_workspace_run(function):
     async def guarded(*args, **kwargs):
         bound = signature.bind(*args, **kwargs)
         async with workspace_run(bound.arguments):
-            async for event in function(*bound.args, **bound.kwargs):
-                yield event
+            async with aclosing(function(*bound.args, **bound.kwargs)) as events:
+                async for event in events:
+                    yield event
 
     return guarded
