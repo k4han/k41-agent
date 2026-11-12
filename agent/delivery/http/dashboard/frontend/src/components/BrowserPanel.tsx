@@ -135,7 +135,8 @@ export function BrowserPanel(props: {
     let lastRefresh = Date.now();
     const timer = window.setInterval(() => {
       if (document.visibilityState === "hidden") return;
-      if (connected() && Date.now() - lastRefresh < 30000) return;
+      const interval = connected() || (!props.open && !props.busy) ? 30000 : 5000;
+      if (Date.now() - lastRefresh < interval) return;
       if (props.open || props.busy || status()?.open || status()?.handoff) { lastRefresh = Date.now(); void refresh(); }
     }, 5000);
     const handoff = (event: Event) => {

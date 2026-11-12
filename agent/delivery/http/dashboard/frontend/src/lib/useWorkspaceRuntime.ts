@@ -48,6 +48,7 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
   };
 
   const refreshQuietly = () => { void refresh().catch(() => undefined); };
+  const pollInterval = createMemo(() => payloadTransitionBusy(payload()) ? 2000 : payload().workspace ? 30000 : 0);
   createEffect(() => {
     scope();
     revision += 1;
@@ -59,9 +60,11 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
     refreshQuietly();
   });
   createEffect(() => {
-    const switching = payloadTransitionBusy(payload());
-    if (!payload().workspace && !switching) return;
-    const timer = window.setInterval(refreshQuietly, switching ? 2000 : 5000);
+    const interval = pollInterval();
+    if (!interval) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") refreshQuietly();
+    }, interval);
     onCleanup(() => window.clearInterval(timer));
   });
   onMount(() => {
@@ -69,14 +72,17 @@ export function useWorkspaceRuntime(threadId: () => string, applyWorkspace: (bin
       const detail = (event as CustomEvent<{ project_workspace_id?: number; thread_id?: string }>).detail;
       if (detail?.thread_id === threadId() || !payload().workspace || !detail?.project_workspace_id || detail.project_workspace_id === payload().workspace?.project_workspace_id) refreshQuietly();
     };
+    const visibilityChanged = () => { if (document.visibilityState !== "hidden") refreshQuietly(); };
     window.addEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED, changed);
     window.addEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED, changed);
     window.addEventListener("focus", refreshQuietly);
+    document.addEventListener("visibilitychange", visibilityChanged);
     onCleanup(() => {
       revision += 1;
       window.removeEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_RUNTIME_CHANGED, changed);
       window.removeEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED, changed);
       window.removeEventListener("focus", refreshQuietly);
+      document.removeEventListener("visibilitychange", visibilityChanged);
     });
   });
 

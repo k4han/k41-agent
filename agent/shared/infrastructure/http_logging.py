@@ -20,13 +20,17 @@ def _is_log_viewer_path(path: str) -> bool:
     )
 
 
+def _is_successful_health_request(method: str, path: str, status: int) -> bool:
+    return method == "GET" and path.partition("?")[0].rstrip("/") == "/health" and 200 <= status < 300
+
+
 class LogViewerAccessFilter(logging.Filter):
-    """Exclude log viewer requests from Uvicorn access logs."""
+    """Exclude log viewer requests and successful health probes from access logs."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
         if isinstance(args, tuple) and len(args) == 5 and isinstance(args[2], str):
-            return not _is_log_viewer_path(args[2])
+            return not (_is_log_viewer_path(args[2]) or _is_successful_health_request(args[1], args[2], args[4]))
         return True
 
 
@@ -75,6 +79,8 @@ class HTTPLoggingMiddleware(BaseHTTPMiddleware):
             logger.error("HTTP request completed", extra=log_data)
         elif response.status_code >= 400:
             logger.warning("HTTP request completed", extra=log_data)
+        elif _is_successful_health_request(method, path, response.status_code):
+            logger.debug("HTTP request completed", extra=log_data)
         else:
             logger.info("HTTP request completed", extra=log_data)
 

@@ -794,8 +794,15 @@ test('workspace runtime events and reconnect snapshots refresh shared workspace 
 
 function runtimeFixture() {
   const listeners = new Map();
+  const documentListeners = new Map();
+  const document = {
+    visibilityState: 'visible',
+    addEventListener: (name, handler) => documentListeners.set(name, handler),
+    removeEventListener: name => documentListeners.delete(name),
+  };
   const timers = new Map();
-  const applied = [], sent = [];
+  const intervals = new Map();
+  const applied = [], sent = [], reads = [];
   let nextTimer = 0;
   let result = { kind: 'shared', workspace: {
     project_id: 7, project_workspace_id: 8, runtime_generation: 1,
@@ -804,17 +811,17 @@ function runtimeFixture() {
   let read = async () => result;
   const constants = loadModule('../src/lib/eventConstants.ts');
   const module = loadModule('../src/lib/useWorkspaceRuntime.ts', {
-    '@/lib/api': { apiFetch: (...args) => read(...args), postJson: async (path, body) => {
+    '@/lib/api': { apiFetch: (...args) => { reads.push(args); return read(...args); }, postJson: async (path, body) => {
       sent.push({ path, body });
       return { transition: { operation_id: 'switch', phase: 'saving', target_backend: body.backend } };
     } }, '@/lib/eventConstants': constants,
-  }, { window: {
+  }, { document, window: {
     addEventListener: (name, handler) => listeners.set(name, handler),
     removeEventListener: name => listeners.delete(name),
-    setInterval: handler => { const id = ++nextTimer; timers.set(id, handler); return id; },
-    clearInterval: id => timers.delete(id),
+    setInterval: (handler, delay) => { const id = ++nextTimer; timers.set(id, handler); intervals.set(id, delay); return id; },
+    clearInterval: id => { timers.delete(id); intervals.delete(id); },
   } });
-  return { ...module, ...constants, listeners, timers, applied, sent,
+  return { ...module, ...constants, listeners, document, documentListeners, timers, intervals, applied, sent, reads,
     apply: binding => applied.push(binding), setRead: value => { read = value; }, setResult: value => { result = value; }, getResult: () => result };
 }
 
@@ -828,6 +835,7 @@ test('runtime switching retains accepted progress across a connection loss and a
   assert.equal(value.busy(), true);
   assert.equal(f.sent[0].body.expected_generation, 1);
   assert.equal(f.timers.size, 1);
+  assert.deepEqual([...f.intervals.values()], [2000]);
   const binding = { ...f.getResult().workspace, runtime_generation: 2, execution: { backend: 'daytona', locator: 'new-sandbox' } };
   f.setRead(async () => ({ workspace: binding, kind: 'shared', runtime: { status: 'ready', generation: 2,
     transition: { operation_id: 'switch', phase: 'completed', target_backend: 'daytona' } } }));
@@ -836,6 +844,7 @@ test('runtime switching retains accepted progress across a connection loss and a
   assert.equal(value.busy(), false);
   assert.equal(f.applied.at(-1).execution.locator, 'new-sandbox');
   assert.equal(f.timers.size, 1);
+  assert.deepEqual([...f.intervals.values()], [30000]);
 });
 
 test('storage polling refreshes save state without resetting the working location', async t => {
@@ -843,6 +852,8 @@ test('storage polling refreshes save state without resetting the working locatio
   const { value, dispose } = mount(t, () => f.useWorkspaceRuntime(() => 'thread', f.apply));
   await tick();
   assert.equal(f.applied.length, 1);
+  assert.deepEqual([...f.intervals.values()], [30000]);
+  const timerId = [...f.timers.keys()][0];
   f.setResult({ ...f.getResult(), persistence: { status: 'error', last_error: 'Disk full' },
     workspace_name: 'main', local_link: { path: '/original', status: 'pending' } });
   [...f.timers.values()][0]();
@@ -851,7 +862,30 @@ test('storage polling refreshes save state without resetting the working locatio
   assert.equal(value.payload().workspace_name, 'main');
   assert.equal(value.payload().local_link.path, '/original');
   assert.equal(f.applied.length, 1);
+  assert.equal([...f.timers.keys()][0], timerId);
   dispose();
+  assert.equal(f.timers.size, 0);
+});
+
+test('runtime polling pauses in hidden tabs and refreshes on return and workspace events', async t => {
+  const f = runtimeFixture();
+  const { dispose } = mount(t, () => f.useWorkspaceRuntime(() => 'thread', f.apply));
+  await tick();
+  assert.equal(f.reads.length, 1);
+  f.document.visibilityState = 'hidden';
+  [...f.timers.values()][0]();
+  f.documentListeners.get('visibilitychange')();
+  await tick();
+  assert.equal(f.reads.length, 1);
+  f.document.visibilityState = 'visible';
+  f.documentListeners.get('visibilitychange')();
+  await tick();
+  assert.equal(f.reads.length, 2);
+  f.listeners.get(f.CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED)({ detail: { project_workspace_id: 8 } });
+  await tick();
+  assert.equal(f.reads.length, 3);
+  dispose();
+  assert.equal(f.documentListeners.size, 0);
   assert.equal(f.timers.size, 0);
 });
 

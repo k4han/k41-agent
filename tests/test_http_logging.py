@@ -14,12 +14,14 @@ from agent.shared.infrastructure.http_logging import HTTPLoggingMiddleware, LogV
     ("/dashboard-api/logs/server?after=cursor", False),
     ("/dashboard-api/logs/tray?before=cursor", False),
     ("/dashboard-api/logs/update", False),
-    ("/health", True),
+    ("/health", False),
+    ("/health/", False),
+    ("/health-other", True),
     ("/dashboard-api/logs-other", True),
     ("/settings/logs-other", True),
-    ("/health?next=/dashboard-api/logs/server", True),
+    ("/health?next=/dashboard-api/logs/server", False),
 ])
-def test_log_viewer_requests_are_excluded_from_both_logs(path, logged, caplog):
+def test_routine_requests_are_excluded_from_info_logs(path, logged, caplog):
     app = FastAPI()
     app.add_middleware(HTTPLoggingMiddleware)
 
@@ -63,3 +65,33 @@ def test_other_request_errors_are_still_logged(status, level, caplog):
     assert len(requests) == 1
     assert requests[0].levelno == level
     assert requests[0].status == status
+
+
+@pytest.mark.parametrize(("method", "status", "level"), [
+    ("GET", 200, logging.DEBUG),
+    ("GET", 400, logging.WARNING),
+    ("GET", 503, logging.ERROR),
+    ("POST", 200, logging.INFO),
+])
+def test_health_probes_keep_debug_details_and_error_logs(method, status, level, caplog):
+    app = FastAPI()
+    app.add_middleware(HTTPLoggingMiddleware)
+
+    @app.api_route("/health", methods=["GET", "POST"])
+    def endpoint():
+        return Response(status_code=status)
+
+    with caplog.at_level(logging.DEBUG):
+        with TestClient(app) as client:
+            assert client.request(method, "/health").status_code == status
+    requests = [record for record in caplog.records if record.getMessage() == "HTTP request completed"]
+    assert len(requests) == 1
+    assert requests[0].levelno == level
+    assert requests[0].status == status
+
+    record = logging.getLogger("uvicorn.access").makeRecord(
+        "uvicorn.access", logging.INFO, __file__, 0,
+        '%s - "%s %s HTTP/%s" %d',
+        ("127.0.0.1:12345", method, "/health", "1.1", status), None,
+    )
+    assert LogViewerAccessFilter().filter(record) is (level != logging.DEBUG)
