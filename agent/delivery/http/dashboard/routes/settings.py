@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from agent.delivery.http.dashboard.spa import spa_index_response
+from agent.shared.infrastructure.http_routing import accepts_html
 from agent.delivery.http.dashboard.routes.helpers.agents import (
     invalidate_agent_provider_options_cache,
 )
@@ -33,9 +36,14 @@ from agent.shared.config.web_connections import (
 router = APIRouter()
 
 
-@router.get("/settings")
-async def get_settings(request: Request) -> dict[str, dict[str, Any]]:
-    """Get all runtime settings as key-value pairs."""
+@router.get("/settings", response_model=None)
+async def get_settings(request: Request, response: Response) -> Response | dict[str, dict[str, Any]]:
+    """Serve the settings SPA for HTML navigation and runtime settings for API clients."""
+    response.headers["Vary"] = "Accept"
+    if accepts_html(request):
+        index_response = spa_index_response()
+        index_response.headers["Vary"] = "Accept"
+        return index_response
     service = get_request_config_service(request)
     return {"settings": service.get_settings_overview()}
 

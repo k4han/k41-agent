@@ -59,7 +59,7 @@ def _payload(name: str) -> dict:
 def test_agents_page_serves_spa_and_agent_api_returns_cards(dashboard_agent_client) -> None:
     client, _ = dashboard_agent_client
 
-    response = client.get("/agents")
+    response = client.get("/agents", headers={"Accept": "text/html"})
 
     assert response.status_code == 200
     assert '<div id="root">' in response.text
@@ -86,7 +86,7 @@ def test_agents_page_serves_spa_and_agent_api_returns_cards(dashboard_agent_clie
     assert "web_search" in tools_data["tool_config_effective"]
     assert "generate_image" in tools_data["tool_config_effective"]
 
-    index_response = client.get("/")
+    index_response = client.get("/", headers={"Accept": "text/html"})
     assert index_response.status_code == 200
     assert '<div id="root">' in index_response.text
 
@@ -94,7 +94,7 @@ def test_agents_page_serves_spa_and_agent_api_returns_cards(dashboard_agent_clie
 def test_chat_page_serves_spa(dashboard_agent_client) -> None:
     client, _ = dashboard_agent_client
 
-    response = client.get("/chat?agent=default")
+    response = client.get("/chat?agent=default", headers={"Accept": "text/html"})
 
     assert response.status_code == 200
     assert '<div id="root">' in response.text

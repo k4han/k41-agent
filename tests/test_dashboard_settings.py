@@ -907,14 +907,24 @@ class TestDashboardSettingsEndpoints:
         assert response.status_code == 400
         assert "enabled" in response.json()["detail"].lower()
 
-    def test_get_settings(self, dashboard_client) -> None:
-        resp = dashboard_client.get("/settings")
+    @pytest.mark.parametrize("accept", ["application/json", "*/*", ""])
+    def test_get_settings(self, dashboard_client, accept) -> None:
+        resp = dashboard_client.get("/settings", headers={"Accept": accept})
         assert resp.status_code == 200
+        assert resp.headers["Vary"] == "Accept"
         data = resp.json()
         assert "settings" in data
         assert "channels.telegram.enabled" in data["settings"]
         assert "host" in data["settings"]
         assert data["settings"]["channels.telegram.enabled"]["source"] == "default"
+
+    def test_get_settings_html_navigation(self, dashboard_client) -> None:
+        response = dashboard_client.get("/settings", headers={"Accept": "text/html"})
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        assert response.headers["Vary"] == "Accept"
+        assert '<div id="root">' in response.text
 
     def test_get_settings_sources(self, dashboard_client) -> None:
         resp = dashboard_client.get("/settings/sources")

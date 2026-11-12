@@ -193,31 +193,31 @@ def test_legacy_bots_routes_are_removed() -> None:
 def test_dashboard_spa_route_serves_index() -> None:
     client = _create_dashboard_client(ChannelManager())
 
-    response = client.get("/scheduler")
+    response = client.get("/scheduler", headers={"Accept": "text/html"})
 
     assert response.status_code == 200
     assert '<div id="root">' in response.text
     assert "/dashboard-assets/" in response.text
 
-    chat_response = client.get("/c/api_dashboard_123")
+    chat_response = client.get("/c/api_dashboard_123", headers={"Accept": "text/html"})
 
     assert chat_response.status_code == 200
     assert '<div id="root">' in chat_response.text
     assert "/dashboard-assets/" in chat_response.text
 
-    connections_response = client.get("/settings/connections")
+    connections_response = client.get("/settings/connections", headers={"Accept": "text/html"})
 
     assert connections_response.status_code == 200
     assert '<div id="root">' in connections_response.text
     assert "/dashboard-assets/" in connections_response.text
 
-    skills_response = client.get("/settings/skills")
+    skills_response = client.get("/settings/skills", headers={"Accept": "text/html"})
 
     assert skills_response.status_code == 200
     assert '<div id="root">' in skills_response.text
     assert "/dashboard-assets/" in skills_response.text
 
-    tools_response = client.get("/settings/tools")
+    tools_response = client.get("/settings/tools", headers={"Accept": "text/html"})
 
     assert tools_response.status_code == 200
     assert '<div id="root">' in tools_response.text
@@ -227,7 +227,7 @@ def test_dashboard_spa_route_serves_index() -> None:
 @pytest.mark.parametrize("path", ["/projects/1", "/projects/1?tab=skills", "/projects/1?tab=instructions"])
 def test_project_detail_direct_links_serve_spa(path) -> None:
     client = _create_dashboard_client(ChannelManager())
-    response = client.get(path)
+    response = client.get(path, headers={"Accept": "text/html"})
     assert response.status_code == 200
     assert '<div id="root">' in response.text
     assert "/dashboard-assets/" in response.text

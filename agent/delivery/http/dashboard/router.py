@@ -40,7 +40,6 @@ from agent.delivery.http.dashboard.routes import (
 router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_current_admin)])
 
 for child_router in (
-    spa_routes.router,
     catalog_routes.router,
     generated_images_routes.router,
     dashboard_routes.router,
@@ -70,6 +69,8 @@ for child_router in (
     computers_routes.router,
     skills_routes.router,
     skill_packages_routes.router,
+    # Keep the SPA fallback after all concrete dashboard endpoints.
+    spa_routes.router,
 ):
     router.include_router(child_router)
 

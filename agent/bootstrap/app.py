@@ -198,7 +198,6 @@ def create_app(bootstrap_config: BootstrapConfig | None = None, container=None) 
 
     if bootstrap_config.enable_dashboard:
         fastapi_app.include_router(auth_router)
-        fastapi_app.include_router(dashboard_router)
         from agent.delivery.http.dashboard.routes.browser import viewer_router
         fastapi_app.include_router(viewer_router)
         from agent.delivery.http.dashboard.routes.computers import viewer_router as computer_viewer_router
@@ -260,6 +259,11 @@ def create_app(bootstrap_config: BootstrapConfig | None = None, container=None) 
             {"status": "ready" if available else "not_ready", "version": APP_VERSION},
             status_code=200 if available else 503,
         )
+
+    if bootstrap_config.enable_dashboard:
+        # The dashboard includes the SPA fallback and must follow all endpoints
+        # and mounts, including any new namespaces added above.
+        fastapi_app.include_router(dashboard_router)
 
     fastapi_app.add_middleware(ContainerActivationMiddleware, container=container)
 

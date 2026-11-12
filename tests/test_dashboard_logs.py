@@ -205,7 +205,7 @@ def test_source_validation_and_authentication(client):
     client.app.dependency_overrides[get_current_admin] = deny
     assert client.get("/dashboard-api/logs").status_code == 401
     assert client.get("/dashboard-api/logs/server").status_code == 401
-    assert client.get("/settings/logs").status_code == 401
+    assert client.get("/settings/logs", headers={"Accept": "text/html"}).status_code == 401
 
 
 def test_file_and_directory_symlinks_are_rejected(client, tmp_path, monkeypatch):

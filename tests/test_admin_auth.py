@@ -153,7 +153,8 @@ async def test_default_password_session_requires_change_before_console_access(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", ["/dashboard-api/protected", "/api/protected", "/v1/api/protected", "/v2/api/protected", "/"])
+@pytest.mark.parametrize("path", ["/dashboard-api/protected", "/api/protected", "/v1/api/protected", "/v2/api/protected",
+                                  "/dashboard-api", "/api", "/v1/api", "/v2/api", "/"])
 @pytest.mark.parametrize("credentials", ["missing", "invalid", "expired"])
 async def test_authentication_failures_preserve_api_errors_and_page_redirects(monkeypatch, path, credentials):
     from datetime import datetime, timedelta, timezone

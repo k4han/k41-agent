@@ -9,6 +9,7 @@ from fastapi import HTTPException, Request, status
 
 from agent.modules.admin_auth.service import get_admin_auth_service
 from agent.shared.config import get_config_service
+from agent.shared.infrastructure.http_routing import is_api_path
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ async def get_current_admin(request: Request) -> str:
             token = auth_header.split(" ", 1)[1]
 
     if not token:
-        if request.url.path.startswith(("/api/", "/v1/api/", "/v2/api/", "/dashboard-api/")):
+        if is_api_path(request.url.path):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Not authenticated",
@@ -69,7 +70,7 @@ async def get_current_admin(request: Request) -> str:
             raise ValueError("Admin not found")
 
     except Exception:
-        if request.url.path.startswith(("/api/", "/v1/api/", "/v2/api/", "/dashboard-api/")):
+        if is_api_path(request.url.path):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
@@ -81,7 +82,7 @@ async def get_current_admin(request: Request) -> str:
     if payload.get("password_change_required") and request.url.path not in {
         "/change-password", "/logout",
     }:
-        if request.url.path.startswith(("/api/", "/v1/api/", "/v2/api/", "/dashboard-api/")):
+        if is_api_path(request.url.path):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={

@@ -784,6 +784,15 @@ async def test_plan_cannot_be_handed_to_an_acp_agent():
 
 
 def test_settings_page_can_be_loaded_directly():
-    from agent.delivery.http.dashboard.routes import spa
+    from agent.delivery.http.dashboard.router import router
+    from agent.modules.admin_auth import get_current_admin
 
-    assert "/settings/acp" in {route.path for route in spa.router.routes}
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_current_admin] = lambda: "test_admin"
+    client = TestClient(app)
+
+    response = client.get("/settings/acp", headers={"Accept": "text/html"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert '<div id="root">' in response.text

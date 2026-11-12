@@ -506,7 +506,7 @@ def test_catalog_routes_require_dashboard_authentication(monkeypatch):
         raise HTTPException(status_code=401, detail="Authentication required")
 
     app.dependency_overrides[get_current_admin] = deny
-    client = TestClient(app)
+    client = TestClient(app, headers={"Accept": "text/html"})
     for method, path in (("get", "/projects"), ("get", "/dashboard-api/projects"),
                          ("post", "/dashboard-api/projects"), ("patch", "/dashboard-api/projects/1"),
                          ("delete", "/dashboard-api/projects/1")):

@@ -1,47 +1,67 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import Response
+from fastapi.routing import APIRoute
+from starlette.routing import Match
+from starlette.types import Scope
 
 from agent.delivery.http.dashboard.spa import spa_index_response
+from agent.shared.infrastructure.http_routing import API_PATH_PREFIXES, accepts_html
 
 
-router = APIRouter()
+RESERVED_PATHS = (
+    *API_PATH_PREFIXES,
+    "/dashboard-assets",
+    "/integrations",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/health",
+    "/ready",
+    "/services",
+    "/providers",
+    "/prompt-variables",
+    "/settings/sources",
+    "/login",
+    "/logout",
+    "/favicon.ico",
+    "/favicon-yellow.ico",
+)
+# These namespaces also have a legacy SPA page at their exact base path.
+RESERVED_CHILD_PATHS = ("/channels/", "/agents/", "/scheduler/", "/tasks/")
 
 
-# --- SPA routes -------------------------------------------------------
+class SPAFallbackRoute(APIRoute):
+    """Match GET navigation with an explicit Accept: text/html media type.
+
+    Wildcard or missing Accept headers keep normal routing errors (404/405),
+    rather than serving HTML or triggering dashboard authentication redirects.
+    Register this fallback after all concrete endpoints and static mounts.
+    Reserved namespaces keep their routing errors even for HTML requests.
+    """
+
+    def matches(self, scope: Scope) -> tuple[Match, Scope]:
+        match, child_scope = super().matches(scope)
+        if match is Match.NONE:
+            return match, child_scope
+
+        request = Request(scope)
+        path = f"/{child_scope['path_params']['path']}"
+        # Reject before dependencies run so later API routes and mounts still match.
+        if (
+            request.method != "GET"
+            or not accepts_html(request)
+            or path.startswith(RESERVED_CHILD_PATHS)
+            or any(path == base or path.startswith(f"{base}/") for base in RESERVED_PATHS)
+        ):
+            return Match.NONE, {}
+        return match, child_scope
 
 
-@router.get("/", include_in_schema=False)
-@router.get("/chat", include_in_schema=False)
-@router.get("/c/{thread_id:path}", include_in_schema=False)
-@router.get("/tasks", include_in_schema=False)
-@router.get("/scheduler", include_in_schema=False)
-@router.get("/repositories", include_in_schema=False)
-@router.get("/projects", include_in_schema=False)
-@router.get("/projects/{project_id}", include_in_schema=False)
-@router.get("/repositories/{repository_id:path}", include_in_schema=False)
-@router.get("/history", include_in_schema=False)
-@router.get("/history/{thread_id:path}", include_in_schema=False)
-@router.get("/settings/config", include_in_schema=False)
-@router.get("/settings/logs", include_in_schema=False)
-@router.get("/settings/tools", include_in_schema=False)
-@router.get("/settings/acp", include_in_schema=False)
-@router.get("/settings/browser", include_in_schema=False)
-@router.get("/settings/backends", include_in_schema=False)
-@router.get("/settings/sandboxes", include_in_schema=False)
-@router.get("/settings/providers", include_in_schema=False)
-@router.get("/settings/connections", include_in_schema=False)
-@router.get("/settings/channels", include_in_schema=False)
-@router.get("/settings/agents", include_in_schema=False)
-@router.get("/settings/skills", include_in_schema=False)
-@router.get("/settings/prompt-variables", include_in_schema=False)
-@router.get("/settings/security", include_in_schema=False)
-@router.get("/settings/appearance", include_in_schema=False)
-@router.get("/settings/usage", include_in_schema=False)
-# Legacy routes - SPA handles redirect to /settings/*
-@router.get("/channels", include_in_schema=False)
-@router.get("/agents", include_in_schema=False)
-@router.get("/change-password", include_in_schema=False)
+router = APIRouter(route_class=SPAFallbackRoute)
+
+
+@router.get("/{path:path}", include_in_schema=False)
 async def dashboard_spa() -> Response:
     return spa_index_response()
