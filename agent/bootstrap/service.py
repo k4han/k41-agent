@@ -166,6 +166,36 @@ def is_service_installed(service_file: Path | None = None) -> bool:
     return path.exists()
 
 
+def uses_systemd_service() -> bool:
+    """Keep installed Linux services under their supervisor, even when offline."""
+    return sys.platform == "linux" and is_service_installed()
+
+
+def get_service_state() -> dict[str, str]:
+    result = _run_systemctl([
+        "show", SERVICE_NAME, "--property=ActiveState,SubState,MainPID,ControlPID",
+    ])
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"Could not query {SERVICE_NAME}: {detail or 'unknown error'}")
+    state = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    if not {"ActiveState", "SubState", "MainPID", "ControlPID"} <= state.keys():
+        raise RuntimeError(f"Could not verify the state of {SERVICE_NAME}.")
+    return state
+
+
+def _verify_service_stopped() -> None:
+    state = get_service_state()
+    if state["ActiveState"] not in {"inactive", "failed"} or state["MainPID"] != "0" or state["ControlPID"] != "0":
+        raise RuntimeError(f"{SERVICE_NAME} has not stopped: {state}.")
+
+
+def _verify_service_started() -> None:
+    state = get_service_state()
+    if state["ActiveState"] != "active" or not state["MainPID"].isdigit() or int(state["MainPID"]) <= 0:
+        raise RuntimeError(f"{SERVICE_NAME} has not started: {state}.")
+
+
 def is_service_enabled() -> bool:
     try:
         result = _run_systemctl(["is-enabled", "--quiet", SERVICE_NAME])
@@ -201,21 +231,19 @@ def install_service(*, start: bool = True, paths: ServicePaths | None = None) ->
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(f"Could not enable {SERVICE_NAME}: {detail or 'unknown error'}")
+    if start:
+        _verify_service_started()
     return resolved
 
 
 def uninstall_service(*, paths: ServicePaths | None = None) -> bool:
     resolved = paths or resolve_service_paths()
-    available, _reason = is_systemd_available()
+    available, reason = is_systemd_available()
     if not available:
-        # Still remove the unit file so reinstalls do not leave stale units.
-        # Cleanup itself is success even without a running systemd manager.
-        removed = False
         if resolved.service_file.exists():
-            resolved.service_file.unlink(missing_ok=True)
-            removed = True
-        return removed
-    _run_systemctl(["disable", "--now", SERVICE_NAME])
+            raise RuntimeError(f"Cannot verify service shutdown: {reason} Unit file retained.")
+        return False
+    disable_service(stop=True)
     removed = False
     if resolved.service_file.exists():
         resolved.service_file.unlink(missing_ok=True)
@@ -235,16 +263,20 @@ def enable_service(*, start: bool = True) -> None:
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(f"Could not enable {SERVICE_NAME}: {detail or 'unknown error'}")
+    if start:
+        _verify_service_started()
 
 
 def disable_service(*, stop: bool = True) -> None:
     _ensure_systemd_available()
     args = ["disable", "--now" if stop else "", SERVICE_NAME]
     args = [a for a in args if a]
-    result = _run_systemctl(args)
+    result = _run_systemctl(args, timeout=SYSTEMCTL_STOP_TIMEOUT_SECONDS if stop else 30.0)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(f"Could not disable {SERVICE_NAME}: {detail or 'unknown error'}")
+    if stop:
+        _verify_service_stopped()
 
 
 def start_service() -> None:
@@ -253,6 +285,7 @@ def start_service() -> None:
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(f"Could not start {SERVICE_NAME}: {detail or 'unknown error'}")
+    _verify_service_started()
 
 
 def stop_service() -> None:
@@ -261,14 +294,16 @@ def stop_service() -> None:
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(f"Could not stop {SERVICE_NAME}: {detail or 'unknown error'}")
+    _verify_service_stopped()
 
 
 def restart_service() -> None:
     _ensure_systemd_available()
-    result = _run_systemctl(["restart", SERVICE_NAME])
+    result = _run_systemctl(["restart", SERVICE_NAME], timeout=SYSTEMCTL_STOP_TIMEOUT_SECONDS)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(f"Could not restart {SERVICE_NAME}: {detail or 'unknown error'}")
+    _verify_service_started()
 
 
 def ensure_linger() -> tuple[bool, str]:
@@ -337,6 +372,7 @@ __all__ = [
     "get_agent_home",
     "get_service_path",
     "get_status",
+    "get_service_state",
     "install_service",
     "is_service_active",
     "is_service_enabled",
@@ -348,4 +384,5 @@ __all__ = [
     "start_service",
     "stop_service",
     "uninstall_service",
+    "uses_systemd_service",
 ]

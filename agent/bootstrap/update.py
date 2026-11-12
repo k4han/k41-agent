@@ -862,17 +862,9 @@ def stop_running_server(pid: int) -> None:
 
 
 def _is_server_command(command: list[str]) -> bool:
-    if len(command) >= 3 and command[1:3] == ["-m", "agent.bootstrap.cli"]:
-        arguments = command[3:]
-    elif command and Path(command[0]).name.lower() in {"k41", "k41.exe"}:
-        arguments = command[1:]
-    elif len(command) >= 2 and Path(command[1]).name.lower() in {"k41", "k41.exe"}:
-        arguments = command[2:]
-    else:
-        return False
-    # Subcommands such as update, init and tray must never be terminated here.
-    server_flags = {"--foreground", "-f", "--no-tray", "--tray", "--verbose", "--quiet", "-q"}
-    return all(argument in server_flags for argument in arguments)
+    from agent.bootstrap.process_utils import is_server_command
+
+    return is_server_command(command)
 
 
 def _cleanup_server_stop_files(pid: int) -> None:

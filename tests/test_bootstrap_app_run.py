@@ -1,4 +1,5 @@
 import importlib
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -57,6 +58,58 @@ async def test_web_server_uses_bounded_graceful_shutdown(monkeypatch):
     assert log_config["handlers"]["access"]["filters"] == ["exclude_log_viewer"]
     assert log_config["filters"]["exclude_log_viewer"]["()"] is app_module.LogViewerAccessFilter
     assert "filters" not in app_module.uvicorn.config.LOGGING_CONFIG["handlers"]["access"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enable_web", [True, False])
+async def test_shutdown_monitor_ignores_another_instances_signal(tmp_path, monkeypatch, enable_web):
+    signal_file = tmp_path / "shutdown.signal"
+    signal_file.write_text(str(os.getpid() + 1000000))
+    monkeypatch.setattr(app_module, "SHUTDOWN_SIGNAL", signal_file)
+    monkeypatch.setattr(app_module, "settings", SimpleNamespace(enable_web=enable_web, host="127.0.0.1", port=4141))
+    original_sleep = app_module.asyncio.sleep
+    polls = []
+
+    async def sleep(seconds):
+        polls.append(seconds)
+        if len(polls) == 2:
+            assert signal_file.exists()
+            signal_file.write_text(str(os.getpid()))
+        assert len(polls) < 20
+        await original_sleep(0)
+
+    class Runtime:
+        started = False
+        stopped = False
+
+        async def startup(self):
+            self.started = True
+
+        async def shutdown(self):
+            self.stopped = True
+
+    class Server:
+        should_exit = False
+
+        def __init__(self, config):
+            pass
+
+        async def serve(self):
+            for _ in range(20):
+                await original_sleep(0)
+                if self.should_exit:
+                    return
+            pytest.fail("Server did not consume its own shutdown request")
+
+    runtime = Runtime()
+    monkeypatch.setattr(app_module, "app", SimpleNamespace(state=SimpleNamespace(runtime=runtime)))
+    monkeypatch.setattr(app_module.uvicorn, "Server", Server)
+    monkeypatch.setattr(app_module.asyncio, "sleep", sleep)
+    await app_module.main()
+    assert len(polls) >= 2
+    assert not signal_file.exists()
+    if not enable_web:
+        assert runtime.started and runtime.stopped
 
 
 @pytest.mark.asyncio

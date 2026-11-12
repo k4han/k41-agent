@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 TRAY_EXECUTABLE_NAME = "k41-agent-tray.exe"
@@ -52,6 +53,8 @@ def get_dedicated_tray_executable(
 
 
 def is_process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
     try:
         import psutil
 
@@ -68,8 +71,52 @@ def is_process_alive(pid: int) -> bool:
         try:
             os.kill(pid, 0)
             return True
+        except PermissionError:
+            return True
+        except ProcessLookupError:
+            return False
         except OSError:
             return False
+
+
+def remove_pid_file(path: Path, pid: int) -> None:
+    """Remove only a file that still belongs to the expected process."""
+    try:
+        if path.read_text(encoding="utf-8").strip() == str(pid):
+            path.unlink(missing_ok=True)
+    except FileNotFoundError:
+        pass
+
+
+def consume_shutdown_signal(path: Path, pid: int) -> bool:
+    """Accept shutdown requests addressed to this server instance only."""
+    try:
+        if path.read_text(encoding="utf-8").strip() != str(pid):
+            return False
+        remove_pid_file(path, pid)
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def wait_for_process_exit(process, timeout_seconds: float) -> bool:
+    """Track a psutil Process, including its identity if the PID is reused."""
+    import psutil
+
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            if not process.is_running() or process.status() in {psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD}:
+                return True
+        except psutil.NoSuchProcess:
+            return True
+        except psutil.AccessDenied:
+            # An unreadable process must never be reported as stopped.
+            pass
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.5, remaining))
 
 
 def get_process_cmdline(pid: int) -> str:
@@ -124,6 +171,20 @@ def is_k41_process(pid: int, *, strict: bool = False) -> bool:
         return ("k41" in cmd or "agent.bootstrap.cli" in cmd) and not _is_tray_cmdline(cmd)
     except Exception:
         return False
+
+
+def is_server_command(command: list[str]) -> bool:
+    """Match server entrypoints without matching CLI subcommands or install paths."""
+    if len(command) >= 3 and command[1:3] == ["-m", "agent.bootstrap.cli"]:
+        arguments = command[3:]
+    elif command and Path(command[0]).name.lower() in {"k41", "k41.exe"}:
+        arguments = command[1:]
+    elif len(command) >= 2 and Path(command[1]).name.lower() in {"k41", "k41.exe"}:
+        arguments = command[2:]
+    else:
+        return False
+    server_flags = {"--foreground", "-f", "--no-tray", "--tray", "--verbose", "--quiet", "-q"}
+    return all(argument in server_flags for argument in arguments)
 
 
 def is_tray_process(pid: int, *, strict: bool = False) -> bool:

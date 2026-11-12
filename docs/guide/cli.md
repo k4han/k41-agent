@@ -15,10 +15,23 @@ Run these commands in a new terminal after [installation](./installation).
 | `k41 --foreground` | Run the server in the current terminal. |
 | `k41 status` | Check server and dashboard status. |
 | `k41 stop` | Stop the server. |
+| `k41 stop --timeout 60` | Allow up to 60 seconds for the server process to exit. |
+| `k41 restart` | Confirm shutdown, then start the server again. |
+| `k41 restart --with-tray` | Restart both the server and system tray. |
 | `k41 cli` | Open the terminal chat interface. |
 
 The default dashboard is at
 [http://127.0.0.1:4141](http://127.0.0.1:4141).
+
+Stopping waits up to 30 seconds by default. If the process is still alive,
+the command retains its PID file and exits with an error. `restart` does not
+start another server when shutdown cannot be confirmed. For an unmanaged
+server, neither command force-kills an unresponsive process. Use `--with-tray` to also stop or restart
+the tray, or `restart --no-tray` to restart without a tray.
+
+PID files may remain after a foreground run or an external shutdown. They
+are removed by the controller after process exit is confirmed, or replaced
+by a subsequent server start.
 
 ## Browser setup
 
@@ -62,6 +75,11 @@ See [updates and maintenance](./maintenance) for backup and data behavior.
 | `k41 service install` | Reinstall and enable autostart. |
 
 These commands manage the Linux systemd user service.
+When that service is installed, `k41`, `k41 stop`, and `k41 restart` also use
+systemd. Stop and restart wait for systemd's configured stop timeout, including
+older units with a 90-second timeout, and verify the resulting unit state.
+An unavailable systemd manager causes an error so a second unmanaged server
+is not started. `k41 --foreground` continues to run in the current terminal.
 
 ## Running from a source checkout
 

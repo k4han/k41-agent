@@ -275,10 +275,11 @@ async def main() -> None:
         server = uvicorn.Server(config)
 
         async def monitor_shutdown_signal():
+            from agent.bootstrap.process_utils import consume_shutdown_signal
+
             while True:
-                if SHUTDOWN_SIGNAL.exists():
+                if consume_shutdown_signal(SHUTDOWN_SIGNAL, os.getpid()):
                     logger.info("Shutdown signal received. Stopping server...")
-                    SHUTDOWN_SIGNAL.unlink(missing_ok=True)
                     server.should_exit = True
                     return
                 await asyncio.sleep(0.5)
@@ -295,10 +296,11 @@ async def main() -> None:
     runtime: AppRuntime = app.state.runtime
     await runtime.startup()
     try:
+        from agent.bootstrap.process_utils import consume_shutdown_signal
+
         while True:
-            if SHUTDOWN_SIGNAL.exists():
+            if consume_shutdown_signal(SHUTDOWN_SIGNAL, os.getpid()):
                 logger.info("Shutdown signal received. Stopping server...")
-                SHUTDOWN_SIGNAL.unlink(missing_ok=True)
                 break
             await asyncio.sleep(0.5)
     finally:

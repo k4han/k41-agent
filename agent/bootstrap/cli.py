@@ -31,6 +31,7 @@ app = typer.Typer(
         "    k41                    Start the server in the background\n\n"
         "    k41 status             Check server and tray status\n\n"
         "    k41 stop               Stop the running server\n\n"
+        "    k41 restart            Restart the server safely\n\n"
         "    k41 cli                Start an interactive chat session\n\n"
         "    k41 tray --status      Show system tray status\n\n"
         "    k41 update             Update from the latest GitHub release"
@@ -47,6 +48,7 @@ app.add_typer(browser_app, name="browser")
 PID_FILE = Path.home() / ".k41-agent" / "server.pid"
 SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
 TRAY_PID_FILE = Path.home() / ".k41-agent" / "tray.pid"
+SERVER_STOP_TIMEOUT_SECONDS = 30.0
 
 
 def _echo_info(message: str) -> None:
@@ -123,8 +125,8 @@ def _wait_for_server_startup(config: Any, timeout_seconds: float = 10.0) -> bool
             health_url = _health_url(config.host, config.port)
         except Exception:
             health_url = None
-    deadline = time.time() + timeout_seconds
-    while time.time() < deadline:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
         if PID_FILE.exists():
             try:
                 pid = int(PID_FILE.read_text().strip())
@@ -143,14 +145,6 @@ def _wait_for_server_startup(config: Any, timeout_seconds: float = 10.0) -> bool
                 except Exception:
                     pass
         time.sleep(0.3)
-    # Final fallback: PID alive is considered started even if health not yet ready
-    if PID_FILE.exists():
-        try:
-            pid = int(PID_FILE.read_text().strip())
-            if _is_process_alive(pid) and _is_k41_process(pid):
-                return True
-        except (ValueError, OSError):
-            pass
     return False
 
 
@@ -178,8 +172,8 @@ def _daemonize() -> None:
     sys.exit(0)
 
 
-def _daemon_command() -> list[str]:
-    args = list(sys.argv[1:])
+def _daemon_command(args: list[str] | None = None) -> list[str]:
+    args = list(sys.argv[1:] if args is None else args)
     # Prevent double tray spawn: daemon child should not re-spawn tray.
     if "--no-tray" not in args and "--tray" not in args:
         args.append("--no-tray")
@@ -573,6 +567,23 @@ def serve(foreground: bool = False, tray: bool = False, no_tray: bool = False) -
                 else:
                     _echo_warning("Could not stop tray (unverifiable or termination failed).")
 
+    from agent.bootstrap import service as service_module
+
+    if not foreground and not is_daemon_child and service_module.uses_systemd_service():
+        try:
+            state = service_module.get_service_state()
+            if PID_FILE.exists():
+                old_pid = int(PID_FILE.read_text(encoding="utf-8").strip())
+                if _is_process_alive(old_pid) and state["ActiveState"] in {"inactive", "failed"}:
+                    raise RuntimeError("A server process is still running outside systemd. Stop it before starting the service.")
+            service_module.start_service()
+        except (RuntimeError, OSError, ValueError) as exc:
+            _echo_error(str(exc))
+            raise typer.Exit(1) from exc
+        _echo_success("Service started.")
+        _print_common_commands()
+        return
+
     if PID_FILE.exists():
         try:
             old_pid = int(PID_FILE.read_text().strip())
@@ -607,7 +618,7 @@ def serve(foreground: bool = False, tray: bool = False, no_tray: bool = False) -
             _echo_warning(
                 "Server health endpoint is reachable but PID check failed - server is actually running (stale PID file)."
             )
-            _echo_warning("If you want to restart, run `k41 stop` (may need --with-tray) then `k41`.")
+            _echo_warning("Cannot safely identify the running server. Check `k41 status` and `k41 service status`.")
             _print_server_endpoints(config)
             _print_common_commands()
             raise typer.Exit(1)
@@ -622,7 +633,13 @@ def serve(foreground: bool = False, tray: bool = False, no_tray: bool = False) -
 
         env = os.environ.copy()
         env["K41_DAEMONIZED"] = "1"
-        cmd = _daemon_command()
+        startup_args = ["--no-tray"]
+        level = logging.getLogger().getEffectiveLevel()
+        if level <= logging.DEBUG:
+            startup_args.append("--verbose")
+        elif level >= logging.WARNING:
+            startup_args.append("--quiet")
+        cmd = _daemon_command(startup_args)
         spawn_detached_process(cmd, SERVER_LOG_FILE, env=env)
 
         started = _wait_for_server_startup(config, timeout_seconds=10.0)
@@ -630,12 +647,11 @@ def serve(foreground: bool = False, tray: bool = False, no_tray: bool = False) -
             _echo_success("Server started.")
             _print_server_endpoints(config)
         else:
-            _echo_warning("Server is starting in background. It may take a moment to become ready.")
-            _echo_warning("If it does not start, check logs at:")
+            _echo_error("Server startup could not be confirmed. Check status and logs:")
             _print_key_value("Log", SERVER_LOG_FILE)
             _print_server_endpoints_pending(config)
         _print_common_commands()
-        sys.exit(0)
+        raise typer.Exit(0 if started else 1)
 
     if foreground:
         _echo_info("Starting Kai Agent in foreground. Press Ctrl+C to stop.")
@@ -643,12 +659,10 @@ def serve(foreground: bool = False, tray: bool = False, no_tray: bool = False) -
 
     from agent.bootstrap.app import run as run_server
 
-    PID_FILE.write_text(str(os.getpid()))
-    try:
-        run_server()
-    finally:
-        if PID_FILE.exists():
-            PID_FILE.unlink(missing_ok=True)
+    # The controller removes this file after confirming process exit. Runtime
+    # cleanup can return while non-daemon threads still keep Python alive.
+    PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
+    run_server()
 
 
 @app.command("cli")
@@ -895,56 +909,117 @@ def stop(
         "--with-tray",
         help="Also stop system tray if running.",
     ),
+    timeout: float = typer.Option(
+        SERVER_STOP_TIMEOUT_SECONDS, "--timeout", min=0.1,
+        help="Seconds to wait for the server process to exit (systemd uses its unit timeout).",
+    ),
 ) -> None:
     """Stop the running k41-agent server."""
     _echo_info("Stopping Kai Agent server...")
-    if not PID_FILE.exists():
-        _echo_warning("Server is not running.")
-        _print_key_value("PID file", PID_FILE)
-        _maybe_stop_tray(with_tray)
+    errors = []
+    for action in (
+        lambda: _stop_server(timeout_seconds=timeout),
+        lambda: _stop_requested_tray(with_tray),
+    ):
+        try:
+            action()
+        except (RuntimeError, OSError) as exc:
+            errors.append(str(exc))
+    for message in errors:
+        _echo_error(message)
+    if errors:
         raise typer.Exit(1)
 
-    pid_text = PID_FILE.read_text().strip()
+
+def _server_health_reachable() -> bool:
+    import httpx
+    from agent.bootstrap.settings import load_bootstrap_config
+
     try:
-        pid = int(pid_text)
-    except ValueError:
-        _echo_error("Invalid PID file content.")
-        PID_FILE.unlink(missing_ok=True)
-        _maybe_stop_tray(with_tray)
-        raise typer.Exit(1)
+        config = load_bootstrap_config()
+        if not getattr(config, "enable_web", True):
+            return False
+        return httpx.get(_health_url(config.host, config.port), timeout=2.0).status_code == 200
+    except Exception:
+        return False
 
-    if not _is_process_alive(pid):
-        _echo_warning(f"Process {pid} was not found. Cleaning up PID file.")
-        PID_FILE.unlink(missing_ok=True)
-        _maybe_stop_tray(with_tray)
-        raise typer.Exit(1)
 
-    if not _is_k41_process(pid):
-        _echo_warning(f"Process {pid} is not a Kai Agent server. Cleaning up PID file.")
-        PID_FILE.unlink(missing_ok=True)
-        _maybe_stop_tray(with_tray)
-        raise typer.Exit(1)
+def _stop_requested_tray(with_tray: bool) -> None:
+    if with_tray and _is_tray_running() and not _maybe_stop_tray(True):
+        raise RuntimeError("Could not stop tray. Its PID file was retained.")
 
-    SHUTDOWN_SIGNAL.write_text(str(pid))
-    _echo_info(f"Sent shutdown signal to server (PID {pid}).")
 
-    import time
+def _stop_server(*, timeout_seconds: float, allow_stopped: bool = False) -> None:
+    import psutil
+    from agent.bootstrap import service as service_module
+    from agent.bootstrap.process_utils import is_server_command, remove_pid_file, wait_for_process_exit
 
-    for _ in range(10):
-        time.sleep(0.5)
-        if not _is_process_alive(pid):
-            PID_FILE.unlink(missing_ok=True)
-            SHUTDOWN_SIGNAL.unlink(missing_ok=True)
-            _echo_success(f"Server stopped (PID {pid}).")
-            _maybe_stop_tray(with_tray)
-            return
+    pid: int | None = None
+    process = None
+    try:
+        pid = int(PID_FILE.read_text(encoding="utf-8").strip())
+        if pid <= 0:
+            raise ValueError
+    except FileNotFoundError:
+        pass
+    except ValueError as exc:
+        raise RuntimeError("Invalid PID file content. PID file retained; shutdown cannot be verified.") from exc
 
-    _echo_warning(f"Process {pid} is still alive after 5s.")
-    _echo_info("It may take a moment to shut down.")
-    PID_FILE.unlink(missing_ok=True)
-    SHUTDOWN_SIGNAL.unlink(missing_ok=True)
+    if pid is not None:
+        try:
+            process = psutil.Process(pid)
+            if not is_server_command(process.cmdline()):
+                raise RuntimeError(f"Process {pid} is not a verified Kai Agent server. PID file retained.")
+        except psutil.NoSuchProcess:
+            process = None
+        except psutil.AccessDenied as exc:
+            raise RuntimeError(f"Cannot verify process {pid}. PID file retained.") from exc
 
-    _maybe_stop_tray(with_tray)
+    managed = service_module.uses_systemd_service()
+    if managed:
+        # Use the supervisor even without a PID file, including activating and
+        # deactivating units. An unreachable manager must not trigger a fallback.
+        service_module.stop_service()
+    elif process is not None:
+        SHUTDOWN_SIGNAL.write_text(str(pid), encoding="utf-8")
+        _echo_info(f"Sent shutdown signal to server (PID {pid}).")
+
+    if process is not None and not wait_for_process_exit(process, timeout_seconds):
+        raise RuntimeError(f"Process {pid} is still alive after {timeout_seconds:g}s. PID file retained; shutdown is not confirmed.")
+    if _server_health_reachable():
+        raise RuntimeError("Server health endpoint is still reachable. Shutdown is not confirmed; PID file retained.")
+
+    if pid is not None:
+        remove_pid_file(PID_FILE, pid)
+        remove_pid_file(SHUTDOWN_SIGNAL, pid)
+    if not managed and process is None:
+        if not allow_stopped:
+            raise RuntimeError("Server is not running.")
+        return
+    _echo_success("Server stopped." if pid is None else f"Server stopped (PID {pid}).")
+
+
+@app.command()
+def restart(
+    with_tray: bool = typer.Option(False, "--with-tray", help="Also restart the system tray."),
+    no_tray: bool = typer.Option(False, "--no-tray", help="Do not start a system tray."),
+    timeout: float = typer.Option(
+        SERVER_STOP_TIMEOUT_SECONDS, "--timeout", min=0.1,
+        help="Seconds to wait for the old server to exit (systemd uses its unit timeout).",
+    ),
+) -> None:
+    """Restart the server only after its shutdown has been confirmed."""
+    if with_tray and no_tray:
+        _echo_error("Cannot use --with-tray and --no-tray together.")
+        raise typer.Exit(2)
+    _echo_info("Restarting Kai Agent server...")
+    try:
+        _stop_server(timeout_seconds=timeout, allow_stopped=True)
+        _stop_requested_tray(with_tray)
+    except (RuntimeError, OSError) as exc:
+        _echo_error(str(exc))
+        raise typer.Exit(1) from exc
+    serve(tray=with_tray, no_tray=no_tray)
 
 
 def _tray_handle_enabled_toggle(
