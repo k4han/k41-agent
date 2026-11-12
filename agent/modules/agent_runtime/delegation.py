@@ -9,7 +9,7 @@ from langgraph.types import Command
 
 
 async def find_delegation(parent_thread_id: str, *, delegation_id=None, tool_call_id=None, parent_message_id=None):
-    from agent.modules.workflows.checkpoint import get_checkpointer
+    from agent.modules.workflows import get_checkpointer
     criteria = {"k41_parent_thread_id": parent_thread_id}
     if delegation_id:
         criteria["k41_delegation_id"] = delegation_id
@@ -58,7 +58,7 @@ async def annotate_delegation_results(value, parent_thread_id: str):
 
 
 async def get_subagent_history(parent_thread_id: str, delegation_id: str):
-    from agent.modules.conversations.history import get_thread_messages_payload
+    from agent.modules.conversations import get_thread_messages_payload
     checkpoint = await find_delegation(parent_thread_id, delegation_id=delegation_id)
     if checkpoint is None:
         return None
@@ -101,8 +101,8 @@ async def enrich_delegated_calls(messages: list[dict], parent_thread_id: str):
 async def copy_delegated_history(state: dict, source_thread_id: str, target_thread_id: str,
         *, created=None, replacements=()):
     """Copy referenced child snapshots so deleting a source cannot break its fork."""
-    from agent.modules.conversations.forking import _seed_fork_history, _rebind_storage_references
-    from agent.modules.workflows import get_workflow_graph, graph_name_for_thread
+    from agent.modules.conversations import seed_fork_history, rebind_storage_references
+    from agent.modules.workflows import get_workflow_graph, graph_name_for_thread, get_checkpointer
     import copy
 
     for message in state.get("messages", []):
@@ -120,12 +120,11 @@ async def copy_delegated_history(state: dict, source_thread_id: str, target_thre
         if not snapshot or not snapshot.values:
             continue
         copied_id = target_thread_id + child_id[len(source_thread_id):]
-        copied = _rebind_storage_references(copy.deepcopy(snapshot.values), replacements)
+        copied = rebind_storage_references(copy.deepcopy(snapshot.values), replacements)
         if created is not None:
             created.append(copied_id)
         await copy_delegated_history(copied, child_id, copied_id, created=created, replacements=replacements)
-        config = await _seed_fork_history(graph, copied_id, copied)
-        from agent.modules.workflows.checkpoint import get_checkpointer
+        config = await seed_fork_history(graph, copied_id, copied)
         saver = get_checkpointer()
         saved = await saver.aget_tuple(config)
         metadata = {**saved.metadata,

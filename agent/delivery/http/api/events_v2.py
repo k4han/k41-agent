@@ -18,8 +18,8 @@ from agent.delivery.http.api.schemas import (
     ReconnectRequest,
 )
 from agent.modules.admin_auth import get_current_admin
-from agent.modules.agent_runtime.chat_stream_manager import get_chat_stream_manager
-from agent.modules.agent_runtime.protocol import (
+from agent.modules.agent_runtime import (
+    get_chat_stream_manager,
     protocol_event,
     run_agent_edit_protocol_stream,
     run_agent_protocol_stream,
@@ -108,7 +108,7 @@ async def reconnect(request: ReconnectRequest):
 
 @router.get("/chat/{thread_id}/subagents/{delegation_id}")
 async def subagent_history(thread_id: str, delegation_id: str):
-    from agent.modules.agent_runtime.delegation import get_subagent_history
+    from agent.modules.agent_runtime import get_subagent_history
 
     result = await get_subagent_history(resolve_thread_id(thread_id), delegation_id)
     if result is None:

@@ -292,7 +292,7 @@ async def _fork_reserved(thread_id: str, checkpoint_id: str, message_index: int)
                     for key, entry in state.get("active_skills", {}).items():
                         replacements.append((key, activation_key(entry["agent_name"], temp, entry["name"])))
             state = _rebind_storage_references(state, replacements)
-            from agent.modules.agent_runtime.delegation import copy_delegated_history
+            from agent.modules.agent_runtime import copy_delegated_history
             await copy_delegated_history(state, thread_id, new_id,
                 created=copied_subthreads, replacements=replacements)
             if state.get("active_skills"):

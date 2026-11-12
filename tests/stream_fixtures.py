@@ -5,6 +5,7 @@ from contextlib import aclosing
 from langchain_core.messages import AIMessageChunk
 
 from agent.shared.infrastructure.parsing import extract_message_thinking
+from agent.shared.infrastructure.thinking_parser import strip_thinking_tags
 
 
 def graph_event(method, data):
@@ -69,12 +70,12 @@ class EventRun:
                             ],
                         )
                     text = (
-                        chunk.content
+                        strip_thinking_tags(chunk.content)
                         if isinstance(chunk.content, str)
                         else "".join(
                             block.get("text", "")
                             for block in chunk.content
-                            if isinstance(block, dict)
+                            if isinstance(block, dict) and block.get("type") != "thinking"
                         )
                     )
                     if text:

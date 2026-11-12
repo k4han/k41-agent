@@ -659,7 +659,7 @@ async def get_thread_messages_payload(
 
     active_checkpoint_id = _checkpoint_id_from_tuple(checkpoint_tuple)
     messages = _checkpoint_messages(checkpoint_tuple)
-    from agent.modules.agent_runtime.delegation import enrich_delegated_calls
+    from agent.modules.agent_runtime import enrich_delegated_calls
     if not include_branch_metadata:
         return await enrich_delegated_calls(_serialize_thread_messages(messages), thread_id), active_checkpoint_id
 

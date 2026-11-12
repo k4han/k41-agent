@@ -41,7 +41,17 @@ from agent.modules.agent_runtime.chat_stream_manager import (
     ChatStreamSession,
     get_chat_stream_manager,
 )
-from agent.modules.agent_runtime.protocol import run_agent_protocol_stream, run_agent_edit_protocol_stream
+from agent.modules.agent_runtime.protocol import (
+    protocol_event,
+    run_agent_protocol_stream,
+    run_agent_edit_protocol_stream,
+)
+from agent.modules.agent_runtime.delegation import (
+    annotate_delegation_results,
+    copy_delegated_history,
+    enrich_delegated_calls,
+    get_subagent_history,
+)
 from agent.modules.agent_runtime.input_messages import (
     DEFAULT_IMAGE_PROMPT,
     MISSING_IMAGE_PROMPT,
@@ -80,4 +90,9 @@ __all__ = [
     "ChatStreamManager",
     "ChatStreamSession",
     "get_chat_stream_manager",
+    "protocol_event",
+    "annotate_delegation_results",
+    "copy_delegated_history",
+    "enrich_delegated_calls",
+    "get_subagent_history",
 ]

@@ -69,7 +69,7 @@ async def close_checkpointer(container=None) -> None:
 
 
 def get_checkpointer():
-    from agent.modules.workflows.checkpoint.store import get_checkpointer as _get_checkpointer
+    from agent.modules.workflows.checkpoint import get_checkpointer as _get_checkpointer
 
     return _get_checkpointer()
 

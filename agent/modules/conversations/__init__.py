@@ -3,7 +3,12 @@ from agent.modules.conversations.navigation import list_conversation_projects, l
 from agent.modules.conversations.navigation import _project_previews_statement as project_previews_statement, _serialize_project_thread as serialize_project_thread
 from agent.modules.conversations.migrations import migrate_conversation_ids, migrate_conversation_tables
 from agent.modules.conversations import history
-from agent.modules.conversations.forking import ConversationForkConflictError, fork_conversation_thread
+from agent.modules.conversations.forking import (
+    ConversationForkConflictError,
+    fork_conversation_thread,
+    _seed_fork_history as seed_fork_history,
+    _rebind_storage_references as rebind_storage_references,
+)
 from agent.modules.conversations.history import (
     CheckpointNotFoundError,
     ConversationHistoryUnavailableError,
@@ -110,6 +115,8 @@ __all__ = [
     "parse_thread_metadata",
     "release_conversation_thread_agent",
     "rename_conversation_thread",
+    "seed_fork_history",
+    "rebind_storage_references",
     "schedule_conversation_title_generation",
     "update_conversation_thread_title_if_current",
     "upsert_conversation_thread",

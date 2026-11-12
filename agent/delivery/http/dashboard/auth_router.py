@@ -10,9 +10,9 @@ from agent.modules.admin_auth import (
     create_access_token,
     get_admin_auth_service,
     get_current_admin,
+    DEFAULT_ADMIN_PASSWORD,
     LoginThrottled,
 )
-from agent.modules.admin_auth.service import DEFAULT_ADMIN_PASSWORD
 
 router = APIRouter(tags=["auth"])
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk
 
+from tests.stream_fixtures import EventGraph
+
 from agent.modules.agent_runtime.runner import (
     _StreamingChunkExtractor,
     run_agent_stream,
@@ -360,8 +362,8 @@ async def test_run_agent_stream_strips_inline_thinking_from_message_chunks(
                 tools=[],
             )
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             yield ("messages", (AIMessageChunk(content="Plan "), {}))
             yield ("messages", (AIMessageChunk(content="<thinking>"), {}))
             yield ("messages", (AIMessageChunk(content="internal"), {}))
@@ -437,8 +439,8 @@ async def test_run_agent_stream_emits_thinking_events_when_enabled(
                 tools=[],
             )
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             yield (
                 "messages",
                 (
@@ -571,8 +573,8 @@ async def _collect_stream_events(monkeypatch, graph_events, thread_id: str) -> l
                 tools=[],
             )
 
-    class _FakeGraph:
-        async def astream(self, payload, **kwargs):
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
             for event in graph_events:
                 yield event
 
