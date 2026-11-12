@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.testclient import TestClient
 
+from agent.delivery.http.dashboard import spa
 from agent.delivery.http.dashboard.router import router as dashboard_router
 from agent.modules.admin_auth import get_current_admin
 
@@ -42,6 +43,48 @@ def test_html_navigation_serves_spa(spa_client, path):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert '<div id="root">' in response.text
+
+
+@pytest.mark.parametrize("path", ["/", "/settings", "/future-page/nested/detail"])
+@pytest.mark.parametrize("built", [True, False])
+def test_spa_html_disables_caching(spa_client, tmp_path, monkeypatch, path, built):
+    index_file = tmp_path / "index.html"
+    if built:
+        index_file.write_text('<div id="root">Built dashboard</div>', encoding="utf-8")
+    monkeypatch.setattr(spa, "INDEX_FILE", index_file)
+
+    response = spa_client.get(path)
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache, no-store, must-revalidate"
+    if built:
+        assert response.text == index_file.read_text(encoding="utf-8")
+        assert response.headers["etag"]
+        assert response.headers["last-modified"]
+    else:
+        assert "Dashboard frontend is not built" in response.text
+
+
+def test_static_index_disables_caching_while_hashed_assets_remain_immutable(spa_client, tmp_path):
+    (tmp_path / "index.html").write_text('<div id="root"></div>', encoding="utf-8")
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "index-abc123.js").write_text("export const ready = true;", encoding="utf-8")
+    spa_client.app.mount("/dashboard-assets", spa.CachedStaticFiles(directory=tmp_path))
+
+    response = spa_client.get("/dashboard-assets/index.html")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache, no-store, must-revalidate"
+    etag = response.headers["etag"]
+    revalidated = spa_client.get("/dashboard-assets/index.html", headers={"If-None-Match": etag})
+    assert revalidated.status_code == 304
+    assert revalidated.headers["cache-control"] == "no-cache, no-store, must-revalidate"
+    assert revalidated.headers["etag"] == etag
+
+    asset_response = spa_client.get("/dashboard-assets/assets/index-abc123.js")
+    assert asset_response.status_code == 200
+    assert asset_response.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 
 @pytest.mark.parametrize(("path", "status"), [

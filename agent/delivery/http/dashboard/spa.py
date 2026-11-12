@@ -10,22 +10,29 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 INDEX_FILE = STATIC_DIR / "index.html"
 
+INDEX_CACHE_CONTROL = "no-cache, no-store, must-revalidate"
 IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
 class CachedStaticFiles(StaticFiles):
-    """StaticFiles that marks content-hashed build assets as immutable."""
+    """Disable index caching and mark content-hashed build assets as immutable."""
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         response = await super().get_response(path, scope)
         if path.startswith("assets/") or path.startswith("assets\\"):
             response.headers["Cache-Control"] = IMMUTABLE_CACHE_CONTROL
+        elif path == "index.html":
+            response.headers["Cache-Control"] = INDEX_CACHE_CONTROL
         return response
 
 
 def spa_index_response() -> Response:
     if INDEX_FILE.is_file():
-        return FileResponse(INDEX_FILE, media_type="text/html")
+        return FileResponse(
+            INDEX_FILE,
+            media_type="text/html",
+            headers={"Cache-Control": INDEX_CACHE_CONTROL},
+        )
 
     return HTMLResponse(
         """<!doctype html>
@@ -39,6 +46,7 @@ def spa_index_response() -> Response:
 <body>
   <div id="root">Dashboard frontend is not built. Run pnpm dashboard:build.</div>
 </body>
-</html>"""
+</html>""",
+        headers={"Cache-Control": INDEX_CACHE_CONTROL},
     )
 
