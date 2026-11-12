@@ -12,8 +12,26 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 logger = logging.getLogger(__name__)
 
 
+def _is_log_viewer_path(path: str) -> bool:
+    path = path.partition("?")[0].rstrip("/")
+    return (
+        path in {"/settings/logs", "/dashboard-api/logs"}
+        or path.startswith("/dashboard-api/logs/")
+    )
+
+
+class LogViewerAccessFilter(logging.Filter):
+    """Exclude log viewer requests from Uvicorn access logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) == 5 and isinstance(args[2], str):
+            return not _is_log_viewer_path(args[2])
+        return True
+
+
 class HTTPLoggingMiddleware(BaseHTTPMiddleware):
-    """Logs structured information about every HTTP request and response.
+    """Logs structured HTTP requests and responses except log viewer requests.
 
     Captures:
     - method, path, query parameters
@@ -26,6 +44,9 @@ class HTTPLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
+        if _is_log_viewer_path(request.url.path):
+            return await call_next(request)
+
         request_id = request.headers.get("X-Request-ID", "")
         client_ip = _get_client_ip(request)
         method = request.method

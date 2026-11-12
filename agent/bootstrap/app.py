@@ -4,6 +4,7 @@ import os
 import selectors
 import time
 from contextlib import asynccontextmanager, suppress
+from copy import deepcopy
 from pathlib import Path
 
 import uvicorn
@@ -13,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from agent.bootstrap.version import APP_VERSION
-from agent.shared.infrastructure.http_logging import HTTPLoggingMiddleware
+from agent.shared.infrastructure.http_logging import HTTPLoggingMiddleware, LogViewerAccessFilter
 from agent.shared.infrastructure.csrf_protection import CSRFProtectionMiddleware, CSRF_HEADER_NAME
 from agent.shared.infrastructure.http_errors import register_http_exception_handlers
 
@@ -259,12 +260,16 @@ settings: BootstrapConfig = app.state.bootstrap_config
 
 async def main() -> None:
     if settings.enable_web:
+        log_config = deepcopy(uvicorn.config.LOGGING_CONFIG)
+        log_config["filters"] = {"exclude_log_viewer": {"()": LogViewerAccessFilter}}
+        log_config["handlers"]["access"]["filters"] = ["exclude_log_viewer"]
         config = uvicorn.Config(
             app=app,
             host=settings.host,
             port=settings.port,
             reload=False,
             loop="asyncio",
+            log_config=log_config,
             timeout_graceful_shutdown=SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
         )
         server = uvicorn.Server(config)

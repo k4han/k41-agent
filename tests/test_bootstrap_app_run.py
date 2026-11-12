@@ -53,6 +53,10 @@ async def test_web_server_uses_bounded_graceful_shutdown(monkeypatch):
         captured["timeout_graceful_shutdown"]
         == app_module.SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS
     )
+    log_config = captured["log_config"]
+    assert log_config["handlers"]["access"]["filters"] == ["exclude_log_viewer"]
+    assert log_config["filters"]["exclude_log_viewer"]["()"] is app_module.LogViewerAccessFilter
+    assert "filters" not in app_module.uvicorn.config.LOGGING_CONFIG["handlers"]["access"]
 
 
 @pytest.mark.asyncio
