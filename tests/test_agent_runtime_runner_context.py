@@ -3,6 +3,7 @@ from tests.stream_fixtures import EventGraph
 import asyncio
 import base64
 import importlib
+from contextlib import aclosing
 from types import SimpleNamespace
 
 import pytest
@@ -1650,12 +1651,13 @@ async def test_run_agent_stream_emits_thread_title_while_generating(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_run_agent_stream_delivers_late_thread_title_before_close(monkeypatch):
+async def test_run_agent_stream_delivers_ready_thread_title_before_close(monkeypatch):
     _title_stream_mocks(monkeypatch)
+    release_generation = asyncio.Event()
 
     async def fake_record_conversation_thread(**kwargs):
         async def _generate_title():
-            await asyncio.sleep(0.05)
+            await release_generation.wait()
             return {
                 "thread_id": kwargs["thread_id"],
                 "title": "Slow Generated Title",
@@ -1672,6 +1674,9 @@ async def test_run_agent_stream_delivers_late_thread_title_before_close(monkeypa
     class _FakeGraph(EventGraph):
         async def events(self, payload, **kwargs):
             yield ("values", {"messages": [AIMessage(content="quick answer", id="ai-1")]})
+            release_generation.set()
+            for _ in range(5):
+                await asyncio.sleep(0)
 
     monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
 
@@ -1692,6 +1697,100 @@ async def test_run_agent_stream_delivers_late_thread_title_before_close(monkeypa
             "title": "Slow Generated Title",
         },
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream_end", ["complete", "close", "cancel"])
+async def test_run_agent_stream_leaves_pending_title_generation_in_background(
+    monkeypatch, stream_end,
+):
+    from agent.modules.conversations import service as conversation_service
+
+    _title_stream_mocks(monkeypatch)
+    generation_started = asyncio.Event()
+    release_generation = asyncio.Event()
+    message_delivered = asyncio.Event()
+    keep_graph_open = asyncio.Event()
+    title_tasks = []
+    updates = []
+    events = []
+
+    async def fake_generate_conversation_title(**kwargs):
+        generation_started.set()
+        await release_generation.wait()
+        return "Generated Background Title"
+
+    async def fake_update_conversation_thread_title_if_current(**kwargs):
+        updates.append(kwargs)
+        return {"thread_id": kwargs["thread_id"], "title": kwargs["title"]}
+
+    async def fake_record_conversation_thread(**kwargs):
+        task = conversations_module.schedule_conversation_title_generation(
+            thread_id=kwargs["thread_id"], title=kwargs["title"],
+        )
+        title_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(
+        conversation_service, "generate_conversation_title", fake_generate_conversation_title,
+    )
+    monkeypatch.setattr(
+        conversation_service,
+        "update_conversation_thread_title_if_current",
+        fake_update_conversation_thread_title_if_current,
+    )
+    monkeypatch.setattr(
+        runner_module, "_record_conversation_thread", fake_record_conversation_thread,
+    )
+
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
+            await generation_started.wait()
+            yield ("messages", (AIMessageChunk(content="working"), {"langgraph_node": "llm"}))
+            if stream_end == "cancel":
+                await keep_graph_open.wait()
+            yield ("values", {"messages": [AIMessage(content="quick answer", id="ai-1")]})
+
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+
+    async def consume_stream():
+        async with aclosing(runner_module.run_agent_stream(
+            user_input="quick question",
+            thread_id="api:dashboard:pending-title",
+            agent_name="default",
+        )) as stream:
+            async for event in stream:
+                events.append(event)
+                message_delivered.set()
+                if stream_end == "close":
+                    break
+
+    consumer = asyncio.create_task(consume_stream())
+    try:
+        if stream_end == "cancel":
+            await asyncio.wait_for(message_delivered.wait(), timeout=1)
+            consumer.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await consumer
+        else:
+            await asyncio.wait_for(consumer, timeout=1)
+
+        await asyncio.sleep(0)
+        assert not title_tasks[0].done()
+        assert updates == []
+        assert events == [
+            {"type": "message", "content": "working"},
+            *([{"type": "final", "content": "quick answer"}] if stream_end == "complete" else []),
+        ]
+    finally:
+        release_generation.set()
+        await asyncio.gather(*title_tasks, return_exceptions=True)
+
+    assert updates == [{
+        "thread_id": "api:dashboard:pending-title",
+        "title": "Generated Background Title",
+        "current_titles": ["api:dashboard:pending-title", "quick question"],
+    }]
 
 
 @pytest.mark.asyncio

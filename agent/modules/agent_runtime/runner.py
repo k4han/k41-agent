@@ -1458,7 +1458,8 @@ async def run_agent_stream(
         if conversation_title_task is None:
             return
         try:
-            updated_metadata = await conversation_title_task
+            # Stream cleanup must not cancel background title persistence.
+            updated_metadata = await asyncio.shield(conversation_title_task)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1625,21 +1626,7 @@ async def run_agent_stream(
                     elif isinstance(message, ToolMessage):
                         yield _tool_result_event(message)
 
-            # The graph finished but the generated title may still be in
-            # flight; give it a bounded window so a late rename still
-            # reaches the client before the stream closes.
-            if not title_watcher.done():
-                try:
-                    from agent.modules.conversations import (
-                        CONVERSATION_TITLE_TIMEOUT_SECONDS,
-                    )
-
-                    await asyncio.wait_for(
-                        asyncio.shield(title_watcher),
-                        timeout=CONVERSATION_TITLE_TIMEOUT_SECONDS + 2.0,
-                    )
-                except TimeoutError:
-                    pass
+            # Deliver titles already available without delaying stream completion.
             while not title_event_queue.empty():
                 yield title_event_queue.get_nowait()
     finally:
