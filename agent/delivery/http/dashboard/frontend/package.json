@@ -14,7 +14,7 @@
     "build": "vite build && node scripts/precompress-assets.mjs",
     "check": "tsc --noEmit",
     "test:compression": "node --test tests/precompress-assets.test.mjs",
-    "test": "node --conditions=browser --test tests/solid-reactivity.test.mjs tests/nav-projects.test.mjs tests/no-workspace.test.mjs tests/workspace-refresh.test.mjs tests/chat-scroll.test.mjs tests/chat-model-preference.test.mjs tests/chat-export.test.mjs tests/visual-viewport.test.mjs tests/context-window.test.mjs tests/provider-connections.test.mjs tests/reasoning-effort.test.mjs tests/system-update.test.mjs tests/skill-suggestions.test.mjs tests/shell-tool-result.test.mjs tests/browser-viewer.test.mjs tests/protocol-stream.test.mjs tests/transcript-activity.test.mjs tests/tool-group-summary.test.mjs tests/subagent-summary.test.mjs tests/thinking.test.mjs tests/markdown-blocks.test.mjs tests/acp.test.mjs tests/permission-mode.test.mjs tests/log-viewer.test.mjs && node scripts/verify-responsive.mjs --skip-build",
+    "test": "node --conditions=browser --test tests/solid-reactivity.test.mjs tests/nav-projects.test.mjs tests/no-workspace.test.mjs tests/workspace-refresh.test.mjs tests/chat-scroll.test.mjs tests/code-highlight.test.mjs tests/chat-model-preference.test.mjs tests/chat-export.test.mjs tests/visual-viewport.test.mjs tests/context-window.test.mjs tests/provider-connections.test.mjs tests/reasoning-effort.test.mjs tests/system-update.test.mjs tests/skill-suggestions.test.mjs tests/shell-tool-result.test.mjs tests/browser-viewer.test.mjs tests/protocol-stream.test.mjs tests/transcript-activity.test.mjs tests/tool-group-summary.test.mjs tests/subagent-summary.test.mjs tests/thinking.test.mjs tests/markdown-blocks.test.mjs tests/acp.test.mjs tests/permission-mode.test.mjs tests/log-viewer.test.mjs && node scripts/verify-responsive.mjs --skip-build",
     "test:subagents": "node --conditions=browser --test tests/subagent-summary.test.mjs tests/tool-group-summary.test.mjs tests/protocol-stream.test.mjs tests/transcript-activity.test.mjs",
     "test:subagents-ui": "node scripts/verify-subagents.mjs",
     "test:chat-export": "node --test tests/chat-export.test.mjs",
@@ -40,11 +40,13 @@
     "test:mobile-ui": "node scripts/verify-mobile-layout.mjs",
     "test:navbar-ui": "node scripts/verify-navbar.mjs",
     "test:nav-projects": "node --conditions=browser --test tests/nav-projects.test.mjs",
-    "test:projects-ui": "node scripts/verify-projects.mjs"
+    "test:projects-ui": "node scripts/verify-projects.mjs",
+    "test:transcript-ui": "node scripts/verify-transcript-performance.mjs"
   },
   "dependencies": {
     "@novnc/novnc": "1.5.0",
     "@solidjs/router": "^0.15.3",
+    "@tanstack/solid-virtual": "^3.13.53",
     "diff2html": "^3.4.56",
     "dompurify": "^3.4.5",
     "lucide-solid": "^0.562.0",

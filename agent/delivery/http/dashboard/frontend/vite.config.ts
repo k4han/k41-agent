@@ -8,6 +8,7 @@ const fastApiTarget = "http://localhost:4141";
 
 export default defineConfig({
   base: "/dashboard-assets/",
+  worker: { format: "es" },
   plugins: [solidPlugin(), tailwindcss()],
   resolve: {
     alias: {

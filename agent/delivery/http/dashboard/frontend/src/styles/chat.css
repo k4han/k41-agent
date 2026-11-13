@@ -340,31 +340,44 @@
   scrollbar-gutter: stable;
 }
 
+.transcript-virtual-list {
+  position: relative;
+  width: 100%;
+}
+
+.transcript-virtual-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: flow-root;
+}
+
 .chat-shell-flat .transcript,
 .chat-shell-resizable .transcript {
   padding-inline: 0;
 }
 
-.chat-shell-resizable.workspace-open .transcript > .message,
-.chat-shell-resizable.workspace-open .transcript > .thinking-block,
-.chat-shell-resizable.workspace-open .transcript > .activity-group,
-.chat-shell-resizable.workspace-open .transcript > .tool-call,
-.chat-shell-resizable.workspace-open .transcript > .subagent-details,
-.chat-shell-resizable.workspace-open .transcript > .plan-review,
-.chat-shell-resizable.workspace-open .transcript > .tool-html-preview:not(.is-fullwidth),
-.chat-shell-resizable.workspace-open .transcript > .empty,
-.chat-shell-resizable.workspace-open .transcript > .chat-workspace-empty,
-.chat-shell-resizable.workspace-open .transcript > .transcript-compacting-indicator,
-.chat-shell-resizable.workspace-closed .transcript > .message,
-.chat-shell-resizable.workspace-closed .transcript > .thinking-block,
-.chat-shell-resizable.workspace-closed .transcript > .activity-group,
-.chat-shell-resizable.workspace-closed .transcript > .tool-call,
-.chat-shell-resizable.workspace-closed .transcript > .subagent-details,
-.chat-shell-resizable.workspace-closed .transcript > .plan-review,
-.chat-shell-resizable.workspace-closed .transcript > .tool-html-preview:not(.is-fullwidth),
-.chat-shell-resizable.workspace-closed .transcript > .empty,
-.chat-shell-resizable.workspace-closed .transcript > .chat-workspace-empty,
-.chat-shell-resizable.workspace-closed .transcript > .transcript-compacting-indicator {
+.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .message,
+.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .thinking-block,
+.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .activity-group,
+.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .tool-call,
+.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .subagent-details,
+.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .plan-review,
+.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .tool-html-preview:not(.is-fullwidth),
+.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .empty,
+.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .chat-workspace-empty,
+.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .transcript-compacting-indicator,
+.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .message,
+.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .thinking-block,
+.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .activity-group,
+.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .tool-call,
+.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .subagent-details,
+.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .plan-review,
+.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .tool-html-preview:not(.is-fullwidth),
+.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .empty,
+.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .chat-workspace-empty,
+.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .transcript-compacting-indicator {
   width: min(960px, calc(100% - 32px));
   margin-inline: auto;
 }
@@ -809,9 +822,9 @@
   }
 
   .chat-shell-resizable.workspace-open .chat-composer,
-  .chat-shell-resizable.workspace-open .transcript > .transcript-compacting-indicator,
+  .chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .transcript-compacting-indicator,
   .chat-shell-resizable.workspace-closed .chat-composer,
-  .chat-shell-resizable.workspace-closed .transcript > .transcript-compacting-indicator {
+  .chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .transcript-compacting-indicator {
     width: calc(100% - 16px);
     margin-inline: auto;
   }

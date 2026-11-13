@@ -1,59 +1,6 @@
-import { createBundledHighlighter } from "shiki/core";
-import { createOnigurumaEngine } from "shiki/engine/oniguruma";
+import type { SupportedHighlightLanguage } from "./codeHighlight.worker";
 
-const LIGHT_THEME = "github-light";
-const DARK_THEME = "github-dark";
-
-const LANGUAGE_LOADERS = {
-  astro: () => import("shiki/dist/langs/astro.mjs"),
-  c: () => import("shiki/dist/langs/c.mjs"),
-  csharp: () => import("shiki/dist/langs/csharp.mjs"),
-  css: () => import("shiki/dist/langs/css.mjs"),
-  diff: () => import("shiki/dist/langs/diff.mjs"),
-  docker: () => import("shiki/dist/langs/docker.mjs"),
-  go: () => import("shiki/dist/langs/go.mjs"),
-  html: () => import("shiki/dist/langs/html.mjs"),
-  ini: () => import("shiki/dist/langs/ini.mjs"),
-  java: () => import("shiki/dist/langs/java.mjs"),
-  javascript: () => import("shiki/dist/langs/javascript.mjs"),
-  json: () => import("shiki/dist/langs/json.mjs"),
-  jsonc: () => import("shiki/dist/langs/jsonc.mjs"),
-  jsx: () => import("shiki/dist/langs/jsx.mjs"),
-  markdown: () => import("shiki/dist/langs/markdown.mjs"),
-  mdx: () => import("shiki/dist/langs/mdx.mjs"),
-  php: () => import("shiki/dist/langs/php.mjs"),
-  powershell: () => import("shiki/dist/langs/powershell.mjs"),
-  python: () => import("shiki/dist/langs/python.mjs"),
-  rust: () => import("shiki/dist/langs/rust.mjs"),
-  scss: () => import("shiki/dist/langs/scss.mjs"),
-  shell: () => import("shiki/dist/langs/shell.mjs"),
-  sql: () => import("shiki/dist/langs/sql.mjs"),
-  svelte: () => import("shiki/dist/langs/svelte.mjs"),
-  toml: () => import("shiki/dist/langs/toml.mjs"),
-  tsx: () => import("shiki/dist/langs/tsx.mjs"),
-  typescript: () => import("shiki/dist/langs/typescript.mjs"),
-  vue: () => import("shiki/dist/langs/vue.mjs"),
-  xml: () => import("shiki/dist/langs/xml.mjs"),
-  yaml: () => import("shiki/dist/langs/yaml.mjs"),
-} as const;
-
-const THEME_LOADERS = {
-  [LIGHT_THEME]: () => import("shiki/dist/themes/github-light.mjs"),
-  [DARK_THEME]: () => import("shiki/dist/themes/github-dark.mjs"),
-} as const;
-
-type SupportedHighlightLanguage = keyof typeof LANGUAGE_LOADERS;
 type HighlightLanguage = SupportedHighlightLanguage | "text";
-
-const createDashboardHighlighter = createBundledHighlighter({
-  langs: LANGUAGE_LOADERS,
-  themes: THEME_LOADERS,
-  engine: () => createOnigurumaEngine(import("shiki/wasm")),
-});
-type DashboardHighlighter = Awaited<ReturnType<typeof createDashboardHighlighter>>;
-
-let highlighterPromise: Promise<DashboardHighlighter> | null = null;
-const loadingLangs = new Map<string, Promise<void>>();
 
 const EXTENSION_TO_LANG: Partial<Record<string, SupportedHighlightLanguage>> = {
   ts: "typescript",
@@ -99,7 +46,13 @@ const EXTENSION_TO_LANG: Partial<Record<string, SupportedHighlightLanguage>> = {
   patch: "diff",
 };
 
-const SUPPORTED_LANG_NAMES = new Set<string>(Object.keys(LANGUAGE_LOADERS));
+const SUPPORTED_LANG_NAMES = new Set<string>([
+  "astro", "c", "csharp", "css", "diff", "docker", "go",
+  "html", "ini", "java", "javascript", "json", "jsonc", "jsx",
+  "markdown", "mdx", "php", "powershell", "python", "rust", "scss",
+  "shell", "sql", "svelte", "toml", "tsx", "typescript", "vue",
+  "xml", "yaml",
+]);
 const LANGUAGE_ALIASES: Record<string, SupportedHighlightLanguage> = {
   bash: "shell",
   cjs: "javascript",
@@ -119,16 +72,6 @@ const LANGUAGE_ALIASES: Record<string, SupportedHighlightLanguage> = {
   yml: "yaml",
   zsh: "shell",
 };
-
-function getHighlighter(): Promise<DashboardHighlighter> {
-  if (!highlighterPromise) {
-    highlighterPromise = createDashboardHighlighter({
-      themes: [LIGHT_THEME, DARK_THEME],
-      langs: [],
-    });
-  }
-  return highlighterPromise;
-}
 
 function toSupportedLanguage(language: string): HighlightLanguage {
   const normalized = language.trim().toLowerCase();
@@ -156,28 +99,67 @@ export function languageFromName(language: string): HighlightLanguage {
   return toSupportedLanguage(language);
 }
 
-async function ensureLanguageLoaded(
-  highlighter: DashboardHighlighter,
-  lang: HighlightLanguage,
-): Promise<void> {
-  if (lang === "text") {
-    return;
+interface PendingHighlight {
+  resolve: (html: string | null) => void;
+}
+
+const MAX_HIGHLIGHT_LENGTH = 100_000;
+const MAX_CACHE_SIZE = 2_000_000;
+const WORKER_STALL_TIMEOUT = 30_000;
+const WORKER_RETRY_DELAY = 5_000;
+const cache = new Map<string, string>();
+const inFlight = new Map<string, Promise<string>>();
+const pending = new Map<number, PendingHighlight>();
+let cachedSize = 0;
+let nextRequestId = 0;
+let worker: Worker | undefined;
+let workerRetryAt = 0;
+let workerTimeout: ReturnType<typeof setTimeout> | undefined;
+
+function plainCode(code: string, dark: boolean): string {
+  const escaped = code.replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+  return `<pre class="shiki" style="background-color:${dark ? "#24292e" : "#fff"};color:${dark ? "#e1e4e8" : "#24292e"}"><code>${escaped}</code></pre>`;
+}
+
+// Queued requests share a deadline that resets whenever the worker makes progress.
+function resetWorkerTimeout(): void {
+  clearTimeout(workerTimeout);
+  workerTimeout = pending.size > 0 ? setTimeout(stopWorker, WORKER_STALL_TIMEOUT) : undefined;
+}
+
+function stopWorker(): void {
+  workerRetryAt = Date.now() + WORKER_RETRY_DELAY;
+  worker?.terminate();
+  worker = undefined;
+  for (const request of pending.values()) {
+    request.resolve(null);
   }
-  if (highlighter.getLoadedLanguages().includes(lang)) {
-    return;
+  pending.clear();
+  resetWorkerTimeout();
+}
+
+function getWorker(): Worker | undefined {
+  if (Date.now() < workerRetryAt || typeof Worker === "undefined") return undefined;
+  if (!worker) {
+    try {
+      const target = new Worker(new URL("./codeHighlight.worker.ts", import.meta.url), { type: "module" });
+      worker = target;
+      target.onmessage = (event: MessageEvent<{ id: number; html: string | null }>) => {
+        if (worker !== target) return;
+        const request = pending.get(event.data.id);
+        if (!request) return;
+        pending.delete(event.data.id);
+        resetWorkerTimeout();
+        request.resolve(event.data.html);
+      };
+      target.onerror = (event) => { event.preventDefault(); if (worker === target) stopWorker(); };
+      target.onmessageerror = () => { if (worker === target) stopWorker(); };
+    } catch {
+      stopWorker();
+    }
   }
-  const pending = loadingLangs.get(lang);
-  if (pending) {
-    await pending;
-    return;
-  }
-  const task = highlighter.loadLanguage(lang).then(() => undefined);
-  loadingLangs.set(lang, task);
-  try {
-    await task;
-  } finally {
-    loadingLangs.delete(lang);
-  }
+  return worker;
 }
 
 export async function highlightCode(
@@ -185,10 +167,42 @@ export async function highlightCode(
   lang: HighlightLanguage,
   dark: boolean,
 ): Promise<string> {
-  const highlighter = await getHighlighter();
-  await ensureLanguageLoaded(highlighter, lang);
-  return highlighter.codeToHtml(code, {
-    lang,
-    theme: dark ? DARK_THEME : LIGHT_THEME,
-  });
+  // Bound token spans and pathological grammar work for large or minified files.
+  if (lang === "text" || code.length > MAX_HIGHLIGHT_LENGTH
+    || code.split("\n").some((line, index) => index > 2_000 || line.length > 4_000)) {
+    return plainCode(code, dark);
+  }
+  const key = JSON.stringify([code, lang, dark]);
+  const cached = cache.get(key);
+  if (cached !== undefined) {
+    cache.delete(key);
+    cache.set(key, cached);
+    return cached;
+  }
+  const active = inFlight.get(key);
+  if (active) return active;
+  const target = getWorker();
+  if (!target) return plainCode(code, dark);
+  const task = new Promise<string | null>((resolve) => {
+    const id = ++nextRequestId;
+    pending.set(id, { resolve });
+    if (pending.size === 1) resetWorkerTimeout();
+    try { target.postMessage({ id, code, lang, dark }); }
+    catch { stopWorker(); }
+  }).then((html) => {
+    if (html === null) return plainCode(code, dark);
+    const size = key.length + html.length;
+    if (size <= MAX_CACHE_SIZE) {
+      cache.set(key, html);
+      cachedSize += size;
+      while (cache.size > 32 || cachedSize > MAX_CACHE_SIZE) {
+        const oldest = cache.keys().next().value!;
+        cachedSize -= oldest.length + cache.get(oldest)!.length;
+        cache.delete(oldest);
+      }
+    }
+    return html;
+  }).finally(() => { inFlight.delete(key); });
+  inFlight.set(key, task);
+  return task;
 }

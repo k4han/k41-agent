@@ -2257,6 +2257,7 @@ export function ChatPage() {
                 hideRegenerateAction={acpAgentSelected()}
                 showScrollToBottom={showScrollToBottom()}
                 turnAnchorSpacerHeight={turnAnchorSpacerHeight()}
+                turnAnchorItemId={scroll.turnAnchorItemId()}
                 onScrollToBottomClick={handleScrollToBottomClick}
                 conversationBusy={conversationBusy()}
                 agents={validCards()}
