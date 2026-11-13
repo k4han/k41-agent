@@ -8,6 +8,7 @@ import mimetypes
 import shutil
 import subprocess
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -150,7 +151,9 @@ async def _delete_temp_workspace_directory(locator: str) -> bool:
     return True
 
 
-async def cleanup_orphaned_temp_workspaces() -> dict[str, int]:
+async def cleanup_orphaned_temp_workspaces(
+    *, candidate_paths: set[Path] | None = None, updated_before: datetime | None = None,
+) -> dict[str, int]:
     """Remove temporary workspaces whose owning thread no longer exists.
 
     A temporary workspace is provisioned eagerly whenever a dashboard chat is
@@ -159,9 +162,12 @@ async def cleanup_orphaned_temp_workspaces() -> dict[str, int]:
     ``thread_workspaces`` record would otherwise leak forever. This routine
     drops records whose thread is no longer active and removes directories
     under the temp root whose owning thread is also gone. It is intended to be
-    invoked once at application startup.
+    invoked once at application startup. Background sweeps restrict directory
+    removal to a startup snapshot and preserve records updated after it.
     """
     stats: dict[str, int] = {"directories_removed": 0, "records_removed": 0}
+    if candidate_paths is not None:
+        candidate_paths = {path.resolve() for path in candidate_paths}
 
     repo = get_thread_workspace_repository()
     try:
@@ -203,6 +209,24 @@ async def cleanup_orphaned_temp_workspaces() -> dict[str, int]:
             # Assume every thread is alive so we never delete a workspace that
             # a live thread still depends on.
             alive_ids = set(root_ids)
+
+    for thread_id, record in temp_records.items():
+        execution = resolve_workspace_ref(record.get("workspace"))
+        locator = execution.locator if execution.backend == LOCAL_BACKEND else (record.get("host_mirror") or {}).get("path")
+        protected = (
+            candidate_paths is not None and locator and Path(locator).exists()
+            and Path(locator).resolve() not in candidate_paths
+        )
+        if updated_before is not None and record.get("updated_at"):
+            try:
+                updated_at = datetime.fromisoformat(str(record["updated_at"]))
+                if updated_at.tzinfo is None:
+                    updated_at = updated_at.replace(tzinfo=timezone.utc)
+                protected = protected or updated_at >= updated_before
+            except ValueError:
+                protected = True
+        if protected:
+            alive_ids.add(str(thread_id).split(":sub:", 1)[0])
 
     referenced_names: set[str] = set()
     for thread_id, record in temp_records.items():
@@ -269,6 +293,8 @@ async def cleanup_orphaned_temp_workspaces() -> dict[str, int]:
             alive_orphan_names = orphan_names
 
     for entry in entries:
+        if candidate_paths is not None and entry.resolve() not in candidate_paths:
+            continue
         if not entry.is_dir() or not entry.name.startswith("thread-"):
             continue
         if entry.name in referenced_names or entry.name in alive_orphan_names:
@@ -745,6 +771,18 @@ class _RecoveringModalWorkspaceBackend:
             return reader(file_path)
 
         return await self._run(_read)
+
+    async def stream_bytes(self, file_path: str, *, chunk_size: int = 64 * 1024):
+        from agent.modules.workspaces.reads import WorkspaceByteStream
+
+        stream = await self._run(
+            lambda backend: WorkspaceByteStream.open(backend.stream_bytes(file_path, chunk_size=chunk_size))
+        )
+        try:
+            async for chunk in stream:
+                yield chunk
+        finally:
+            await stream.aclose()
 
     async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         return await self._run(lambda backend: backend.write_text(file_path, content, append=append))

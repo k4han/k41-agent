@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -353,6 +354,63 @@ def test_cleanup_removes_orphaned_directories_without_records(
 
     assert stats == {"directories_removed": 1, "records_removed": 0}
     assert not orphan.exists()
+
+
+def test_background_cleanup_keeps_workspaces_created_after_snapshot(
+    _temp_workspace_root: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    old_ref = asyncio.run(create_temp_workspace("old"))
+    candidates = {Path(old_ref.locator)}
+    new_ref = asyncio.run(create_temp_workspace("new"))
+    orphan = _temp_workspace_root / "thread-new-orphan"
+    orphan.mkdir()
+    repo = _FakeTempRepository({
+        "old": _temp_record("old", old_ref),
+        "new": _temp_record("new", new_ref),
+    })
+    _patch_temp_cleanup_dependencies(monkeypatch, repo)
+
+    stats = asyncio.run(cleanup_orphaned_temp_workspaces(candidate_paths=candidates))
+
+    assert stats == {"directories_removed": 1, "records_removed": 1}
+    assert not Path(old_ref.locator).exists()
+    assert Path(new_ref.locator).exists()
+    assert orphan.exists()
+    assert repo.deleted == ["old"]
+
+
+def test_background_cleanup_removes_stale_record_with_missing_directory(
+    _temp_workspace_root: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    ref = asyncio.run(create_temp_workspace("missing"))
+    Path(ref.locator).rmdir()
+    repo = _FakeTempRepository({"missing": _temp_record("missing", ref)})
+    _patch_temp_cleanup_dependencies(monkeypatch, repo)
+
+    stats = asyncio.run(cleanup_orphaned_temp_workspaces(candidate_paths=set()))
+
+    assert stats == {"directories_removed": 0, "records_removed": 1}
+    assert repo.deleted == ["missing"]
+
+
+def test_background_cleanup_preserves_workspace_reused_after_snapshot(
+    _temp_workspace_root: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    ref = asyncio.run(create_temp_workspace("reused"))
+    candidates = {Path(ref.locator)}
+    cutoff = datetime.now(timezone.utc)
+    record = _temp_record("reused", ref)
+    record["updated_at"] = (cutoff + timedelta(seconds=1)).isoformat()
+    repo = _FakeTempRepository({"reused": record})
+    _patch_temp_cleanup_dependencies(monkeypatch, repo)
+
+    stats = asyncio.run(cleanup_orphaned_temp_workspaces(
+        candidate_paths=candidates, updated_before=cutoff,
+    ))
+
+    assert stats == {"directories_removed": 0, "records_removed": 0}
+    assert Path(ref.locator).exists()
+    assert repo.deleted == []
 
 
 def test_cleanup_keeps_orphaned_directory_when_thread_alive(

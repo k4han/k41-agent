@@ -753,6 +753,8 @@ class AppContainer:
             self._instabox_service = None
         if self._computer_control is not None:
             self._computer_control.close()
+        if self._cache is not None:
+            self._cache.clear()
         await close_checkpointer(container=self)
         await close_async_engine(container=self)
         try:

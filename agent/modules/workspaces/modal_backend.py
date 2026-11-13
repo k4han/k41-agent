@@ -729,6 +729,29 @@ class ModalWorkspaceBackend(SandboxBackendBase):
         self.touch()
         return await self._read_bytes(resolve_modal_path(self.root, file_path))
 
+    async def stream_bytes(self, file_path: str, *, chunk_size: int = 64 * 1024):
+        self.touch()
+        remote_path = resolve_modal_path(self.root, file_path)
+        info = await self._run_remote_aio(lambda: self._stat(remote_path))
+        if file_info_is_dir(info):
+            raise IsADirectoryError(remote_path)
+        process = await self._run_remote_aio(
+            lambda: self.sandbox.exec.aio("cat", "--", remote_path, text=False, timeout=HARD_MAX_TIMEOUT)
+        )
+        try:
+            async for chunk in process.stdout:
+                for offset in range(0, len(chunk), chunk_size):
+                    yield chunk[offset:offset + chunk_size]
+        finally:
+            import anyio
+
+            with anyio.CancelScope(shield=True):
+                await process.stdout.aclose()
+                await process.stderr.aclose()
+        exit_code = await process.wait.aio()
+        if exit_code != 0:
+            raise OSError(f"Failed to stream workspace file: {remote_path} (exit code {exit_code}).")
+
     async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         self.touch()
         self._invalidate_workspace_caches()

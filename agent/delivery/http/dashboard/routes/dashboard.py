@@ -4,9 +4,9 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi import APIRouter, Depends, Request, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from agent.modules.admin_auth import get_current_admin
@@ -238,12 +238,12 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
     services = list_channel_statuses(channel_manager)
 
     task_manager = get_background_task_manager()
-    all_tasks = task_manager.list_all()
+    task_counts = task_manager.count_by_status()
     tasks_active = sum(
-        1 for task in all_tasks if task.get("status") in BACKGROUND_TASK_ACTIVE_STATUSES
+        task_counts.get(status, 0) for status in BACKGROUND_TASK_ACTIVE_STATUSES
     )
-    tasks_failed = sum(1 for task in all_tasks if task.get("status") == "failed")
-    recent_tasks = all_tasks[:HOME_RECENT_TASKS_LIMIT]
+    tasks_failed = task_counts.get("failed", 0)
+    recent_tasks = task_manager.list_all(limit=HOME_RECENT_TASKS_LIMIT)
 
     registry = get_active_session_registry()
     sessions_active = registry.count()
@@ -334,7 +334,7 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
             },
             "agents": agents_total,
             "tasks": {
-                "total": len(all_tasks),
+                "total": sum(task_counts.values()),
                 "active": tasks_active,
                 "failed": tasks_failed,
             },
@@ -442,11 +442,14 @@ async def get_dashboard_channels(request: Request) -> dict[str, Any]:
 
 
 @router.get("/dashboard-api/tasks")
-async def get_dashboard_tasks() -> dict[str, Any]:
+async def get_dashboard_tasks(
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, Any]:
     """Get background tasks with agent and identity context."""
     manager = get_background_task_manager()
     catalog = get_catalog_service()
-    tasks = manager.list_all()
+    tasks = manager.list_all(limit=limit, offset=offset)
 
     thread_ids = [t["thread_id"] for t in tasks if t.get("thread_id")]
     repo = get_conversation_thread_repository()
@@ -458,6 +461,9 @@ async def get_dashboard_tasks() -> dict[str, Any]:
 
     return {
         "tasks": tasks,
+        "total": manager.count(),
+        "limit": limit,
+        "offset": offset,
         "agents": [serialize_agent_config(agent) for agent in catalog.list_agents()],
         "identities": await paired_identities(),
     }

@@ -1,5 +1,8 @@
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
+from pathlib import Path
 
 from agent.bootstrap.container import (
     AppContainer,
@@ -83,6 +86,7 @@ class AppRuntime:
         self._started = False
         self._activated = False
         self._previous_active = None
+        self._startup_maintenance_task: asyncio.Task[None] | None = None
 
     @property
     def bootstrap_config(self):
@@ -136,10 +140,17 @@ class AppRuntime:
 
             register_builtin_workflows()
 
-            logger.info("Discovering skills...")
+            logger.info("Invalidating skills cache...")
             from agent.modules.skills import reload_skills
 
             reload_skills()
+
+            # Snapshot before channels, scheduler, or HTTP can create workspaces.
+            cleanup_started_at = datetime.now(timezone.utc)
+            cleanup_paths = await asyncio.to_thread(self._snapshot_cleanup_paths)
+
+            logger.info("Restoring background task history...")
+            await self.container.task_manager.restore_from_persistence()
 
             self._register_channels()
             await self._start_enabled_channels()
@@ -149,42 +160,15 @@ class AppRuntime:
 
             await initialize_scheduler()
 
-            logger.info("Restoring background task history...")
-            await self.container.task_manager.restore_from_persistence()
-
-            logger.info("Pruning orphaned GitHub worktrees...")
-            try:
-                pruned = await self.container.github_service.prune_orphaned_worktrees()
-                if pruned:
-                    logger.info("Pruned %d orphaned GitHub worktrees.", pruned)
-            except Exception as exc:
-                logger.warning("Failed to prune orphaned GitHub worktrees: %s", exc)
-
-            logger.info("Cleaning up orphaned temporary workspaces...")
-            try:
-                from agent.modules.workspaces import cleanup_orphaned_temp_workspaces
-
-                cleaned = await cleanup_orphaned_temp_workspaces()
-                if cleaned.get("directories_removed") or cleaned.get("records_removed"):
-                    logger.info(
-                        "Removed %d orphaned temp workspace directories and %d records.",
-                        cleaned["directories_removed"],
-                        cleaned["records_removed"],
-                    )
-            except Exception as exc:
-                logger.warning("Failed to clean up orphaned temp workspaces: %s", exc)
-
-            logger.info("Removing discarded browser data...")
-            try:
-                await self.container.browser_service.purge_discarded()
-            except Exception as exc:
-                logger.warning("Failed to remove discarded browser data: %s", exc)
-
             logger.info("Starting workspace background services...")
             from agent.modules.workspaces import start_enabled_workspace_background_services
 
             await start_enabled_workspace_background_services()
 
+            self._startup_maintenance_task = asyncio.create_task(
+                self._run_startup_maintenance(*cleanup_paths, updated_before=cleanup_started_at),
+                name="startup-maintenance",
+            )
             self._started = True
             logger.info("Application runtime is ready.")
         except Exception:
@@ -203,6 +187,7 @@ class AppRuntime:
             return
         errors: list[BaseException] = []
         try:
+            await self._attempt(errors, "stop startup maintenance", self._stop_startup_maintenance_step)
             await self._attempt(errors, "stop managed channels", self._stop_channels_step)
             await self._attempt(errors, "stop background scheduler", self._stop_scheduler_step)
             await self._attempt(errors, "stop chat streams", self._stop_chat_streams_step)
@@ -223,6 +208,61 @@ class AppRuntime:
                 len(errors),
                 "; ".join(f"{type(error).__name__}: {error}" for error in errors),
             )
+
+    def _snapshot_cleanup_paths(self) -> tuple[set[Path], set[Path]]:
+        from agent.modules.workspaces import temp_workspace_root
+
+        try:
+            worktrees = set(self.container.github_service.workspace_manager.root.glob("*/*.worktrees/*"))
+        except Exception as exc:
+            logger.warning("Could not snapshot orphaned GitHub worktrees: %s", exc)
+            worktrees = set()
+        try:
+            temporary = set(temp_workspace_root().glob("thread-*"))
+        except Exception as exc:
+            logger.warning("Could not snapshot temporary workspaces: %s", exc)
+            temporary = set()
+        return worktrees, temporary
+
+    async def _run_startup_maintenance(
+        self, worktree_paths: set[Path], temp_paths: set[Path],
+        *, updated_before: datetime | None = None,
+    ) -> None:
+        logger.info("Pruning orphaned GitHub worktrees...")
+        try:
+            pruned = await self.container.github_service.prune_orphaned_worktrees(
+                candidate_paths=worktree_paths,
+            )
+            if pruned:
+                logger.info("Pruned %d orphaned GitHub worktrees.", pruned)
+        except Exception as exc:
+            logger.warning("Failed to prune orphaned GitHub worktrees: %s", exc)
+
+        logger.info("Cleaning up orphaned temporary workspaces...")
+        try:
+            from agent.modules.workspaces import cleanup_orphaned_temp_workspaces
+
+            options = {} if updated_before is None else {"updated_before": updated_before}
+            cleaned = await cleanup_orphaned_temp_workspaces(candidate_paths=temp_paths, **options)
+            if cleaned.get("directories_removed") or cleaned.get("records_removed"):
+                logger.info(
+                    "Removed %d orphaned temp workspace directories and %d records.",
+                    cleaned["directories_removed"], cleaned["records_removed"],
+                )
+        except Exception as exc:
+            logger.warning("Failed to clean up orphaned temp workspaces: %s", exc)
+
+        logger.info("Removing discarded browser data...")
+        try:
+            await self.container.browser_service.purge_discarded()
+        except Exception as exc:
+            logger.warning("Failed to remove discarded browser data: %s", exc)
+
+    async def _stop_startup_maintenance_step(self) -> None:
+        if self._startup_maintenance_task is not None:
+            self._startup_maintenance_task.cancel()
+            await asyncio.gather(self._startup_maintenance_task, return_exceptions=True)
+            self._startup_maintenance_task = None
 
     @staticmethod
     async def _attempt(

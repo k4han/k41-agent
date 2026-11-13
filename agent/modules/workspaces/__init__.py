@@ -2,7 +2,7 @@
 
 from agent.modules.workspaces.refs import WorkspaceBinding, WorkspaceInput, WorkspaceRef, WorkspaceScope, bind_workspace_ref, binding_from_record, workspace_ref_from_columns
 from agent.modules.workspaces.models import ThreadMachine, ThreadWorkspace
-from agent.modules.workspaces.reads import ReadConsistency, WorkspaceReadResult, WorkspaceReadService
+from agent.modules.workspaces.reads import ReadConsistency, WorkspaceByteStream, WorkspaceReadResult, WorkspaceReadService
 from agent.modules.workspaces.policies import WorkspaceSyncPolicy
 
 from agent.modules.workspaces.computer import (
@@ -243,6 +243,7 @@ __all__ = [
     "WorkspaceBackendRegistry",
     "WorkspaceBinding",
     "WorkspaceBrowser",
+    "WorkspaceByteStream",
     "WorkspaceChangeInspector",
     "WorkspaceCommandExecutor",
     "WorkspaceComputer",

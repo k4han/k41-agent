@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from agent.modules.agent_runtime import NotifyChannel
@@ -29,10 +29,13 @@ class SubmitTaskBody(BaseModel):
 
 
 @router.get("/tasks/list")
-async def list_background_tasks() -> dict[str, Any]:
-    """List all background tasks with their current status and thread information."""
+async def list_background_tasks(
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, Any]:
+    """List a page of background tasks with status and thread information."""
     manager = get_background_task_manager()
-    tasks = manager.list_all()
+    tasks = manager.list_all(limit=limit, offset=offset)
 
     thread_ids = [t["thread_id"] for t in tasks if t.get("thread_id")]
     repo = get_conversation_thread_repository()
@@ -42,7 +45,7 @@ async def list_background_tasks() -> dict[str, Any]:
         tid = task.get("thread_id")
         task["thread_deleted"] = bool(tid) and tid not in active_threads
 
-    return {"tasks": tasks}
+    return {"tasks": tasks, "total": manager.count(), "limit": limit, "offset": offset}
 
 
 @router.post("/tasks")

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 import secrets
-from typing import Callable
 
 from fastapi import Request, Response, status
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ CSRF_HEADER_NAME = "X-CSRF-Token"
 CSRF_FORM_FIELD_NAME = "csrf_token"
 
 
-class CSRFProtectionMiddleware(BaseHTTPMiddleware):
+class CSRFProtectionMiddleware:
     """
     Middleware to protect against CSRF attacks for cookie-based authentication.
 
@@ -31,12 +31,12 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
 
     def __init__(
         self,
-        app,
+        app: ASGIApp,
         enabled: bool = True,
         safe_methods: set[str] | None = None,
         exempt_paths: set[str] | None = None,
     ):
-        super().__init__(app)
+        self.app = app
         self.enabled = enabled
         self.safe_methods = safe_methods or {"GET", "HEAD", "OPTIONS", "TRACE"}
         self.exempt_paths = exempt_paths or {
@@ -94,19 +94,20 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
             },
         )
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Validate CSRF token for state-changing requests."""
-        if not self.enabled:
-            return await call_next(request)
+        if scope["type"] != "http" or not self.enabled:
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope)
 
         # Skip CSRF check for safe methods
         if request.method in self.safe_methods:
-            response = await call_next(request)
-            # Set CSRF token cookie on safe requests if not present
             csrf_token, is_new = self._get_or_create_csrf_token(request)
+            cookie_headers = []
             if is_new:
+                response = Response()
                 response.set_cookie(
                     key=CSRF_COOKIE_NAME,
                     value=csrf_token,
@@ -114,18 +115,27 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
                     samesite="lax",
                     secure=request.url.scheme == "https",
                 )
-            # Include CSRF token in response header so frontend can read it
-            # (cookie is httponly so JavaScript cannot read it directly)
-            response.headers[CSRF_HEADER_NAME] = csrf_token
-            return response
+                cookie_headers = [header for header in response.raw_headers if header[0] == b"set-cookie"]
+
+            async def send_response(message: Message) -> None:
+                if message["type"] == "http.response.start":
+                    headers = MutableHeaders(scope=message)
+                    headers[CSRF_HEADER_NAME] = csrf_token
+                    headers.raw.extend(cookie_headers)
+                await send(message)
+
+            await self.app(scope, receive, send_response)
+            return
 
         # Skip CSRF check for exempt paths
         if self._is_exempt(request.url.path):
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
         # Skip CSRF check for Bearer token authentication (stateless API)
         if self._is_using_bearer_auth(request):
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
         # For state-changing methods with cookie auth, validate CSRF token
         expected_token = request.cookies.get(CSRF_COOKIE_NAME)
@@ -136,9 +146,11 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
                 request.url.path,
                 extra={"method": request.method, "path": request.url.path},
             )
-            return self._create_csrf_error_response(
+            response = self._create_csrf_error_response(
                 "CSRF token missing. Please refresh the page and try again."
             )
+            await response(scope, receive, send)
+            return
 
         provided_token = self._get_csrf_token_from_request(request)
         if not provided_token:
@@ -148,9 +160,11 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
                 request.url.path,
                 extra={"method": request.method, "path": request.url.path},
             )
-            return self._create_csrf_error_response(
+            response = self._create_csrf_error_response(
                 f"CSRF token required. Please include {CSRF_HEADER_NAME} header."
             )
+            await response(scope, receive, send)
+            return
 
         # Constant-time comparison to prevent timing attacks
         if not secrets.compare_digest(expected_token, provided_token):
@@ -160,13 +174,14 @@ class CSRFProtectionMiddleware(BaseHTTPMiddleware):
                 request.url.path,
                 extra={"method": request.method, "path": request.url.path},
             )
-            return self._create_csrf_error_response(
+            response = self._create_csrf_error_response(
                 "CSRF token validation failed. Please refresh the page and try again."
             )
+            await response(scope, receive, send)
+            return
 
         # CSRF validation passed
-        response = await call_next(request)
-        return response
+        await self.app(scope, receive, send)
 
 
 def get_csrf_token_from_request(request: Request) -> str | None:

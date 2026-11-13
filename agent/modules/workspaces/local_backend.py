@@ -4,7 +4,10 @@ import os
 import re
 import subprocess
 import time
+from collections.abc import AsyncIterator
 from typing import Any
+
+import anyio
 
 from agent.modules.tools import build_safe_env, resolve_safe_path
 from agent.modules.workspaces.backends import CommandResult
@@ -114,6 +117,12 @@ class LocalWorkspaceBackend:
         full_path = resolve_safe_path(str(self.root), file_path)
         with open(full_path, "rb") as file_handle:
             return file_handle.read()
+
+    async def stream_bytes(self, file_path: str, *, chunk_size: int = 64 * 1024) -> AsyncIterator[bytes]:
+        full_path = resolve_safe_path(str(self.root), file_path)
+        async with await anyio.open_file(full_path, "rb") as file_handle:
+            while chunk := await file_handle.read(chunk_size):
+                yield chunk
 
     async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         full_path = resolve_safe_path(str(self.root), file_path)

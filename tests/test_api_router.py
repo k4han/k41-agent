@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from agent.delivery.http.common import redirect_legacy_api
+from agent.delivery.http.common import LegacyAPIRedirectMiddleware
 from agent.modules.admin_auth import get_current_admin
 from agent.shared.infrastructure.http_errors import register_http_exception_handlers
 from agent.delivery.http.api.schemas import ChatRequest, HumanResumePayload, PlanResumePayload
@@ -63,7 +63,7 @@ def _create_client() -> TestClient:
     app = FastAPI()
     register_http_exception_handlers(app)
 
-    app.middleware("http")(redirect_legacy_api)
+    app.add_middleware(LegacyAPIRedirectMiddleware)
 
     app.include_router(router_module.router)
     app.include_router(events_module.router)

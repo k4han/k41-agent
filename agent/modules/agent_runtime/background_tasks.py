@@ -706,12 +706,20 @@ class BackgroundTaskManager:
             if not subscribers:
                 self._subscribers.pop(thread_id, None)
 
-    def list_all(self) -> list[dict[str, Any]]:
-        """Return all tasks, newest first."""
+    def list_all(self, *, limit: int | None = 50, offset: int = 0) -> list[dict[str, Any]]:
+        """Serialize a page, newest first; None is reserved for internal aggregates."""
+        if (limit is not None and limit < 1) or offset < 0:
+            raise ValueError("Limit must be positive and offset must be non-negative.")
         with self._lock:
             tasks = list(self._tasks.values())
         tasks.sort(key=lambda t: t.created_at, reverse=True)
-        return [t.to_dict() for t in tasks]
+        end = offset + limit if limit is not None else None
+        return [t.to_dict() for t in tasks[offset:end]]
+
+    def count(self) -> int:
+        """Return the number of tasks currently held in memory."""
+        with self._lock:
+            return len(self._tasks)
 
     def cancel(self, task_id: str) -> str:
         """Cancel a running task and return the outcome."""

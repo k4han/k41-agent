@@ -48,7 +48,8 @@ class DefaultConfigSource:
         Args:
             keys: Optional set of keys to filter. If None, returns all keys.
         """
-        return build_settings_values(self._defaults, SettingsSource.DEFAULT, keys)
+        values = {key: value for key, value in self._defaults.items() if value is not None}
+        return build_settings_values(values, SettingsSource.DEFAULT, keys)
 
     def reload(self) -> None:
         """No-op for defaults (they never change)."""

@@ -1369,3 +1369,33 @@ async def test_issue_claim_ttl_outlives_max_task_duration() -> None:
     import agent.modules.github.service as service_module
 
     assert service_module.ISSUE_TASK_CLAIM_TTL_SECONDS >= service_module.DEFAULT_TASK_TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_worktree_cleanup_keeps_paths_created_after_snapshot(tmp_path):
+    manager = GitHubWorkspaceManager(root=tmp_path)
+    worktrees = tmp_path / "octo" / "example.worktrees"
+
+    def create_worktree(name):
+        path = worktrees / name
+        path.mkdir(parents=True)
+        (path / ".git").write_text(
+            f"gitdir: {tmp_path.as_posix()}/octo/example/.git/worktrees/{name}\n",
+            encoding="utf-8",
+        )
+        return path
+
+    old = create_worktree("old")
+    candidates = {old}
+    new = create_worktree("new")
+    preserved = create_worktree("preserved")
+    candidates.add(preserved)
+
+    removed = await manager.prune_orphaned_worktrees(
+        candidate_paths=candidates, preserve_paths={preserved.resolve()},
+    )
+
+    assert removed == 1
+    assert not old.exists()
+    assert new.exists()
+    assert preserved.exists()

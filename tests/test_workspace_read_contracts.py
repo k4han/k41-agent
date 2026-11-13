@@ -199,3 +199,101 @@ async def test_generation_changes_during_live_reads_are_rejected(monkeypatch, tm
     with pytest.raises(ProjectWorkspaceError) as changed:
         await facade.read_result("read_text", "file.txt")
     assert changed.value.code == "stale_runtime"
+
+
+@pytest.mark.asyncio
+async def test_saved_stream_keeps_view_open_until_closed(reader, monkeypatch):
+    active = []
+    original_view = reader.facade._saved_view
+
+    @asynccontextmanager
+    async def saved_view():
+        async with original_view() as view:
+            active.append(True)
+            try:
+                yield view
+            finally:
+                active.pop()
+
+    async def unavailable(path):
+        raise ConnectionError("offline")
+        yield
+
+    async def saved_chunks(path):
+        assert active
+        yield b"first"
+        assert active
+        yield b"second"
+
+    monkeypatch.setattr(reader.facade, "_saved_view", saved_view)
+    reader.live.stream_bytes = unavailable
+    reader.saved.stream_bytes = saved_chunks
+    result = await reader.facade.read_result("stream_bytes", "file.bin", consistency="saved_ok")
+    assert result.data_source == "saved" and result.saved_revision == "saved-revision"
+    assert active
+    assert await anext(result.data) == b"first"
+    assert active
+    await result.data.aclose()
+    assert not active
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_after_first_chunk_never_mixes_sources(reader):
+    closed = []
+
+    async def chunks(path):
+        try:
+            yield b"live"
+            raise ConnectionError("lost connection")
+        finally:
+            closed.append(True)
+
+    reader.live.stream_bytes = chunks
+    result = await reader.facade.read_result("stream_bytes", "file.bin", consistency="saved_ok")
+    assert result.data_source == "live"
+    assert await anext(result.data) == b"live"
+    with pytest.raises(ConnectionError):
+        await anext(result.data)
+    assert closed and not reader.saved_reads
+
+
+@pytest.mark.asyncio
+async def test_stream_rejects_generation_change_while_opening(reader, monkeypatch):
+    changed = False
+    closed = []
+    original_generation = reader.facade._read_generation
+
+    async def check_generation():
+        if changed:
+            raise ProjectWorkspaceError("Runtime changed.", "stale_runtime")
+        return await original_generation()
+
+    async def chunks(path):
+        nonlocal changed
+        try:
+            changed = True
+            yield b"stale"
+        finally:
+            closed.append(True)
+
+    monkeypatch.setattr(reader.facade, "_read_generation", check_generation)
+    reader.live.stream_bytes = chunks
+    with pytest.raises(ProjectWorkspaceError):
+        await reader.facade.read_result("stream_bytes", "file.bin")
+    assert closed and not reader.saved_reads
+
+
+@pytest.mark.asyncio
+async def test_stream_checks_generation_at_completion_without_per_chunk_queries(reader, monkeypatch):
+    checks = AsyncMock(wraps=reader.facade._read_generation)
+
+    async def chunks(path):
+        for _ in range(100):
+            yield b"chunk"
+
+    monkeypatch.setattr(reader.facade, "_read_generation", checks)
+    reader.live.stream_bytes = chunks
+    result = await reader.facade.read_result("stream_bytes", "file.bin")
+    opening_checks = checks.await_count
+    assert len([chunk async for chunk in result.data]) == 100
+    assert checks.await_count == opening_checks + 1

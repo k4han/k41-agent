@@ -442,7 +442,8 @@ async def test_background_task_restore_keeps_memory_bounded(
     manager = BackgroundTaskManager()
     await manager.restore_from_persistence()
 
-    assert len(manager.list_all()) == MAX_COMPLETED_TASKS
+    assert manager.count() == MAX_COMPLETED_TASKS
+    assert len(manager.list_all(limit=MAX_COMPLETED_TASKS)) == MAX_COMPLETED_TASKS
 
 
 @pytest.mark.asyncio

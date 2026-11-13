@@ -161,7 +161,7 @@ class GitHubWorkspaceManager:
                 worktree_path,
                 remove_exc,
             )
-        shutil.rmtree(worktree_path, ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, worktree_path, ignore_errors=True)
         if worktree_path.exists():
             raise RuntimeError(f"Failed to remove worktree directory: {worktree_path}")
         try:
@@ -173,7 +173,10 @@ class GitHubWorkspaceManager:
                 prune_exc,
             )
 
-    async def prune_orphaned_worktrees(self, *, preserve_paths: set[Path] | None = None) -> int:
+    async def prune_orphaned_worktrees(
+        self, *, preserve_paths: set[Path] | None = None,
+        candidate_paths: set[Path] | None = None,
+    ) -> int:
         """Remove worktree directories left behind by interrupted tasks.
 
         Task worktrees live under ``<root>/<owner>/<repo>.worktrees/*`` and
@@ -182,7 +185,8 @@ class GitHubWorkspaceManager:
         leftover worktrees (their tasks were marked failed on restore).
         """
         pruned = 0
-        for worktree_path in sorted(self.root.glob("*/*.worktrees/*")):
+        candidates = self.root.glob("*/*.worktrees/*") if candidate_paths is None else candidate_paths
+        for worktree_path in sorted(candidates):
             if preserve_paths and worktree_path.resolve() in preserve_paths:
                 continue
             if not worktree_path.is_dir():
@@ -201,7 +205,7 @@ class GitHubWorkspaceManager:
                     async with self._lock_for(full_name):
                         await self._remove_worktree(repo_path, worktree_path)
                 else:
-                    shutil.rmtree(worktree_path, ignore_errors=True)
+                    await asyncio.to_thread(shutil.rmtree, worktree_path, ignore_errors=True)
                 pruned += 1
             except Exception as exc:
                 logger.warning(

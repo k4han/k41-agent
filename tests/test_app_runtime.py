@@ -1,4 +1,7 @@
 import asyncio
+from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -316,3 +319,101 @@ async def test_shutdown_finishes_chat_cleanup_before_workspace_and_persistence(i
 
     assert calls == ["run-cleaned", "error-saved", "workspace", "persistence"]
     assert await isolated_container.chat_stream_manager.get_session(session.thread_id) is None
+
+
+@pytest.mark.asyncio
+async def test_startup_does_not_wait_for_maintenance_and_shutdown_cancels_it(
+    isolated_container, monkeypatch, tmp_path,
+):
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+    worktrees = {tmp_path / "old-worktree"}
+    temporary = {tmp_path / "old-temp"}
+
+    async def prune(*, candidate_paths):
+        assert candidate_paths == worktrees
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            assert isolated_container._persistence_ready
+            cancelled.set()
+
+    runtime = AppRuntime(container=isolated_container)
+    monkeypatch.setattr(runtime_module, "_cleanup_update_state", lambda: None)
+    monkeypatch.setattr(runtime, "_snapshot_cleanup_paths", lambda: (worktrees, temporary))
+    monkeypatch.setattr(runtime, "_register_channels", lambda: None)
+    monkeypatch.setattr(runtime, "_start_enabled_channels", AsyncMock())
+    monkeypatch.setattr("agent.modules.providers.ensure_catalog_available", AsyncMock(return_value=(True, "ready")))
+    monkeypatch.setattr("agent.modules.workflows.register_builtin_workflows", lambda: None)
+    monkeypatch.setattr("agent.modules.skills.reload_skills", lambda: None)
+    monkeypatch.setattr("agent.modules.scheduler.initialize_scheduler", AsyncMock())
+    monkeypatch.setattr("agent.modules.workspaces.start_enabled_workspace_background_services", AsyncMock())
+    monkeypatch.setattr(isolated_container, "_github_service", SimpleNamespace(prune_orphaned_worktrees=prune))
+    monkeypatch.setattr(isolated_container, "_task_manager", SimpleNamespace(restore_from_persistence=AsyncMock()))
+    isolated_container._persistence_ready = True
+
+    async def close():
+        assert cancelled.is_set()
+        isolated_container._persistence_ready = False
+
+    for step in ("_stop_channels_step", "_stop_scheduler_step", "_stop_chat_streams_step", "_stop_workspace_services_step"):
+        monkeypatch.setattr(runtime, step, AsyncMock())
+    monkeypatch.setattr(isolated_container, "close_persistence", close)
+    try:
+        await asyncio.wait_for(runtime.startup(), timeout=1)
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert runtime._started
+        assert not runtime._startup_maintenance_task.done()
+        task = runtime._startup_maintenance_task
+        await asyncio.wait_for(runtime.shutdown(), timeout=1)
+        assert task.cancelled()
+        assert runtime._startup_maintenance_task is None
+    finally:
+        await runtime.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_startup_maintenance_continues_after_cleanup_failure(isolated_container, monkeypatch):
+    worktrees, temporary = set(), set()
+    prune = AsyncMock(side_effect=RuntimeError("git failed"))
+    cleanup = AsyncMock(side_effect=RuntimeError("workspace failed"))
+    purge = AsyncMock()
+    monkeypatch.setattr(isolated_container, "_github_service", SimpleNamespace(prune_orphaned_worktrees=prune))
+    monkeypatch.setattr(isolated_container, "_browser_service", SimpleNamespace(purge_discarded=purge))
+    monkeypatch.setattr("agent.modules.workspaces.cleanup_orphaned_temp_workspaces", cleanup)
+
+    await AppRuntime(container=isolated_container)._run_startup_maintenance(worktrees, temporary)
+
+    prune.assert_awaited_once_with(candidate_paths=worktrees)
+    cleanup.assert_awaited_once_with(candidate_paths=temporary)
+    purge.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_warmup_does_not_block_lifespan(isolated_container, monkeypatch):
+    import agent.bootstrap.app as app_module
+
+    started, cancelled = asyncio.Event(), asyncio.Event()
+
+    async def warmup():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(AppRuntime, "startup", AsyncMock())
+
+    async def shutdown():
+        assert cancelled.is_set()
+
+    monkeypatch.setattr(AppRuntime, "shutdown", AsyncMock(side_effect=shutdown))
+    monkeypatch.setattr(app_module, "_warm_dashboard_caches", warmup)
+    isolated_container.bootstrap_config = replace(isolated_container.bootstrap_config, enable_dashboard=True)
+    app = app_module.create_app(container=isolated_container)
+    async with asyncio.timeout(1):
+        async with app.router.lifespan_context(app):
+            await started.wait()
+            assert not cancelled.is_set()
+    assert cancelled.is_set()

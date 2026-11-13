@@ -14,7 +14,7 @@ from agent.modules.projects.workspaces import ProjectWorkspaceError, get_project
 from agent.modules.workspaces import CommandResult
 from agent.modules.workspaces import relative_remote_path, resolve_remote_path
 from agent.modules.workspaces import READS, STRUCTURED_READS, WorkspaceReadService
-from agent.modules.workspaces import WorkspaceReadResult
+from agent.modules.workspaces import WorkspaceByteStream, WorkspaceReadResult
 
 MUTATIONS = frozenset({"write_text", "write_bytes", "rename", "delete", "create_file", "create_directory", "execute", "clone_repository"})
 logger = logging.getLogger(__name__)
@@ -36,6 +36,18 @@ class ManagedWorkspaceBackend:
             raise ProjectWorkspaceError("Execution runtime changed.", "stale_runtime")
         kwargs.pop("consistency", None)
         kwargs.pop("recover", None)
+        if name == "stream_bytes":
+            async def check_generation():
+                _, _, current = await self.service.rows(self.binding.project_id, self.binding.project_workspace_id)
+                if current.generation != self.binding.runtime_generation:
+                    raise ProjectWorkspaceError("Execution runtime changed during the read.", "stale_runtime")
+            result = await WorkspaceByteStream.open(self.backend.stream_bytes(*args, **kwargs), check=check_generation)
+            try:
+                await check_generation()
+            except BaseException:
+                await result.aclose()
+                raise
+            return WorkspaceReadResult(result, "live", self.binding.runtime_generation)
         result = await getattr(self.backend, name)(*args, **kwargs)
         _, _, runtime = await self.service.rows(self.binding.project_id, self.binding.project_workspace_id)
         if runtime.generation != self.binding.runtime_generation:

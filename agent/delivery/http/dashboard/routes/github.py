@@ -35,7 +35,7 @@ def _repository_activity(
     manager = get_background_task_manager()
     matches = [
         task
-        for task in manager.list_all()
+        for task in manager.list_all(limit=None)
         if _task_repository_full_name(task) == full_name
     ]
     return {

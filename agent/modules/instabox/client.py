@@ -340,6 +340,17 @@ class InstaboxClient:
         )
         return bytes(response.content)
 
+    async def stream_file(self, machine_id: str, path: str, *, chunk_size: int = 64 * 1024) -> AsyncIterator[bytes]:
+        async with self._client.stream(
+            "GET", f"{self.api_url}/v1/machines/{_quote(machine_id)}/files/content",
+            params={"path": path}, headers=self._headers(), timeout=300.0,
+        ) as response:
+            if not response.is_success:
+                await response.aread()
+                raise _parse_error(response)
+            async for chunk in response.aiter_bytes(chunk_size):
+                yield chunk
+
     async def write_file(
         self, machine_id: str, path: str, content: bytes, *, mode: str | None = None
     ) -> dict[str, Any]:

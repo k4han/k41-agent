@@ -207,15 +207,19 @@ class ConfigService:
                 result = val
         return result
 
-    def _list_runtime_keys(self) -> list[str]:
+    def _list_runtime_keys(self, source_values: list[dict[str, SettingsValue]]) -> list[str]:
         from agent.shared.config.web_connections import MIGRATION_KEY, is_legacy_web_key
 
         keys = set(KNOWN_RUNTIME_KEYS)
-        for source in self._sources:
-            for key in source.get_all().keys():
+        migrated = False
+        for values in source_values:
+            for key in values:
                 if isinstance(key, str) and is_runtime_key(key):
                     keys.add(key)
-        if self.get(MIGRATION_KEY):
+            migration = values.get(MIGRATION_KEY)
+            if migration is not None and migration.value is not None:
+                migrated = migration.value
+        if migrated:
             keys = {key for key in keys if not is_legacy_web_key(key)}
         return sorted(keys)
 
@@ -224,14 +228,7 @@ class ConfigService:
 
         Only returns known runtime keys with source tracking.
         """
-        merged: dict[str, SettingsValue] = {}
-        for key in self._list_runtime_keys():
-            for source in self._sources:
-                val = source.get_settings_value(key)
-                if val is not None:
-                    merged[key] = val
-
-        return merged
+        return {key: values[-1] for key, values in self.list_all_by_source().items()}
 
     def list_all_by_source(self) -> dict[str, list[SettingsValue]]:
         """Return every value from every source, grouped by key.
@@ -239,9 +236,10 @@ class ConfigService:
         Useful for the dashboard to show where each value comes from.
         """
         by_key: dict[str, list[SettingsValue]] = {}
-        for key in self._list_runtime_keys():
-            for source in self._sources:
-                val = source.get_settings_value(key)
+        source_values = [source.get_all_settings_values() for source in self._sources]
+        for key in self._list_runtime_keys(source_values):
+            for values in source_values:
+                val = values.get(key)
                 if val is not None:
                     by_key.setdefault(key, []).append(val)
         return by_key
@@ -283,22 +281,8 @@ class ConfigService:
         get_settings_sources() separately, which each independently scan all
         sources for every key.
         """
-        # Gather data once
-        keys = self._list_runtime_keys()
-        by_key: dict[str, list[SettingsValue]] = {}
-        merged: dict[str, SettingsValue] = {}
-        for key in keys:
-            values: list[SettingsValue] = []
-            latest: SettingsValue | None = None
-            for source in self._sources:
-                val = source.get_settings_value(key)
-                if val is not None:
-                    values.append(val)
-                    latest = val
-            if values:
-                by_key[key] = values
-            if latest is not None:
-                merged[key] = latest
+        by_key = self.list_all_by_source()
+        merged = {key: values[-1] for key, values in by_key.items()}
 
         overview = {
             key: _build_settings_overview_entry(sv, get_setting_metadata(key))

@@ -1,16 +1,76 @@
 """Source-aware reads shared by durable project and temporary thread facades."""
 
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generic, Literal, TypeVar
+
+import anyio
 
 from agent.modules.workspaces.backends import WorkspaceUnavailableError
 
 T = TypeVar("T")
 ReadConsistency = Literal["live_required", "saved_ok"]
-READS = frozenset({"read_text", "read_bytes", "list_dir", "glob", "grep", "tree", "tree_page", "file", "changes", "diff"})
+READS = frozenset({"read_text", "read_bytes", "stream_bytes", "list_dir", "glob", "grep", "tree", "tree_page", "file", "changes", "diff"})
 STRUCTURED_READS = frozenset({"tree", "tree_page", "file", "changes", "diff"})
-PATH_FIRST = frozenset({"read_text", "read_bytes", "list_dir", "tree", "tree_page", "file", "diff"})
+PATH_FIRST = frozenset({"read_text", "read_bytes", "stream_bytes", "list_dir", "tree", "tree_page", "file", "diff"})
+
+
+class WorkspaceByteStream:
+    """A prefetched byte stream that owns its reader and saved-view lifetime."""
+
+    def __init__(self, iterator, first, stack, check):
+        self._iterator = iterator
+        self._first = first
+        self._stack = stack
+        self._check = check
+        self._closed = False
+
+    @classmethod
+    async def open(
+        cls, iterator: AsyncIterator[bytes], *, stack: AsyncExitStack | None = None,
+        check: Callable[[], Awaitable[object]] | None = None,
+    ) -> WorkspaceByteStream:
+        stack = stack if stack is not None else AsyncExitStack()
+        await stack.enter_async_context(aclosing(iterator))
+        try:
+            first = await anext(iterator, None)
+        except BaseException as exc:
+            with anyio.CancelScope(shield=True):
+                await stack.__aexit__(type(exc), exc, exc.__traceback__)
+            raise
+        return cls(iterator, first, stack, check)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self._closed:
+            raise StopAsyncIteration
+        try:
+            if self._first is not None:
+                first, self._first = self._first, None
+                return first
+            try:
+                return await anext(self._iterator)
+            except StopAsyncIteration:
+                # Fence the completed read without querying storage for every chunk.
+                if self._check is not None:
+                    await self._check()
+                raise
+        except BaseException:
+            await self.aclose()
+            raise
+
+    async def aclose(self) -> None:
+        if not self._closed:
+            self._closed = True
+            self._first = None
+            with anyio.CancelScope(shield=True):
+                await self._stack.aclose()
 
 
 async def provider_read_error(ref, error):
@@ -97,6 +157,18 @@ class WorkspaceReadService:
     async def read(self, facade, name, *args, consistency: ReadConsistency = "saved_ok", recover=False, **kwargs):
         if name not in READS or consistency not in {"live_required", "saved_ok"}:
             raise ValueError("Unsupported workspace read operation or consistency.")
+        stack = AsyncExitStack()
+        try:
+            result = await self._read(facade, name, *args, stack=stack, consistency=consistency, recover=recover, **kwargs)
+            if name != "stream_bytes":
+                await stack.aclose()
+            return result
+        except BaseException as exc:
+            with anyio.CancelScope(shield=True):
+                await stack.__aexit__(type(exc), exc, exc.__traceback__)
+            raise
+
+    async def _read(self, facade, name, *args, stack, consistency, recover, **kwargs):
         from agent.modules.workspaces import create_workspace_runtime_backend
         from agent.modules.workspaces.host_mirror import workspace_is_running
 
@@ -119,7 +191,11 @@ class WorkspaceReadService:
             ref = facade.ref.model_copy(deep=True)
             ref.metadata["_require_running"] = True
             backend = await create_workspace_runtime_backend(ref)
-            result = await getattr(backend, name)(*args, **kwargs)
+            if name == "stream_bytes":
+                result = await WorkspaceByteStream.open(backend.stream_bytes(*args, **kwargs),
+                                                        stack=stack, check=facade._read_generation)
+            else:
+                result = await getattr(backend, name)(*args, **kwargs)
             await facade._read_generation()
             return WorkspaceReadResult(result, "live", generation)
         except Exception as exc:
@@ -130,17 +206,20 @@ class WorkspaceReadService:
                 raise normalized from exc
             reason = "provider_unavailable" if isinstance(normalized, (TimeoutError, ConnectionError)) else "runtime_unavailable"
 
-        async with facade._saved_view() as view:
-            backend = await create_workspace_runtime_backend(view)
-            if name in {"changes", "diff"} and not (Path(view.locator) / ".git").exists():
-                result = {"root": view.locator, "is_git_repo": False, "message": "Workspace is not a Git repository."}
-                if name == "changes":
-                    result["changes"] = []
-                else:
-                    result.update(path=str(Path(view.locator) / (args[0] if args else kwargs["path"])),
-                                  status="", diff="", truncated=False)
+        view = await stack.enter_async_context(facade._saved_view())
+        backend = await create_workspace_runtime_backend(view)
+        if name == "stream_bytes":
+            result = await WorkspaceByteStream.open(backend.stream_bytes(*args, **kwargs),
+                                                    stack=stack, check=facade._read_generation)
+        elif name in {"changes", "diff"} and not (Path(view.locator) / ".git").exists():
+            result = {"root": view.locator, "is_git_repo": False, "message": "Workspace is not a Git repository."}
+            if name == "changes":
+                result["changes"] = []
             else:
-                result = await getattr(backend, name)(*args, **kwargs)
-            await facade._read_generation()
-            return WorkspaceReadResult(facade._present_paths(result, view.locator), "saved", generation,
-                                       view.metadata["saved_revision"], view.metadata.get("last_saved_at"), reason)
+                result.update(path=str(Path(view.locator) / (args[0] if args else kwargs["path"])),
+                              status="", diff="", truncated=False)
+        else:
+            result = await getattr(backend, name)(*args, **kwargs)
+        await facade._read_generation()
+        return WorkspaceReadResult(facade._present_paths(result, view.locator), "saved", generation,
+                                   view.metadata["saved_revision"], view.metadata.get("last_saved_at"), reason)

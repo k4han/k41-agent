@@ -135,14 +135,15 @@ class GitHubAutomationService:
     def settings(self) -> GitHubSettings:
         return get_github_settings()
 
-    async def prune_orphaned_worktrees(self) -> int:
+    async def prune_orphaned_worktrees(self, *, candidate_paths: set[Path] | None = None) -> int:
         """Remove leftover task worktrees from interrupted runs."""
         from agent.modules.projects import get_project_workspace_service
         projects = get_project_workspace_service()
+        options = {} if candidate_paths is None else {"candidate_paths": candidate_paths}
         if projects.container._persistence_ready:
             paths = await projects.preserved_local_paths()
-            return await self.workspace_manager.prune_orphaned_worktrees(preserve_paths=paths)
-        return await self.workspace_manager.prune_orphaned_worktrees()
+            return await self.workspace_manager.prune_orphaned_worktrees(preserve_paths=paths, **options)
+        return await self.workspace_manager.prune_orphaned_worktrees(**options)
 
     async def sync_installations(self) -> dict[str, int]:
         if not self.settings.is_configured:

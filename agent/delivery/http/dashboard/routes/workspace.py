@@ -8,8 +8,9 @@ from urllib.parse import quote
 
 import anyio
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.types import Receive, Scope, Send
 
 from agent.modules.workspaces import WorkspaceBinding, WorkspaceRef
 from agent.delivery.http.dashboard.routes.helpers.workspace import (
@@ -37,6 +38,15 @@ from agent.modules.workspaces import (
 
 
 router = APIRouter()
+
+
+class _WorkspaceStreamingResponse(StreamingResponse):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self.body_iterator.aclose()
+
 
 INLINE_FILE_TYPES = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -83,15 +93,17 @@ async def _workspace_file_response(
             raise FileNotFoundError(f"File not found: {path}")
         return FileResponse(full_path, media_type=media_type, headers=headers)
 
-    from agent.modules.workspaces import get_workspace_file_io
+    from agent.modules.workspaces import WorkspaceByteStream, get_workspace_file_io
 
     file_io = await get_workspace_file_io(workspace, thread_id=thread_id)
     read_result = getattr(file_io, "read_result", None)
     if read_result is not None:
-        result = await read_result("read_bytes", path, consistency="saved_ok")
+        result = await read_result("stream_bytes", path, consistency="saved_ok")
         headers.update(result.headers())
-        return Response(content=result.data, media_type=media_type, headers=headers)
-    return Response(content=await file_io.read_bytes(path), media_type=media_type, headers=headers)
+        stream = result.data
+    else:
+        stream = await WorkspaceByteStream.open(file_io.stream_bytes(path))
+    return _WorkspaceStreamingResponse(stream, media_type=media_type, headers=headers)
 
 
 async def _run_workspace_capability_operation(

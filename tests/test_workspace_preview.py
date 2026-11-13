@@ -1,6 +1,6 @@
 import os
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -8,6 +8,12 @@ import pytest
 
 from agent.delivery.http.dashboard.routes.workspace import router
 from agent.modules.workspaces import WorkspaceRef
+from agent.modules.workspaces.reads import WorkspaceByteStream
+
+
+async def byte_chunks(data, *, chunk_size=64 * 1024):
+    for offset in range(0, len(data), chunk_size):
+        yield data[offset:offset + chunk_size]
 
 
 @pytest.fixture
@@ -84,20 +90,23 @@ def test_file_metadata_tracks_same_size_updates_without_tree_refresh(client, tmp
 
 
 @pytest.mark.parametrize("backend", ["daytona", "modal"])
-def test_remote_preview_and_download_use_public_binary_reader(client, monkeypatch, backend):
+def test_remote_preview_and_download_use_public_binary_stream(client, monkeypatch, backend):
     import agent.delivery.http.dashboard.routes.workspace as routes
     import agent.modules.workspaces as workspaces
 
     workspace = WorkspaceRef(backend=backend, locator="sandbox-test", metadata={"root": "/workspace"})
     monkeypatch.setattr(routes, "workspace_ref_from_request", AsyncMock(return_value=workspace))
-    reader = SimpleNamespace(read_bytes=AsyncMock(return_value=b"\x00\xff\x80"))
+    data = b"\x00\xff\x80" * 70_000
+    reader = SimpleNamespace(stream_bytes=Mock(side_effect=lambda path: byte_chunks(data)),
+                             read_bytes=AsyncMock(side_effect=AssertionError("Whole-file reads are forbidden")))
     getter = AsyncMock(return_value=reader)
     monkeypatch.setattr(workspaces, "get_workspace_file_io", getter)
     for action in ("preview", "download"):
         response = client.get(f"/dashboard-api/workspace/{action}", params={"thread_id": "test-thread", "path": "image.png"})
         assert response.status_code == 200
-        assert response.content == b"\x00\xff\x80"
-        reader.read_bytes.assert_awaited_with("image.png")
+        assert response.content == data
+        reader.stream_bytes.assert_called_with("image.png")
+        reader.read_bytes.assert_not_awaited()
         getter.assert_awaited_with(workspace, thread_id="test-thread")
 
 
@@ -107,13 +116,33 @@ def test_saved_binary_responses_include_source_and_revision_headers(client, monk
     from agent.modules.workspaces.reads import WorkspaceReadResult
     workspace = WorkspaceRef(backend="modal", locator="unavailable", metadata={"root": "/workspace"})
     monkeypatch.setattr(routes, "workspace_ref_from_request", AsyncMock(return_value=workspace))
-    result = WorkspaceReadResult(b"\x00\xffsaved", "saved", 7, "revision", "timestamp", "provider_unavailable")
-    reader = SimpleNamespace(read_result=AsyncMock(return_value=result))
+    data = b"\x00\xffsaved"
+    async def read_result(*args, **kwargs):
+        return WorkspaceReadResult(await WorkspaceByteStream.open(byte_chunks(data)), "saved", 7,
+                                   "revision", "timestamp", "provider_unavailable")
+    reader = SimpleNamespace(read_result=AsyncMock(side_effect=read_result))
     monkeypatch.setattr(workspaces, "get_workspace_file_io", AsyncMock(return_value=reader))
     for action in ("preview", "download"):
         response = client.get(f"/dashboard-api/workspace/{action}", params={"thread_id": "thread", "path": "image.png"})
-        assert response.status_code == 200 and response.content == result.data
+        assert response.status_code == 200 and response.content == data
         assert response.headers["x-workspace-data-source"] == "saved"
         assert response.headers["x-workspace-saved-revision"] == "revision"
         assert response.headers["x-workspace-generation"] == "7"
-        reader.read_result.assert_awaited_with("read_bytes", "image.png", consistency="saved_ok")
+        reader.read_result.assert_awaited_with("stream_bytes", "image.png", consistency="saved_ok")
+
+
+@pytest.mark.parametrize("error,status", [(FileNotFoundError("missing"), 404), (PermissionError("denied"), 403),
+                                         (ValueError("invalid path"), 400)])
+def test_remote_stream_errors_are_reported_before_response_headers(client, monkeypatch, error, status):
+    import agent.delivery.http.dashboard.routes.workspace as routes
+    import agent.modules.workspaces as workspaces
+
+    async def chunks(path):
+        raise error
+        yield
+
+    workspace = WorkspaceRef(backend="modal", locator="test", metadata={"root": "/workspace"})
+    monkeypatch.setattr(routes, "workspace_ref_from_request", AsyncMock(return_value=workspace))
+    monkeypatch.setattr(workspaces, "get_workspace_file_io", AsyncMock(return_value=SimpleNamespace(stream_bytes=chunks)))
+    response = client.get("/dashboard-api/workspace/download", params={"path": "file.bin"})
+    assert response.status_code == status

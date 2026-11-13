@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -59,6 +60,9 @@ class WorkspaceFileIO(Protocol):
             backend=getattr(getattr(self, "ref", None), "backend", "unknown"),
             capability="read_bytes",
         )
+
+    def stream_bytes(self, file_path: str, *, chunk_size: int = 64 * 1024) -> AsyncIterator[bytes]:
+        ...
 
     async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         ...

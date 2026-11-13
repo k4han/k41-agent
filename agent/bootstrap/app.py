@@ -28,7 +28,7 @@ from agent.delivery.http import (
     telegram_webhook_router,
     zalo_webhook_router,
 )
-from agent.delivery.http.common import redirect_legacy_api
+from agent.delivery.http.common import LegacyAPIRedirectMiddleware
 from agent.delivery.http.dashboard.auth_router import router as auth_router
 from agent.delivery.http.dashboard.spa import STATIC_DIR, CachedStaticFiles
 from agent.modules.channels import list_channel_statuses
@@ -70,8 +70,9 @@ class ContainerActivationMiddleware:
 
 async def _warm_dashboard_caches() -> None:
     try:
-        from agent.modules.tools import seed_tool_runtime_defaults
+        from agent.modules.tools import get_builtin_tool_config_schemas, seed_tool_runtime_defaults
 
+        await asyncio.to_thread(get_builtin_tool_config_schemas)
         seeded = seed_tool_runtime_defaults()
         if seeded:
             logger.info("Seeded %s tool runtime config default(s).", seeded)
@@ -111,11 +112,16 @@ def create_app(bootstrap_config: BootstrapConfig | None = None, container=None) 
     @asynccontextmanager
     async def lifespan(fastapi_app: FastAPI):
         await runtime.startup()
-        if bootstrap_config.enable_dashboard:
-            await _warm_dashboard_caches()
+        warmup_task = (
+            asyncio.create_task(_warm_dashboard_caches(), name="dashboard-cache-warmup")
+            if bootstrap_config.enable_dashboard else None
+        )
         try:
             yield
         finally:
+            if warmup_task is not None:
+                warmup_task.cancel()
+                await asyncio.gather(warmup_task, return_exceptions=True)
             await runtime.shutdown()
 
     fastapi_app = FastAPI(
@@ -188,7 +194,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None, container=None) 
         from agent.delivery.http.api.events_v2 import router as events_v2_router
         fastapi_app.include_router(events_v2_router)
         # Backward compatibility: redirect /api/* to /v1/api/*
-        fastapi_app.middleware("http")(redirect_legacy_api)
+        fastapi_app.add_middleware(LegacyAPIRedirectMiddleware)
 
     fastapi_app.include_router(telegram_webhook_router)
     fastapi_app.include_router(zalo_webhook_router)

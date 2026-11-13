@@ -6,6 +6,7 @@ import logging
 import posixpath
 import shlex
 import time
+from contextlib import aclosing
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -562,6 +563,20 @@ class InstaboxWorkspaceBackend(SandboxBackendBase):
         client = await self._client()
         try:
             return await client.read_file(self.machine_id, path)
+        except InstaboxApiError as exc:
+            if exc.status == 404 and exc.code not in {"machine_not_found"}:
+                raise FileNotFoundError(path) from exc
+            if exc.is_not_found:
+                raise _unavailable(self.ref, exc) from exc
+            raise
+
+    async def stream_bytes(self, file_path: str, *, chunk_size: int = 64 * 1024):
+        path = resolve_remote_path(self.root, file_path)
+        client = await self._client()
+        try:
+            async with aclosing(client.stream_file(self.machine_id, path, chunk_size=chunk_size)) as stream:
+                async for chunk in stream:
+                    yield chunk
         except InstaboxApiError as exc:
             if exc.status == 404 and exc.code not in {"machine_not_found"}:
                 raise FileNotFoundError(path) from exc

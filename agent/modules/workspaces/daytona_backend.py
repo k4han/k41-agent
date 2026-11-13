@@ -1030,6 +1030,24 @@ class DaytonaWorkspaceBackend(SandboxBackendBase):
             return raw.encode("utf-8")
         return bytes(raw or b"")
 
+    async def stream_bytes(self, file_path: str, *, chunk_size: int = 64 * 1024):
+        import anyio
+
+        remote_path = resolve_daytona_path(self.root, file_path)
+        await anyio.to_thread.run_sync(self.ensure_active)
+        iterator = await anyio.to_thread.run_sync(self.fs.download_file_stream, remote_path)
+        sentinel = object()
+        try:
+            while True:
+                chunk = await anyio.to_thread.run_sync(next, iterator, sentinel)
+                if chunk is sentinel:
+                    break
+                for offset in range(0, len(chunk), chunk_size):
+                    yield chunk[offset:offset + chunk_size]
+        finally:
+            with anyio.CancelScope(shield=True):
+                await anyio.to_thread.run_sync(iterator.close)
+
     async def write_text(self, file_path: str, content: str, *, append: bool = False) -> str:
         self.ensure_active()
         self._invalidate_workspace_caches()
