@@ -6,6 +6,7 @@ export interface ToolGroupItem {
   args?: unknown;
   result: unknown;
   resultReceived?: boolean;
+  executionStatus?: "running" | "completed" | "failed";
 }
 
 export interface ToolCategoryInfo {
@@ -55,6 +56,7 @@ const WEB_TOOLS = new Set([
 ]);
 
 export function isToolFailed(tool: ToolGroupItem): boolean {
+  if (tool?.executionStatus === "failed") return true;
   if (!tool || !hasToolCallResult(tool)) return false;
   if (isShellTool(tool.name)) {
     const res = shellToolResult(tool.result, tool.name);

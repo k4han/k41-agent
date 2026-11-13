@@ -1809,19 +1809,22 @@ export function TranscriptItemView(props: TranscriptItemViewProps) {
     );
   }
   return (
-    <>
-    <ToolCallDetail
-      name={props.item.name}
-      args={props.item.args}
-      result={props.item.result}
-      resultReceived={props.item.resultReceived}
-      itemId={props.itemId}
-      threadId={props.threadId}
-    />
-    <Show when={props.item.subagent}>{(subagent) => <SubagentDetails activity={subagent()} />}</Show>
-    <Show when={props.item.executionStatus === "running" && props.item.outputDelta !== undefined}>
-      <pre class="tool-call-progress">{formatValue(props.item.outputDelta)}</pre>
+    <Show when={props.item.subagent} fallback={
+      <>
+        <ToolCallDetail
+          name={props.item.name}
+          args={props.item.args}
+          result={props.item.result}
+          resultReceived={props.item.resultReceived}
+          itemId={props.itemId}
+          threadId={props.threadId}
+        />
+        <Show when={props.item.executionStatus === "running" && props.item.outputDelta !== undefined}>
+          <pre class="tool-call-progress">{formatValue(props.item.outputDelta)}</pre>
+        </Show>
+      </>
+    }>
+      {(subagent) => <SubagentDetails activity={subagent()} itemId={props.itemId} />}
     </Show>
-    </>
   );
 }

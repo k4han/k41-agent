@@ -241,7 +241,10 @@ try {
   await call('Page.reload', { ignoreCache: true });
   await until(() => js('!!document.querySelector(".subagent-details")'), 'saved subagent activity');
   assert.equal(await js('document.querySelector(".subagent-details").open'), false);
-  assert.equal(childHistoryRequests, 0, 'collapsed history is loaded lazily');
+  await until(() => js('document.querySelector(".subagent-tool-summary")?.textContent.includes("0 tools")'), 'collapsed subagent tool summary');
+  assert.equal(childHistoryRequests, 1, 'collapsed history loads the tool summary in the background');
+  assert.equal(await js('document.querySelector(".subagent-transcript")'), null, 'collapsed transcripts remain unmounted');
+  assert.equal(await js('Array.from(document.querySelectorAll(".tool-call-summary")).some(row => row.textContent.includes("delegate_task"))'), false);
   await js('document.querySelector(".subagent-details").open = true');
   await until(() => js('document.querySelector(".subagent-details").textContent.includes("Saved child answer")'), 'expanded child history');
   assert.equal(childHistoryRequests, 1);

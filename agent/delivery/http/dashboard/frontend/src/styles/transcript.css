@@ -812,20 +812,92 @@
 }
 
 .subagent-details {
+  min-width: 0;
+  max-width: 100%;
   margin: 0.5rem 0 0.75rem 1rem;
   padding: 0.65rem 0.85rem;
-  border-left: 2px solid var(--border-color, #8886);
+  border-left: 2px solid var(--border);
 }
 
-.subagent-details > summary {
+.subagent-summary {
+  display: grid;
+  grid-template-columns: 16px 14px minmax(0, 1fr);
+  align-items: start;
+  gap: 6px;
   cursor: pointer;
-  overflow-wrap: anywhere;
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--font-size-chat);
+  line-height: 1.4;
 }
 
-.subagent-details > summary span {
-  margin-left: 0.6rem;
-  opacity: 0.65;
+.subagent-summary::-webkit-details-marker {
+  display: none;
+}
+
+.subagent-chevron,
+.subagent-status-icon {
+  margin-top: 3px;
+}
+
+.subagent-chevron {
+  transition: transform 120ms ease;
+}
+
+.subagent-details[open] > .subagent-summary > .subagent-chevron {
+  transform: rotate(90deg);
+}
+
+.subagent-status-icon {
+  display: flex;
+}
+
+.subagent-status-icon.is-failed {
+  color: var(--danger);
+}
+
+.subagent-status-icon.is-completed {
+  color: var(--success);
+}
+
+.subagent-summary-text {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.subagent-heading {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+}
+
+.subagent-name,
+.subagent-tool-summary,
+.subagent-current-tool {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-name {
+  flex: 0 1 auto;
+  max-width: 40%;
+  color: var(--fg);
+}
+
+.subagent-tool-summary {
+  flex: 1;
+}
+
+.subagent-current-tool {
   font-size: 0.85em;
+}
+
+.subagent-transcript {
+  min-width: 0;
+  margin-top: 10px;
 }
 
 .subagent-transcript, .tool-call-progress {
