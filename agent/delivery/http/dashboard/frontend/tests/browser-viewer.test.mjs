@@ -187,10 +187,12 @@ test('viewer disposal aborts pending requests and removes all timers and listene
 });
 
 test('binary frame headers preserve logical viewport dimensions and JPEG bytes', async () => {
-  const frame = decodeBrowserFrame(binaryFrame(42, 1024, 768));
+  const data = binaryFrame(42, 1024, 768);
+  const frame = decodeBrowserFrame(data);
   assert.equal(frame.id, 42); assert.equal(frame.width, 1024); assert.equal(frame.height, 768);
-  assert.equal(frame.image.type, 'image/jpeg');
-  assert.deepEqual([...new Uint8Array(await frame.image.arrayBuffer())], [0xff, 0xd8, 0xff, 0xd9]);
+  assert.equal(frame.image.buffer, data);
+  assert.equal(frame.image.byteOffset, 12);
+  assert.deepEqual([...frame.image], [0xff, 0xd8, 0xff, 0xd9]);
   assert.throws(() => decodeBrowserFrame(new ArrayBuffer(12)), /Invalid browser frame/);
   assert.throws(() => decodeBrowserFrame(binaryFrame(0)), /Invalid browser frame header/);
   assert.throws(() => decodeBrowserFrame(binaryFrame(1, 0)), /Invalid browser frame header/);
@@ -318,7 +320,7 @@ test('decode failure and a stuck render reconnect without claiming a successful 
   stuck.dispose();
 });
 
-function rendererFixture() {
+function rendererFixture(globals = {}) {
   const paints = new Map(), decodes = [], draws = [];
   let sequence = 0;
   const canvas = { width: 0, height: 0, getContext: () => ({ drawImage: bitmap => draws.push(bitmap) }) };
@@ -326,11 +328,13 @@ function rendererFixture() {
   runInNewContext(outputText, {
     exports: module,
     performance,
+    Blob,
     createImageBitmap: () => new Promise(resolve => decodes.push(resolve)),
     window: {
       requestAnimationFrame(callback) { const id = ++sequence; paints.set(id, callback); return id; },
       cancelAnimationFrame(id) { paints.delete(id); },
     },
+    ...globals,
   });
   return {
     renderer: module.createBrowserFrameRenderer(() => canvas), canvas, decodes, paints, draws,
@@ -377,6 +381,63 @@ test('tab resets discard stale decodes and cancel queued paints without leaking 
   assert.equal(await cancelled, false);
   assert.equal(fixture.paints.size, 0);
   assert.equal(cancelledImage.closed, 1);
+});
+
+test('WebCodecs decodes the original JPEG view without Blob or bitmap allocation', async () => {
+  const image = { displayWidth: 640, displayHeight: 400, closed: 0, close() { this.closed++; } };
+  const decoders = [];
+  class Decoder {
+    constructor(options) { this.options = options; this.closed = 0; decoders.push(this); }
+    async decode() { return { image }; }
+    close() { this.closed++; }
+  }
+  const fixture = rendererFixture({ ImageDecoder: Decoder,
+    Blob: class { constructor() { assert.fail('WebCodecs must not allocate a Blob'); } },
+    createImageBitmap: () => assert.fail('WebCodecs must draw the VideoFrame directly'),
+  });
+  const frame = decodeBrowserFrame(binaryFrame());
+  const drawing = fixture.renderer.draw(frame);
+  await flushPromises();
+  assert.equal(decoders[0].options.data, frame.image);
+  assert.equal(decoders[0].options.type, 'image/jpeg');
+  assert.equal(decoders[0].closed, 1);
+  fixture.paint();
+  assert.equal(await drawing, true);
+  assert.equal(fixture.canvas.width, 640);
+  assert.equal(fixture.canvas.height, 400);
+  assert.equal(fixture.draws[0], image);
+  assert.equal(image.closed, 1);
+});
+
+test('WebCodecs failures release the decoder and fall back to bitmap decoding', async () => {
+  let closed = 0;
+  const fixture = rendererFixture({ ImageDecoder: class {
+    async decode() { throw new Error('Unsupported codec'); }
+    close() { closed++; }
+  } });
+  const drawing = fixture.renderer.draw(decodeBrowserFrame(binaryFrame()));
+  await flushPromises();
+  assert.equal(closed, 1);
+  const image = bitmap();
+  fixture.decodes.shift()(image);
+  await flushPromises();
+  fixture.paint();
+  assert.equal(await drawing, true);
+  assert.equal(image.closed, 1);
+});
+
+test('reset closes in-flight WebCodecs work without falling back or painting stale frames', async () => {
+  let rejectDecode, closed = 0;
+  const fixture = rendererFixture({ ImageDecoder: class {
+    decode() { return new Promise((_resolve, reject) => { rejectDecode = reject; }); }
+    close() { closed++; rejectDecode(new Error('Closed')); }
+  } });
+  const drawing = fixture.renderer.draw(decodeBrowserFrame(binaryFrame()));
+  fixture.renderer.reset();
+  assert.equal(await drawing, false);
+  assert.equal(closed, 1);
+  assert.equal(fixture.decodes.length, 0);
+  assert.equal(fixture.paints.size, 0);
 });
 
 test('mouse movement keeps only the latest position and flushes before discrete inputs', () => {

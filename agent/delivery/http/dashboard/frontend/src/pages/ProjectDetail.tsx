@@ -14,6 +14,8 @@ import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
 import { projectChatState, prepareProjectChatWorkspace } from "@/lib/projects";
+import { sameJsonValue } from "@/lib/utils";
+import { useVisibleInterval } from "@/lib/useVisibleInterval";
 import type { ProjectSummary } from "@/types";
 
 const RESOURCE_TABS = [
@@ -52,16 +54,20 @@ export function ProjectDetailPage() {
     const refreshMirror = () => { if (!saving() && !loading() && !opening()) void load(true); };
     window.addEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED, refreshMirror);
     onCleanup(() => window.removeEventListener(CUSTOM_DOM_EVENTS.WORKSPACE_FILES_CHANGED, refreshMirror));
-    const timer = window.setInterval(async () => {
-      if (!project() || saving() || loading() || opening()) return;
-      const version = revision;
-      try {
-        const result = await apiFetch<ProjectSummary>(`${API_PATHS.projects}/${project()!.id}`);
-        if (version === revision) setProject(result);
-      } catch { /* Keep the current editor and last known storage state. */ }
-    }, 5000);
-    onCleanup(() => window.clearInterval(timer));
   });
+  let polling = false;
+  useVisibleInterval(async () => {
+    const current = project();
+    if (!current || polling || saving() || loading() || opening()) return;
+    polling = true;
+    const version = revision;
+    try {
+      const result = await apiFetch<ProjectSummary>(`${API_PATHS.projects}/${current.id}`);
+      if (version === revision && document.visibilityState !== "hidden"
+        && !saving() && !loading() && !opening() && !sameJsonValue(project(), result)) setProject(result);
+    } catch { /* Keep the current editor and last known storage state. */ }
+    finally { polling = false; }
+  }, 5000);
   const openChat = async () => {
     if (opening() || !project()) return;
     const current = project()!;

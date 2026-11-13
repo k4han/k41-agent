@@ -11,7 +11,7 @@ catalog entry so that workspace is easy to return to.
 
 Use the workspace selector in chat to select the context for the task. A local
 workspace runs on the K41 host. Optional Daytona, Modal and
-[Instabox](../instabox.md) backends provide remote execution when configured.
+[Instabox](https://github.com/k4han/k41-agent/blob/main/docs/instabox.md) backends provide remote execution when configured.
 
 New project conversations use local execution. Moving an existing conversation
 to another execution environment is an explicit session change.

@@ -121,8 +121,8 @@ test('indexed tool results retain row identity and work after snapshots and lega
     const row = items()[0];
     const payload = { output: ['done'] };
     assert.equal(setToolResult('first', 'read', payload), true);
-    payload.output.push('external mutation');
     assert.equal(items()[0], row);
+    assert.equal(store.unwrap(row.result), payload);
     assert.equal(row.result.output.length, 1);
     assert.equal(items()[1].result, null);
     assert.equal(setToolResult('', 'read', 'legacy result'), true);
@@ -137,6 +137,65 @@ test('indexed tool results retain row identity and work after snapshots and lega
     setItems([]);
     assert.equal(setToolResult('third', 'shell', 'removed'), false);
   });
+});
+
+test('large tool snapshots share outputs and replace results without mutating previous outputs', t => {
+  let resultClones = 0;
+  const large = { output: [{ text: 'file contents\n'.repeat(100_000) }] };
+  const { createTranscriptItems } = loadModule('../src/lib/chatStreamStore.ts', {
+    '@/lib/utils': { cloneValue(value) {
+      if (value === large || value?.result === large) resultClones++;
+      return structuredClone(value);
+    } },
+  });
+  mount(t, () => {
+    const first = { id: 1, type: 'tool', name: 'read', tool_call_id: 'first', result: large };
+    const [items, setItems, , appendItem, , setToolResult] = createTranscriptItems([first]);
+    assert.equal(store.unwrap(items()[0].result), large);
+    appendItem({ ...first, id: 2, tool_call_id: 'second' });
+    assert.equal(store.unwrap(items()[1].result), large);
+    setToolResult('second', 'read', large);
+    const replacement = { output: [{ text: 'replacement' }] };
+    setItems([{ ...first, result: replacement }, { ...first, id: 2, tool_call_id: 'second' }]);
+    assert.equal(store.unwrap(items()[0].result), replacement);
+    assert.equal(store.unwrap(items()[1].result), large);
+    assert.equal(large.output[0].text, 'file contents\n'.repeat(100_000));
+    setToolResult('first', 'read', large);
+    assert.equal(store.unwrap(items()[0].result), large);
+    assert.deepEqual(replacement, { output: [{ text: 'replacement' }] });
+    assert.equal(resultClones, 0);
+  });
+});
+
+test('visible intervals stop while hidden, refresh on return, and clean up on disposal', async t => {
+  const timers = new Map(), listeners = new Map();
+  let sequence = 0, ticks = 0;
+  const document = {
+    visibilityState: 'visible',
+    addEventListener: (name, callback) => listeners.set(name, callback),
+    removeEventListener: name => listeners.delete(name),
+  };
+  const { useVisibleInterval } = loadModule('../src/lib/useVisibleInterval.ts', {}, { document, window: {
+    setInterval(callback, delay) { const id = ++sequence; timers.set(id, { callback, delay }); return id; },
+    clearInterval(id) { timers.delete(id); },
+  } });
+  const { dispose } = mount(t, () => useVisibleInterval(() => ticks++, 30_000));
+  await tick();
+  assert.equal(ticks, 1);
+  assert.equal([...timers.values()][0].delay, 30_000);
+  const staleTick = [...timers.values()][0].callback;
+  document.visibilityState = 'hidden';
+  listeners.get('visibilitychange')();
+  staleTick();
+  assert.equal(ticks, 1);
+  assert.equal(timers.size, 0);
+  document.visibilityState = 'visible';
+  listeners.get('visibilitychange')();
+  assert.equal(ticks, 2);
+  assert.equal(timers.size, 1);
+  dispose();
+  assert.equal(timers.size, 0);
+  assert.equal(listeners.size, 0);
 });
 
 test('tool completion updates waiting state without rebuilding groups or rematching empty results', t => {

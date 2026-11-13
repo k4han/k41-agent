@@ -8,6 +8,13 @@ import type { ChatModelPreference } from "@/lib/chatModelPreference";
 
 export type ChatTranscriptItem = TranscriptItem & { id: number; key?: string };
 
+/** Incoming tool outputs transfer ownership as immutable snapshots. */
+function copyTranscriptItem(item: ChatTranscriptItem): ChatTranscriptItem {
+  if (item.type !== "tool") return cloneValue(unwrap(item));
+  const { result, ...metadata } = unwrap(item);
+  return { ...cloneValue(metadata), result };
+}
+
 export type TranscriptItemsUpdater =
   | ChatTranscriptItem[]
   | ((previous: ChatTranscriptItem[]) => ChatTranscriptItem[]);
@@ -22,7 +29,7 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
   setToolResult: (toolCallId: string, name: string, result: unknown) => boolean,
   finishThinking: (id: number, durationMs: number) => void,
 ] {
-  const [state, setState] = createStore({ items: cloneValue(unwrap(initialItems)) });
+  const [state, setState] = createStore({ items: initialItems.map(copyTranscriptItem) });
   const indices = new Map<number, number>();
   const toolIndices = new Map<string, number>();
   const indexItem = (item: ChatTranscriptItem, index: number) => {
@@ -36,10 +43,25 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
     () => state.items,
     (update) => {
       const next = untrack(() => typeof update === "function" ? update(unwrap(state.items)) : update);
+      const previous = new Map(unwrap(state.items).map((item) => [item.id, item]));
+      // Reconcile row metadata while replacing opaque results as whole values.
+      // Recursing into results would mutate a previous snapshot's shared data.
+      const snapshots = next.map((item) => {
+        if (item.type !== "tool") return item;
+        const previousItem = previous.get(item.id);
+        return { ...item, result: previousItem?.type === "tool" ? previousItem.result : undefined };
+      });
       indices.clear();
       toolIndices.clear();
       next.forEach(indexItem);
-      setState("items", reconcile(next, { key: "id" }));
+      batch(() => {
+        setState("items", reconcile(snapshots, { key: "id" }));
+        next.forEach((item, index) => {
+          if (item.type === "tool") setState("items", index, produce((row) => {
+            if (row.type === "tool") row.result = item.result;
+          }));
+        });
+      });
       return state.items;
     },
     (chunks) => untrack(() => batch(() => {
@@ -55,7 +77,7 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
       const index = state.items.length;
       indexItem(item, index);
       // Append through the store path without copying or reconciling history.
-      setState("items", index, cloneValue(unwrap(item)));
+      setState("items", index, copyTranscriptItem(item));
     }),
     (id, text) => untrack(() => {
       const index = indices.get(id);
@@ -78,7 +100,7 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
         }
       }
       if (index === undefined) return false;
-      const nextResult = cloneValue(unwrap(result));
+      const nextResult = unwrap(result);
       setState("items", index, produce((item) => {
         if (item.type === "tool") {
           item.result = nextResult;

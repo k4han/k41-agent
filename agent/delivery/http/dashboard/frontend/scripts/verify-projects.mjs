@@ -46,6 +46,7 @@ let unavailable = false;
 let delayRuntimeFailure = false;
 let failPendingRuntime;
 const detailRequests = [];
+let navRequests = 0;
 const instructionRequests = [];
 let failCatalog = false;
 let failInstructions = false;
@@ -298,6 +299,7 @@ const server = http.createServer(async (req, res) => {
     }
     const ordered = rows => [...rows].sort((a, b) => Number(b.is_pinned) - Number(a.is_pinned) || a.key.localeCompare(b.key));
     if (url.pathname === '/dashboard-api/nav-projects') {
+      navRequests++;
       send({ projects: ordered(projects.filter(project => project.status === 'active')).map(project => ({ ...project, threads: [] })), has_more: false, next_cursor: null }); return;
     }
     if (url.pathname === '/dashboard-api/projects' && req.method === 'GET') {
@@ -396,6 +398,13 @@ try {
   await call('Page.navigate', { url: `${base}/projects` });
   await until(() => js(`document.querySelectorAll('.project-card').length === 2 && document.querySelectorAll('.nav-history-workspace').length === 2`), 'empty project catalog and navigation');
   assert.equal(await js(`document.querySelectorAll('.nav-history-item').length`), 0);
+  const beforeThreadEvents = navRequests;
+  await js(`for (let index = 0; index < 50; index++) window.dispatchEvent(new CustomEvent('k41:threads-changed'))`);
+  await delay(100);
+  assert.equal(navRequests, beforeThreadEvents, 'Thread events wait for the debounce delay.');
+  await until(() => navRequests === beforeThreadEvents + 1, 'thread events coalesce into one navigation refresh');
+  await delay(300);
+  assert.equal(navRequests, beforeThreadEvents + 1);
   failCatalog = true;
   await js(`document.querySelector('[aria-label="Refresh projects"]').click()`);
   await until(() => js(`document.querySelector('[role="alert"]')?.textContent.includes('Catalog unavailable.')`), 'catalog error');
@@ -498,6 +507,16 @@ try {
   await delay(200);
   assert.equal(dialogCount, beforeBackgroundDialog, 'Status polling must not ask to discard the draft.');
   assert.equal(instructionRequests.length, beforeBackgroundRead, 'Status polling must not reload instructions.');
+  const backgroundTarget = await call('Target.createTarget', { url: 'about:blank' });
+  await until(() => js(`document.visibilityState === 'hidden'`), 'project page is hidden');
+  await delay(100);
+  const hiddenReads = detailRequests.length;
+  await delay(5500);
+  assert.equal(detailRequests.length, hiddenReads, 'Hidden project pages stop status polling.');
+  await call('Target.closeTarget', { targetId: backgroundTarget.targetId });
+  await call('Page.bringToFront');
+  await until(() => detailRequests.length > hiddenReads, 'returning to the project immediately refreshes its status');
+  assert.equal(await js(`document.querySelector('[aria-label="AGENTS.md content"]').value`), 'Preserved draft');
   const beforeCheckpointRefresh = detailRequests.length;
   await clickText('Save now');
   await until(async () => detailRequests.length > beforeCheckpointRefresh && await js(`!!document.querySelector('[aria-label="AGENTS.md content"]') && !document.querySelector('.projects-page [role="status"]')?.textContent.includes('Loading project')`), 'checkpoint keeps editor');

@@ -24,21 +24,54 @@ export type BrowserStreamMetrics = {
   pendingBytes: number; frameBytes: number; targetFps: number; sourceDroppedFrames: number; pacingDroppedFrames: number;
 };
 
-export type BrowserFrame = { id: number; width: number; height: number; image: Blob };
+export type BrowserFrame = { id: number; width: number; height: number; image: Uint8Array<ArrayBuffer> };
+
+type BrowserImageDecoder = {
+  decode: () => Promise<{ image: VideoFrame }>;
+  close: () => void;
+};
+type BrowserImageDecoderConstructor = new (options: {
+  data: Uint8Array<ArrayBuffer>; type: string;
+}) => BrowserImageDecoder;
 
 export function decodeBrowserFrame(data: ArrayBuffer): BrowserFrame {
   if (data.byteLength <= 12 || data.byteLength > 16 * 1024 * 1024) throw new Error("Invalid browser frame.");
   const header = new DataView(data);
   const id = header.getUint32(0), width = header.getUint32(4), height = header.getUint32(8);
   if (!id || !width || !height || width > 8192 || height > 8192) throw new Error("Invalid browser frame header.");
-  return { id, width, height, image: new Blob([new Uint8Array(data, 12)], { type: "image/jpeg" }) };
+  return { id, width, height, image: new Uint8Array(data, 12) };
 }
 
 export function createBrowserFrameRenderer(canvas: () => HTMLCanvasElement | undefined) {
   let revision = 0;
   let cancelPaint: (() => void) | undefined;
+  let decoder: BrowserImageDecoder | undefined;
   let timing = { decodeMs: 0, renderMs: 0 };
-  const reset = () => { revision++; cancelPaint?.(); cancelPaint = undefined; };
+  const reset = () => {
+    revision++;
+    decoder?.close(); decoder = undefined;
+    cancelPaint?.(); cancelPaint = undefined;
+  };
+  const decode = async (frame: BrowserFrame, current: number): Promise<ImageBitmap | VideoFrame> => {
+    const Decoder = (globalThis as typeof globalThis & { ImageDecoder?: BrowserImageDecoderConstructor }).ImageDecoder;
+    if (Decoder) {
+      let activeDecoder: BrowserImageDecoder | undefined;
+      try {
+        activeDecoder = new Decoder({ data: frame.image, type: "image/jpeg" });
+        decoder = activeDecoder;
+        return (await activeDecoder.decode()).image;
+      } catch (cause) {
+        if (current !== revision) throw cause;
+        // Fall back for unsupported codecs and browser-specific decode failures.
+      } finally {
+        if (decoder === activeDecoder) {
+          activeDecoder?.close();
+          decoder = undefined;
+        }
+      }
+    }
+    return createImageBitmap(new Blob([frame.image], { type: "image/jpeg" }));
+  };
   return {
     reset,
     get timing() { return timing; },
@@ -46,8 +79,8 @@ export function createBrowserFrameRenderer(canvas: () => HTMLCanvasElement | und
       reset();
       const current = revision;
       const started = performance.now();
-      let bitmap: ImageBitmap;
-      try { bitmap = await createImageBitmap(frame.image); }
+      let bitmap: ImageBitmap | VideoFrame;
+      try { bitmap = await decode(frame, current); }
       catch (cause) { if (current !== revision) return false; throw cause; }
       if (current !== revision) { bitmap.close(); return false; }
       const decoded = performance.now();
@@ -59,8 +92,10 @@ export function createBrowserFrameRenderer(canvas: () => HTMLCanvasElement | und
             const target = canvas();
             const context = target?.getContext("2d");
             if (!target || !context) throw new Error("Browser canvas is unavailable.");
-            if (target.width !== bitmap.width) target.width = bitmap.width;
-            if (target.height !== bitmap.height) target.height = bitmap.height;
+            const width = "displayWidth" in bitmap ? bitmap.displayWidth : bitmap.width;
+            const height = "displayHeight" in bitmap ? bitmap.displayHeight : bitmap.height;
+            if (target.width !== width) target.width = width;
+            if (target.height !== height) target.height = height;
             context.drawImage(bitmap, 0, 0);
             timing = { decodeMs: decoded - started, renderMs: performance.now() - decoded };
             resolve(true);

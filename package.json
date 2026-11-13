@@ -12,6 +12,7 @@
     "docs:preview": "vitepress preview docs --host 127.0.0.1 --port 4174"
   },
   "devDependencies": {
+    "esbuild": "0.27.7",
     "vitepress": "1.6.4"
   }
 }

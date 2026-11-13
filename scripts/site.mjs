@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { createReadStream, existsSync, watch } from "node:fs";
-import { cp, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { transform } from "esbuild";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const source = path.join(root, "website");
@@ -62,6 +63,9 @@ async function build() {
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
   await cp(source, output, { recursive: true });
+  const stylesheet = await readFile(path.join(source, "styles.css"), "utf8");
+  const minified = await transform(stylesheet, { loader: "css", minify: true });
+  await writeFile(path.join(output, "styles.css"), minified.code);
   for (const installer of installers) await cp(path.join(root, installer), path.join(output, installer));
   await cp(path.join(root, "CNAME"), path.join(output, "CNAME"));
   await cp(docsOutput, path.join(output, "docs"), { recursive: true });

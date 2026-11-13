@@ -261,6 +261,83 @@ test('project conversations load inline across pages and remain expanded after r
   assert.equal(store.threads().filter(row => row.workspace_key === key).length, 25);
 });
 
+test('background refresh loads only active expanded conversations and retains other cached rows', async () => {
+  const calls = [];
+  let previewTitle = 'Original';
+  const rows = key => [...project(key).threads, { thread_id: `${key}-older`, workspace_key: key }];
+  const store = createNavProjectsStore(async () => {
+    const page = payload(['one', 'two']);
+    page.projects[1].threads[0].title = previewTitle;
+    return page;
+  }, async url => {
+    const key = new URL(url, 'http://localhost').searchParams.get('project_key');
+    calls.push(key);
+    return { threads: rows(key), has_more: false, next_offset: 2 };
+  });
+  store.setActiveThreadId('one-thread');
+  await store.load(true);
+  await store.loadProjectThreads('one');
+  await store.loadProjectThreads('two');
+  calls.length = 0;
+  previewTitle = 'Updated preview';
+  await store.load(true, false);
+  assert.deepEqual(calls, ['one']);
+  assert.deepEqual(store.groups().find(group => group.key === 'two').threads,
+    rows('two').map((row, index) => index === 0 ? { ...row, title: previewTitle } : row));
+  calls.length = 0;
+  store.setActiveThreadId('two-older');
+  await store.load();
+  assert.deepEqual(calls, ['two']);
+  calls.length = 0;
+  await store.load(true);
+  assert.deepEqual(calls.sort(), ['one', 'two'], 'explicit refresh still reloads all expanded projects');
+});
+
+test('background refresh without an active chat does not fetch expanded conversation lists', async () => {
+  let requests = 0;
+  const store = createNavProjectsStore(async () => payload(['one']), async () => {
+    requests++;
+    return { threads: project('one').threads, has_more: false, next_offset: 1 };
+  });
+  await store.load(true);
+  await store.loadProjectThreads('one');
+  await store.load(true, false);
+  assert.equal(requests, 1);
+  assert.equal(store.projectState('one').expanded, true);
+});
+
+test('fresh previews take precedence over cached conversations moved between projects', async () => {
+  let moved = false;
+  const moving = { thread_id: 'moving', workspace_key: 'one' };
+  const store = createNavProjectsStore(async () => {
+    const page = payload(['one', 'two']);
+    if (moved) page.projects[1].threads.push({ ...moving, workspace_key: 'two' });
+    return page;
+  }, async () => ({ threads: [...project('one').threads, moving], has_more: false, next_offset: 2 }));
+  await store.load(true);
+  await store.loadProjectThreads('one');
+  moved = true;
+  await store.load(true, false);
+  assert.equal(store.threads().filter(row => row.thread_id === 'moving').length, 1);
+  assert.equal(store.threads().find(row => row.thread_id === 'moving').workspace_key, 'two');
+  assert.equal(store.groups().find(group => group.key === 'one').threads.some(row => row.thread_id === 'moving'), false);
+});
+
+test('thread synchronization groups each unique row once regardless of project count', async () => {
+  const keys = Array.from({ length: 100 }, (_, index) => `project-${index}`);
+  const store = createNavProjectsStore(async () => payload(keys));
+  await store.load(true);
+  let keyReads = 0;
+  const rows = keys.flatMap(key => Array.from({ length: 10 }, (_, index) => ({
+    thread_id: `${key}-${index}`,
+    get workspace_key() { keyReads++; return key; },
+  })));
+  store.updateThreads([...rows, rows[0]]);
+  assert.equal(store.threads().length, rows.length);
+  assert.ok(keyReads <= rows.length * 2, `Expected linear grouping, got ${keyReads} workspace key reads`);
+  assert.ok(store.groups().every(group => group.threads.length === 10));
+});
+
 test('duplicate project clicks share a request and failed pagination can retry without losing rows', async () => {
   const requests = [];
   const store = createNavProjectsStore(async () => payload(['one']), url => new Promise((resolve, reject) => requests.push({ url, resolve, reject })));

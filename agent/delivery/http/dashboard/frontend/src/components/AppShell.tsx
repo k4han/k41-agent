@@ -131,6 +131,7 @@ export function AppShell(props: {
   const chatViewport = useVisualViewport(() => Boolean(props.noHeader) && isMobileViewport());
   let disposed = false;
   let deferredHistoryLoad: DeferredHistoryLoad | null = null;
+  let threadsChangedTimer: number | undefined;
 
 
   const runningThreadIds = createMemo(() => {
@@ -309,12 +310,16 @@ export function AppShell(props: {
   };
 
   const handleThreadsChanged = () => {
-    if (!collapsed() || mobileDrawerOpen() || isHistoryActive()) {
-      void loadHistory(true);
-      return;
-    }
-
-    applyHistoryState({ loaded: false });
+    window.clearTimeout(threadsChangedTimer);
+    threadsChangedTimer = window.setTimeout(() => {
+      threadsChangedTimer = undefined;
+      if (disposed) return;
+      if (!collapsed() || mobileDrawerOpen() || isHistoryActive()) {
+        void navProjectsStore.load(true, false);
+      } else {
+        applyHistoryState({ loaded: false });
+      }
+    }, 250);
   };
 
   const setSidebarCollapsed = (next: boolean) => {
@@ -750,6 +755,7 @@ export function AppShell(props: {
 
   onCleanup(() => {
     disposed = true;
+    window.clearTimeout(threadsChangedTimer);
     cancelDeferredHistoryLoad();
     document.removeEventListener("click", handleClickOutside);
     document.removeEventListener("keydown", handleKeydown);

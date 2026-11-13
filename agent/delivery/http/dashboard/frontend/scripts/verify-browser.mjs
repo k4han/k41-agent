@@ -31,7 +31,7 @@ const ihdr = Buffer.alloc(13);
 ihdr.writeUInt32BE(1280); ihdr.writeUInt32BE(800, 4); ihdr[8] = 8; ihdr[9] = 2;
 const pixels = Buffer.alloc((1280 * 3 + 1) * 800, 255);
 for (let row = 0; row < 800; row++) pixels[row * (1280 * 3 + 1)] = 0;
-const image = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(pixels)), chunk('IEND', Buffer.alloc(0))]);
+let image = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(pixels)), chunk('IEND', Buffer.alloc(0))]);
 const status = { open: true, generation: 'session', profile_id: null, mode: 'human',
   tabs: [{ id: 'tab', title: 'Sign in', url: 'http://fixture.test/login' }],
   handoff: { handoff_id: 'handoff', reason: 'Sign in directly in the browser' }, handoff_expired: false, images: [] };
@@ -272,6 +272,23 @@ try {
   await call('Page.navigate', { url: `${base}/c/browser-test` });
   await until(() => js('document.querySelector(".browser-screen:not([hidden]) canvas")?.width === 1280'), 'live browser canvas');
   await until(() => frameAcknowledgements.length > 0, 'canvas acknowledges its first paint');
+  assert.deepEqual(await js('[...document.querySelector(".browser-screen canvas").getContext("2d").getImageData(0, 0, 1, 1).data]'), [255, 255, 255, 255]);
+  image = Buffer.from(await js(`(async () => {
+    const canvas = document.querySelector('.browser-screen canvas');
+    const jpeg = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'));
+    if (typeof ImageDecoder === 'function') {
+      window.__imageDecodes = 0;
+      window.ImageDecoder = new Proxy(ImageDecoder, { construct(target, args) {
+        window.__imageDecodes++;
+        return new target(...args);
+      } });
+    }
+    return [...new Uint8Array(await jpeg.arrayBuffer())];
+  })()`));
+  const beforeJpegFrame = frameAcknowledgements.length;
+  for (const socket of viewers) sendFrame(socket);
+  await until(() => frameAcknowledgements.length > beforeJpegFrame, 'native JPEG frame is drawn');
+  assert.equal(await js(`typeof ImageDecoder !== 'function' || window.__imageDecodes > 0`), true, 'JPEG frames use native WebCodecs when available');
   assert.deepEqual(await js('[...document.querySelector(".browser-screen canvas").getContext("2d").getImageData(0, 0, 1, 1).data]'), [255, 255, 255, 255]);
   assert.equal(ticketRequests, 2, 'failed viewer tickets are retried automatically');
   assert.equal(await js('document.querySelector(".browser-panel [role=alert]")?.textContent || ""'), '', 'a recovered stream clears the connection error');

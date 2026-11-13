@@ -78,14 +78,24 @@ export function createNavProjectsStore(
   let revision = 0;
   let catalogRevision = 0;
   let pendingRefresh = false;
+  let refreshAllExpanded = false;
   let request: Promise<void> | null = null;
+  let threadsById = new Map<string, ThreadSummary>();
 
   const syncThreads = (next: ThreadSummary[]) => {
-    const rows = uniqueThreads(next);
+    threadsById = new Map(next.map((thread) => [thread.thread_id, thread]));
+    const rows = [...threadsById.values()];
+    const byWorkspace = new Map<string, ThreadSummary[]>();
+    for (const thread of rows) {
+      const key = threadWorkspaceKey(thread);
+      const group = byWorkspace.get(key);
+      if (group) group.push(thread);
+      else byWorkspace.set(key, [thread]);
+    }
     batch(() => {
       setThreads(rows);
       setGroups((current) => current.map((group) => ({
-        ...group, threads: rows.filter((thread) => threadWorkspaceKey(thread) === group.key),
+        ...group, threads: byWorkspace.get(group.key) ?? [],
       })));
     });
   };
@@ -102,10 +112,12 @@ export function createNavProjectsStore(
     return fetchThreads(`${API_PATHS.navProjectThreads}?${params}`);
   };
 
-  const load = (reset = false): Promise<void> => {
+  // Background events refresh only the active expanded project; explicit refreshes refresh all.
+  const load = (reset = false, refreshExpanded = true): Promise<void> => {
     if (reset) {
       revision += 1;
       pendingRefresh = true;
+      refreshAllExpanded ||= refreshExpanded;
     }
     if (request) return request;
     if (loaded() && !hasMore() && !pendingRefresh) return Promise.resolve();
@@ -116,6 +128,8 @@ export function createNavProjectsStore(
       do {
         const refresh = pendingRefresh || !loaded();
         pendingRefresh = false;
+        const refreshAll = refreshAllExpanded;
+        refreshAllExpanded = false;
         const version = revision;
         const boundary = refresh ? loadedThrough : null;
         let cursor = refresh ? null : nextCursor;
@@ -134,9 +148,18 @@ export function createNavProjectsStore(
 
           const expandedStates = new Map<string, ProjectThreadsState>();
           if (refresh) {
+            const cachedGroups = new Map(groups().map((group) => [group.key, group]));
+            const preservedProjects = new Set<string>();
+            const activeThread = projects.flatMap((project) => project.threads).find((thread) => thread.thread_id === activeThreadId)
+              ?? threadsById.get(activeThreadId);
+            const activeKey = activeThread ? threadWorkspaceKey(activeThread) : undefined;
             await Promise.all(projects.map(async (project) => {
               const state = projectStates()[project.key];
               if (!state?.expanded) return;
+              if (!refreshAll && project.key !== activeKey) {
+                preservedProjects.add(project.key);
+                return;
+              }
               const rows: ThreadSummary[] = [];
               let page: ProjectThreadsPayload;
               let offset = 0;
@@ -151,10 +174,21 @@ export function createNavProjectsStore(
                 threadIds: rows.map((thread) => thread.thread_id),
               });
             }));
+            const refreshedIds = new Set(projects.flatMap((project) => project.threads.map((thread) => thread.thread_id)));
+            for (const project of projects) {
+              if (!preservedProjects.has(project.key)) continue;
+              const cached = cachedGroups.get(project.key)?.threads ?? [];
+              const projectIds = new Set(project.threads.map((thread) => thread.thread_id));
+              project.threads = uniqueThreads([
+                ...cached.filter((thread) => !refreshedIds.has(thread.thread_id) || projectIds.has(thread.thread_id)),
+                ...project.threads,
+              ]);
+            }
           }
 
           if (version !== revision) {
             pendingRefresh = true;
+            refreshAllExpanded ||= refreshAll;
             continue;
           }
           const rows = projects.flatMap((project) => project.threads);
@@ -268,7 +302,7 @@ export function createNavProjectsStore(
     setActiveThreadId(threadId: string) {
       if (activeThreadId === threadId) return;
       activeThreadId = threadId;
-      if (loaded() || request) void load(true);
+      if (loaded() || request) void load(true, false);
     },
   };
 }

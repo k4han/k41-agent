@@ -14,6 +14,7 @@ import { API_PATHS } from "@/lib/endpoints";
 import { isSchedulerSession } from "@/lib/schedulerSessions";
 import { useSessions } from "@/lib/sessionStore";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
+import { useVisibleInterval } from "@/lib/useVisibleInterval";
 import { dateTimeInTimeZone, triggerArgsFromDateInput, truncateText } from "@/lib/utils";
 import { formatRunTime, modelLabel, RunHistoryPanel } from "@/components/scheduler/RunHistoryPanel";
 import { RunningNowPanel, RunningPill } from "@/components/scheduler/RunningNowPanel";
@@ -621,7 +622,7 @@ function TriggerFields(props: {
 }
 
 const SCHEDULER_RUNS_LOOKUP_LIMIT = 20;
-const CLOCK_TICK_MS = 1000;
+const CLOCK_TICK_MS = 30_000;
 
 const DURATION_UNITS = [
   ["weeks", "w"],
@@ -893,8 +894,7 @@ export function SchedulerPage() {
   const { showToast } = useToast();
   const { sessions } = useSessions();
 
-  const clock = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
-  onCleanup(() => clearInterval(clock));
+  useVisibleInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
 
   const schedulerSessions = createMemo(() => sessions().filter(isSchedulerSession));
   const runsByThread = createMemo(() => new Map(recentRuns().map((run) => [run.thread_id, run])));
