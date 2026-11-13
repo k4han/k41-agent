@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
+
+if TYPE_CHECKING:
+    from agent.modules.github import GitHubAutomationService
 
 router = APIRouter(tags=["github"])
 logger = logging.getLogger(__name__)
 
 
-@router.post("/channels/github/webhook")
+@router.post("/channels/github/webhook", status_code=202)
 async def github_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     event: str | None = Header(default=None, alias="X-GitHub-Event"),
     delivery_id: str | None = Header(default=None, alias="X-GitHub-Delivery"),
     signature: str | None = Header(default=None, alias="X-Hub-Signature-256"),
@@ -40,29 +44,56 @@ async def github_webhook(
         payload = await request.json()
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid GitHub webhook payload.") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid GitHub webhook payload.")
 
     try:
         service = get_github_automation_service(request)
-        result = await service.handle_webhook(
+        background_tasks.add_task(
+            _process_github_webhook,
+            service=service,
             event=event or "",
             delivery_id=delivery_id or "",
             payload=payload,
         )
+        return {"status": "accepted", "delivery_id": delivery_id or ""}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("GitHub webhook scheduling failed.")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+async def _process_github_webhook(
+    *,
+    service: GitHubAutomationService,
+    event: str,
+    delivery_id: str,
+    payload: dict[str, Any],
+) -> None:
+    try:
+        result = await service.handle_webhook(
+            event=event,
+            delivery_id=delivery_id,
+            payload=payload,
+        )
         logger.info(
             "GitHub webhook handled: event=%s delivery=%s action=%s repo=%s status=%s reason=%s",
-            event or "",
-            delivery_id or "",
+            event,
+            delivery_id,
             str(payload.get("action") or ""),
             _repository_full_name(payload),
             str(result.get("status") or ""),
             str(result.get("reason") or ""),
         )
-        return result
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("GitHub webhook processing failed.")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception:
+        logger.exception(
+            "GitHub webhook processing failed: event=%s delivery=%s action=%s repo=%s",
+            event,
+            delivery_id,
+            str(payload.get("action") or ""),
+            _repository_full_name(payload),
+        )
 
 
 def _repository_full_name(payload: dict[str, Any]) -> str:
