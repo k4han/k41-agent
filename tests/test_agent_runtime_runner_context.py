@@ -3,8 +3,11 @@ from tests.stream_fixtures import EventGraph
 import asyncio
 import base64
 import importlib
+import threading
 from contextlib import aclosing
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
@@ -479,6 +482,78 @@ async def test_run_agent_stream_builds_multimodal_user_message(monkeypatch, allo
             "kind": "image",
         },
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("run_name", ["run_agent", "run_agent_stream"])
+async def test_runner_attachment_writes_allow_event_loop_progress(
+    monkeypatch, tmp_path, run_name,
+):
+    from agent.modules.tools.runtime import thread_storage
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    storage = tmp_path / "storage"
+    monkeypatch.setattr(thread_storage, "THREAD_STORAGE_BASE_DIR", storage)
+    contents = {
+        "notes.txt": b"Attached text.",
+        "screen.png": b"image-bytes",
+        "data.bin": b"\x00\xff\x01",
+    }
+    attachments = [
+        {"kind": "text", "name": "notes.txt", "content": contents["notes.txt"].decode()},
+        {"kind": "image", "name": "screen.png", "base64": base64.b64encode(contents["screen.png"]).decode()},
+        {"kind": "file", "name": "data.bin", "base64": base64.b64encode(contents["data.bin"]).decode()},
+    ]
+    loop = asyncio.get_running_loop()
+    event_loop_thread = threading.get_ident()
+    write_threads = []
+    loop_progress = []
+    original_write_bytes = Path.write_bytes
+
+    async def record_loop_progress():
+        loop_progress.append(True)
+
+    def blocking_write_bytes(path, data):
+        if path.name in contents:
+            write_threads.append(threading.get_ident())
+            if threading.get_ident() != event_loop_thread:
+                # Simulate a write waiting while another coroutine runs.
+                asyncio.run_coroutine_threadsafe(record_loop_progress(), loop).result(timeout=5)
+        return original_write_bytes(path, data)
+
+    class _FakeGraph(EventGraph):
+        async def events(self, payload, **kwargs):
+            assert len(loop_progress) == 2 * len(contents)
+            assert all(thread != event_loop_thread for thread in write_threads)
+            for name, data in contents.items():
+                assert (workspace / ".k41-agent" / "uploads" / name).read_bytes() == data
+                assert next(storage.rglob(name)).read_bytes() == data
+            message = payload["messages"][0]
+            assert isinstance(message, HumanMessage)
+            assert [item["kind"] for item in message.additional_kwargs["attachments"]] == [
+                "text", "image", "file",
+            ]
+            yield {"messages": [AIMessage(content="done", id="ai-final")]}
+
+    catalog = SimpleNamespace(get_agent=lambda name: SimpleNamespace(
+        graph_type="react_agent", context_compact_threshold=75, tools=[],
+    ))
+    monkeypatch.setattr("agent.modules.agents.get_catalog_service", lambda: catalog)
+    monkeypatch.setattr(runner_module, "get_workflow_graph", lambda name: _FakeGraph())
+    monkeypatch.setattr(runner_module, "make_run_context", lambda **kwargs: kwargs)
+    monkeypatch.setattr(runner_module, "_record_conversation_thread", AsyncMock(return_value=None))
+    monkeypatch.setattr(runner_module, "_ingest_attachments_to_sandbox", AsyncMock())
+    monkeypatch.setattr(Path, "write_bytes", blocking_write_bytes)
+
+    events = [event async for event in getattr(runner_module, run_name)(
+        user_input="Review attachments",
+        thread_id="thread-attachment-writes",
+        workspace=str(workspace),
+        attachments=attachments,
+    )]
+
+    assert events == (["done"] if run_name == "run_agent" else [{"type": "final", "content": "done"}])
 
 
 def test_build_run_params_rejects_spoofed_text_attachment_size():

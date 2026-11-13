@@ -451,6 +451,7 @@ def _make_user_message(
     attachments: list[Any] | None = None,
     workspace: Any = None,
 ) -> HumanMessage:
+    """Build a message and persist attachments; call off the event loop."""
     message_id = f"user-{uuid4()}"
     normalized_attachments = _normalize_chat_attachments(attachments)
     if not normalized_attachments:
@@ -1263,7 +1264,10 @@ async def run_agent(
     elif resume:
         input_data = None
     else:
-        input_data = {"messages": [_make_user_message(user_input, attachments, workspace=workspace)]}
+        user_message = await asyncio.to_thread(
+            _make_user_message, user_input, attachments, workspace=workspace,
+        )
+        input_data = {"messages": [user_message]}
 
     with track_active_session(thread_id, agent_name, usage_context=usage_context) as session_id:
         async for event in stream_graph(
@@ -1447,7 +1451,9 @@ async def run_agent_stream(
                 resume=normalized_resume_payload.model_dump(exclude_none=True)
             )
     else:
-        user_message = _make_user_message(user_input, attachments, workspace=workspace)
+        user_message = await asyncio.to_thread(
+            _make_user_message, user_input, attachments, workspace=workspace,
+        )
         input_data = {"messages": [user_message]}
         user_message_id = _message_id(user_message)
         current_user_seen = False
