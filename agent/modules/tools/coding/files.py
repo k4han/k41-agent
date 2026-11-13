@@ -14,12 +14,13 @@ import shutil
 import stat
 import subprocess
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
 from typing import Any
 
 from agent.modules.tools.coding.contracts import CodingError, InvocationContext, RuntimeResult as ToolResult
-from agent.modules.tools.coding.paths import PathPermissions
+from agent.modules.tools.coding.paths import PathPermissions, PathScope, comparable_path, normalize_resolved_path
 from agent.modules.tools.coding.storage import MAX_MODEL_BYTES, MAX_MODEL_LINES, ensure_workspace_exclude
 from agent.modules.tools.runtime.output_policy import CAPTURE_NOTICE, TextCapture, captured_lines
 from agent.modules.workspaces import IGNORED_DIR_NAMES, MAX_IMAGE_READ_BYTES
@@ -27,6 +28,13 @@ from agent.modules.workspaces import compile_glob_pattern, match_glob_path, matc
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
 MAX_EDIT_BYTES = 10 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class SearchEntry:
+    path: Path
+    resolved: Path
+    is_dir: bool
 
 
 def file_version(path: Path) -> str:
@@ -265,38 +273,19 @@ class FileService:
                 regex = re.compile(re.escape(pattern) if values.get("fixed_strings") else pattern, flags)
             except re.error as exc:
                 raise CodingError("invalid_input", f"Invalid regular expression: {exc}") from exc
-        glob_regex = compile_glob_pattern(pattern) if name == "glob" else None
         results: list[Any] = []
         capture_truncated = False
         capture = TextCapture()
-        candidates, engine = self.search_candidates(base, values.get("include_dirs", False))
-        visible = []
-        for candidate in candidates:
-            resolved = candidate.resolve()
-            if not resolved.is_relative_to(base if base.is_dir() else base.parent):
-                continue
-            if resolved.is_relative_to(self.permissions.storage.root.resolve()):
-                continue
-            try:
-                self.permissions.resolve_path(context, str(resolved), "read", authorize=False)
-            except CodingError as exc:
-                if exc.code == "not_found":
-                    continue
-                raise
-            visible.append(candidate)
-        candidates = visible
+        candidates, engine = self.search_entries(name, base, values, context)
         if name == "grep" and engine == "ripgrep":
             return self.ripgrep(base, candidates, values, context)
-        for candidate in sorted(candidates):
-            resolved = candidate.resolve()
-            self.permissions.assert_allowed(context, "read", str(resolved), allow_interrupt=False)
-            rel = os.path.relpath(candidate, context.workspace).replace(os.sep, "/")
+        for candidate in candidates:
+            self.permissions.assert_allowed(context, "read", str(candidate.resolved), allow_interrupt=False)
+            rel = os.path.relpath(candidate.path, context.workspace).replace(os.sep, "/")
             if name == "glob":
-                sub = os.path.relpath(candidate, base).replace(os.sep, "/")
-                if match_glob_path(glob_regex, rel, sub, candidate.is_dir()):
-                    results.append(rel + ("/" if candidate.is_dir() else ""))
-            elif candidate.is_file() and match_include_pattern(candidate.name, values.get("include")):
-                with resolved.open("r", encoding="utf-8", errors="replace") as handle:
+                results.append(rel + ("/" if candidate.is_dir else ""))
+            else:
+                with candidate.resolved.open("r", encoding="utf-8", errors="replace") as handle:
                     for line_no, (piece, cut) in enumerate(captured_lines(handle), 1):
                         capture_truncated |= cut
                         if "\0" in piece:
@@ -319,6 +308,46 @@ class FileService:
                           capture_truncated=capture_truncated or capture.truncated,
                           warnings=["Search capture quota exceeded; some matches may be missing."]
                           if capture_truncated or capture.truncated else [])
+
+    def search_entries(self, name: str, base: Path, values: dict[str, Any],
+                       context: InvocationContext) -> tuple[list[SearchEntry], str]:
+        """Filter names before filesystem checks and resolve each target once."""
+        include_dirs = name == "glob" and values.get("include_dirs", False)
+        glob_regex = compile_glob_pattern(values["pattern"]) if name == "glob" else None
+        root = normalize_resolved_path(base if base.is_dir() else base.parent)
+        storage_root = comparable_path(self.permissions.storage.root)
+        scope = PathScope.from_context(context)
+        candidates, engine = self.search_candidates(base, include_dirs)
+        entries: list[SearchEntry] = []
+        for candidate in sorted(candidates):
+            if name == "grep":
+                if not match_include_pattern(candidate.name, values.get("include")):
+                    continue
+                is_dir = False
+            else:
+                rel = os.path.relpath(candidate, context.workspace).replace(os.sep, "/")
+                sub = os.path.relpath(candidate, base).replace(os.sep, "/")
+                if not match_glob_path(glob_regex, rel, sub, include_dirs):
+                    continue
+                is_dir = include_dirs and candidate.is_dir()
+                if not match_glob_path(glob_regex, rel, sub, is_dir):
+                    continue
+            resolved = candidate.resolve()
+            normalized = normalize_resolved_path(resolved)
+            if not normalized.is_relative_to(root) or normalized.is_relative_to(storage_root):
+                continue
+            try:
+                scope.check_skill_access(resolved, "read")
+            except CodingError as exc:
+                if exc.code == "not_found":
+                    continue
+                raise
+            if name == "grep" and not resolved.is_file():
+                continue
+            entries.append(SearchEntry(candidate, resolved, is_dir))
+            if name == "glob" and len(entries) > values.get("limit", 500):
+                break
+        return entries, engine
 
     @staticmethod
     def search_candidates(base: Path, include_dirs: bool = False) -> tuple[list[Path], str]:
@@ -352,26 +381,34 @@ class FileService:
             candidates.extend(sorted(directories))
         return candidates, engine
 
-    def ripgrep(self, base: Path, candidates: list[Path], values: dict[str, Any], context: InvocationContext) -> ToolResult:
+    def ripgrep(self, base: Path, candidates: list[SearchEntry], values: dict[str, Any], context: InvocationContext) -> ToolResult:
         matches: list[dict[str, Any]] = []
         capture = TextCapture()
         capture_truncated = False
         limit = values.get("max_results", 100)
-        files = [path for path in sorted(candidates) if path.is_file()
-                 and path.resolve().is_relative_to(base if base.is_dir() else base.parent)
-                 and not path.resolve().is_relative_to(self.permissions.storage.root.resolve())
-                 and match_include_pattern(path.name, values.get("include"))]
         root = base if base.is_dir() else base.parent
-        for start in range(0, len(files), 32):
-            for path in files[start:start + 32]:
-                self.permissions.assert_allowed(context, "read", str(path.resolve()), allow_interrupt=False)
+        start = 0
+        while start < len(candidates):
+            batch: list[SearchEntry] = []
+            targets: set[Path] = set()
+            while start < len(candidates) and len(batch) < 32:
+                candidate = candidates[start]
+                if candidate.resolved in targets:
+                    break
+                targets.add(candidate.resolved)
+                batch.append(candidate)
+                start += 1
+            for candidate in batch:
+                self.permissions.assert_allowed(context, "read", str(candidate.resolved), allow_interrupt=False)
             args = [shutil.which("rg"), "--line-number", "--with-filename", "--no-heading", "--color", "never",
                     "--max-count", str(limit + 1)]
             if values.get("fixed_strings"):
                 args.append("--fixed-strings")
             if values.get("case_insensitive"):
                 args.append("--ignore-case")
-            args += ["-e", values["pattern"], "--", *(str(path) for path in files[start:start + 32])]
+            args += ["-e", values["pattern"], "--", *(str(candidate.resolved) for candidate in batch)]
+            relative_paths = {str(candidate.resolved): os.path.relpath(candidate.path, context.workspace).replace(os.sep, "/")
+                              for candidate in batch}
             process = subprocess.Popen(args, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                        **hidden_subprocess_kwargs())
             try:
@@ -381,7 +418,7 @@ class FileService:
                     parsed = re.match(r"^(.*?):(\d+):(.*)$", decoded)
                     if parsed:
                         path, line, text = parsed.groups()
-                        matches.append({"path": os.path.relpath(path, context.workspace).replace(os.sep, "/"),
+                        matches.append({"path": relative_paths[path],
                                         "line": int(line), "text": text})
                         if len(matches) <= limit:
                             capture.append_line(f"{matches[-1]['path']}:{line}: {text}")

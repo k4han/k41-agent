@@ -5,6 +5,7 @@ import base64
 import hashlib
 import os
 import sys
+import threading
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -143,6 +144,184 @@ async def test_external_symlink_is_not_searched(coding, tmp_path):
     assert read.error.code == "permission_denied"
     search = await invoke(service, context, "grep", pattern="secret")
     assert not search.data["matches"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["python", "ripgrep"])
+@pytest.mark.parametrize(("name", "args"), [
+    ("glob", {"pattern": "**/*.{py,md}"}),
+    ("grep", {"pattern": "needle", "include": "*.{py,md}"}),
+])
+async def test_search_filters_names_before_resolving_or_authorizing(coding, monkeypatch, engine, name, args):
+    import shutil
+
+    service, context, workspace = coding
+    if engine == "ripgrep" and not shutil.which("rg"):
+        pytest.skip("ripgrep is unavailable.")
+    if engine == "python":
+        monkeypatch.setattr("agent.modules.tools.coding.files.shutil.which", lambda name: None)
+    source = workspace / "source.py"
+    source.write_text("needle\n", encoding="utf-8")
+    unrelated = [workspace / f"unrelated-{index}.txt" for index in range(256)]
+    for path in unrelated:
+        path.write_text("needle\n", encoding="utf-8")
+    context = replace(context, permission_rules=(PermissionRule(action="read", resource="*unrelated-*", effect="deny"),))
+    resolve = Path.resolve
+    resolved_paths = []
+
+    def record_resolution(path, *args, **kwargs):
+        resolved_paths.append(path)
+        return resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", record_resolution)
+    result = await invoke(service, context, name, **args)
+
+    assert result.status == "success", result.content
+    assert result.data["engine"] == engine
+    assert "source.py" in result.content
+    assert not set(unrelated).intersection(resolved_paths)
+    assert resolved_paths.count(source) == 2
+
+
+@pytest.mark.asyncio
+async def test_glob_resolves_only_enough_matches_for_limit(coding, monkeypatch):
+    service, context, workspace = coding
+    paths = [workspace / f"source-{index:03}.py" for index in range(128)]
+    for path in paths:
+        path.touch()
+    resolve = Path.resolve
+    resolved_paths = []
+
+    def record_resolution(path, *args, **kwargs):
+        resolved_paths.append(path)
+        return resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", record_resolution)
+    result = await invoke(service, context, "glob", pattern="**/*.py", limit=2)
+
+    assert result.status == "success", result.content
+    assert result.data["matches"] == ["source-000.py", "source-001.py"]
+    assert result.output_truncated and result.data["truncated"]
+    assert set(paths).intersection(resolved_paths) == set(paths[:3])
+
+
+@pytest.mark.asyncio
+async def test_search_preparation_resolves_files_off_event_loop_and_yields(coding, monkeypatch):
+    service, context, workspace = coding
+    paths = [workspace / f"source-{index:03}.py" for index in range(130)]
+    for path in paths:
+        path.touch()
+    paths = set(paths)
+    resolve = Path.resolve
+    assert_allowed = service.permissions.assert_allowed
+    resolution_threads = []
+    authorization_threads = []
+    checkpoints = []
+    authorized = []
+    loop = asyncio.get_running_loop()
+
+    def record_resolution(path, *args, **kwargs):
+        if path in paths:
+            resolution_threads.append(threading.get_ident())
+        return resolve(path, *args, **kwargs)
+
+    def record_authorization(ctx, action, resource, **kwargs):
+        if action == "read" and Path(resource) in paths:
+            authorization_threads.append(threading.get_ident())
+            authorized.append(resource)
+            if len(authorized) == 1:
+                loop.call_soon(lambda: checkpoints.append(len(authorized)))
+        return assert_allowed(ctx, action, resource, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", record_resolution)
+    monkeypatch.setattr(service.permissions, "assert_allowed", record_authorization)
+    values = SCHEMAS["grep"].model_validate({"pattern": "needle"}).model_dump()
+    await service.prepare("grep", values, context)
+
+    assert len(resolution_threads) == len(paths)
+    assert threading.get_ident() not in resolution_threads
+    assert authorization_threads == [threading.get_ident()] * len(paths)
+    assert checkpoints and 0 < checkpoints[0] < len(paths)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["python", "ripgrep"])
+async def test_search_canonical_targets_preserve_alias_paths(coding, monkeypatch, engine):
+    import shutil
+
+    from agent.modules.tools.coding.files import SearchEntry
+
+    service, context, workspace = coding
+    if engine == "ripgrep" and not shutil.which("rg"):
+        pytest.skip("ripgrep is unavailable.")
+    source = workspace / "source.py"
+    source.write_text("needle\nsecond needle\n", encoding="utf-8")
+    entries = [SearchEntry(workspace / name, source, False) for name in ("alias.py", "source.py")]
+    monkeypatch.setattr(service.files, "search_entries", lambda *args: (entries, engine))
+    result = await invoke(service, context, "grep", pattern="needle")
+
+    assert result.status == "success", result.content
+    assert [(match["path"], match["line"]) for match in result.data["matches"]] == [
+        ("alias.py", 1), ("alias.py", 2), ("source.py", 1), ("source.py", 2),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("name", "pattern"), [("grep", "secret"), ("glob", "**/*.py")])
+async def test_search_rejects_resolved_targets_outside_root(coding, tmp_path, monkeypatch, name, pattern):
+    service, context, workspace = coding
+    outside = tmp_path / "secret.py"
+    outside.write_text("secret\n", encoding="utf-8")
+    link = workspace / "link.py"
+    resolve = Path.resolve
+
+    def resolve_link(path, *args, **kwargs):
+        return outside if path == link else resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve_link)
+    monkeypatch.setattr(service.files, "search_candidates", lambda *args: ([link], "python"))
+    result = await invoke(service, context, name, pattern=pattern)
+
+    assert result.status == "success", result.content
+    assert result.data["matches"] == []
+
+
+@pytest.mark.asyncio
+async def test_search_read_approval_resumes_on_original_task(coding):
+    service, context, workspace = coding
+    (workspace / "source.py").write_text("needle\n", encoding="utf-8")
+    context = replace(context, tool_call_id="search-approval", approval_supported=True,
+                      permission_rules=(PermissionRule(action="read", resource="*source.py", effect="ask"),))
+    graph = StateGraph(dict)
+
+    async def search(state):
+        result = await invoke(service, context, "grep", pattern="needle")
+        return {"status": result.status, "content": result.content}
+
+    graph.add_node("search", search)
+    graph.add_edge(START, "search")
+    graph.add_edge("search", END)
+    compiled = graph.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "search-approval"}}
+    first = await compiled.ainvoke({}, config)
+    request = first["__interrupt__"][0].value
+    assert request["action"] == "read" and request["resource"].endswith("source.py")
+    resumed = await compiled.ainvoke(Command(resume={"action": "permission", "request_id": request["request_id"],
+                                                    "decision": "allow_once"}), config)
+    assert resumed["status"] == "success"
+    assert "source.py:1: needle" in resumed["content"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows device prefixes only.")
+def test_search_scope_checks_skill_cache_with_device_prefix(tmp_path):
+    from agent.modules.tools.coding.paths import PathScope
+
+    context = InvocationContext("default", str(tmp_path), "thread")
+    scope = PathScope.from_context(context)
+    target = Path("\\\\?\\" + str(tmp_path / ".k41-agent" / "s" / "inactive" / "guide.md"))
+    with pytest.raises(CodingError) as exc:
+        scope.check_skill_access(target, "read")
+    assert exc.value.code == "not_found"
 
 
 @pytest.mark.asyncio

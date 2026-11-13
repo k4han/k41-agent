@@ -22,13 +22,13 @@ class CodingEngine:
             if name in {"grep", "glob"}:
                 base = self.permissions.resolve_path(context, values.get("path", ""), "read", authorize=False)
                 self.permissions.assert_allowed(context, name, values["pattern"], root=str(base), include=values.get("include"))
-                candidates, _ = await asyncio.to_thread(self.files.search_candidates, base, values.get("include_dirs", False))
-                for candidate in candidates:
-                    resolved = candidate.resolve()
-                    if resolved.is_relative_to(self.storage.root.resolve()):
-                        continue
-                    if resolved.is_relative_to(base if base.is_dir() else base.parent):
-                        self.permissions.assert_allowed(context, "read", str(resolved))
+                candidates, _ = await asyncio.to_thread(self.files.search_entries, name, base, values, context)
+                for index, candidate in enumerate(candidates, 1):
+                    self.permissions.assert_allowed(context, "read", str(candidate.resolved))
+                    # Approval interrupts stay on this task; large scans must
+                    # still let other conversations and cancellations run.
+                    if index % 64 == 0:
+                        await asyncio.sleep(0)
         elif name == "bash":
             command = values["command"]
             blocked, reason = check_command_blocked(command)
