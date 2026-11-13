@@ -286,6 +286,11 @@ pnpm dashboard:check
 pnpm dashboard:build
 ```
 
+The build also generates `.gz` and `.br` variants for compressible dashboard assets
+of at least 500 bytes, keeping a variant only when it is smaller than the original.
+The server negotiates these files through `Accept-Encoding` without runtime
+compression and serves the original when no acceptable compressed file is available.
+
 Initialize the local runtime:
 
 ```sh

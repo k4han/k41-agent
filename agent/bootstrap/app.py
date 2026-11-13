@@ -11,7 +11,6 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 
 from agent.bootstrap.version import APP_VERSION
 from agent.shared.infrastructure.http_logging import HTTPLoggingMiddleware, LogViewerAccessFilter
@@ -205,7 +204,7 @@ def create_app(bootstrap_config: BootstrapConfig | None = None, container=None) 
         dashboard_assets_app = CachedStaticFiles(directory=STATIC_DIR, check_dir=False)
         fastapi_app.mount(
             "/dashboard-assets",
-            GZipMiddleware(dashboard_assets_app, minimum_size=500),
+            dashboard_assets_app,
             name="dashboard-assets",
         )
 
