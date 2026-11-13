@@ -19,6 +19,10 @@ machine or internal server.
   and list the actual frontend origins in `security.cors_origins`.
 - For PostgreSQL, install matching `pg_dump` and `pg_restore` clients on PATH.
   A missing backup client aborts the update before source replacement.
+- Windows entry points use the default Proactor event loop with SQLite.
+  PostgreSQL retains SelectorEventLoop because Psycopg's async checkpointer
+  does not support Proactor. That configuration still has a 512-socket limit;
+  use SQLite or a non-Windows host when higher concurrency is required.
 
 ## Health and readiness
 

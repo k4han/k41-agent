@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import selectors
 import time
 from contextlib import asynccontextmanager, suppress
 from copy import deepcopy
@@ -13,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.bootstrap.version import APP_VERSION
+from agent.bootstrap.event_loop import get_event_loop_factory
 from agent.shared.infrastructure.http_logging import HTTPLoggingMiddleware, LogViewerAccessFilter
 from agent.shared.infrastructure.csrf_protection import CSRFProtectionMiddleware, CSRF_HEADER_NAME
 from agent.shared.infrastructure.http_errors import register_http_exception_handlers
@@ -324,14 +324,8 @@ async def main() -> None:
 
 def run() -> None:
     try:
-        if os.name == "nt":
-            asyncio.run(
-                main(),
-                loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
-            )
-            return
-
-        asyncio.run(main())
+        loop_factory = get_event_loop_factory(app.state.container.database_type)
+        asyncio.run(main(), loop_factory=loop_factory)
     except KeyboardInterrupt:
         logger.info("Shutdown requested by user.")
 

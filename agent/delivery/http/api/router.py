@@ -2,9 +2,11 @@
 import asyncio
 import json
 import logging
+from contextlib import aclosing
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from agent.delivery.http.common.streaming import ChatStreamingResponse, stream_chat_chunks
 
 from agent.modules.admin_auth import get_current_admin
 from agent.modules.agents import get_catalog_service
@@ -71,8 +73,9 @@ def _agent_error_event(exc: BaseException) -> dict[str, str]:
 
 async def _stream_agent_chunks(params: dict[str, object]):
     try:
-        async for chunk in run_agent(**params):
-            yield chunk
+        async with aclosing(run_agent(**params)) as chunks:
+            async for chunk in chunks:
+                yield chunk
     except Exception as exc:
         logger.exception("Failed to stream agent response")
         yield json.dumps(_agent_error_event(exc), ensure_ascii=False) + "\n"
@@ -264,12 +267,12 @@ async def chat_sync(request: ChatRequest, admin: str = Depends(get_current_admin
 
 
 @router.post("/chat/stream")
-async def chat_stream(request: ChatRequest, admin: str = Depends(get_current_admin)):
+async def chat_stream(request: ChatRequest, http_request: Request, admin: str = Depends(get_current_admin)):
     """Stream the agent response as plain text chunks."""
     params = await prepare_run_params(request, browser_owner_id=f"admin:{admin}")
 
-    return StreamingResponse(
-        _stream_agent_chunks(params),
+    return ChatStreamingResponse(
+        stream_chat_chunks(_stream_agent_chunks(params), http_request),
         media_type="text/plain",
         headers=STREAM_RESPONSE_HEADERS,
     )

@@ -682,6 +682,23 @@ def test_dashboard_workspace_browse_rejects_missing_path(tmp_path: Path) -> None
     assert "Directory does not exist" in response.json()["detail"]
 
 
+@pytest.mark.asyncio
+async def test_dashboard_workspace_browse_runs_outside_event_loop(monkeypatch):
+    import threading
+
+    workspace_routes = importlib.import_module("agent.delivery.http.dashboard.routes.workspace")
+    main_thread = threading.get_ident()
+    result = {"path": "workspace", "entries": []}
+
+    def browse(path):
+        assert threading.get_ident() != main_thread
+        assert path == "workspace"
+        return result
+
+    monkeypatch.setattr(workspace_routes, "list_workspace_directories", browse)
+    assert await workspace_routes.browse_dashboard_workspace(path="workspace") == result
+
+
 def test_dashboard_workspace_resolve_uses_github_service(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

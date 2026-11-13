@@ -106,7 +106,9 @@ async def test_chat_events_survives_http_disconnect_and_reconnects(monkeypatch):
     monkeypatch.setattr(events_module, "get_chat_stream_manager", lambda: manager)
     monkeypatch.setattr(router_module, "resolve_thread_id", lambda value: value)
     try:
-        response = await events_module.chat_events(ChatRequest(message="hello"), admin="test")
+        response = await events_module.chat_events(
+            ChatRequest(message="hello"), Request({"type": "http"}, receive), admin="test",
+        )
         await asyncio.wait_for(response({"type": "http", "asgi": {"spec_version": "2.3"}}, receive, send), timeout=1)
         session = await manager.get_session("http-disconnect")
         assert not session.task.done()
@@ -114,7 +116,10 @@ async def test_chat_events_survives_http_disconnect_and_reconnects(monkeypatch):
 
         proceed.set()
         await asyncio.wait_for(session.task, timeout=1)
-        response = await events_module.reconnect(ReconnectRequest(thread_id=session.thread_id))
+        response = await events_module.reconnect(
+            ReconnectRequest(thread_id=session.thread_id),
+            Request({"type": "http"}, asyncio.Queue().get),
+        )
         replay = [application_event(json.loads(chunk)) async for chunk in response.body_iterator]
         assert replay == events
     finally:

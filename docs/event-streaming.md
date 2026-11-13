@@ -50,6 +50,14 @@ The `/v1/api/chat/events` endpoints and their `/api` aliases have been removed.
 Background SSE streams publish v3 envelopes under the `agent` event name.
 There is no alternate wire format or fallback to graph `astream`.
 
+Idle v2 HTTP streams send an empty NDJSON line every 15 seconds to keep proxy
+connections active. Clients must ignore empty lines. These transport heartbeats
+do not receive sequence numbers and are not stored in the replay log. HTTP
+disconnects close the subscription while the background run remains available
+for reconnect. The v1 plain-text stream closes its agent iterator on disconnect;
+it does not insert heartbeats into the assistant's text. Dashboard SSE streams
+already send named heartbeat events every 15 seconds.
+
 ## Delegated history
 
 `delegate_task` forwards isolated child events into the parent's v3 stream, with

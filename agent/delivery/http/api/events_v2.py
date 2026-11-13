@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from contextlib import aclosing
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from agent.delivery.http.common.streaming import ChatStreamingResponse, stream_chat_chunks
 
 from agent.delivery.http.api.router import (
     STREAM_RESPONSE_HEADERS,
@@ -31,14 +33,16 @@ router = APIRouter(
 )
 
 
-def stream_response(session=None, *, after_seq=0):
+def stream_response(request: Request, session=None, *, after_seq=0):
     async def generate():
         if session is not None:
-            async for event in session.subscribe(after_seq=after_seq):
-                yield json.dumps(event, ensure_ascii=False) + "\n"
+            async with aclosing(session.subscribe(after_seq=after_seq)) as events:
+                async for event in events:
+                    yield json.dumps(event, ensure_ascii=False) + "\n"
 
-    return StreamingResponse(
-        generate(),
+    return ChatStreamingResponse(
+        # Empty NDJSON lines are ignored by clients and do not enter replay logs.
+        stream_chat_chunks(generate(), request, heartbeat="\n"),
         media_type="application/x-ndjson",
         headers={
             **STREAM_RESPONSE_HEADERS,
@@ -53,7 +57,7 @@ def stream_response(session=None, *, after_seq=0):
 
 
 @router.post("/chat/events")
-async def chat_events(request: ChatRequest, admin: str = Depends(get_current_admin)):
+async def chat_events(request: ChatRequest, http_request: Request, admin: str = Depends(get_current_admin)):
     params = await prepare_run_params(request, browser_owner_id=f"admin:{admin}")
     thread_id = str(params["thread_id"])
     session = await get_chat_stream_manager().get_or_create_session(
@@ -70,12 +74,12 @@ async def chat_events(request: ChatRequest, admin: str = Depends(get_current_adm
                 },
             )
         )
-    return stream_response(session)
+    return stream_response(http_request, session)
 
 
 @router.post("/chat/events/edit")
 async def chat_events_edit(
-    request: EditChatRequest, admin: str = Depends(get_current_admin)
+    request: EditChatRequest, http_request: Request, admin: str = Depends(get_current_admin)
 ):
     params = await prepare_edit_params(request, admin)
     session = await get_chat_stream_manager().get_or_create_session(
@@ -83,11 +87,11 @@ async def chat_events_edit(
         params,
         run_fn=run_agent_edit_protocol_stream,
     )
-    return stream_response(session)
+    return stream_response(http_request, session)
 
 
 @router.post("/chat/events/reconnect")
-async def reconnect(request: ReconnectRequest):
+async def reconnect(request: ReconnectRequest, http_request: Request):
     session = await get_chat_stream_manager().get_session(
         resolve_thread_id(request.thread_id)
     )
@@ -103,7 +107,7 @@ async def reconnect(request: ReconnectRequest):
                 "message": "The stream belongs to a different run.",
             },
         )
-    return stream_response(session, after_seq=request.after_seq or 0)
+    return stream_response(http_request, session, after_seq=request.after_seq or 0)
 
 
 @router.get("/chat/{thread_id}/subagents/{delegation_id}")

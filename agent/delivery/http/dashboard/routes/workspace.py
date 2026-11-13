@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+import anyio
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -157,7 +158,7 @@ async def browse_dashboard_workspace(
 ) -> dict[str, Any]:
     """Browse workspace directories at the given path."""
     try:
-        return list_workspace_directories(path)
+        return await anyio.to_thread.run_sync(list_workspace_directories, path)
     except Exception as exc:
         raise workspace_http_error(exc) from exc
 

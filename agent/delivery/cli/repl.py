@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import selectors
 import sys
 from typing import Any
 
@@ -15,6 +14,7 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 from rich.console import Console
 
+from agent.bootstrap.event_loop import get_event_loop_factory
 from agent.delivery.cli.commands import (
     COMMANDS_ORDER,
     dispatch_slash_command,
@@ -193,8 +193,8 @@ async def _chat_loop(session: CLISession) -> None:
         await _stream_agent_response(session, line)
 
 
-async def _run_repl_async() -> None:
-    runtime = CLIRuntime()
+async def _run_repl_async(runtime: CLIRuntime | None = None) -> None:
+    runtime = runtime or CLIRuntime()
     session = CLISession()
     await runtime.startup()
     try:
@@ -206,15 +206,9 @@ async def _run_repl_async() -> None:
 def run_repl() -> None:
     """Synchronous entrypoint suitable for CLI command wiring."""
     try:
-        if os.name == "nt":
-            asyncio.run(
-                _run_repl_async(),
-                loop_factory=lambda: asyncio.SelectorEventLoop(
-                    selectors.SelectSelector()
-                ),
-            )
-        else:
-            asyncio.run(_run_repl_async())
+        runtime = CLIRuntime()
+        loop_factory = get_event_loop_factory(runtime.container.database_type)
+        asyncio.run(_run_repl_async(runtime), loop_factory=loop_factory)
     except KeyboardInterrupt:
         pass
 
