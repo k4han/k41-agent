@@ -9,8 +9,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
 import tempfile
-from collections.abc import AsyncIterator, Callable
+from bisect import bisect_right
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import aclosing, asynccontextmanager
 from typing import Any, AsyncGenerator
 from uuid import uuid4
@@ -26,7 +28,7 @@ from agent.shared.infrastructure.errors import (
 
 logger = logging.getLogger(__name__)
 
-# Larger replay logs spill to disk without discarding any events.
+# Bound recent event memory; archive older events to disk in batches.
 MAX_BUFFER_BYTES = 1_048_576
 
 # Grace period (in seconds) after stream completes before removing the session.
@@ -35,6 +37,100 @@ SESSION_GRACE_PERIOD_SECONDS = 30
 
 # Allow cleanup to finish before retrying cancellation, then bound the retry too.
 CANCELLATION_GRACE_PERIOD_SECONDS = 5
+
+
+def _snapshot_json(value: Any) -> Any:
+    """Copy JSON containers without serializing immutable scalar values."""
+    if isinstance(value, dict):
+        return {key: _snapshot_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_snapshot_json(item) for item in value]
+    return value
+
+
+def _snapshot_json_with_size(value: Any) -> tuple[Any, int]:
+    """Snapshot an event and conservatively account for its retained memory."""
+    if isinstance(value, dict):
+        result = {}
+        size = 0
+        for key, item in value.items():
+            child, child_size = _snapshot_json_with_size(item)
+            result[key] = child
+            size += sys.getsizeof(key) + child_size
+        return result, sys.getsizeof(result) + size
+    if isinstance(value, (list, tuple)):
+        result = []
+        size = 0
+        for item in value:
+            child, child_size = _snapshot_json_with_size(item)
+            result.append(child)
+            size += child_size
+        return result, sys.getsizeof(result) + size
+    return value, sys.getsizeof(value)
+
+
+class _ReplayLog:
+    """Keep live events in memory and archive only older batches."""
+
+    def __init__(self) -> None:
+        self._events: list[dict[str, Any]] = []
+        self._memory_bytes = 0
+        self._first_seq = 1
+        self._file = None
+        self._file_size = 0
+        # Each entry records the first sequence, byte offset, and batch length.
+        self._batches: list[tuple[int, int, int]] = []
+        self.closed = False
+
+    def append(self, event: dict[str, Any]) -> None:
+        snapshot, size = _snapshot_json_with_size(event)
+        if self._events and self._memory_bytes + size > MAX_BUFFER_BYTES:
+            self._spill()
+        self._events.append(snapshot)
+        self._memory_bytes += size
+        if self._memory_bytes > MAX_BUFFER_BYTES:
+            self._spill()
+
+    def _spill(self) -> None:
+        payload = json.dumps(self._events, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if self._file is None:
+            self._file = tempfile.TemporaryFile(mode="w+b")
+        self._file.seek(self._file_size)
+        self._file.write(payload)
+        self._batches.append((self._first_seq, self._file_size, len(payload)))
+        self._file_size += len(payload)
+        self._first_seq += len(self._events)
+        self._events = []
+        self._memory_bytes = 0
+
+    def events_after(self, after_seq: int) -> Iterator[dict[str, Any]]:
+        sequence = max(1, after_seq + 1)
+        while True:
+            if sequence >= self._first_seq:
+                index = sequence - self._first_seq
+                if index >= len(self._events):
+                    return
+                event = _snapshot_json(self._events[index])
+                sequence += 1
+                yield event
+            else:
+                batch_index = bisect_right(self._batches, sequence, key=lambda batch: batch[0]) - 1
+                first_seq, offset, length = self._batches[batch_index]
+                self._file.seek(offset)
+                events = json.loads(self._file.read(length))
+                for index in range(sequence - first_seq, len(events)):
+                    event = events[index]
+                    sequence = event["seq"] + 1
+                    yield event
+                del events
+
+    def close(self) -> None:
+        self.closed = True
+        self._events.clear()
+        self._memory_bytes = 0
+        self._batches.clear()
+        if self._file is not None:
+            self._file.close()
 
 
 class ChatStreamSession:
@@ -46,12 +142,11 @@ class ChatStreamSession:
         self.run_id = uuid4().hex
         self.last_seq = 0
         self.params = {**params, "_run_id": self.run_id}
-        self._event_log = tempfile.SpooledTemporaryFile(max_size=MAX_BUFFER_BYTES, mode="w+b")
+        self._event_log = _ReplayLog()
         self._closed = False
-        # Subscribers retain only a cursor and a single coalesced wakeup.
+        # Subscribers have independent cursors and a single coalesced wakeup.
         self.queues: set[asyncio.Queue[None]] = set()
         self.task: asyncio.Task[None] | None = None
-        self.lock = asyncio.Lock()
         self.done = False
         self._superseded = False
         self._on_done: Callable[[ChatStreamSession], None] | None = None
@@ -138,48 +233,36 @@ class ChatStreamSession:
 
     async def push_event(self, event: dict[str, Any]) -> None:
         """Append an event to the replay log and wake subscribers."""
-        async with self.lock:
-            self.last_seq += 1
-            event = {**event, "seq": self.last_seq, "event_id": f"{self.run_id}:{self.last_seq}"}
-            payload = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
-            self._event_log.seek(0, 2)
-            self._event_log.write(payload)
-            for q in self.queues:
-                if q.empty():
-                    q.put_nowait(None)
+        # Log access and subscriber registration never suspend on this event loop.
+        self.last_seq += 1
+        event = {**event, "seq": self.last_seq, "event_id": f"{self.run_id}:{self.last_seq}"}
+        self._event_log.append(event)
+        for q in self.queues:
+            if q.empty():
+                q.put_nowait(None)
 
     async def subscribe(self, *, after_seq: int = 0) -> AsyncGenerator[dict[str, Any], None]:
         """Subscribe to stream events. Yields buffered events first, then new ones."""
         q: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
-        async with self.lock:
-            if self._closed:
-                return
-            self.queues.add(q)
-        position = 0
+        if self._closed:
+            return
+        self.queues.add(q)
 
         try:
             while True:
-                async with self.lock:
-                    self._event_log.seek(position)
-                    line = self._event_log.readline()
-                    position = self._event_log.tell()
-                    is_done = self.done
-                if line:
-                    event = json.loads(line)
-                    if event["seq"] > after_seq:
-                        yield event
-                    continue
-                if is_done:
+                for event in self._event_log.events_after(after_seq):
+                    after_seq = event["seq"]
+                    yield event
+                if self.done:
                     break
                 try:
                     await asyncio.wait_for(q.get(), timeout=0.5)
                 except asyncio.TimeoutError:
                     pass
         finally:
-            async with self.lock:
-                self.queues.discard(q)
-                if self._closed and not self.queues:
-                    self._event_log.close()
+            self.queues.discard(q)
+            if self._closed and not self.queues:
+                self._event_log.close()
 
     def close(self) -> None:
         """Release the replay log after the last existing subscriber leaves."""

@@ -2,10 +2,12 @@ import asyncio
 from contextlib import aclosing, asynccontextmanager
 from contextvars import ContextVar
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import pytest_asyncio
 
+from agent.modules.agent_runtime import chat_stream_manager as stream_module
 from agent.modules.agent_runtime.chat_stream_manager import ChatStreamManager, ChatStreamSession
 from agent.modules.agent_runtime.protocol import application_event, protocol_event
 
@@ -153,6 +155,113 @@ async def test_chat_stream_session_emits_error_for_base_exception_group() -> Non
 
 
 @pytest.mark.asyncio
+async def test_live_events_use_memory_without_json_or_temporary_files(monkeypatch) -> None:
+    json_codec = SimpleNamespace(
+        dumps=Mock(side_effect=AssertionError("Live events must not be serialized for replay")),
+        loads=Mock(side_effect=AssertionError("Live events must not be decoded from replay")),
+    )
+    temporary_file = Mock(side_effect=AssertionError("Small streams must stay in memory"))
+    monkeypatch.setattr(stream_module, "json", json_codec)
+    monkeypatch.setattr(stream_module, "tempfile", SimpleNamespace(TemporaryFile=temporary_file))
+    session = ChatStreamSession("memory-only", {})
+    subscriber = _subscribe_updates(session)
+    try:
+        for index in range(20):
+            event = {"type": "message", "content": "token", "sequence": index}
+            await session.push_event(_wire_event(event))
+            assert await anext(subscriber) == event
+        session.done = True
+        assert [event async for event in subscriber] == []
+        json_codec.dumps.assert_not_called()
+        json_codec.loads.assert_not_called()
+        temporary_file.assert_not_called()
+    finally:
+        await subscriber.aclose()
+        session.close()
+
+
+@pytest.mark.asyncio
+async def test_live_subscribers_avoid_disk_reads_and_history_writes_are_batched(monkeypatch) -> None:
+    monkeypatch.setattr(stream_module, "MAX_BUFFER_BYTES", 65_536)
+    json_codec = SimpleNamespace(
+        dumps=Mock(wraps=stream_module.json.dumps), loads=Mock(wraps=stream_module.json.loads),
+    )
+    archive = Mock(wraps=stream_module.tempfile.TemporaryFile(mode="w+b"))
+    temporary_file = Mock(return_value=archive)
+    monkeypatch.setattr(stream_module, "json", json_codec)
+    monkeypatch.setattr(stream_module, "tempfile", SimpleNamespace(TemporaryFile=temporary_file))
+    session = ChatStreamSession("batched-history", {})
+    subscriber = _subscribe_updates(session)
+    events = [{"type": "message", "content": "token", "sequence": index} for index in range(1_000)]
+    try:
+        for event in events:
+            await session.push_event(_wire_event(event))
+            assert await anext(subscriber) == event
+        session.done = True
+        assert [event async for event in subscriber] == []
+        temporary_file.assert_called_once()
+        assert 0 < archive.write.call_count < len(events) // 10
+        assert archive.seek.call_count == archive.write.call_count == json_codec.dumps.call_count
+        archive.read.assert_not_called()
+        json_codec.loads.assert_not_called()
+        writes = archive.write.call_count
+
+        assert [event async for event in _subscribe_updates(session)] == events
+        assert archive.read.call_count == json_codec.loads.call_count == writes
+        assert archive.write.call_count == writes
+    finally:
+        await subscriber.aclose()
+        session.close()
+        archive.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("memory_limit", [128, 8_192])
+async def test_replay_snapshots_are_isolated_from_producers_and_other_subscribers(monkeypatch, memory_limit) -> None:
+    monkeypatch.setattr(stream_module, "MAX_BUFFER_BYTES", memory_limit)
+    session = ChatStreamSession("snapshots", {})
+    expected = {"type": "message", "content": "original", "items": [{"value": "original"}]}
+    event = _wire_event(expected)
+    try:
+        await session.push_event(event)
+        event["params"]["data"]["content"] = "producer mutation"
+        event["params"]["data"]["items"][0]["value"] = "producer mutation"
+        session.done = True
+        first = [update async for update in _subscribe_updates(session)]
+        assert first == [expected]
+        first[0]["items"][0]["value"] = "subscriber mutation"
+        second = [update async for update in _subscribe_updates(session)]
+        assert second == [expected]
+    finally:
+        session.close()
+
+
+@pytest.mark.asyncio
+async def test_reconnect_seeks_to_archived_or_recent_sequences(monkeypatch) -> None:
+    monkeypatch.setattr(stream_module, "MAX_BUFFER_BYTES", 8_192)
+    session = ChatStreamSession("resume-batches", {})
+    try:
+        for index in range(100):
+            await session.push_event(_wire_event({"type": "message", "sequence": index}))
+        session.done = True
+        for after_seq in [0, 1, 33, 98, 100, 200]:
+            replay = [event async for event in session.subscribe(after_seq=after_seq)]
+            assert [event["seq"] for event in replay] == list(range(after_seq + 1, 101))
+            assert all(event["event_id"] == f"{session.run_id}:{event['seq']}" for event in replay)
+
+        json_codec = SimpleNamespace(
+            dumps=stream_module.json.dumps,
+            loads=Mock(side_effect=AssertionError("Recent cursors must skip archived history")),
+        )
+        monkeypatch.setattr(stream_module, "json", json_codec)
+        recent = [event async for event in session.subscribe(after_seq=99)]
+        assert [event["seq"] for event in recent] == [100]
+        json_codec.loads.assert_not_called()
+    finally:
+        session.close()
+
+
+@pytest.mark.asyncio
 async def test_replay_keeps_all_events_and_final_after_spilling_to_disk(monkeypatch) -> None:
     monkeypatch.setattr("agent.modules.agent_runtime.chat_stream_manager.MAX_BUFFER_BYTES", 128)
     session = ChatStreamSession("long-stream", {})
@@ -168,8 +277,9 @@ async def test_replay_keeps_all_events_and_final_after_spilling_to_disk(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_slow_and_fast_subscribers_keep_independent_cursors_and_bounded_wakeups(monkeypatch) -> None:
-    monkeypatch.setattr("agent.modules.agent_runtime.chat_stream_manager.MAX_BUFFER_BYTES", 128)
+@pytest.mark.parametrize("memory_limit", [128, 8_192])
+async def test_slow_and_fast_subscribers_keep_independent_cursors_and_bounded_wakeups(monkeypatch, memory_limit) -> None:
+    monkeypatch.setattr(stream_module, "MAX_BUFFER_BYTES", memory_limit)
     session = ChatStreamSession("slow-reader", {})
     first = {"type": "message", "content": "initial"}
     await session.push_event(_wire_event(first))

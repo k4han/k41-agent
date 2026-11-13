@@ -39,8 +39,11 @@ Reconnect with `{"thread_id": "..."}` to replay from the beginning. To continue
 an existing transcript, supply both `run_id` and `after_seq`; only events with
 greater sequence numbers are returned. A replaced run returns `409 run_replaced`.
 An expired session returns an empty stream; reload checkpoint history in that
-case. The replay buffer spills to disk after 1 MiB and remains available for
-30 seconds after completion. Disconnecting a subscriber does not cancel execution.
+case. Recent events stay in memory with a conservative 1 MiB budget. Older events
+are serialized and archived to a temporary file in batches; live subscribers read
+recent events directly from memory. Oversized events are archived immediately.
+Replay remains available for 30 seconds after completion. Disconnecting a
+subscriber does not cancel execution.
 The existing session-stop endpoint cancels the run, including its delegated work.
 
 The `/v1/api/chat/events` endpoints and their `/api` aliases have been removed.
