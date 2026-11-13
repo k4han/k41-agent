@@ -37,7 +37,7 @@ import { apiFetch, postJson } from "@/lib/api";
 import type { BrowserHandoffResume } from "@/lib/browserViewer";
 import { getBackends } from "@/lib/catalogStore";
 import { highlightCode, languageFromPath } from "@/lib/codeHighlight";
-import { useBrowserSession } from "@/lib/useBrowserSession";
+import { useBrowserSession, type BrowserSession } from "@/lib/useBrowserSession";
 import { useComputerSession } from "@/lib/useComputerSession";
 import { matchesWorkspaceEvent, singleFlight, visibleWorkspaceDirectories, WORKSPACE_IDLE_POLL_MS, WORKSPACE_RUNNING_POLL_MS, WORKSPACE_REFRESH_DELAY_MS, type WorkspaceEventIdentity } from "@/lib/workspaceRefresh";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
@@ -233,6 +233,8 @@ export function WorkspaceExplorer(props: {
   onWorkingDirChange: (value: WorkspaceRef | string | null) => void;
   onCollapse?: () => void;
   browserRequest?: number;
+  browserSession?: BrowserSession;
+  onBrowserActiveChange?: (active: boolean) => void;
   onBrowserOpen?: () => void;
   onBrowserResume?: (payload: BrowserHandoffResume) => void;
   onBrowserHandoffChange?: (pending: boolean, threadId: string) => void;
@@ -474,13 +476,15 @@ export function WorkspaceExplorer(props: {
     && !(splitLayout() && fileExpanded()) && !(isCompact() && activeTab().startsWith("file:") && treeCollapsed());
   const changesVisible = () => openTabs().includes("changes") && lastPrimaryTab() === "changes" && !(splitLayout() && fileExpanded());
   const fileVisible = () => activeTab().startsWith("file:") && !panelActive() && !(splitLayout() && fileCollapsed());
-  const browserSession = useBrowserSession({
+  const browserSession = props.browserSession ?? useBrowserSession({
     threadId: () => props.onBrowserResume ? props.threadId || null : null,
     visible: canAutoRefresh, active: browserActive, busy: () => Boolean(props.running),
     onOpen: () => openBrowser(),
     onHandoffChange: (pending, thread) => props.onBrowserHandoffChange?.(pending, thread),
     onSessionChange: (active, thread) => props.onBrowserSessionChange?.(active, thread),
   });
+  createEffect(() => props.onBrowserActiveChange?.(browserActive()));
+  onCleanup(() => props.onBrowserActiveChange?.(false));
   const computerSession = useComputerSession(desktopBackend, desktopLocator, canAutoRefresh);
   const dismissedBrowsers = new Map<string, string>();
   let changesDismissed = false;
@@ -965,10 +969,6 @@ export function WorkspaceExplorer(props: {
     }
   };
 
-  createEffect(on(() => props.browserRequest, (request) => {
-    if (request) openTab("browser");
-  }));
-
   const openBrowser = () => {
     openTab("browser");
     props.onBrowserOpen?.();
@@ -1242,6 +1242,10 @@ export function WorkspaceExplorer(props: {
     return `${backend}:${locator}:${root}`;
   });
   createEffect(on(workspaceRefreshKey, hardRefresh));
+  // Apply browser requests queued before lazy loading after the initial reset.
+  createEffect(on(() => props.browserRequest, (request) => {
+    if (request) openTab("browser");
+  }));
 
   createEffect(on(() => [props.threadId, props.binding?.runtime_generation] as const, ([newTid], previous) => {
     // Keep workspace-owned views while rejecting reads from the previous conversation or runtime.

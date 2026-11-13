@@ -234,6 +234,9 @@ try {
   await call('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
   await call('Page.navigate', { url: base + '/chat' });
   await until(() => js('!!document.querySelector(".composer-workspace-trigger")'), 'composer project picker');
+  assert.equal(await js('!!document.querySelector(".workspace-explorer")'), false, 'the unopened workspace must not mount');
+  assert.equal(await js('performance.getEntriesByType("resource").some(entry => /\\/WorkspaceExplorer-[^/]+\\.js$/.test(entry.name))'), false,
+    'chat must not download the unopened workspace chunk');
   await js(`document.querySelector('button[aria-label="Close workspace explorer"]')?.click()`);
   await delay(300);
   assert.equal(await js('document.querySelector(".composer-workspace-label").textContent'), 'No workspace');
@@ -450,6 +453,12 @@ try {
   await until(() => js('!!document.querySelector(".chat-prompt-input") && !document.querySelector(".chat-prompt-input").disabled'), 'existing conversation');
   await js(`document.querySelector('button[aria-label="Open workspace"]')?.click()`);
   await until(() => js('!!document.querySelector(".workspace-tree-row") && !!document.querySelector(".chat-prompt-input") && !document.querySelector(".chat-prompt-input").disabled'), 'production chat and local workspace');
+  assert.equal(await js('performance.getEntriesByType("resource").filter(entry => /\\/WorkspaceExplorer-[^/]+\\.js$/.test(entry.name)).length'), 1,
+    'opening the workspace loads its separate chunk once');
+  await js('window.workspaceElement = document.querySelector(".workspace-explorer"); document.querySelector(\'button[aria-label="Close workspace explorer"]\').click()');
+  assert.equal(await js('workspaceElement === document.querySelector(".workspace-explorer")'), true, 'closing retains the mounted workspace');
+  await js('document.querySelector(\'button[aria-label="Open workspace"]\').click()');
+  assert.equal(await js('workspaceElement === document.querySelector(".workspace-explorer")'), true, 'reopening retains workspace state');
   await openPicker();
   assert.equal(await js('!!document.querySelector(".workspace-selector.locked") && !document.querySelector(".workspace-tab-btn")'), true, 'existing conversation project must remain locked');
   await escape();

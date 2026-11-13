@@ -6,7 +6,7 @@ import {
   PanelRightOpen,
   X,
 } from "lucide-solid";
-import { batch, createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, For, lazy, on, onCleanup, onMount, Show, Suspense } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { ChatComposer } from "@/components/ChatComposer";
@@ -23,7 +23,6 @@ import type { UserInputRequestSubmitPayload } from "@/components/UserInputReques
 import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
-import { WorkspaceExplorer } from "@/components/WorkspaceExplorer";
 import { ProjectLocalSync } from "@/components/ProjectLocalSync";
 import type { TodoProgress } from "@/components/ChatTodos";
 import { apiFetch, fetchWithCsrf, postJson, readError } from "@/lib/api";
@@ -92,6 +91,7 @@ import { createMediaQuery } from "@/lib/useMediaQuery";
 import { useChatScroll } from "@/lib/useChatScroll";
 import { useChatStreams } from "@/lib/useChatStreams";
 import { useWorkspaceExplorer } from "@/lib/useWorkspaceExplorer";
+import { useBrowserSession } from "@/lib/useBrowserSession";
 import { useWorkspaceRuntime } from "@/lib/useWorkspaceRuntime";
 import { fetchCatalog, getBackendDisplayName, isBackendEnabled } from "@/lib/catalogStore";
 import { useChatAttachments } from "@/lib/useChatAttachments";
@@ -114,6 +114,7 @@ import {
 } from "@/lib/chatStatus";
 
 const DAYTONA_STATUS_STARTED = "started";
+const WorkspaceExplorer = lazy(() => import("@/components/WorkspaceExplorer").then(module => ({ default: module.WorkspaceExplorer })));
 
 type WorkspaceResolveRequest = {
   kind: string;
@@ -286,6 +287,10 @@ export function ChatPage() {
   } = scroll;
 
   const explorer = useWorkspaceExplorer(() => chatShellRef);
+  const [explorerMounted, setExplorerMounted] = createSignal(false);
+  createEffect(() => {
+    if (explorer.open()) setExplorerMounted(true);
+  });
 
   createEffect(() => {
     if (isDrawerActive() && explorer.fullscreen()) {
@@ -1538,6 +1543,20 @@ export function ChatPage() {
   const showBrowserWorkspace = () => {
     if (!explorer.open()) explorer.toggle();
   };
+  const [browserActive, setBrowserActive] = createSignal(false);
+  // Discover handoffs even before the workspace UI has been loaded.
+  const browserSession = useBrowserSession({
+    threadId: () => currentThreadId() || null,
+    visible: explorer.open,
+    active: browserActive,
+    busy: conversationBusy,
+    onOpen: () => {
+      showBrowserWorkspace();
+      setBrowserRequest((value) => value + 1);
+    },
+    onHandoffChange: updateBrowserHandoff,
+    onSessionChange: (active, threadId) => setBrowserSessionThreadId(active ? threadId : null),
+  });
   const openBrowserWorkspace = () => {
     showBrowserWorkspace();
     setBrowserRequest((value) => value + 1);
@@ -2334,31 +2353,36 @@ export function ChatPage() {
                   aria-label="Resize workspace explorer"
                 />
               </Show>
-              <WorkspaceExplorer
-                browserRequest={browserRequest()}
-                onBrowserOpen={showBrowserWorkspace}
-                onBrowserHandoffChange={updateBrowserHandoff}
-                onBrowserSessionChange={(active, threadId) => setBrowserSessionThreadId(active ? threadId : null)}
-                onBrowserResume={(payload) => { if (!conversationBusy()) void sendMessage(true, payload); }}
-                binding={workspaceBinding()}
-                visible={explorer.open()}
-                fullscreen={explorer.fullscreen()}
-                splitView={true}
-                onToggleFullscreen={isDrawerActive() ? undefined : explorer.toggleFullscreen}
-                running={conversationBusy()}
-                threadId={currentThreadId()}
-                workingDir={workingDir()}
-                workspace={workspaceRef()}
-                disabled={
-                  conversationBusy()
-                  || !workspaceRef()
-                  || !(workspaceRef()?.locator || workingDir()).trim()
-                  || !currentThreadId()
-                  || (workspaceLocked() && workspaceRef()?.backend !== "modal")
-                }
-                onWorkingDirChange={setWorkspace}
-                onCollapse={explorer.toggle}
-              />
+              <Show when={explorerMounted()}>
+                <Suspense fallback={<div class="workspace-empty-view hint">Loading workspace...</div>}>
+                  <WorkspaceExplorer
+                    browserSession={browserSession}
+                    onBrowserActiveChange={setBrowserActive}
+                    browserRequest={browserRequest()}
+                    onBrowserOpen={showBrowserWorkspace}
+                    onBrowserHandoffChange={updateBrowserHandoff}
+                    onBrowserResume={(payload) => { if (!conversationBusy()) void sendMessage(true, payload); }}
+                    binding={workspaceBinding()}
+                    visible={explorer.open()}
+                    fullscreen={explorer.fullscreen()}
+                    splitView={true}
+                    onToggleFullscreen={isDrawerActive() ? undefined : explorer.toggleFullscreen}
+                    running={conversationBusy()}
+                    threadId={currentThreadId()}
+                    workingDir={workingDir()}
+                    workspace={workspaceRef()}
+                    disabled={
+                      conversationBusy()
+                      || !workspaceRef()
+                      || !(workspaceRef()?.locator || workingDir()).trim()
+                      || !currentThreadId()
+                      || (workspaceLocked() && workspaceRef()?.backend !== "modal")
+                    }
+                    onWorkingDirChange={setWorkspace}
+                    onCollapse={explorer.toggle}
+                  />
+                </Suspense>
+              </Show>
             </div>
           </div>
         )}

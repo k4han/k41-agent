@@ -11,24 +11,30 @@ const { outputText } = ts.transpileModule(source, {
 });
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const page = (text, options = {}) => ({
-  source: 'server', text, bytes: text.length, before: 'start', after: 'end', has_older: false, has_newer: false, ...options,
+  source: 'server', text, bytes: Buffer.byteLength(text), before: 'start', after: 'end', has_older: false, has_newer: false, ...options,
 });
 
-function fixture(t) {
-  const mounts = [], cleanups = [], pending = [], frames = new Map(), timers = new Map(), nodes = new Map();
-  let nextId = 0, viewer, position = 0;
+function fixture(t, { hidden = false } = {}) {
+  const mounts = [], cleanups = [], pending = [], frames = new Map(), timers = new Map(), nodes = new Map(), listeners = new Map();
+  let nextId = 0, viewer, position = 0, geometryReads = 0;
   const exports = {};
+  const document = {
+    visibilityState: hidden ? 'hidden' : 'visible',
+    addEventListener: (event, callback) => listeners.set(event, callback),
+    removeEventListener: event => listeners.delete(event),
+  };
   const viewport = {
     clientHeight: 100,
     get scrollHeight() { return 100 + (viewer?.chunks() ?? []).reduce((sum, chunk) => sum + chunk.page.text.length, 0); },
     get scrollTop() { return position; },
     set scrollTop(value) { position = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight)); },
-    getBoundingClientRect: () => ({ top: 20 }),
+    getBoundingClientRect: () => { geometryReads++; return { top: 20 }; },
     querySelectorAll() {
       return viewer.chunks().map(chunk => {
         if (!nodes.has(chunk.id)) nodes.set(chunk.id, {
           get isConnected() { return viewer.chunks().includes(chunk); },
           getBoundingClientRect() {
+            geometryReads++;
             let top = 20 - position;
             for (const item of viewer.chunks()) {
               if (item === chunk) break;
@@ -42,7 +48,7 @@ function fixture(t) {
     },
   };
   const globals = {
-    exports, URLSearchParams, AbortController, TextEncoder, Error,
+    exports, URLSearchParams, AbortController, document, Error,
     requestAnimationFrame: callback => { const id = ++nextId; frames.set(id, callback); return id; },
     cancelAnimationFrame: id => frames.delete(id),
     setInterval: callback => { const id = ++nextId; timers.set(id, callback); return id; },
@@ -63,7 +69,9 @@ function fixture(t) {
   const flush = () => { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback()); };
   t.after(() => cleanups.forEach(callback => callback()));
   return {
-    viewer, viewport, pending, frames, timers, exports, flush,
+    viewer, viewport, pending, frames, timers, exports, flush, listeners,
+    geometryReads: () => geometryReads,
+    hide(value) { document.visibilityState = value ? 'hidden' : 'visible'; listeners.get('visibilitychange')?.(); },
     poll: () => [...timers.values()].forEach(callback => callback()),
     dispose: () => cleanups.forEach(callback => callback()),
     async respond(value) { pending.shift().resolve(value); await tick(); flush(); },
@@ -90,6 +98,7 @@ test('polling follows the end and leaves a reader of history in place', async t 
   f.poll();
   await f.respond(page('b'.repeat(100), { before: 'end', after: 'end2' }));
   assert.equal(f.viewport.scrollTop, 1100);
+  assert.equal(f.geometryReads(), 0, 'live following does not measure chunk rectangles');
   f.viewport.scrollTop = 300;
   f.poll();
   await f.respond(page('new output', { after: 'end3' }));
@@ -100,6 +109,45 @@ test('polling follows the end and leaves a reader of history in place', async t 
   await f.respond(page('latest'.repeat(200)));
   assert.equal(f.viewport.scrollTop, 1200);
   assert.equal(f.viewer.newLogs(), false);
+});
+
+test('polling pauses while hidden and catches up immediately when visible', async t => {
+  const f = fixture(t);
+  await f.respond(page('initial output'));
+  const queuedPoll = [...f.timers.values()][0];
+  f.hide(true);
+  assert.equal(f.timers.size, 0);
+  queuedPoll();
+  f.poll();
+  assert.equal(f.pending.length, 0);
+  f.hide(false);
+  assert.equal(f.timers.size, 1);
+  assert.equal(f.pending.length, 1);
+  assert.equal(new URL(f.pending[0].url, 'http://local').searchParams.get('after'), 'end');
+  await f.respond(page('new output'));
+  f.dispose();
+  assert.equal(f.timers.size, 0);
+  assert.equal(f.listeners.size, 0);
+});
+
+test('a viewer mounted in a hidden tab starts polling only when shown', async t => {
+  const f = fixture(t, { hidden: true });
+  await f.respond(page('initial output'));
+  assert.equal(f.timers.size, 0);
+  f.poll();
+  assert.equal(f.pending.length, 0);
+  f.hide(false);
+  assert.equal(f.pending.length, 1);
+  assert.equal(f.timers.size, 1);
+});
+
+test('chunk sizes use original API bytes even when invalid UTF-8 was replaced', async t => {
+  const f = fixture(t);
+  await f.respond(page('\uFFFD', { bytes: 1 }));
+  assert.equal(f.viewer.chunks()[0].size, 1);
+  f.poll();
+  await f.respond(page('é🙂'));
+  assert.equal(f.viewer.chunks()[1].size, 6);
 });
 
 test('scrolling during a poll does not pull the reader down', async t => {

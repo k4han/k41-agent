@@ -1,11 +1,9 @@
 import DOMPurify from "dompurify";
-import { Check, Code2, Copy, Eye } from "lucide-solid";
 import { marked } from "marked";
 import {
   batch, createEffect, createMemo, createSignal, For, onCleanup, onMount, untrack,
   type Accessor, type Setter,
 } from "solid-js";
-import { render } from "solid-js/web";
 
 import { highlightCode, languageFromName } from "@/lib/codeHighlight";
 import { rewriteGeneratedImagePaths } from "@/lib/generatedImages";
@@ -38,6 +36,20 @@ interface MarkdownDomBlock {
 
 const DIAGRAM_FONT_FAMILY =
   'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+
+// Static Lucide icon geometry (ISC license), without a reactive root per icon.
+const MARKDOWN_ICON_SHAPES = {
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  code: '<path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/>',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  diagram: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+};
+
+function mountIcon(element: Element, icon: keyof typeof MARKDOWN_ICON_SHAPES) {
+  const compact = icon === "check" || icon === "code";
+  const size = compact ? 14 : 15;
+  element.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${compact ? 2 : 1.9}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${MARKDOWN_ICON_SHAPES[icon]}</svg>`;
+}
 
 let pelePromise: Promise<PeleApi> | null = null;
 let nextMermaidRenderId = 1;
@@ -114,8 +126,6 @@ export function Markdown(props: {
   let containerRef: HTMLDivElement | undefined;
   let disposed = false;
   let mermaidRenderFrame: number | undefined;
-  let iconDisposers = new Set<() => void>();
-  let iconDisposerByElement = new WeakMap<Element, () => void>();
   const sourceMarkup = new WeakMap<Node, string>();
   const nodeSlots = new WeakMap<Node, MarkdownNode>();
   const highlightInFlight = new WeakMap<HTMLPreElement, symbol>();
@@ -134,23 +144,11 @@ export function Markdown(props: {
     return renderBlocks(source);
   });
 
-  const cleanupIcons = () => {
-    iconDisposers.forEach((dispose) => dispose());
-    iconDisposers.clear();
-    iconDisposerByElement = new WeakMap<Element, () => void>();
-  };
-
   const cleanupNode = (node: Node) => {
     nodeSlots.delete(node);
     if (!(node instanceof Element)) return;
-    const elements = [node, ...node.querySelectorAll("button, pre, .markdown-code-title-icon, .markdown-mermaid-title-icon, .markdown-mermaid-frame")];
+    const elements = [node, ...node.querySelectorAll("pre, .markdown-mermaid-frame")];
     for (const element of elements) {
-      const dispose = iconDisposerByElement.get(element);
-      if (dispose) {
-        dispose();
-        iconDisposers.delete(dispose);
-        iconDisposerByElement.delete(element);
-      }
       if (element instanceof HTMLPreElement) {
         pendingHighlights.delete(element);
         highlightInFlight.delete(element);
@@ -166,34 +164,6 @@ export function Markdown(props: {
         mermaidOwners.delete(element);
       }
     }
-  };
-
-  const mountIcon = (element: Element, icon: "check" | "code" | "copy" | "diagram") => {
-    const currentDispose = iconDisposerByElement.get(element);
-    if (currentDispose) {
-      currentDispose();
-      iconDisposers.delete(currentDispose);
-      iconDisposerByElement.delete(element);
-    }
-    element.replaceChildren();
-
-    const dispose = render(
-      () => {
-        if (icon === "check") {
-          return <Check size={14} strokeWidth={2} />;
-        }
-        if (icon === "copy") {
-          return <Copy size={15} strokeWidth={1.9} />;
-        }
-        if (icon === "diagram") {
-          return <Eye size={15} strokeWidth={1.9} />;
-        }
-        return <Code2 size={14} strokeWidth={2} />;
-      },
-      element,
-    );
-    iconDisposerByElement.set(element, dispose);
-    iconDisposers.add(dispose);
   };
 
   // Preserve completed blocks and their controls as the trailing Markdown grows.
@@ -951,7 +921,6 @@ export function Markdown(props: {
   onCleanup(() => {
     disposed = true;
     clearMermaidRenderFrame();
-    cleanupIcons();
     pendingHighlights.clear();
     pendingMermaidFrames.clear();
     mermaidFrames.clear();

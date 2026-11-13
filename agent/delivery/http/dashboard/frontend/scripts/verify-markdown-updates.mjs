@@ -57,6 +57,8 @@ try {
           style.textContent = tokenStyles + '\\n' + markdownStyles;
           document.head.appendChild(style);
           window.highlightRequests = []; window.peleRequests = [];
+          window.copiedTexts = [];
+          Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => { window.copiedTexts.push(text); } } });
           window.sanitizedInputs = [];
           window.lexedLengths = []; window.markdownRootQueries = [];
           const lex = marked.lexer;
@@ -163,6 +165,13 @@ try {
   await setText(fence('js', 'const a = 1;'));
   await waitRequests('highlightRequests', 1);
   await js('window.codeFrame = document.querySelector(".markdown-code-frame"); window.codePre = codeFrame.querySelector("pre")');
+  assert.equal(await js('codeFrame.querySelector(".markdown-code-copy svg").getAttribute("aria-hidden")'), 'true');
+  await js('codeFrame.querySelector(".markdown-code-copy svg path").dispatchEvent(new MouseEvent("click", { bubbles: true }))');
+  await until(() => js('codeFrame.querySelector(".markdown-code-copy").title === "Copied"'), 'copy from a static icon');
+  assert.deepEqual(await js('copiedTexts'), ['const a = 1;\n']);
+  assert.equal(await js('codeFrame.querySelector(".markdown-code-copy svg path").getAttribute("d")'), 'M20 6 9 17l-5-5');
+  await until(() => js('codeFrame.querySelector(".markdown-code-copy").title === "Copy code"'), 'copy icon restored');
+  assert.equal(await js('codeFrame.querySelectorAll(".markdown-code-copy svg").length'), 1, 'restoring an icon replaces the previous SVG');
   await setText(fence('js', 'const a = 1;\nconst b = 2;'));
   await waitRequests('highlightRequests', 2);
   await js('highlightRequests[0].resolve()');

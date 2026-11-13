@@ -64,9 +64,11 @@ export function useLogViewer(viewport: () => HTMLDivElement | undefined) {
     const element = viewport();
     if (!element) return undefined;
     const top = element.getBoundingClientRect().top;
-    const node = Array.from(element.querySelectorAll<HTMLElement>("[data-log-chunk]"))
-      .find(item => item.getBoundingClientRect().bottom >= top);
-    return node ? { node, top: node.getBoundingClientRect().top } : undefined;
+    for (const node of element.querySelectorAll<HTMLElement>("[data-log-chunk]")) {
+      const rect = node.getBoundingClientRect();
+      if (rect.bottom >= top) return { node, top: rect.top };
+    }
+    return undefined;
   };
 
   const load = async (direction: Direction, probe = false): Promise<void> => {
@@ -97,13 +99,13 @@ export function useLogViewer(viewport: () => HTMLDivElement | undefined) {
       }
       const follow = direction === "latest" || (direction === "after" && wasFollowing && following && nearBottom());
       following = follow;
-      const saved = anchor();
-      const chunk = { id: ++sequence, page, size: new TextEncoder().encode(page.text).length };
+      const chunk = { id: ++sequence, page, size: page.bytes };
       const previous = chunks();
       const combined = direction === "latest" ? (page.text ? [chunk] : [])
         : !page.text ? previous
         : direction === "before" ? [chunk, ...previous] : [...previous, chunk];
       const window = trimLogWindow(combined, direction);
+      const saved = !follow && combined !== previous ? anchor() : undefined;
       adjusting = true;
       setChunks(window.chunks);
       boundary = page.after;
@@ -184,10 +186,25 @@ export function useLogViewer(viewport: () => HTMLDivElement | undefined) {
       .then(payload => { if (!disposed) setSources(payload.sources); })
       .catch(() => { /* Content requests report actionable file errors. */ });
     void load("latest");
-    const timer = setInterval(() => {
-      if (!error()) void load(chunks().length || boundary ? "after" : "latest", true);
-    }, LOG_POLL_MS);
-    onCleanup(() => clearInterval(timer));
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const poll = () => {
+      if (document.visibilityState !== "hidden" && !error()) {
+        void load(chunks().length || boundary ? "after" : "latest", true);
+      }
+    };
+    const updatePolling = () => {
+      if (timer !== undefined) clearInterval(timer);
+      timer = undefined;
+      if (document.visibilityState === "hidden") return;
+      poll();
+      timer = setInterval(poll, LOG_POLL_MS);
+    };
+    updatePolling();
+    document.addEventListener("visibilitychange", updatePolling);
+    onCleanup(() => {
+      if (timer !== undefined) clearInterval(timer);
+      document.removeEventListener("visibilitychange", updatePolling);
+    });
   });
 
   onCleanup(() => {
