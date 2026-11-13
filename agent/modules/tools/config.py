@@ -133,6 +133,13 @@ def normalize_tool_setting_value(key: str, value: Any) -> Any:
     return coerced
 
 
+def get_builtin_tool_config_schemas() -> dict[str, dict[str, Any]]:
+    """Return a snapshot of the active registry's cached builtin schemas."""
+    from agent.modules.tools.registry_service import get_registry_service
+
+    return get_registry_service().get_builtin_config_schemas()
+
+
 def seed_tool_runtime_defaults(service: ConfigService | None = None) -> int:
     """Register ``tools.*`` runtime keys and defaults from builtin tool schemas.
 
@@ -140,12 +147,9 @@ def seed_tool_runtime_defaults(service: ConfigService | None = None) -> int:
     are explicitly set. Safe to call repeatedly (idempotent).
     """
     try:
-        from agent.modules.tools import ToolSource, find_descriptors
         from agent.shared.config.service import register_runtime_defaults
 
-        schemas = serialize_tool_config_schemas(
-            find_descriptors(source=ToolSource.BUILTIN)
-        )
+        schemas = get_builtin_tool_config_schemas()
         defaults: dict[str, Any] = {}
         for tool_name, schema in schemas.items():
             default_config = schema.get("default_config") or {}
@@ -297,6 +301,7 @@ __all__ = [
     "MASKED_SECRET_VALUE",
     "ToolConfigService",
     "coerce_tool_config_value",
+    "get_builtin_tool_config_schemas",
     "materialize_tool",
     "normalize_tool_setting_value",
     "resolve_global_tool_config_schemas",

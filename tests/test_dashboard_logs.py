@@ -40,6 +40,55 @@ def test_sources_and_empty_logs(client, tmp_path):
         assert not page["has_older"] and not page["has_newer"]
 
 
+def test_source_polling_uses_metadata_without_opening_files(client, tmp_path, monkeypatch):
+    files = [("server.log.2", b"old\n"), ("server.log.1", b"backup\n"),
+             ("server.log.rotating", b"staged\n"), ("server.log", b"current\n")]
+    for name, content in files:
+        (tmp_path / name).write_bytes(content)
+
+    def fail_open(path):
+        pytest.fail("Listing log sources must not open file contents")
+
+    monkeypatch.setattr(log_reader, "_open_file", fail_open)
+    response = client.get("/dashboard-api/logs")
+    source = response.json()["sources"][0]
+    assert source["files"] == [{"name": name, "size": len(content)} for name, content in files]
+    assert source["available"] is True
+    assert source["error"] is None
+
+    (tmp_path / "server.log").write_bytes(b"appended output\n")
+    source = client.get("/dashboard-api/logs").json()["sources"][0]
+    assert source["files"][-1]["size"] == len(b"appended output\n")
+
+
+def test_source_polling_tolerates_a_backup_disappearing(client, tmp_path, monkeypatch):
+    backup = tmp_path / "server.log.1"
+    backup.write_bytes(b"backup\n")
+    (tmp_path / "server.log").write_bytes(b"current\n")
+    original = Path.lstat
+
+    def remove_then_stat(path, *args, **kwargs):
+        if path == backup:
+            path.unlink(missing_ok=True)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", remove_then_stat)
+    source = client.get("/dashboard-api/logs").json()["sources"][0]
+    assert source["files"] == [{"name": "server.log", "size": len(b"current\n")}]
+    assert source["error"] is None
+
+
+def test_source_polling_reports_unavailable_files_per_source(client, tmp_path):
+    (tmp_path / "server.log").mkdir()
+    (tmp_path / "tray.log").write_bytes(b"tray\n")
+    sources = client.get("/dashboard-api/logs").json()["sources"]
+    assert sources[0]["files"] == []
+    assert sources[0]["available"] is False
+    assert sources[0]["error"] == "Log files are currently unavailable."
+    assert sources[1]["files"] == [{"name": "tray.log", "size": len(b"tray\n")}]
+    assert sources[1]["error"] is None
+
+
 def test_tail_backward_and_forward_across_backups(client, tmp_path):
     for name, data in [("server.log.2", b"oldest\n"), ("server.log.1", b"middle\n"), ("server.log", b"newest\n")]:
         (tmp_path / name).write_bytes(data)

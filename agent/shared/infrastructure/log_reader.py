@@ -59,6 +59,25 @@ class LogSnapshotChanged(Exception):
     """Rotation changed the file inventory while it was being opened."""
 
 
+def log_file_inventory(path: Path, backup_count: int) -> list[tuple[Path, os.stat_result]]:
+    """List regular log files and their metadata without opening their contents."""
+    if any(parent.is_symlink() for parent in path.parents):
+        raise PermissionError("Log directories must not be symbolic links.")
+    paths = [Path(f"{path}.{index}") for index in range(backup_count, 0, -1)]
+    # The writer stages the newest backup here before shifting numbered files.
+    paths.extend([Path(f"{path}.rotating"), path])
+    inventory = []
+    for candidate in paths:
+        try:
+            info = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            raise PermissionError("Only regular log files can be read.")
+        inventory.append((candidate, info))
+    return inventory
+
+
 @dataclass
 class LogFile:
     path: Path
@@ -79,27 +98,9 @@ class LogSnapshot:
         self.files: list[LogFile] = []
         self._stack = ExitStack()
 
-    @staticmethod
-    def _inventory(paths: list[Path]) -> list[tuple[Path, os.stat_result]]:
-        inventory = []
-        for path in paths:
-            try:
-                info = path.lstat()
-            except FileNotFoundError:
-                continue
-            if not stat.S_ISREG(info.st_mode):
-                raise PermissionError("Only regular log files can be read.")
-            inventory.append((path, info))
-        return inventory
-
     def __enter__(self) -> LogSnapshot:
         try:
-            if any(parent.is_symlink() for parent in self.path.parents):
-                raise PermissionError("Log directories must not be symbolic links.")
-            paths = [Path(f"{self.path}.{index}") for index in range(self.backup_count, 0, -1)]
-            # The writer stages the newest backup here before shifting numbered files.
-            paths.extend([Path(f"{self.path}.rotating"), self.path])
-            inventory = self._inventory(paths)
+            inventory = log_file_inventory(self.path, self.backup_count)
             identities = set()
             for path, expected in inventory:
                 try:
@@ -115,7 +116,7 @@ class LogSnapshot:
                 identities.add(identity)
                 self.files.append(LogFile(path, stream, info))
             # Include previously absent paths so a new file cannot be silently skipped.
-            current = self._inventory(paths)
+            current = log_file_inventory(self.path, self.backup_count)
             if [(path, info.st_dev, info.st_ino) for path, info in current] != [
                 (file.path, *file.identity) for file in self.files
             ]:

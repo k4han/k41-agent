@@ -102,12 +102,14 @@ def make_dashboard_client(monkeypatch: pytest.MonkeyPatch):
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
         from agent.modules.admin_auth import get_current_admin
+        from agent.modules.tools import seed_tool_runtime_defaults
 
         from agent.delivery.http.dashboard.router import router
 
         app = FastAPI()
         app.include_router(router)
         app.state.config_service = config_service or ConfigService(sources=[DefaultConfigSource()])
+        seed_tool_runtime_defaults(app.state.config_service)
 
         async def mock_admin(req: Request) -> str:
             return "test_admin"
@@ -419,7 +421,7 @@ class TestDashboardSettingsEndpoints:
         assert not any(key.startswith("tools.") for key in data["settings"])
         assert "tools" not in data["by_category"]
 
-    def test_get_tools_api_seeds_and_returns_tool_payload(self, dashboard_client) -> None:
+    def test_get_tools_api_returns_startup_defaults_and_tool_payload(self, dashboard_client) -> None:
         resp = dashboard_client.get("/dashboard-api/tools")
 
         assert resp.status_code == 200
@@ -435,6 +437,37 @@ class TestDashboardSettingsEndpoints:
         assert "tools.web_search.google_connection" in data["settings"]
         assert "tools" in data["by_category"]
         assert set(data["settings_sources"]) == set(data["settings"])
+
+    def test_get_tools_api_reuses_schemas_and_reads_current_settings(self, make_dashboard_client, monkeypatch) -> None:
+        from agent.modules import tools
+        from agent.modules.tools import config as tool_config
+        from agent.shared.config import service as config_module
+
+        service, db_source = _db_config_service("tools:\n  web_search:\n    provider: auto")
+        client = make_dashboard_client(service)
+
+        def fail_rebuild(*args, **kwargs):
+            pytest.fail("GET requests must reuse startup defaults and serialized schemas")
+
+        monkeypatch.setattr(tools, "seed_tool_runtime_defaults", fail_rebuild)
+        monkeypatch.setattr(config_module, "register_runtime_defaults", fail_rebuild)
+        monkeypatch.setattr(tool_config, "serialize_tool_config_schemas", fail_rebuild)
+        first = client.get("/dashboard-api/tools")
+        assert first.status_code == 200
+        assert first.json()["tool_config_effective"]["web_search"]["provider"] == "auto"
+
+        db_source.update_settings({
+            "tools.web_search.provider": "google",
+            "web.connections.search.type": "google",
+            "web.connections.search.label": "Search",
+        })
+        second = client.get("/dashboard-api/tools")
+        assert second.status_code == 200
+        payload = second.json()
+        assert payload["settings"]["tools.web_search.provider"]["value"] == "google"
+        assert payload["tool_config_effective"]["web_search"]["provider"] == "google"
+        fields = {field["name"]: field for field in payload["tool_config_schemas"]["web_search"]["fields"]}
+        assert "search" in fields["google_connection"]["options"]
 
     def test_put_tool_setting_unknown_tool_returns_bad_request(self, dashboard_client) -> None:
         resp = dashboard_client.put(

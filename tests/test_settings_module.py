@@ -188,14 +188,14 @@ class TestSeedToolRuntimeDefaults:
         assert first > 0
         assert second == first
 
-    def test_seed_survives_descriptor_failure(self, monkeypatch) -> None:
-        import agent.modules.tools as tools_pkg
+    def test_seed_survives_schema_failure(self, monkeypatch) -> None:
+        from agent.modules.tools import config as tool_config
         from agent.modules.tools.config import seed_tool_runtime_defaults
 
         def _boom(*args, **kwargs):
             raise RuntimeError("descriptor load failed")
 
-        monkeypatch.setattr(tools_pkg, "find_descriptors", _boom)
+        monkeypatch.setattr(tool_config, "get_builtin_tool_config_schemas", _boom)
 
         assert seed_tool_runtime_defaults(ConfigService(sources=[DefaultConfigSource()])) == 0
 

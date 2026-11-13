@@ -8,6 +8,7 @@ the codebase so workflow nodes do not need to know about descriptors.
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from typing import Any
 
 from langchain_core.tools import BaseTool
@@ -28,6 +29,7 @@ class ToolRegistryService:
 
     def __init__(self, registry: ToolRegistry | None = None) -> None:
         self._registry = registry if registry is not None else ToolRegistry()
+        self._builtin_config_schemas: dict[str, dict[str, Any]] | None = None
 
     @property
     def registry(self) -> ToolRegistry:
@@ -38,8 +40,12 @@ class ToolRegistryService:
             if desc.id in self._registry:
                 continue
             self._registry.add(desc)
+            if desc.source is ToolSource.BUILTIN:
+                self._builtin_config_schemas = None
 
     def remove_by_source(self, source: ToolSource) -> None:
+        if source is ToolSource.BUILTIN:
+            self._builtin_config_schemas = None
         for desc in list(self._registry.find(source=source)):
             self._registry.remove(desc.id)
 
@@ -54,6 +60,18 @@ class ToolRegistryService:
                 raise ValueError(f"Unexpected tool source: {descriptor.source}")
             replacement.add(descriptor)
         self._registry = replacement
+        if source is ToolSource.BUILTIN:
+            self._builtin_config_schemas = None
+
+    def get_builtin_config_schemas(self) -> dict[str, dict[str, Any]]:
+        """Reuse serialized builtin schemas while keeping caller mutations isolated."""
+        from agent.modules.tools.config import serialize_tool_config_schemas
+
+        if self._builtin_config_schemas is None:
+            self._builtin_config_schemas = serialize_tool_config_schemas(
+                self.find(source=ToolSource.BUILTIN)
+            )
+        return deepcopy(self._builtin_config_schemas)
 
     def get_tool_by_name(self, name: str) -> BaseTool | None:
         return self._registry.get_tool(name)

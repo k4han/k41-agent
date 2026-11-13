@@ -22,11 +22,8 @@ from agent.delivery.http.dashboard.routes.helpers.settings import (
     validate_default_model_update,
 )
 from agent.modules.tools import (
-    ToolSource,
-    find_descriptors,
+    get_builtin_tool_config_schemas,
     resolve_global_tool_config_schemas,
-    seed_tool_runtime_defaults,
-    serialize_tool_config_schemas,
 )
 from agent.shared.config.web_connections import (
     connection_payload, is_legacy_web_key, translate_legacy_updates, validate_tool_references, web_tool_schemas, web_tool_sources,
@@ -59,14 +56,12 @@ async def get_settings_sources(request: Request) -> dict[str, dict[str, Any]]:
 async def get_dashboard_tools_settings(request: Request) -> dict[str, Any]:
     """Global tool configuration page: schemas, effective values, and settings."""
     service = get_request_config_service(request)
-    seed_tool_runtime_defaults(service)
     settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
     settings = {key: info for key, info in settings_raw.items() if key.startswith("tools.") and not is_legacy_web_key(key)}
     settings_sources = {
         key: info for key, info in settings_sources_raw.items() if key.startswith("tools.") and not is_legacy_web_key(key)
     }
-    descriptors = find_descriptors(source=ToolSource.BUILTIN)
-    schemas = web_tool_schemas(serialize_tool_config_schemas(descriptors), service, global_view=True)
+    schemas = web_tool_schemas(get_builtin_tool_config_schemas(), service, global_view=True)
     connections = connection_payload(service)
     for tool, schema in schemas.items():
         for field in schema["fields"]:

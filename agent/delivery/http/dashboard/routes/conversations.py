@@ -242,32 +242,38 @@ async def get_chat_thread_messages(
     """Get all messages and metadata for a specific conversation thread."""
     thread_id = resolve_thread_id(thread_id)
     try:
-        messages, active_checkpoint_id = await get_thread_messages_payload(
-            thread_id,
-            checkpoint_id=checkpoint_id,
-            include_branch_metadata=True,
+        (messages, active_checkpoint_id), metadata, workspace = await asyncio.gather(
+            get_thread_messages_payload(
+                thread_id,
+                checkpoint_id=checkpoint_id,
+                include_branch_metadata=True,
+            ),
+            get_conversation_thread(thread_id),
+            workspace_ref_for_thread(thread_id, include_default=False),
         )
     except CheckpointNotFoundError:
         raise HTTPException(status_code=404, detail="Checkpoint not found.") from None
     except ConversationHistoryUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    metadata = await get_conversation_thread(thread_id)
     parsed = metadata or _parse_thread_id_safe(thread_id)
-    workspace = await workspace_ref_for_thread(thread_id, include_default=False)
     from agent.modules.tools import pending_permission_requests
-    pending_requests = await pending_permission_requests(thread_id, checkpoint_id=active_checkpoint_id)
     from agent.bootstrap.container import require_active_container
     container = require_active_container()
-    handoff = None
+    # Permission and continuation state must use the checkpoint selected above.
+    lookups = [
+        pending_permission_requests(thread_id, checkpoint_id=active_checkpoint_id),
+        get_thread_resume_error(
+            thread_id,
+            agent_name=str(parsed.get("agent_name") or "default"),
+            checkpoint_id=active_checkpoint_id,
+        ),
+    ]
     if container.persistence_ready:
         # Browser control belongs to the live thread, even when viewing an older checkpoint.
-        handoff = await container.browser_service.owned_handoff(thread_id, f"admin:{admin}")
-    resume_error = await get_thread_resume_error(
-        thread_id,
-        agent_name=str(parsed.get("agent_name") or "default"),
-        checkpoint_id=active_checkpoint_id,
-    )
+        lookups.append(container.browser_service.owned_handoff(thread_id, f"admin:{admin}"))
+    pending_requests, resume_error, *handoffs = await asyncio.gather(*lookups)
+    handoff = handoffs[0] if handoffs else None
     return {
         "thread_id": thread_id,
         "active_checkpoint_id": active_checkpoint_id,

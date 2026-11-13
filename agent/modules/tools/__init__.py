@@ -21,6 +21,7 @@ from agent.modules.tools.domain import (
 )
 from agent.modules.tools.config import (
     coerce_tool_config_value,
+    get_builtin_tool_config_schemas,
     materialize_tool,
     normalize_tool_setting_value,
     resolve_global_tool_config_schemas,
@@ -277,6 +278,7 @@ __all__ = [
     "normalize_tool_setting_value",
     "resolve_global_tool_config_schemas",
     "seed_tool_runtime_defaults",
+    "get_builtin_tool_config_schemas",
     "serialize_tool_config_schemas",
     "THREAD_STORAGE_BASE_DIR",
     "THREAD_STORAGE_DIRS",

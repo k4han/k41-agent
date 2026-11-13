@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 
 from agent.bootstrap.logs import LOG_BACKUP_COUNT, LOG_DIR, LOG_MAX_BYTES
 from agent.shared.infrastructure.log_reader import (
-    MAX_CHUNK_BYTES, LogHistoryExpired, LogSnapshot, LogSnapshotChanged,
+    MAX_CHUNK_BYTES, LogHistoryExpired, LogSnapshot, LogSnapshotChanged, log_file_inventory,
 )
 
 router = APIRouter()
@@ -35,12 +35,13 @@ def get_log_sources(response: Response) -> dict:
     sources = []
     for source, label in LOG_SOURCES.items():
         try:
-            status = _read(source, lambda snapshot: {
-                "files": [{"name": file.path.name, "size": file.info.st_size} for file in snapshot.files],
-                "available": bool(snapshot.files), "error": None,
-            })
-        except HTTPException as exc:
-            status = {"files": [], "available": False, "error": exc.detail}
+            inventory = log_file_inventory(LOG_DIR / f"{source}.log", LOG_BACKUP_COUNT)
+            status = {
+                "files": [{"name": path.name, "size": info.st_size} for path, info in inventory],
+                "available": bool(inventory), "error": None,
+            }
+        except OSError:
+            status = {"files": [], "available": False, "error": "Log files are currently unavailable."}
         sources.append({"id": source, "label": label, **status})
     return {"sources": sources, "max_bytes": LOG_MAX_BYTES, "backup_count": LOG_BACKUP_COUNT}
 
