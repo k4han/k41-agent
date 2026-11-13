@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import inspect
 
 from agent.modules.mcp.install_repository import McpInstallRepository
 from agent.modules.mcp.repository import ConfigMcpServerRepository
 from agent.shared.infrastructure.db import Base
-from agent.shared.infrastructure.db.engine import _normalize_url_to_sync
+from agent.shared.infrastructure.db.engine import create_sync_engine as create_engine
 from agent.shared.infrastructure.parsing import parse_string_or_list
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ def _legacy_mcp_servers_from_card(card) -> list[str] | None:
 
 def migrate_mcp_tables(database_url: str) -> None:
     """Create MCP install tables and seed legacy configuration."""
-    engine = create_engine(_normalize_url_to_sync(database_url), echo=False)
+    engine = create_engine(database_url, echo=False)
     try:
         Base.metadata.create_all(engine)
         inspector = inspect(engine)

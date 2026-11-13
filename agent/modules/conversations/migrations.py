@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import re
 
-from sqlalchemy import MetaData, Table, create_engine, inspect, select, text
+from sqlalchemy import MetaData, Table, inspect, select, text
 
 from agent.shared.thread_ids import canonical_thread_id
 from agent.modules.conversations.models import ConversationThreadAlias
 
-from agent.shared.infrastructure.db.engine import _normalize_url_to_sync
+from agent.shared.infrastructure.db.engine import create_sync_engine as create_engine
 
 CONVERSATION_THREAD_COLUMNS: dict[str, str] = {
     "provider": "VARCHAR(255) NOT NULL DEFAULT ''",
@@ -24,7 +24,7 @@ def _column_names(inspector, table_name: str) -> set[str]:
 
 
 def migrate_conversation_tables(database_url: str) -> None:
-    engine = create_engine(_normalize_url_to_sync(database_url), echo=False)
+    engine = create_engine(database_url, echo=False)
     try:
         with engine.begin() as conn:
             inspector = inspect(conn)
@@ -96,7 +96,7 @@ def migrate_conversation_ids(database_url: str) -> dict[str, str]:
     migration runs in a single transaction and new code only writes
     canonical IDs, so clean thread columns imply clean JSON payloads.
     """
-    engine = create_engine(_normalize_url_to_sync(database_url), echo=False)
+    engine = create_engine(database_url, echo=False)
     try:
         with engine.begin() as conn:
             ConversationThreadAlias.__table__.create(conn, checkfirst=True)

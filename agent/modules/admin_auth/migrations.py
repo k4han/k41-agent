@@ -1,12 +1,12 @@
 """Add persistent session revocation to existing admin credentials."""
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import inspect, text
 
-from agent.shared.infrastructure.db.engine import _normalize_url_to_sync
+from agent.shared.infrastructure.db.engine import create_sync_engine as create_engine
 
 
 def migrate_admin_auth_tables(database_url: str) -> None:
-    engine = create_engine(_normalize_url_to_sync(database_url), echo=False)
+    engine = create_engine(database_url, echo=False)
     try:
         with engine.begin() as connection:
             inspector = inspect(connection)

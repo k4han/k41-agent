@@ -6,7 +6,7 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from agent.modules.agent_runtime import SessionManager, run_agent_full
@@ -14,6 +14,7 @@ from agent.modules.notifications import send_notification as _send_notification
 from agent.modules.workspaces import WorkspaceBinding
 from agent.shared.infrastructure.db.engine import (
     _normalize_url_to_sync,
+    create_sync_engine as create_engine,
 )
 from agent.shared.timezone import resolve_display_timezone
 

@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import inspect, text
 
-from agent.shared.infrastructure.db.engine import _normalize_url_to_sync
+from agent.shared.infrastructure.db.engine import create_sync_engine as create_engine
 
 WORKSPACE_COLUMNS: dict[str, str] = {
     "workspace_backend": "VARCHAR(50)",
@@ -91,7 +91,7 @@ def _backfill_legacy_workspaces(conn, table_name: str) -> None:
 
 def migrate_workspace_tables(database_url: str) -> None:
     """Add ownership columns and preserve references from older workspace schemas."""
-    engine = create_engine(_normalize_url_to_sync(database_url), echo=False)
+    engine = create_engine(database_url, echo=False)
     try:
         with engine.begin() as conn:
             inspector = inspect(conn)

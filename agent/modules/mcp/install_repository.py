@@ -9,7 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
@@ -18,7 +18,11 @@ from agent.modules.mcp.db_models import AgentMCPInstall, MCPCredential, MCPServe
 from agent.modules.mcp.models import MCPServerConfig, MCPTransport
 from agent.modules.mcp.repository import bump_db_revision
 from agent.shared.infrastructure.config_file import DEFAULT_CONFIG_PATH
-from agent.shared.infrastructure.db.engine import _normalize_url_to_sync, get_database_url
+from agent.shared.infrastructure.db.engine import (
+    _normalize_url_to_sync,
+    create_sync_engine as create_engine,
+    get_database_url,
+)
 
 logger = logging.getLogger(__name__)
 

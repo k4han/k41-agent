@@ -7,7 +7,7 @@ from typing import Any
 
 from agent.shared.thread_ids import resolve_thread_id
 
-from sqlalchemy import Engine, create_engine, select
+from sqlalchemy import Engine, select
 
 from agent.modules.workspaces.models import ThreadWorkspace
 from agent.modules.workspaces.refs import (
@@ -21,6 +21,7 @@ from agent.modules.workspaces.refs import (
 from agent.shared.infrastructure.db.base import utcnow
 from agent.shared.infrastructure.db.engine import (
     _normalize_url_to_sync,
+    create_sync_engine as create_engine,
     get_database_url,
 )
 from agent.shared.infrastructure.db.session import get_async_session

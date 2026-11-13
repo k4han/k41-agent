@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import create_engine, make_url, select
+from sqlalchemy import make_url, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from agent.shared.config.constants import (
@@ -61,14 +61,17 @@ class DatabaseConfigSource:
         *,
         key_path: Path | None = None,
     ) -> None:
-        from agent.shared.infrastructure.db.engine import _normalize_url_to_sync
+        from agent.shared.infrastructure.db.engine import (
+            _normalize_url_to_sync,
+            create_sync_engine,
+        )
 
         self.database_url = database_url
         sync_url = _normalize_url_to_sync(database_url)
         connect_args = {}
         if "sqlite" in make_url(sync_url).drivername:
             connect_args["check_same_thread"] = False
-        self._engine = create_engine(sync_url, echo=False, future=True, connect_args=connect_args)
+        self._engine = create_sync_engine(sync_url, echo=False, future=True, connect_args=connect_args)
         self._session_maker = sessionmaker(self._engine, class_=Session, expire_on_commit=False)
         self._key_path = key_path or _default_key_path()
         self._fernet: Fernet | None = None

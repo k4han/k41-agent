@@ -9,6 +9,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from agent.shared.infrastructure.db.engine import (
+    SQLITE_BUSY_TIMEOUT_MS,
     get_database_type,
     get_postgres_conn_string,
     get_sqlite_conn_string,
@@ -34,7 +35,7 @@ def _create_serializer() -> JsonPlusSerializer:
 @asynccontextmanager
 async def _create_sqlite_saver(conn_string: str, serde: JsonPlusSerializer):
     """Create AsyncSqliteSaver with custom serializer."""
-    conn = await aiosqlite.connect(conn_string)
+    conn = await aiosqlite.connect(conn_string, timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
     try:
         checkpointer = AsyncSqliteSaver(conn, serde=serde)
         yield checkpointer

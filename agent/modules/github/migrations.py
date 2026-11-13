@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import inspect, text
 
-from agent.shared.infrastructure.db.engine import _normalize_url_to_sync
+from agent.shared.infrastructure.db.engine import create_sync_engine as create_engine
 
 
 GITHUB_REPOSITORY_BINDING_COLUMNS: dict[str, str] = {
@@ -31,7 +31,7 @@ def _column_names(inspector, table_name: str) -> set[str]:
 
 def migrate_github_tables(database_url: str) -> None:
     """Add per-repository automation and optimization columns."""
-    engine = create_engine(_normalize_url_to_sync(database_url), echo=False)
+    engine = create_engine(database_url, echo=False)
     try:
         with engine.begin() as conn:
             inspector = inspect(conn)

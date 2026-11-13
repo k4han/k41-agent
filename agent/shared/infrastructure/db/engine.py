@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from sqlalchemy import MetaData
-from sqlalchemy import create_engine as create_sync_engine
-from sqlalchemy.engine import URL, make_url
+from sqlalchemy import MetaData, event
+from sqlalchemy import create_engine as _create_sync_engine
+from sqlalchemy.engine import URL, Engine, make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -22,6 +22,29 @@ def _get_default_db_path() -> str:
 
 
 DEFAULT_DATABASE_URL = _get_default_db_path()
+SQLITE_BUSY_TIMEOUT_MS = 30_000
+
+
+def _configure_sqlite_connection(dbapi_connection, connection_record) -> None:
+    """Apply concurrency settings to each physical SQLite connection."""
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+        cursor.execute("PRAGMA journal_mode=WAL")
+    finally:
+        cursor.close()
+
+
+def _configure_sqlite_engine(engine: Engine) -> None:
+    if engine.dialect.name == "sqlite":
+        event.listen(engine, "connect", _configure_sqlite_connection)
+
+
+def create_sync_engine(database_url: str, **kwargs) -> Engine:
+    """Create a sync engine with the shared SQLite concurrency settings."""
+    engine = _create_sync_engine(_normalize_url_to_sync(database_url), **kwargs)
+    _configure_sqlite_engine(engine)
+    return engine
 
 
 def get_database_url() -> str:
@@ -121,6 +144,7 @@ async def initialize_async_engine(metadata: MetaData | None = None, container=No
             connect_args={"check_same_thread": False},
             future=True,
         )
+        _configure_sqlite_engine(engine.sync_engine)
     elif db_type == "postgres":
         if not ("+" in database_url and "asyncpg" in database_url):
             database_url = database_url.replace(
@@ -241,6 +265,7 @@ __all__ = [
     "DEFAULT_DATABASE_URL",
     "close_async_engine",
     "create_tables",
+    "create_sync_engine",
     "get_async_engine",
     "get_database_type",
     "get_database_url",

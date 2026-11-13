@@ -1,12 +1,12 @@
 """Upgrade browser choices without moving or merging saved login directories."""
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import inspect, text
 
-from agent.shared.infrastructure.db.engine import _normalize_url_to_sync
+from agent.shared.infrastructure.db.engine import create_sync_engine as create_engine
 
 
 def migrate_browser_tables(database_url: str) -> None:
-    engine = create_engine(_normalize_url_to_sync(database_url), echo=False)
+    engine = create_engine(database_url, echo=False)
     try:
         with engine.begin() as connection:
             if connection.dialect.name == "sqlite":
