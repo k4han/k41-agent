@@ -58,7 +58,7 @@ def test_prompt_sections_and_tool_history_are_counted_separately():
     prompt = prompt_builders.build_llm_system_prompt(
         system_prompt_template="Follow the user request.", working_dir="/workspace",
         agent_name="default", tools=tools, catalog=catalog,
-        skills_catalog_xml="<available_skills><skill>Review code</skill></available_skills>",
+        skills_catalog_xml="<available_skills><skill><name>review</name><description>Review code</description></skill></available_skills>",
         sections=sections,
     )
     sections["active_skills"] = "\n\n<active_skills>Check the behavior before editing.</active_skills>"

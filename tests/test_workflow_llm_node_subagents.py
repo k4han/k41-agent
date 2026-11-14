@@ -99,7 +99,8 @@ def test_catalogs_are_bound_to_request_scoped_tool_copies():
     bound = bind_tool_catalogs(tools, sections)
     assert prompt == "Base prompt"
     assert "- research: Find sources." in bound[0].description
-    assert "<name>sql</name>" in bound[1].description
+    assert "- sql:" in bound[1].description
+    assert "<available_skills>" not in bound[1].description
     assert "research" not in tools[0].description
     assert "<available_skills>" not in tools[1].description
     other = bind_tool_catalogs(tools, {"subagents": "- coder: Write code."})

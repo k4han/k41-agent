@@ -9,8 +9,10 @@ Cache keys embed both the structural inputs and the revision counters of the
 mutable sources, so a dashboard edit is picked up on the next turn. The TTL is
 an upper bound for changes this process cannot observe, most notably a prompt
 variable written by another worker: revision counters are process-local, so a
-multi-worker deployment relies on the TTL alone. It is therefore kept just
-above the typical gap between two LLM turns rather than as long as possible.
+multi-worker deployment relies on the TTL alone. The five-minute default avoids
+rebuilding after ordinary user pauses or tool calls while bounding staleness for
+external changes. Deployments needing faster cross-worker refresh can lower
+``prompt_cache.ttl_seconds``; cache hits never extend this deadline.
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ from agent.shared.infrastructure.revisions import (
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT_CACHE_TTL_KEY = "prompt_cache.ttl_seconds"
-DEFAULT_SYSTEM_PROMPT_CACHE_TTL_SECONDS = 20
+DEFAULT_SYSTEM_PROMPT_CACHE_TTL_SECONDS = 300
 MAX_SYSTEM_PROMPT_CACHE_ENTRIES = 128
 
 SystemPromptCacheKey = tuple[object, ...]

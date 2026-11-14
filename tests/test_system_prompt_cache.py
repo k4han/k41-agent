@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agent.modules.workflows import system_prompt_cache
+from agent.modules.workflows.system_prompt_cache import get_system_prompt_cache_ttl_seconds
 from agent.shared.infrastructure.revisions import (
     AGENTS_REVISION,
     PROMPT_VARIABLES_REVISION,
@@ -194,6 +195,39 @@ def test_cache_hits_do_not_extend_the_ttl(monkeypatch) -> None:
     assert system_prompt_cache.get_cached_system_prompt(key) is None
 
 
-def test_ttl_defaults_when_config_key_is_absent() -> None:
-    assert system_prompt_cache.DEFAULT_SYSTEM_PROMPT_CACHE_TTL_SECONDS == 20
-    assert system_prompt_cache.SYSTEM_PROMPT_CACHE_TTL_KEY == "prompt_cache.ttl_seconds"
+def test_default_ttl_reuses_prompt_after_user_pause_and_still_expires(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "agent.shared.config.service.get_config_service",
+        lambda: SimpleNamespace(get_int=lambda key, default: default),
+    )
+    monkeypatch.setattr(
+        system_prompt_cache,
+        "get_system_prompt_cache_ttl_seconds",
+        get_system_prompt_cache_ttl_seconds,
+    )
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr(system_prompt_cache, "_now", lambda: clock["now"])
+    key = _key()
+    system_prompt_cache.store_system_prompt(key, "Prompt A")
+
+    clock["now"] += 60
+    assert system_prompt_cache.get_cached_system_prompt(key) == "Prompt A"
+    clock["now"] = 1_300.0
+    assert system_prompt_cache.get_cached_system_prompt(key) is None
+
+
+def test_ttl_uses_configured_value(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    def get_int(key, default):
+        assert key == "prompt_cache.ttl_seconds"
+        assert default == 300
+        return 45
+
+    monkeypatch.setattr(
+        "agent.shared.config.service.get_config_service",
+        lambda: SimpleNamespace(get_int=get_int),
+    )
+    assert get_system_prompt_cache_ttl_seconds() == 45

@@ -1,8 +1,34 @@
-"""Request-scoped discovery data in tool descriptions."""
+"""Compact, request-scoped discovery data in tool descriptions."""
 
+import logging
 from collections.abc import Sequence
 from copy import copy
 from typing import Any
+from xml.etree import ElementTree
+
+logger = logging.getLogger(__name__)
+
+
+def _catalog_line(name: str, description: str) -> str:
+    description = " ".join(description.split())
+    return f"- {name}: {description or 'No description provided.'}"
+
+
+def _compact_skill_catalog(skills_catalog_xml: str) -> str:
+    """Keep selection metadata; resource paths are supplied when a skill loads."""
+    if not skills_catalog_xml.strip():
+        return ""
+    try:
+        root = ElementTree.fromstring(skills_catalog_xml)
+    except ElementTree.ParseError:
+        logger.warning("Unable to parse the skills discovery catalog")
+        return ""
+    lines = [
+        _catalog_line(name, skill.findtext("description", ""))
+        for skill in root.findall("skill")
+        if (name := skill.findtext("name", "").strip())
+    ]
+    return "Available skills:\n" + "\n".join(lines) if lines else ""
 
 
 def build_tool_catalogs(
@@ -14,18 +40,20 @@ def build_tool_catalogs(
 ) -> dict[str, str]:
     names = {getattr(tool, "name", "") for tool in tools or ()}
     sections: dict[str, str] = {}
-    if "skill" in names and skills_catalog_xml.strip() not in {"", "<available_skills/>"}:
-        sections["skills"] = skills_catalog_xml.strip()
+    if "skill" in names:
+        skills = _compact_skill_catalog(skills_catalog_xml)
+        if skills:
+            sections["skills"] = skills
     if "delegate_task" in names:
         get_callable = getattr(catalog, "get_callable_agents", None)
         agents = get_callable(agent_name) if callable(get_callable) else []
         lines = []
         for name in agents or ():
             config = catalog.get_agent(name)
-            description = str(getattr(config, "description", "") or "").strip()
-            lines.append(f"- {name}: {description or 'No description provided.'}")
+            description = str(getattr(config, "description", "") or "")
+            lines.append(_catalog_line(name, description))
         if lines:
-            sections["subagents"] = "<callable_agents>\n" + "\n".join(lines) + "\n</callable_agents>"
+            sections["subagents"] = "Callable agents:\n" + "\n".join(lines)
     return sections
 
 

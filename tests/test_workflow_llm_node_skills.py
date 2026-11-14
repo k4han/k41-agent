@@ -164,7 +164,7 @@ async def test_llm_node_keeps_skill_tool_for_nested_global_package(monkeypatch, 
         SimpleNamespace(context=WorkflowContext(workspace=str(workspace), allowed_tool_names=["skill"])),
     )
     assert "<name>demo</name>" not in captured["messages"][0].content
-    assert "<name>demo</name>" in next(tool.description for tool in captured["tools"] if tool.name == "skill")
+    assert "- demo: Nested global package." in next(tool.description for tool in captured["tools"] if tool.name == "skill")
     assert "skill" in [tool.name for tool in captured["tools"]]
 
 

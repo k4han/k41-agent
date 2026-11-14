@@ -15,8 +15,20 @@ append a second copy of those instructions to the system prompt.
 retains those catalogs with the prompt, using the existing agent, skill,
 workspace, permission scope, and revision keys.
 
+The assembled prompt cache defaults to 300 seconds, so ordinary user pauses and
+tool calls do not trigger repeated database reads and skill discovery. Local
+revision changes invalidate entries immediately. External changes, including
+writes by other workers, are observed after the fixed TTL; cache hits do not
+extend it. Configure `prompt_cache.ttl_seconds` for a shorter refresh interval,
+or set it to zero to disable caching.
+
 `bind_tool_catalogs` attaches each catalog to a shallow copy of the corresponding
-tool before model binding. Registry tools are never modified. Empty callable
+tool before model binding. Discovery catalogs retain every available name and
+its full description as compact single-line entries. Skill XML tags and file
+locations are omitted; loading a skill supplies its instructions and resource
+paths on demand. These selection summaries still consume input tokens on each
+turn, in proportion to the number of available skills and callable agents.
+Registry tools are never modified. Empty callable
 agent catalogs remove `delegate_task`; an empty skill catalog removes `skill`
 unless an active skill still needs unload or refresh operations. Backend
 authorization remains independent of these descriptions.

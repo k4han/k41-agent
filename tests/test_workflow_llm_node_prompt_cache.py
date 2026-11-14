@@ -420,6 +420,27 @@ async def test_repeated_turns_reuse_the_cached_system_prompt(cached_llm_node) ->
 
 
 @pytest.mark.asyncio
+async def test_user_pauses_and_tool_delays_reuse_prompt_until_default_ttl(cached_llm_node, monkeypatch):
+    from agent.modules.workflows import system_prompt_cache
+
+    clock = {"now": 1_000.0}
+    monkeypatch.setattr(system_prompt_cache, "_now", lambda: clock["now"])
+    monkeypatch.setattr(
+        system_prompt_cache, "get_system_prompt_cache_ttl_seconds",
+        lambda: system_prompt_cache.DEFAULT_SYSTEM_PROMPT_CACHE_TTL_SECONDS,
+    )
+    await cached_llm_node.run()
+    for delay in (60, 120, 119):
+        clock["now"] += delay
+        await cached_llm_node.run()
+    assert cached_llm_node.calls == {"builder": 1, "prompt_variables": 1, "skills_catalog": 1}
+
+    clock["now"] += 1
+    await cached_llm_node.run()
+    assert cached_llm_node.calls == {"builder": 2, "prompt_variables": 2, "skills_catalog": 2}
+
+
+@pytest.mark.asyncio
 async def test_revision_bump_rebuilds_the_system_prompt(cached_llm_node) -> None:
     await cached_llm_node.run()
 
@@ -475,11 +496,12 @@ async def test_cached_catalogs_reach_tool_descriptions_once_and_refresh_after_re
     assert cached_llm_node.calls["builder"] == 1
     for tools in cached_llm_node.captured["bound_tools"]:
         description = next(tool.description for tool in tools if tool.name == "skill")
-        assert description.count("<available_skills>") == 1
-        assert "<name>first</name>" in description
+        assert description.count("Available skills:") == 1
+        assert "- first:" in description
+        assert "<available_skills>" not in description
     current[0] = current[0].replace("first", "second")
     bump_revision(SKILLS_REVISION)
     await cached_llm_node.run()
     latest = next(tool.description for tool in cached_llm_node.captured["bound_tools"][-1] if tool.name == "skill")
-    assert "<name>second</name>" in latest and "<name>first</name>" not in latest
+    assert "- second:" in latest and "- first:" not in latest
     assert cached_llm_node.calls["builder"] == 2
