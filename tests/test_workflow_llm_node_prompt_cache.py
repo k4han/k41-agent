@@ -147,7 +147,7 @@ async def test_llm_node_estimates_normalized_input_off_event_loop(cached_llm_nod
     monkeypatch.setattr(llm_node_module, "normalize_messages_for_chat_model", normalize_off_loop)
     monkeypatch.setattr(llm_node_module, "estimate_context_breakdown", estimate_off_loop)
     await cached_llm_node.run(messages=[HumanMessage(content=[{"type": "text", "text": "Hello"}])])
-    assert estimated == [cached_llm_node.captured["messages"]]
+    assert estimated == [cached_llm_node.captured["messages"], [cached_llm_node.captured["messages"][0]]]
     assert estimated[0][-1].content == "Hello"
 
 

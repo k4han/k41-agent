@@ -125,6 +125,7 @@ def test_streamed_and_persisted_breakdowns_match(monkeypatch, tool_calls):
     config = with_usage_tracking(
         {"configurable": {"thread_id": "thread-1"}}, agent_name="default",
         provider_name="test", model_name="test-model", context_breakdown=estimates,
+        context_prompt_breakdown={"system_prompt": 12},
     )
     response = AIMessage(
         content="Done", tool_calls=tool_calls,
@@ -136,6 +137,7 @@ def test_streamed_and_persisted_breakdowns_match(monkeypatch, tool_calls):
         config=config, context_breakdown=estimates,
     )
     stored = records[0].usage_metadata
+    assert stored["context_prompt_breakdown"] == {"system_prompt": 12}
     assert events[0]["context_breakdown"] == include_response_in_context(
         stored["context_breakdown"], records[0].output_tokens, stored["context_output_breakdown"],
     )

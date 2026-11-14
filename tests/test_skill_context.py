@@ -46,7 +46,7 @@ async def test_compaction_preserves_active_skill_checkpoint(setup, monkeypatch):
 
     async def prepare(state):
         content, active, processed = await active_context(state, **options)
-        return {"active_skills": active, "processed_skill_messages": processed}
+        return {"messages": content, "active_skills": active, "processed_skill_messages": processed}
 
     builder = StateGraph(BaseState)
     builder.add_node("prepare", prepare)
@@ -64,12 +64,12 @@ async def test_compaction_preserves_active_skill_checkpoint(setup, monkeypatch):
         return "The user asked to continue."
 
     monkeypatch.setattr(compaction, "_generate_context_summary", summarize)
-    compacted = await compaction.compact_message_history(loaded["messages"], keep_recent_messages=2)
+    compacted = await compaction.compact_message_history(loaded["messages"], keep_recent_messages=2, active_skills=loaded["active_skills"])
     await graph.aupdate_state(config, {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *compacted.messages]}, as_node="prepare")
     checkpoint = await graph.aget_state(config)
     assert len(checkpoint.values["active_skills"]) == 1
     content, active, _ = await active_context(checkpoint.values, **options)
-    assert "Retain these durable instructions." in content
+    assert any(isinstance(message, ToolMessage) and "Retain these durable instructions." in message.content for message in content)
     assert len(active) == 1
     # The original load directive must not reactivate a skill after unloading.
     unloaded = await graph.ainvoke({"messages": [HumanMessage(content="/skill unload demo", id="user-3")]}, config)
@@ -84,11 +84,11 @@ async def test_active_skill_permissions_and_scope_checked_on_resume(setup):
     resumed = {"messages": [HumanMessage(content="Continue", id="user-2")], "active_skills": active, "processed_skill_messages": processed}
     for overrides in ({"agent_name": "other"}, {"names": []}, {"tools": []}):
         content, retained, _ = await active_context(resumed, **{**options, **overrides})
-        assert not content and retained == {}
+        assert not any(isinstance(message, ToolMessage) for message in content) and retained == {}
     package = (await service.inventory())[0]
     await service.enabled(package.id, False)
     content, retained, _ = await active_context(resumed, **options)
-    assert not content and retained == {}
+    assert not any(isinstance(message, ToolMessage) for message in content) and retained == {}
     assert len(resumed["active_skills"]) == 1
 
 
@@ -104,7 +104,7 @@ async def test_pinned_project_skill_survives_missing_source_and_snapshot(setup):
     shutil.rmtree(entry["skill_root"])
     resumed = {"active_skills": active, "processed_skill_messages": processed, "messages": [HumanMessage(content="Continue", id="user-2")]}
     content, _, _ = await active_context(resumed, **options)
-    assert "Pinned project instructions." in content
+    assert any(isinstance(message, ToolMessage) and "Pinned project instructions." in message.content for message in content)
     assert Path(entry["skill_root"], "SKILL.md").is_file()
 
 
@@ -115,11 +115,11 @@ async def test_switching_scope_does_not_replay_an_old_activation_command(setup, 
     _, active, processed = await active_context({"messages": messages}, **options)
     resumed = {"messages": messages, "active_skills": active, "processed_skill_messages": processed}
     content, retained, _ = await active_context(resumed, **{**options, "agent_name": "other"})
-    assert not content and retained == {}
+    assert content == messages and retained == {}
     workspace = tmp_path / "other-workspace"
     workspace.mkdir()
     content, retained, _ = await active_context(resumed, **{**options, "workspace": str(workspace)})
-    assert not content and retained == {}
+    assert content == messages and retained == {}
     assert not (workspace / ".k41-agent" / "skills").exists()
 
 
@@ -156,7 +156,9 @@ async def test_explicit_load_and_uppercase_commands_activate_and_unload(setup):
     assert [entry["name"] for entry in active.values()] == ["demo"]
     content, active, processed = await active_context({"messages": [HumanMessage(content="/SKILL UNLOAD demo", id="unload")],
         "active_skills": active, "processed_skill_messages": processed}, **options)
-    assert content == "" and active == {} and processed == ["load", "unload"]
+    from agent.modules.skills.context import is_skill_instruction
+    assert not any(is_skill_instruction(message) for message in content) and active == {} and processed == ["load", "unload"]
+    assert skill_events(content) == {}
 
 
 @pytest.mark.asyncio
@@ -181,12 +183,13 @@ async def test_coding_read_can_access_activated_snapshot_and_enforces_thread_sco
     assert result.status == "error" and result.error.code == "not_found"
 
 
-def test_model_projection_uses_receipt_without_losing_checkpoint_payload():
+def test_model_projection_restores_complete_instructions_without_mutating_checkpoint_payload():
     original = ToolMessage(content="Long durable instructions", name="skill", tool_call_id="call-1", artifact={"kind": "skill_activation", "key": "key", "action": "load", "skill": {"name": "demo", "content": "Full instructions"}})
     active = skill_events([original])
     projected = model_skill_history([original])[0]
     assert "Full instructions" == active["key"]["content"]
-    assert projected.artifact is None and "Long durable instructions" not in projected.content
+    assert projected.artifact["context_instruction"] and projected.content == "Full instructions"
+    assert original.content == "Long durable instructions"
     assert original.artifact is not None
 
 
@@ -218,10 +221,20 @@ async def test_actual_skill_tool_persists_and_refreshes_with_langgraph(setup):
     document.write_text(document.read_text() + "Updated instructions.\n")
     repeated = await invoke({"name": "demo"}, "load-2")
     assert next(iter(repeated["active_skills"].values()))["version"] == first["version"]
+    projected = model_skill_history(repeated["messages"], repeated["active_skills"])
+    assert projected[:len(loaded["messages"])] == loaded["messages"]
+    assert sum(message.content == first["content"] for message in projected) == 1
     refreshed = await invoke({"name": "demo", "refresh": True}, "load-3")
     assert next(iter(refreshed["active_skills"].values()))["version"] != first["version"]
+    refreshed_again = await invoke({"name": "demo", "refresh": True}, "load-4")
+    entry = next(iter(refreshed_again["active_skills"].values()))
+    projected = model_skill_history(refreshed_again["messages"], refreshed_again["active_skills"])
+    assert entry["context_call_id"] == "load-4"
+    assert sum(message.content == entry["content"] for message in projected) == 1
     unloaded = await invoke({"name": "demo", "action": "unload"}, "unload-1")
     assert unloaded["active_skills"] == {}
+    projected = model_skill_history(unloaded["messages"], unloaded["active_skills"])
+    assert all(first["content"] != message.content and entry["content"] != message.content for message in projected)
 
 
 @pytest.mark.asyncio

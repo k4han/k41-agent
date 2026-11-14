@@ -319,6 +319,53 @@ async def test_manual_compaction_rejects_non_reducing_summary(manual_compaction)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_manual_compaction_persists_complete_skill_responses_and_prompt_budget(
+    manual_compaction, monkeypatch, checkpoint_saver, legacy,
+):
+    from langgraph.graph import END, START, StateGraph
+    from agent.modules.workflows.state.base import BaseState
+    from agent.modules.skills.context import is_skill_instruction, model_skill_history
+    from agent.modules.conversations.history import get_thread_messages_payload
+
+    active = {"demo": {"name": "demo", "version": "pinned", "content": "Exact pinned instructions."}}
+    if not legacy:
+        active["demo"]["context_call_id"] = "original-load"
+    messages = large_history()
+    if not legacy:
+        messages = model_skill_history(messages, active)
+    builder = StateGraph(BaseState)
+    builder.add_node("llm", lambda state: {"messages": []})
+    builder.add_edge(START, "llm")
+    builder.add_edge("llm", END)
+    graph = builder.compile(checkpointer=checkpoint_saver)
+    config = {"configurable": {"thread_id": "test-thread"}}
+    await graph.aupdate_state(config, {"messages": messages, "active_skills": active}, as_node="llm")
+    usage = SimpleNamespace(get_thread_usage=AsyncMock(return_value={
+        "context_breakdown": {"system_prompt": 50, "skills": 50000},
+        **({} if legacy else {"context_prompt_breakdown": {"system_prompt": 50}}),
+    }), record_event=AsyncMock())
+    rebuild = AsyncMock(return_value={"system_prompt": 50})
+    monkeypatch.setattr("agent.modules.workflows.prompt_builders.estimate_thread_prompt_breakdown", rebuild)
+    monkeypatch.setattr("agent.modules.usage.get_usage_service", lambda: usage)
+    monkeypatch.setattr(compaction, "get_history_checkpointer", lambda: checkpoint_saver)
+    monkeypatch.setattr(compaction, "get_workflow_graph", lambda name: graph)
+    monkeypatch.setattr(compaction, "get_thread_messages_payload", get_thread_messages_payload)
+    monkeypatch.setattr("agent.modules.conversations.history.get_history_checkpointer", lambda: checkpoint_saver)
+    result = await compaction.compact_conversation_thread("test-thread")
+    latest = await graph.aget_state(config)
+    assert [message.content for message in latest.values["messages"] if is_skill_instruction(message)] == [active["demo"]["content"]]
+    assert latest.values["active_skills"]["demo"]["context_call_id"]
+    assert compaction.is_valid_message_sequence(latest.values["messages"])
+    assert result["current_context_tokens"] == result["retained_tokens"] + 50
+    assert result["context_breakdown"]["skills"] < 50000
+    if legacy:
+        rebuild.assert_awaited_once()
+    else:
+        rebuild.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_manual_compaction_reserves_latest_prompt_cost(manual_compaction, monkeypatch):
     env = manual_compaction
     env.resolved.context_window = 1000

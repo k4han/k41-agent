@@ -480,7 +480,7 @@ async def test_lazy_active_skill_instructions_do_not_restore_cloud_execution(pro
         workspace=binding.execution, thread_id="lazy-conversation", agent_name="default", names=[],
         tools=[SimpleNamespace(name="skill")],
     )
-    assert "Pinned instructions." in content
+    assert any("Pinned instructions." in message.content for message in content)
     assert retained["demo"]["skill_root"] == f"/workspace/{destination}"
     attach.assert_not_awaited()
     create.assert_not_awaited()

@@ -158,6 +158,7 @@ async def test_compact_conversation_success():
         usage_event = usage_service.record_event.call_args.args[0]
         assert usage_event.usage_metadata == {
             "retained_tokens": result["retained_tokens"], "context_breakdown": breakdown,
+                "context_prompt_breakdown": {key: previous_breakdown[key] for key in ("system_prompt", "system_tools", "skills", "subagents")},
             "context_window": 128000, "reserved_tokens": 4096,
         }
         assert result["context_window"] == 128000

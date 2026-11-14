@@ -45,6 +45,7 @@ class LLMUsageCallback(BaseCallbackHandler):
         config: dict[str, Any] | None,
         tracking: UsageTrackingInfo,
         context_breakdown: dict[str, int] | None = None,
+        context_prompt_breakdown: dict[str, int] | None = None,
         context_window: int | None = None,
         reserved_tokens: int | None = None,
     ) -> None:
@@ -53,6 +54,7 @@ class LLMUsageCallback(BaseCallbackHandler):
         self._context = usage_context_from_config(config)
         self._tracking = tracking
         self._context_breakdown = dict(context_breakdown) if context_breakdown is not None else None
+        self._context_prompt_breakdown = dict(context_prompt_breakdown) if context_prompt_breakdown is not None else None
         self._context_capacity = {
             key: value for key, value in (
                 ("context_window", context_window), ("reserved_tokens", reserved_tokens),
@@ -73,6 +75,8 @@ class LLMUsageCallback(BaseCallbackHandler):
         if pool_name:
             usage_metadata["pool_name"] = pool_name
         usage_metadata.update(self._context_capacity)
+        if self._context_prompt_breakdown is not None:
+            usage_metadata["context_prompt_breakdown"] = self._context_prompt_breakdown
         if self._context_breakdown is not None and usage.input_tokens is not None:
             usage_metadata["context_breakdown"] = reconcile_context_breakdown(
                 self._context_breakdown, usage.input_tokens,
@@ -120,6 +124,7 @@ def with_usage_tracking(
     call_kind: str = "agent",
     internal: bool = False,
     context_breakdown: dict[str, int] | None = None,
+    context_prompt_breakdown: dict[str, int] | None = None,
     context_window: int | None = None,
     reserved_tokens: int | None = None,
 ) -> dict[str, Any]:
@@ -129,6 +134,7 @@ def with_usage_tracking(
     handler = LLMUsageCallback(
         config=next_config,
         context_breakdown=context_breakdown,
+        context_prompt_breakdown=context_prompt_breakdown,
         context_window=context_window,
         reserved_tokens=reserved_tokens,
         tracking=UsageTrackingInfo(

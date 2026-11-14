@@ -272,7 +272,8 @@ class UsageService:
                 )
                 if checkpoint is not None:
                     previous = await self._repository.latest_context_breakdown(thread_id)
-                    breakdown = estimate_compacted_context_breakdown(checkpoint_messages(checkpoint), previous)
+                    breakdown = estimate_compacted_context_breakdown(checkpoint_messages(checkpoint), previous,
+                        context_prompt_breakdown=payload.get("context_prompt_breakdown"))
                     payload["context_breakdown"] = breakdown
                     payload["current_context_tokens"] = sum(breakdown.values())
             except Exception as exc:

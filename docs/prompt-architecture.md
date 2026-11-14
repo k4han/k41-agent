@@ -29,13 +29,20 @@ locations are omitted; loading a skill supplies its instructions and resource
 paths on demand. These selection summaries still consume input tokens on each
 turn, in proportion to the number of available skills and callable agents.
 Registry tools are never modified. Empty callable
-agent catalogs remove `delegate_task`; an empty skill catalog removes `skill`
-unless an active skill still needs unload or refresh operations. Backend
+agent catalogs remove `delegate_task`. The LLM node retains an enabled `skill`
+tool even with an empty catalog, so activation never changes its schema. Backend
 authorization remains independent of these descriptions.
 
 Context accounting attributes discovery catalogs to skills/subagents and counts
 the remaining tool schema separately, so moving a catalog does not double-count
-its tokens. Active skill instructions continue to be supplied in system context.
+its tokens. Active skill instructions remain in their full `skill` tool responses,
+never in the system prompt. Stable activation call IDs link these responses to
+checkpointed snapshots. Compaction restores missing call/result pairs verbatim,
+outside the generated summary, without retaining unrelated sibling tool outputs.
+Channel trimming uses the same restoration before checking the input budget.
+Instruction tokens count as skills, rather than ordinary tool output. Usage
+metadata records `context_prompt_breakdown` separately for the fixed system and
+tool schemas, preventing manual compaction from reserving skill history twice.
 
 ## Internal agent cards
 

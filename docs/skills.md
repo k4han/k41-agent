@@ -43,8 +43,15 @@ Existing checkpoints migrate to the short cache using their pinned archive.
 Use the returned `skill_root` for resources and `workspace_root` for task inputs
 and outputs. Loading a skill does not place every resource in the model context.
 
-Active instructions and source versions are checkpointed separately from message
-history, so manual and automatic compaction preserve them. Repeated activation
+Full instructions remain in the `skill` tool response, not the system prompt.
+Explicit `/skill` commands create equivalent tool call/result messages. Active
+instructions, source versions and activation call IDs are also checkpointed
+separately from message history. Manual and automatic compaction restore any
+missing active responses verbatim, without summarizing or truncating them.
+Channel trimming preserves them too. Oversized skills must fit the model input
+budget; they are never silently shortened. Unloading removes instructions from
+model context, and refreshing replaces the active response with the new version.
+Repeated activation
 does not duplicate instructions. An existing conversation remains pinned to the
 version it loaded until explicitly refreshed; permission changes are checked
 again before instructions are restored. Snapshot archives remain pinned while

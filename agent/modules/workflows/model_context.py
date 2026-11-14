@@ -97,13 +97,16 @@ async def prepare_model_context(
     resolved: Any,
     config: dict,
     tools: list | None = None,
+    active_skills: dict | None = None,
 ) -> tuple[list[BaseMessage], list[BaseMessage]]:
     """Compact before every model call and trim channel history once per run."""
     override = getattr(context, "context_compact_threshold", None)
     threshold = override if override is not None else getattr(agent_config, "context_compact_threshold", DEFAULT_CONTEXT_COMPACT_THRESHOLD)
     target_budget = model_input_budget(resolved, threshold)
     hard_budget = model_input_budget(resolved)
-    current = history
+    from agent.modules.skills.context import model_skill_history
+
+    current = model_skill_history(history, active_skills) if active_skills is not None else history
 
     def count(items):
         payload = normalize_messages_for_chat_model([system, *items])
@@ -116,6 +119,7 @@ async def prepare_model_context(
                 current,
                 thread_id=str(config.get("configurable", {}).get("thread_id", "")),
                 max_retained_tokens=target_budget - await asyncio.to_thread(count, []),
+                **({"active_skills": active_skills} if active_skills is not None else {}),
             )
             after = await asyncio.to_thread(count, compacted.messages)
             if after < before and after <= target_budget:
@@ -128,7 +132,7 @@ async def prepare_model_context(
     if trim_threshold is not None and not getattr(context, "channel_trim_applied", False):
         trimmed = await asyncio.to_thread(trim_channel_history, current, trim_threshold)
         if trimmed is not current:
-            current = trimmed
+            current = model_skill_history(trimmed, active_skills) if active_skills is not None else trimmed
             current_tokens = await asyncio.to_thread(count, current)
         context.channel_trim_applied = True
 

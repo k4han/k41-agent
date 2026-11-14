@@ -424,6 +424,7 @@ class LLMUsageRepository:
             "latest_cache_read_tokens": cache_read_tokens(input_details, latest_input_tokens),
             "has_context_usage": bool(has_context_usage),
             "context_breakdown": context_breakdown,
+            "context_prompt_breakdown": _sanitize_context_breakdown(capacity_metadata.get("context_prompt_breakdown")),
             "latest_output_tokens": latest_output_tokens,
             "latest_total_tokens": int(latest_event.total_tokens or 0) if has_context_usage else 0,
             "latest_model": context_event.model_name if context_event else "",

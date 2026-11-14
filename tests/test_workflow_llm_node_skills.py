@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 import pytest
 
 import agent.modules.workflows.nodes.llm as llm_node_module
@@ -95,7 +95,8 @@ async def test_llm_node_activates_explicit_skill_before_model_call(
         counted.append(messages)
         return count_tokens(messages, **kwargs)
 
-    monkeypatch.setattr(message_utils, "count_tokens_approximately", count_off_loop)
+    monkeypatch.setattr("agent.modules.workflows.model_context.count_tokens_approximately", count_off_loop)
+    monkeypatch.setattr("agent.modules.usage.context_breakdown.count_tokens_approximately", count_off_loop)
     captured: dict = {}
     source = tmp_path / "skills" / "demo"
     source.mkdir(parents=True)
@@ -109,7 +110,7 @@ async def test_llm_node_activates_explicit_skill_before_model_call(
 
     class _FakeCatalog:
         def get_agent(self, name: str):
-            return SimpleNamespace(provider="default", model="model-x", system_prompt="Help the user.", tools=["skill"])
+            return SimpleNamespace(name=name, provider="default", model="model-x", system_prompt="Help the user.", tools=["skill"])
 
     async def _fake_resolve(self, agent_name, *, override_tool_names=None):
         return [skill]
@@ -121,17 +122,39 @@ async def test_llm_node_activates_explicit_skill_before_model_call(
         "/skill demo\nProcess the input.",
         [{"kind": "text", "name": "input.txt", "content": "Attached input."}] if with_attachment else None,
     )
+    runtime = SimpleNamespace(context=WorkflowContext(workspace=str(workspace), allowed_tool_names=["skill"]))
+    config = {"configurable": {"thread_id": "skill-command-thread"}}
+    await llm_node_module.llm_node({"messages": [HumanMessage(content="Hello")]}, config, runtime)
+    initial_system = captured["messages"][0].content
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+    initial_tools = [convert_to_openai_tool(tool) for tool in captured["tools"]]
     result = await llm_node_module.llm_node(
         {"messages": [message]},
-        {"configurable": {"thread_id": "skill-command-thread"}},
-        SimpleNamespace(context=WorkflowContext(workspace=str(workspace), allowed_tool_names=["skill"])),
+        config, runtime,
     )
 
-    assert "<active_skills>" in captured["messages"][0].content
-    assert "Follow these durable instructions." in captured["messages"][0].content
+    assert "<active_skills>" not in captured["messages"][0].content
+    assert "Follow these durable instructions." not in captured["messages"][0].content
+    responses = [message for message in captured["messages"] if isinstance(message, ToolMessage)]
+    assert len(responses) == 1 and "Follow these durable instructions." in responses[0].content
+    assert any(message.id == responses[0].id for message in result["messages"])
     assert [entry["name"] for entry in result["active_skills"].values()] == ["demo"]
     assert result["processed_skill_messages"] == [message.id]
-    assert len(counted) == 1
+    assert counted
+    assert captured["messages"][0].content == initial_system
+    assert [convert_to_openai_tool(tool) for tool in captured["tools"]] == initial_tools
+    sent = captured["messages"]
+    from langgraph.graph.message import add_messages
+    resumed = {**result, "messages": add_messages([message], result["messages"])}
+    resumed["messages"] = add_messages(resumed["messages"], [HumanMessage(content="Continue", id="next-user")])
+    next_result = await llm_node_module.llm_node(resumed, config, runtime)
+    assert captured["messages"][:len(sent)] == sent
+    assert len([message for message in captured["messages"] if isinstance(message, ToolMessage)]) == 1
+    assert len(next_result["messages"]) == 1
+    from agent.modules.workflows.prompt_builders import estimate_thread_prompt_breakdown
+    monkeypatch.setattr("agent.modules.workspaces.get_thread_workspace_ref", AsyncMock(return_value=runtime.context.get_workspace()))
+    rebuilt = await estimate_thread_prompt_breakdown("skill-command-thread", agent_name="default", state=resumed)
+    assert rebuilt == captured["config"]["callbacks"][-1]._context_prompt_breakdown
 
 
 @pytest.mark.asyncio
@@ -241,7 +264,7 @@ async def test_llm_node_uses_prompt_builder_output_for_system_message(monkeypatc
     assert system_message.content == "Prompt built elsewhere"
     assert captured["model"] == "model-x"
     assert captured["provider"] == "provider-x"
-    assert [tool.name for tool in captured["tools"]] == ["read"]
+    assert [tool.name for tool in captured["tools"]] == ["skill", "read"]
     assert builder_calls["system_prompt_template"] == "Agent prompt: {working_dir}"
     assert builder_calls["working_dir"] == str(Path("D:/repo").resolve())
     assert builder_calls["agent_name"] == "builder-agent"
@@ -420,7 +443,7 @@ async def test_llm_node_prefers_runtime_allowed_tool_names_before_building_promp
         ),
     )
 
-    assert [tool.name for tool in captured["tools"]] == ["read"]
+    assert [tool.name for tool in captured["tools"]] == ["skill", "read"]
     assert [tool.name for tool in builder_calls["tools"]] == ["delegate_task", "skill", "read"]
     assert "retained tool output" in captured["tools"][-1].description
 

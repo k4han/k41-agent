@@ -40,7 +40,9 @@ def estimate_context_breakdown(
         elif isinstance(message, HumanMessage):
             result["user_messages"] += count_tokens_approximately([message])
         elif isinstance(message, ToolMessage):
-            result["tool_calls"] += count_tokens_approximately([message])
+            from agent.modules.skills.context import is_skill_instruction
+
+            result["skills" if is_skill_instruction(message) else "tool_calls"] += count_tokens_approximately([message])
         elif isinstance(message, AIMessage):
             without_calls = message.model_copy(update={"tool_calls": [], "additional_kwargs": {
                 key: value for key, value in message.additional_kwargs.items()
@@ -88,15 +90,17 @@ def reconcile_context_breakdown(estimates: dict[str, int], input_tokens: int) ->
 def estimate_compacted_context_breakdown(
     messages: Sequence[BaseMessage],
     previous_breakdown: dict[str, int] | None = None,
+    *,
+    context_prompt_breakdown: dict[str, int] | None = None,
 ) -> dict[str, int]:
     """Recount retained history and carry forward the latest prompt estimates."""
     from agent.modules.workflows import normalize_messages_for_chat_model
 
     result = estimate_context_breakdown(normalize_messages_for_chat_model(list(messages)))
     for key in ("system_prompt", "system_tools", "skills", "subagents"):
-        value = (previous_breakdown or {}).get(key)
+        value = (context_prompt_breakdown if context_prompt_breakdown is not None else previous_breakdown or {}).get(key)
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-            result[key] = max(result[key], value)
+            result[key] = result[key] + value if context_prompt_breakdown is not None else max(result[key], value)
     return result
 
 

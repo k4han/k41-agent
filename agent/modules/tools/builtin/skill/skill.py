@@ -24,6 +24,7 @@ async def skill(
     """
     Load or unload a skill by name. Use refresh=True to load its current version.
     When a task matches an available skill description, load its full instructions before proceeding.
+    Follow the full instructions in the load response until the skill is unloaded or refreshed.
     Use the exact name from the available skills catalog in this tool description.
     Resources are made available to read and bash tools; task outputs use the workspace.
     Wait for loading to complete before accessing its resources in a subsequent tool batch.
@@ -49,6 +50,10 @@ async def skill(
             else:
                 loaded = asdict(await packages.activate(name, workspace=workspace,
                     thread_id=get_thread_id(runtime.config) or "", agent_name=agent_name, allowed_names=allowed_names))
+                loaded["context_call_id"] = runtime.tool_call_id
+            if not loaded.get("context_call_id"):
+                from agent.modules.skills.context import bind_skill_context
+                loaded = bind_skill_context({key: loaded}, getattr(runtime, "state", {}).get("messages", []))[key]
         except PermissionError as exc:
             raise ToolError(ToolErrorCode.PERMISSION_DENIED, str(exc)) from exc
         except FileNotFoundError as exc:
@@ -58,7 +63,7 @@ async def skill(
         except (OSError, RuntimeError) as exc:
             raise ToolError(ToolErrorCode.EXECUTION_ERROR, str(exc)) from exc
         receipt = f"Skill {name} is already active at version {loaded['version']}. skill_root: {loaded['skill_root']}"
-        return ToolMessage(content=receipt if active and not refresh else loaded["content"], artifact={"kind": "skill_activation", "action": "load", "key": key, "skill": loaded},
+        return ToolMessage(content=receipt if active and not refresh else loaded["content"], artifact={"kind": "skill_activation", "action": "load", "key": key, "skill": loaded, "context_instruction": not active or refresh},
                            name="skill", tool_call_id=runtime.tool_call_id)
     if action == "unload":
         return f"Unloaded skill {name}."
