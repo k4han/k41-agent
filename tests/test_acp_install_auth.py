@@ -616,7 +616,14 @@ def test_existing_database_gains_the_graph_family_column(tmp_path):
     url = f"sqlite:///{(tmp_path / 'old.db').as_posix()}"
     engine = create_engine(url)
     with engine.begin() as conn:
-        conn.execute(text("CREATE TABLE conversation_threads (id INTEGER PRIMARY KEY, thread_id VARCHAR(512) NOT NULL)"))
+        conn.execute(text("""
+            CREATE TABLE conversation_threads (
+                id INTEGER PRIMARY KEY, thread_id VARCHAR(512) NOT NULL,
+                kind VARCHAR(50) NOT NULL DEFAULT 'user',
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                deleted_at DATETIME
+            )
+        """))
         conn.execute(text("INSERT INTO conversation_threads (thread_id) VALUES ('old')"))
 
     migrate_conversation_tables(url)

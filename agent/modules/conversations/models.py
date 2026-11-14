@@ -28,6 +28,10 @@ class ConversationThread(BaseModel):
 
     __table_args__ = (
         UniqueConstraint("thread_id", name="uq_conversation_threads_thread_id"),
+        Index(
+            "ix_conversation_threads_deleted_kind_updated_id",
+            "deleted_at", "kind", "updated_at", "id",
+        ),
     )
 
 

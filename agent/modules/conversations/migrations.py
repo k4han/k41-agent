@@ -42,6 +42,10 @@ def migrate_conversation_tables(database_url: str) -> None:
                             f"ADD COLUMN {column_name} {column_type}"
                         )
                     )
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_conversation_threads_deleted_kind_updated_id "
+                "ON conversation_threads (deleted_at, kind, updated_at, id)"
+            ))
     finally:
         engine.dispose()
 
