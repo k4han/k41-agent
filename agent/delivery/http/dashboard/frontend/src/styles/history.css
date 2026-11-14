@@ -8,7 +8,8 @@
   min-height: 34px;
 }
 
-.history-bulk-actions {
+.history-bulk-actions,
+.history-pagination {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -149,17 +150,20 @@
     min-height: 42px;
   }
 
-  .history-bulk-actions {
+  .history-bulk-actions,
+  .history-pagination {
     align-items: stretch;
     flex-direction: column;
     gap: 8px;
   }
 
-  .history-bulk-actions .row-wrap {
+  .history-bulk-actions .row-wrap,
+  .history-pagination .row-wrap {
     justify-content: flex-end;
   }
 
   .history-bulk-actions .btn,
+  .history-pagination .btn,
   .history-table .btn-sm {
     min-height: 40px;
   }

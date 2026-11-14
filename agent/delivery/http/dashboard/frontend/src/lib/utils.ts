@@ -4,16 +4,36 @@ export function classNames(
   return values.filter(Boolean).join(" ");
 }
 
-/** Compare JSON values independently of object property insertion order. */
+/** Compare plain JSON data without sorting keys or allocating serialized snapshots. */
 export function sameJsonValue(first: unknown, second: unknown): boolean {
-  const serialize = (value: unknown) => JSON.stringify(value ?? null, (_key, nested: unknown) => {
-    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
-      return Object.fromEntries(Object.entries(nested).sort(([left], [right]) =>
-        left < right ? -1 : left > right ? 1 : 0));
+  first = first === undefined || (typeof first === "number" && !Number.isFinite(first)) ? null : first;
+  second = second === undefined || (typeof second === "number" && !Number.isFinite(second)) ? null : second;
+  if (first === second) return true;
+  if (first === null || second === null || typeof first !== "object" || typeof second !== "object") return false;
+  if (Array.isArray(first)) {
+    if (!Array.isArray(second) || first.length !== second.length) return false;
+    for (let index = 0; index < first.length; index += 1) {
+      if (!sameJsonValue(first[index], second[index])) return false;
     }
-    return nested;
-  });
-  return serialize(first) === serialize(second);
+    return true;
+  }
+  if (Array.isArray(second)) return false;
+  const left = first as Record<string, unknown>;
+  const right = second as Record<string, unknown>;
+  let leftCount = 0;
+  let rightCount = 0;
+  for (const key in left) {
+    if (!Object.prototype.hasOwnProperty.call(left, key) || left[key] === undefined) continue;
+    // Read missing properties too so reactive stores track later additions.
+    const rightValue = right[key];
+    if (!Object.prototype.hasOwnProperty.call(right, key) || rightValue === undefined
+      || !sameJsonValue(left[key], rightValue)) return false;
+    leftCount += 1;
+  }
+  for (const key in right) {
+    if (Object.prototype.hasOwnProperty.call(right, key) && right[key] !== undefined) rightCount += 1;
+  }
+  return leftCount === rightCount;
 }
 
 /** Deep clone plain data with a JSON fallback for browsers without structuredClone. */

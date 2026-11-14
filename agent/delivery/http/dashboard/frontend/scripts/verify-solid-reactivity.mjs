@@ -447,6 +447,30 @@ try {
   assert.equal(await js('historyRows.every((row, index) => document.querySelectorAll(".history-table tbody tr")[index] === row)'), true);
   assert.equal(await js('document.querySelector(".history-table input").checked'), true);
   console.log('PASS: history title updates retain workspace sections, thread rows, and selection.');
+  fixtures['/dashboard-api/chat-history'].threads.push(...Array.from({ length: 43 }, (_, index) => ({
+    thread_id: `history-extra-${index}`, title: `Extra history thread ${index}`, platform: 'dashboard',
+    user_id: 'dashboard', checkpoint_count: 1, workspace_key: 'one', workspace_label: 'Workspace one',
+  })));
+  await navigate('/history');
+  await until(() => js('document.querySelector(".history-pagination")?.textContent.includes("Page 1 of 3")'), 'history first page');
+  assert.equal(await js('document.querySelectorAll(".history-table tbody tr").length'), 20);
+  assert.equal(await js('document.querySelector(".history-pagination button").disabled'), true);
+  await js('document.querySelector(".history-table thead input").click(); document.querySelector(".history-pagination button:last-child").click();');
+  await until(() => js('document.querySelector(".history-pagination")?.textContent.includes("Page 2 of 3")'), 'history second page');
+  assert.equal(await js('document.querySelectorAll(".history-table tbody tr").length'), 20);
+  assert.equal(await js('document.querySelector(".history-bulk-actions").textContent.includes("20 selected")'), true);
+  assert.equal(await js('document.querySelector(".history-table thead input").checked'), false);
+  await js('document.querySelector(".history-pagination button").click();');
+  assert.equal(await js('Array.from(document.querySelectorAll(".history-table tbody input")).every(input => input.checked)'), true);
+  await js('document.querySelector(".history-pagination button:last-child").click(); document.querySelector(".history-pagination button:last-child").click();');
+  await until(() => js('document.querySelector(".history-pagination")?.textContent.includes("Page 3 of 3")'), 'history last page');
+  assert.equal(await js('document.querySelectorAll(".history-table tbody tr").length'), 5);
+  assert.equal(await js('document.querySelector(".history-pagination button:last-child").disabled'), true);
+  await js(`document.querySelector('[aria-label="Workspace filter"]').click();`);
+  await js('Array.from(document.querySelectorAll("[role=option]")).find(option => option.textContent.includes("Workspace two")).click();');
+  await until(() => js('document.querySelectorAll(".history-table tbody tr").length === 1 && !document.querySelector(".history-pagination")'), 'workspace filter resets history page');
+  assert.equal(await js('document.querySelector(".history-thread-link").textContent.includes("Second history thread")'), true);
+  console.log('PASS: history pages render at most twenty rows, retain selection, and reset after workspace filtering.');
   await call('Fetch.enable', { patterns: [{ urlPattern: '*SecurityPage-*.js', requestStage: 'Request' }] });
   await navigate('/settings/security');
   await until(() => Boolean(pausedPageRequest), 'paused lazy page');

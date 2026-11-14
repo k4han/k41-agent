@@ -14,6 +14,7 @@ import { apiFetch, deleteJson } from "@/lib/api";
 import { chatThreadHref } from "@/lib/chatThreads";
 import { API_PATHS } from "@/lib/endpoints";
 import { truncateText } from "@/lib/utils";
+import { useVisibleInterval } from "@/lib/useVisibleInterval";
 import type { SchedulerJob, SchedulerRun, SchedulerRunsPayload } from "@/types";
 
 const PAGE_SIZE = 25;
@@ -102,14 +103,14 @@ export function RunHistoryPanel(props: {
   createEffect(on(() => [props.jobFilter, props.refreshToken], () => void load("reset")));
 
   let tick = 0;
-  const timer = setInterval(() => {
-    tick += 1;
+  useVisibleInterval((immediate) => {
+    tick = immediate ? 0 : tick + 1;
     const hasRunning = runs().some((run) => run.status === "running");
-    if ((hasRunning || tick % IDLE_POLL_EVERY_TICKS === 0) && !loading()) {
+    if ((immediate || hasRunning || tick % IDLE_POLL_EVERY_TICKS === 0) && !loading()) {
       void load("refresh");
     }
   }, POLL_INTERVAL_MS);
-  onCleanup(() => clearInterval(timer));
+  onCleanup(() => { loadVersion += 1; });
 
   const clearHistory = async () => {
     if (deleting()) return;

@@ -170,6 +170,7 @@ test('large tool snapshots share outputs and replace results without mutating pr
 test('visible intervals stop while hidden, refresh on return, and clean up on disposal', async t => {
   const timers = new Map(), listeners = new Map();
   let sequence = 0, ticks = 0;
+  const immediateTicks = [];
   const document = {
     visibilityState: 'visible',
     addEventListener: (name, callback) => listeners.set(name, callback),
@@ -179,21 +180,148 @@ test('visible intervals stop while hidden, refresh on return, and clean up on di
     setInterval(callback, delay) { const id = ++sequence; timers.set(id, { callback, delay }); return id; },
     clearInterval(id) { timers.delete(id); },
   } });
-  const { dispose } = mount(t, () => useVisibleInterval(() => ticks++, 30_000));
+  const { dispose } = mount(t, () => useVisibleInterval(immediate => { ticks++; immediateTicks.push(immediate); }, 30_000));
   await tick();
   assert.equal(ticks, 1);
   assert.equal([...timers.values()][0].delay, 30_000);
   const staleTick = [...timers.values()][0].callback;
+  staleTick();
+  assert.deepEqual(immediateTicks, [true, false]);
   document.visibilityState = 'hidden';
   listeners.get('visibilitychange')();
   staleTick();
-  assert.equal(ticks, 1);
+  assert.equal(ticks, 2);
   assert.equal(timers.size, 0);
   document.visibilityState = 'visible';
   listeners.get('visibilitychange')();
-  assert.equal(ticks, 2);
+  assert.equal(ticks, 3);
+  assert.deepEqual(immediateTicks, [true, false, true]);
   assert.equal(timers.size, 1);
   dispose();
+  assert.equal(timers.size, 0);
+  assert.equal(listeners.size, 0);
+});
+
+test('JSON comparisons ignore key order, preserve JSON null semantics, and detect nested changes', () => {
+  const { sameJsonValue } = loadModule('../src/lib/utils.ts');
+  assert.equal(sameJsonValue({ z: [1, { b: true, a: 'text' }], a: null },
+    { a: null, z: [1, { a: 'text', b: true }] }), true);
+  assert.equal(sameJsonValue(undefined, null), true);
+  assert.equal(sameJsonValue({ optional: undefined }, {}), true);
+  assert.equal(sameJsonValue([undefined, , NaN, Infinity], [null, null, null, null]), true);
+  for (const [first, second] of [
+    [{ a: null }, { a: undefined }], [{ a: 1 }, { b: 1 }],
+    [{ a: { b: 1 } }, { a: { b: 2 } }], [[1, 2], [2, 1]],
+    [[1], [1, null]], [[], {}], [null, {}], [1, '1'],
+  ]) {
+    assert.equal(sameJsonValue(first, second), false);
+    assert.equal(sameJsonValue(second, first), false);
+  }
+  assert.equal(sameJsonValue(JSON.parse('{"__proto__":{"a":1}}'), {}), false);
+});
+
+test('JSON comparisons stop at the first change and reuse identical subtrees', () => {
+  const { sameJsonValue } = loadModule('../src/lib/utils.ts');
+  const expensive = { get contents() { throw new Error('Unchanged or unreachable subtree was traversed'); } };
+  assert.equal(sameJsonValue({ version: 1, expensive }, { version: 2, expensive }), false);
+  assert.equal(sameJsonValue({ expensive }, { expensive }), true);
+  const largeText = 'file contents\n'.repeat(100_000);
+  assert.equal(sameJsonValue({ files: [{ content: largeText }] }, { files: [{ content: largeText }] }), true);
+});
+
+test('history pagination bounds rows across workspace boundaries and retains group identities', t => {
+  const { useHistoryPagination } = loadModule('../src/lib/useHistoryPagination.ts', {
+    '@/lib/uiConstants': { HISTORY_PAGE_SIZE: 20 },
+  });
+  mount(t, () => {
+    const first = { key: 'first', threads: Array.from({ length: 13 }, (_, index) => ({ thread_id: `first-${index}` })) };
+    const second = { key: 'second', threads: Array.from({ length: 32 }, (_, index) => ({ thread_id: `second-${index}` })) };
+    const [groups, setGroups] = solid.createSignal([first, second]);
+    const [workspace, setWorkspace] = solid.createSignal('all');
+    const visibleGroups = solid.createMemo(() => groups().filter(group => workspace() === 'all' || group.key === workspace()));
+    const pages = useHistoryPagination(visibleGroups, workspace);
+    assert.equal(pages.pageCount(), 3);
+    assert.equal(pages.visibleGroups()[0], first);
+    assert.equal(pages.visibleGroups()[1], second);
+    assert.deepEqual(pages.threads(first), first.threads);
+    assert.deepEqual(pages.threads(second), second.threads.slice(0, 7));
+    pages.previous();
+    assert.equal(pages.pageIndex(), 0);
+    pages.next();
+    assert.deepEqual(pages.visibleGroups(), [second]);
+    assert.deepEqual(pages.threads(second), second.threads.slice(7, 27));
+    pages.next();
+    pages.next();
+    assert.equal(pages.pageIndex(), 2);
+    assert.deepEqual(pages.threads(second), second.threads.slice(27));
+    setWorkspace('second');
+    assert.equal(pages.pageIndex(), 0);
+    assert.equal(pages.pageCount(), 2);
+    pages.next();
+    setGroups([{ ...second, threads: second.threads.slice(0, 5) }]);
+    assert.equal(pages.pageIndex(), 0, 'Deleting the last page must clamp the current page');
+    assert.equal(pages.total(), 5);
+    setGroups([]);
+    assert.equal(pages.pageCount(), 1);
+    assert.deepEqual(pages.visibleGroups(), []);
+  });
+});
+
+test('run history pauses hidden polling, refreshes on return, and keeps its idle cadence', async t => {
+  const timers = new Map(), listeners = new Map(), requests = [];
+  let sequence = 0;
+  const document = {
+    visibilityState: 'visible',
+    addEventListener: (name, callback) => listeners.set(name, callback),
+    removeEventListener: name => listeners.delete(name),
+  };
+  const { useVisibleInterval } = loadModule('../src/lib/useVisibleInterval.ts', {}, { document, window: {
+    setInterval(callback) { const id = ++sequence; timers.set(id, callback); return id; },
+    clearInterval(id) { timers.delete(id); },
+  } });
+  const source = readFileSync(new URL('../src/components/scheduler/RunHistoryPanel.tsx', import.meta.url), 'utf8');
+  const ast = ts.createSourceFile('RunHistoryPanel.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const component = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'RunHistoryPanel');
+  const statements = component.body.statements;
+  const end = statements.findIndex(node => ts.isVariableStatement(node) && node.declarationList.declarations[0].name.getText(ast) === 'clearHistory');
+  const { outputText } = ts.transpileModule(`function runHistoryState(props) {
+    ${statements.slice(0, end).map(node => node.getText(ast)).join('\n')}
+    return { runs, loading };
+  }`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } });
+  const createState = compileFunction(`${outputText}\nreturn runHistoryState;`, [
+    ...Object.keys(solid), 'useVisibleInterval', 'useToast', 'apiFetch', 'API_PATHS',
+    'PAGE_SIZE', 'POLL_INTERVAL_MS', 'IDLE_POLL_EVERY_TICKS',
+  ])(...Object.values(solid), useVisibleInterval, () => ({ showToast() {} }),
+    () => new Promise(resolve => requests.push(resolve)), { schedulerRuns: () => '/scheduler/runs' }, 25, 5000, 6);
+  const { value, dispose } = mount(t, () => createState({ jobFilter: '', refreshToken: 0 }));
+  await tick();
+  assert.equal(requests.length, 1, 'Mount must not overlap the initial request');
+  requests[0]({ runs: [], total: 0 });
+  await tick();
+  const timerTick = [...timers.values()][0];
+  for (let index = 0; index < 5; index++) timerTick();
+  assert.equal(requests.length, 1);
+  timerTick();
+  assert.equal(requests.length, 2, 'Idle polling keeps a thirty-second cadence');
+  requests[1]({ runs: [{ run_id: 'running', status: 'running' }], total: 1 });
+  await tick();
+  timerTick();
+  timerTick();
+  assert.equal(requests.length, 3, 'Running history polls every tick without overlapping requests');
+  requests[2]({ runs: [], total: 0 });
+  await tick();
+  document.visibilityState = 'hidden';
+  listeners.get('visibilitychange')();
+  for (let index = 0; index < 12; index++) timerTick();
+  assert.equal(requests.length, 3);
+  assert.equal(timers.size, 0);
+  document.visibilityState = 'visible';
+  listeners.get('visibilitychange')();
+  assert.equal(requests.length, 4, 'Returning to an idle panel refreshes immediately');
+  dispose();
+  requests[3]({ runs: [{ run_id: 'stale', status: 'completed' }], total: 1 });
+  await tick();
+  assert.deepEqual(value.runs(), [], 'Responses after disposal must be ignored');
   assert.equal(timers.size, 0);
   assert.equal(listeners.size, 0);
 });

@@ -21,6 +21,7 @@ import { truncateText } from "@/lib/utils";
 import { ALL_WORKSPACES_KEY } from "@/lib/workspaceConstants";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { useThreadWorkspaceGroups } from "@/lib/useThreadWorkspaceGroups";
+import { useHistoryPagination } from "@/lib/useHistoryPagination";
 import type { ThreadListPayload, ThreadSummary } from "@/lib/chatThreads";
 
 export function ChatHistoryListPage() {
@@ -63,6 +64,7 @@ export function ChatHistoryListPage() {
     }
     return workspaceGroups().filter((group) => group.key === selected);
   });
+  const pagination = useHistoryPagination(filteredWorkspaceGroups, selectedWorkspaceKey);
 
   const load = async () => {
     setError("");
@@ -327,7 +329,7 @@ export function ChatHistoryListPage() {
                 </div>
               </Show>
               <For
-                each={filteredWorkspaceGroups()}
+                each={pagination.visibleGroups()}
                 fallback={<div class="empty">No conversations in this workspace.</div>}
               >
                 {(group) => (
@@ -347,10 +349,10 @@ export function ChatHistoryListPage() {
                           header: (
                             <input
                               type="checkbox"
-                              checked={isGroupSelected(group.threads)}
-                              aria-label={`Select ${group.label} threads`}
+                              checked={isGroupSelected(pagination.threads(group))}
+                              aria-label={`Select visible ${group.label} threads`}
                               onChange={(event) => setGroupSelected(
-                                group.threads,
+                                pagination.threads(group),
                                 event.currentTarget.checked,
                               )}
                             />
@@ -362,7 +364,7 @@ export function ChatHistoryListPage() {
                         { header: "Steps" },
                         {},
                       ]}
-                      rows={group.threads}
+                      rows={pagination.threads(group)}
                     >
                       {(thread) => (
                         <tr>
@@ -449,6 +451,19 @@ export function ChatHistoryListPage() {
                   </section>
                 )}
               </For>
+              <Show when={pagination.pageCount() > 1}>
+                <nav class="history-pagination panel" aria-label="Chat history pagination">
+                  <span class="muted" role="status">
+                    Page {pagination.pageIndex() + 1} of {pagination.pageCount()} · {pagination.total()} threads
+                  </span>
+                  <div class="row-wrap">
+                    <button class="btn btn-sm" type="button" disabled={pagination.pageIndex() === 0}
+                      onClick={pagination.previous}>Previous</button>
+                    <button class="btn btn-sm" type="button" disabled={pagination.pageIndex() + 1 >= pagination.pageCount()}
+                      onClick={pagination.next}>Next</button>
+                  </div>
+                </nav>
+              </Show>
             </div>
           </Show>
         )}

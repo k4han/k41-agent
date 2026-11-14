@@ -1,17 +1,17 @@
 import { onCleanup, onMount } from "solid-js";
 
 /** Pause periodic UI work while hidden and refresh immediately on return. */
-export function useVisibleInterval(callback: () => void, delayMs: number): void {
+export function useVisibleInterval(callback: (immediate: boolean) => void, delayMs: number): void {
   onMount(() => {
     let timer: number | undefined;
-    const tick = () => {
-      if (document.visibilityState !== "hidden") callback();
+    const tick = (immediate = false) => {
+      if (document.visibilityState !== "hidden") callback(immediate);
     };
     const update = () => {
       window.clearInterval(timer);
       timer = undefined;
       if (document.visibilityState === "hidden") return;
-      tick();
+      tick(true);
       timer = window.setInterval(tick, delayMs);
     };
     update();
