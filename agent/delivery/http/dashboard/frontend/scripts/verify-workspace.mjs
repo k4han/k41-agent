@@ -301,12 +301,20 @@ try {
   await until(refreshDone, 'follow-up completes');
   console.log('PASS: Git changes retain their DOM and expanded diff during background refresh.');
 
+  await call('Emulation.setDeviceMetricsOverride', { width: 600, height: 900, deviceScaleFactor: 1, mobile: false });
+  await until(() => js('document.querySelector(".workspace-explorer").classList.contains("is-compact")'), 'compact preview layout');
   await js(`workspaceTest.addPreviewEntries(); workspaceTest.refresh();`);
   await until(refreshDone, 'preview entries refresh');
   await js(`${tab('Files Explorer')}.click();`);
   await until(() => js(`!!(${row('readme.md')})`), 'preview entries');
   const openPreview = async (path, selector) => {
-    await js(`${tab('Files Explorer')}.click(); ${row(path)}.click();`);
+    await js(`${tab('Files Explorer')}.click(); document.querySelector('.workspace-tree').scrollTop = 0;`);
+    await until(() => js(`!!(${row(path)}) || (() => {
+      const tree = document.querySelector('.workspace-tree');
+      tree.scrollTop += tree.clientHeight;
+      return false;
+    })()`), `${path} tree entry`);
+    await js(`${row(path)}.click();`);
     await until(() => js(`!!document.querySelector(${JSON.stringify(selector)})`), `${path} preview`);
     const download = await js('document.querySelector(".workspace-preview-actions a").getAttribute("href")');
     assert.equal(new URL(download, base).searchParams.get('path'), path);
@@ -322,6 +330,40 @@ try {
   await openPreview('data.csv', '.workspace-table-preview td');
   assert.equal(await js('document.querySelectorAll(".workspace-table-preview tr")[1].children[0].textContent'), 'one,two');
   assert.equal(await js('!!document.querySelector(".workspace-table-preview script")'), false);
+  await openPreview('large.csv', '.workspace-table-preview td');
+  const tableCellCount = () => js('document.querySelectorAll(".workspace-table-preview td").length');
+  assert.ok(await tableCellCount() < 4000, '200 by 100 table must have bounded DOM');
+  assert.equal(await js('document.querySelector(".workspace-table-preview td").textContent'), '0:0');
+  assert.ok(await js('document.querySelector(".workspace-file-panel").textContent.includes("Showing up to 200 rows and 100 columns")'));
+  await call('Emulation.setDeviceMetricsOverride', { width: 1200, height: 900, deviceScaleFactor: 1, mobile: false });
+  await until(() => js('!document.querySelector(".workspace-explorer").classList.contains("is-compact")'), 'wide table layout');
+  assert.ok(await tableCellCount() < 4000, 'resizing must keep table DOM bounded');
+  await js('document.querySelector(".workspace-table-preview").scrollTop = 3000');
+  await until(() => js('!Array.from(document.querySelectorAll(".workspace-table-preview td")).some(cell => cell.textContent === "0:0")'), 'offscreen table rows removed');
+  assert.ok(await tableCellCount() < 4000);
+  await js('document.querySelector(".workspace-table-preview").scrollTop = 1e9; document.querySelector(".workspace-table-preview").scrollLeft = 1e9');
+  await until(() => js('Array.from(document.querySelectorAll(".workspace-table-preview td")).some(cell => cell.textContent === "199:99")'), 'last preview row and column');
+  assert.ok(await tableCellCount() < 4000);
+  await js('document.querySelector(".workspace-preview-actions button").click()');
+  await until(() => js('!!document.querySelector(".workspace-file-view")'), 'CSV source');
+  await js('document.querySelector(".workspace-preview-actions button").click()');
+  await until(() => js('document.querySelector(".workspace-table-preview td")?.textContent === "0:0"'), 'CSV preview remount');
+  await js('document.querySelector(".workspace-table-preview").scrollTop = 1e9');
+  await until(() => js('Array.from(document.querySelectorAll(".workspace-table-preview td")).some(cell => cell.textContent === "199:99")'), 'CSV scrolled before switching files');
+  await call('Emulation.setDeviceMetricsOverride', { width: 600, height: 900, deviceScaleFactor: 1, mobile: false });
+  await until(() => js('document.querySelector(".workspace-explorer").classList.contains("is-compact")'), 'compact table layout');
+  await openPreview('multiline.tsv', '.workspace-table-preview td');
+  await until(() => js('document.querySelector(".workspace-table-preview td")?.textContent === "0\\nsecond line\\nthird line"'), 'new table resets scroll');
+  assert.equal(await js('document.querySelector(".workspace-table-preview").scrollTop'), 0);
+  await js('document.querySelector(".workspace-table-preview").scrollTop = 1e9');
+  await until(() => js('Array.from(document.querySelectorAll(".workspace-table-preview td")).some(cell => cell.textContent === "value-199")'), 'multiline last row');
+  assert.ok(await js(`(() => {
+    const rows = Array.from(document.querySelectorAll('.workspace-table-preview tr:not([aria-hidden])'));
+    return rows.length > 1 && rows.every((row, index) => !index || row.getBoundingClientRect().top >= rows[index - 1].getBoundingClientRect().bottom - 1);
+  })()`), 'measured multiline rows must not overlap');
+  await openPreview('empty.csv', '.workspace-table-preview .empty');
+  assert.equal(await tableCellCount(), 0);
+  console.log('PASS: CSV/TSV previews bound DOM size, reach the last row and column, measure multiline cells and reset on file/source changes.');
   await openPreview('page.html', 'iframe.workspace-document-preview');
   assert.equal(await js('document.querySelector("iframe.workspace-document-preview").getAttribute("sandbox")'), '');
   await delay(150);
@@ -335,6 +377,8 @@ try {
   await openPreview('archive.zip', '.workspace-file-panel .empty');
   assert.ok(await js('document.querySelector(".workspace-file-panel .empty").textContent.includes("No preview is available")'));
   console.log('PASS: Markdown/source, sandboxed HTML, escaped CSV cells, SVG, PDF, media and unsupported file downloads.');
+  await call('Emulation.clearDeviceMetricsOverride');
+  await until(() => js('!document.querySelector(".workspace-explorer").classList.contains("is-compact")'), 'restore workspace layout');
 
   await js(`${tab('Files Explorer')}.click(); ${row('src')}.click();`);
   await until(() => js(`!!(${row('src/image.svg')})`), 'nested preview entry');

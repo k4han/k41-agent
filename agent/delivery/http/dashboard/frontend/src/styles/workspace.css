@@ -1477,8 +1477,14 @@ body.workspace-row-resizing .workspace-explorer * {
   overflow-wrap: anywhere;
 }
 
+.workspace-table-preview {
+  padding: 0;
+  overflow-anchor: none;
+}
+
 .workspace-table-preview table {
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: var(--font-size-workspace);
 }
 
@@ -1489,6 +1495,11 @@ body.workspace-row-resizing .workspace-explorer * {
   min-width: 70px;
   max-width: 400px;
   overflow-wrap: anywhere;
+}
+
+.workspace-table-preview .workspace-table-spacer {
+  padding: 0;
+  border: 0;
 }
 
 .workspace-file-view {

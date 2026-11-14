@@ -1,7 +1,8 @@
-import { createEffect, createMemo, createSignal, For, Match, on, Show, Switch, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, Match, on, Show, Switch, type JSX } from "solid-js";
 import { Download, Maximize2, Minimize2 } from "lucide-solid";
 
 import { Markdown } from "@/components/Markdown";
+import { WorkspaceTablePreview } from "@/components/WorkspaceTablePreview";
 import { parseDelimitedPreview, sandboxedWorkspaceHtml, workspacePreviewKind } from "@/lib/workspacePreview";
 
 export function WorkspaceFilePreview(props: {
@@ -76,10 +77,7 @@ export function WorkspaceFilePreview(props: {
               <div class="hint workspace-hint">Scripts and external resources are disabled in HTML previews.</div>
             </Match>
             <Match when={kind() === "table"}>
-              <div class="workspace-table-preview">
-                <table><tbody><For each={table().rows}>{(row) => <tr><For each={row}>{(cell) => <td>{cell}</td>}</For></tr>}</For></tbody></table>
-                <Show when={!table().rows.length}><div class="empty compact">Empty table.</div></Show>
-              </div>
+              <WorkspaceTablePreview rows={table().rows} />
               <Show when={table().truncated}><div class="hint workspace-hint">Showing up to 200 rows and 100 columns. Download for the complete table.</div></Show>
             </Match>
             <Match when={kind() === "unsupported"}>
