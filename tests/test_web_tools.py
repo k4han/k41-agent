@@ -52,7 +52,7 @@ def test_local_fetch_preserves_content_above_the_old_download_limit(monkeypatch)
         def stream(self, *args, **kwargs):
             return response
 
-    monkeypatch.setattr(web_fetch_module.httpx, "Client", Client)
+    monkeypatch.setattr(web_fetch_module, "_get_http_client", Client)
     assert web_fetch_module._local_fetch("https://example.test") == text
 
 
@@ -73,7 +73,7 @@ def test_web_providers_return_full_content_for_shared_retention(monkeypatch, pro
             payload = {"data": {"markdown": text}} if provider == "firecrawl" else {"results": [{"raw_content": text}]}
             return httpx.Response(200, request=httpx.Request("POST", url), json=payload)
 
-    monkeypatch.setattr(web_fetch_module.httpx, "Client", Client)
+    monkeypatch.setattr(web_fetch_module, "_get_http_client", Client)
     fetch = web_fetch_module._firecrawl_fetch if provider == "firecrawl" else web_fetch_module._tavily_fetch
     assert fetch("https://example.test", api_key="test-key") == text
 
@@ -598,12 +598,12 @@ def test_web_fetch_local_mode(monkeypatch):
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def stream(self, method, url):
+        def stream(self, method, url, **kwargs):
             resp = _FakeResponse([html])
             resp.headers = {"content-type": "text/html"}
             return resp
 
-    monkeypatch.setattr(web_fetch_module.httpx, "Client", _FakeClient)
+    monkeypatch.setattr(web_fetch_module, "_get_http_client", _FakeClient)
 
     tool = web_fetch_module._build_web_fetch_tool({"provider": "local"})
     result = tool.func("https://example.com")
@@ -614,7 +614,7 @@ def test_web_fetch_local_mode(monkeypatch):
 def test_web_fetch_firecrawl_mode_credentials(monkeypatch):
     seen = {}
 
-    def _fake_firecrawl(url, **kwargs):
+    def _fake_firecrawl(url, *, deadline=None, **kwargs):
         seen.update(kwargs)
         return "firecrawl-content"
 
@@ -691,7 +691,7 @@ def test_firecrawl_scrape_url_resolution(monkeypatch):
                 json={"success": True, "data": {"markdown": "# Scraped"}},
             )
 
-    monkeypatch.setattr(web_fetch_module.httpx, "Client", _CaptureClient)
+    monkeypatch.setattr(web_fetch_module, "_get_http_client", _CaptureClient)
 
     # Empty base URL -> defaults to official scrape endpoint
     web_fetch_module._firecrawl_fetch("https://example.com", base_url="")
@@ -734,16 +734,16 @@ def test_firecrawl_scrape_response_handling(monkeypatch):
 
     # Success with markdown
     monkeypatch.setattr(
-        web_fetch_module.httpx,
-        "Client",
+        web_fetch_module,
+        "_get_http_client",
         lambda *args, **kwargs: _MockClient({"success": True, "data": {"markdown": "Hello Firecrawl"}}),
     )
     assert web_fetch_module._firecrawl_fetch("https://example.com") == "Hello Firecrawl"
 
     # Success: false raises ToolError UPSTREAM
     monkeypatch.setattr(
-        web_fetch_module.httpx,
-        "Client",
+        web_fetch_module,
+        "_get_http_client",
         lambda *args, **kwargs: _MockClient({"success": False, "error": "Rate limit exceeded"}),
     )
     try:
@@ -756,8 +756,8 @@ def test_firecrawl_scrape_response_handling(monkeypatch):
 
     # Status code >= 400 in metadata raises ToolError UPSTREAM
     monkeypatch.setattr(
-        web_fetch_module.httpx,
-        "Client",
+        web_fetch_module,
+        "_get_http_client",
         lambda *args, **kwargs: _MockClient(
             {"success": True, "data": {"markdown": "", "metadata": {"statusCode": 404, "error": "Not Found"}}}
         ),
@@ -772,8 +772,8 @@ def test_firecrawl_scrape_response_handling(monkeypatch):
 
     # Empty content
     monkeypatch.setattr(
-        web_fetch_module.httpx,
-        "Client",
+        web_fetch_module,
+        "_get_http_client",
         lambda *args, **kwargs: _MockClient({"success": True, "data": {"markdown": ""}}),
     )
     assert web_fetch_module._firecrawl_fetch("https://example.com") == "No content found."
@@ -795,7 +795,7 @@ def test_firecrawl_scrape_network_errors(monkeypatch):
         def post(self, *args, **kwargs):
             raise httpx.TimeoutException("scrape timed out")
 
-    monkeypatch.setattr(web_fetch_module.httpx, "Client", _TimeoutClient)
+    monkeypatch.setattr(web_fetch_module, "_get_http_client", _TimeoutClient)
     try:
         web_fetch_module._firecrawl_fetch("https://example.com")
     except ToolError as exc:
@@ -819,7 +819,7 @@ def test_firecrawl_scrape_network_errors(monkeypatch):
             resp = httpx.Response(401, request=req)
             raise httpx.HTTPStatusError("unauthorized", request=req, response=resp)
 
-    monkeypatch.setattr(web_fetch_module.httpx, "Client", _StatusClient)
+    monkeypatch.setattr(web_fetch_module, "_get_http_client", _StatusClient)
     try:
         web_fetch_module._firecrawl_fetch("https://example.com")
     except ToolError as exc:
@@ -832,7 +832,7 @@ def test_firecrawl_scrape_network_errors(monkeypatch):
 def test_web_fetch_tavily_mode(monkeypatch):
     seen = {}
 
-    def _fake_tavily(url, **kwargs):
+    def _fake_tavily(url, *, deadline=None, **kwargs):
         seen.update(kwargs)
         return "tavily-content"
 
@@ -883,8 +883,8 @@ def test_tavily_extract_response_handling(monkeypatch):
 
     # Success with raw_content
     monkeypatch.setattr(
-        web_fetch_module.httpx,
-        "Client",
+        web_fetch_module,
+        "_get_http_client",
         lambda *args, **kwargs: _MockClient(
             {"results": [{"url": "https://example.com", "raw_content": "# Tavily Extracted"}]}
         ),
@@ -896,8 +896,8 @@ def test_tavily_extract_response_handling(monkeypatch):
 
     # Failed results raises ToolError UPSTREAM
     monkeypatch.setattr(
-        web_fetch_module.httpx,
-        "Client",
+        web_fetch_module,
+        "_get_http_client",
         lambda *args, **kwargs: _MockClient(
             {"results": [], "failed_results": [{"url": "https://example.com", "error": "Blocked by robots.txt"}]}
         ),
@@ -996,11 +996,11 @@ def test_materialized_web_fetch_applies_error_normalization(monkeypatch):
 def test_web_fetch_falls_back_to_web_search_settings(monkeypatch):
     seen = {}
 
-    def _fake_firecrawl(url, **kwargs):
+    def _fake_firecrawl(url, *, deadline=None, **kwargs):
         seen.update(kwargs)
         return "firecrawl-shared"
 
-    def _fake_tavily(url, **kwargs):
+    def _fake_tavily(url, *, deadline=None, **kwargs):
         seen.update(kwargs)
         return "tavily-shared"
 

@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import logging
 import re
+from http.cookiejar import CookieJar, DefaultCookiePolicy
+from threading import Lock
+from time import monotonic
 from typing import Any
 
 import httpx
@@ -38,7 +42,11 @@ DEFAULT_HEADERS = {
     )
 }
 MAX_RESPONSE_BYTES = MAX_STORED_BYTES
+FETCH_TIMEOUT_SECONDS = 30.0
 _NOISE_TAGS = ["script", "style", "nav", "footer", "header", "aside", "noscript"]
+
+_http_client: httpx.Client | None = None
+_http_client_lock = Lock()
 
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
 TAVILY_EXTRACT_URL = "https://api.tavily.com/extract"
@@ -104,6 +112,48 @@ WEB_FETCH_CONFIG_SCHEMA = ToolConfigSchema(
 WEB_FETCH_CONFIG_SCHEMA = with_web_connections(WEB_FETCH_CONFIG_SCHEMA, "web_fetch")
 
 
+class _NoCookiePolicy(DefaultCookiePolicy):
+    """Keep independent tool calls stateless while reusing connections."""
+
+    def set_ok(self, cookie: Any, request: Any) -> bool:
+        return False
+
+
+def _get_http_client() -> httpx.Client:
+    """Reuse a thread-safe connection pool without storing provider credentials."""
+    global _http_client
+    with _http_client_lock:
+        if _http_client is None:
+            _http_client = httpx.Client(
+                headers=DEFAULT_HEADERS,
+                cookies=CookieJar(policy=_NoCookiePolicy()),
+            )
+        return _http_client
+
+
+def _close_http_client() -> None:
+    global _http_client
+    with _http_client_lock:
+        client, _http_client = _http_client, None
+    if client is not None:
+        client.close()
+
+
+atexit.register(_close_http_client)
+
+
+def _remaining_seconds(deadline: float) -> float:
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise ToolError(ToolErrorCode.TIMEOUT, "Web fetch deadline exceeded.")
+    return remaining
+
+
+def _request_timeout(deadline: float) -> httpx.Timeout:
+    remaining = _remaining_seconds(deadline)
+    return httpx.Timeout(remaining, connect=min(10.0, remaining))
+
+
 def _html_to_markdown(html: str) -> str:
     soup = BeautifulSoup(
         html,
@@ -132,29 +182,39 @@ def _resolve_firecrawl_scrape_url(base_url: str = "") -> str:
     return f"{base}/scrape"
 
 
-def _local_fetch(url: str) -> str:
+def _local_fetch(url: str, *, deadline: float | None = None) -> str:
     """Fetch a web page directly via HTTP and return its content as Markdown."""
-    try:
-        with httpx.Client(
-            timeout=httpx.Timeout(30, connect=10),
-            follow_redirects=True,
-            headers=DEFAULT_HEADERS,
-        ) as client:
-            with client.stream("GET", url) as response:
-                response.raise_for_status()
-                content, capture_truncated = capture_bytes(response.iter_bytes(), MAX_RESPONSE_BYTES)
+    if deadline is None:
+        deadline = monotonic() + FETCH_TIMEOUT_SECONDS
 
-            content_type = response.headers.get("content-type", "")
-            text = content.decode(response.encoding or "utf-8", errors="replace")
-            notice = "\n\n[source download limit reached; some content may be missing]" if capture_truncated else ""
-            if "text/html" in content_type:
-                return _html_to_markdown(text) + notice
-            if "application/json" in content_type or "text/" in content_type:
-                return text + notice
-            return f"[Info] Non-text content type: {content_type}. Response size: {len(content)} bytes."
+    def chunks():
+        for chunk in response.iter_bytes():
+            _remaining_seconds(deadline)
+            yield chunk
+
+    try:
+        client = _get_http_client()
+        with client.stream(
+            "GET",
+            url,
+            timeout=_request_timeout(deadline),
+            follow_redirects=True,
+        ) as response:
+            response.raise_for_status()
+            content, capture_truncated = capture_bytes(chunks(), MAX_RESPONSE_BYTES)
+
+        _remaining_seconds(deadline)
+        content_type = response.headers.get("content-type", "")
+        text = content.decode(response.encoding or "utf-8", errors="replace")
+        notice = "\n\n[source download limit reached; some content may be missing]" if capture_truncated else ""
+        if "text/html" in content_type:
+            return _html_to_markdown(text) + notice
+        if "application/json" in content_type or "text/" in content_type:
+            return text + notice
+        return f"[Info] Non-text content type: {content_type}. Response size: {len(content)} bytes."
     except httpx.TimeoutException as exc:
         raise ToolError(
-            ToolErrorCode.TIMEOUT, "Request timed out after 30 seconds."
+            ToolErrorCode.TIMEOUT, "Request timed out."
         ) from exc
     except httpx.HTTPStatusError as exc:
         raise ToolError(
@@ -174,8 +234,11 @@ def _firecrawl_fetch(
     *,
     api_key: str = "",
     base_url: str = "",
+    deadline: float | None = None,
 ) -> str | None:
     """Fetch webpage markdown using Firecrawl Scrape API."""
+    if deadline is None:
+        deadline = monotonic() + FETCH_TIMEOUT_SECONDS
     headers = {**DEFAULT_HEADERS, "Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -183,16 +246,18 @@ def _firecrawl_fetch(
     scrape_url = _resolve_firecrawl_scrape_url(base_url)
 
     try:
-        with httpx.Client(timeout=httpx.Timeout(30, connect=10), headers=headers) as client:
-            response = client.post(
-                scrape_url,
-                json={
-                    "url": url,
-                    "formats": ["markdown"],
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = _get_http_client().post(
+            scrape_url,
+            headers=headers,
+            timeout=_request_timeout(deadline),
+            json={
+                "url": url,
+                "formats": ["markdown"],
+            },
+        )
+        _remaining_seconds(deadline)
+        response.raise_for_status()
+        data = response.json()
 
         if data.get("success") is False:
             error_msg = data.get("error") or "Firecrawl failed to scrape URL."
@@ -225,7 +290,7 @@ def _firecrawl_fetch(
 
     except httpx.TimeoutException as exc:
         raise ToolError(
-            ToolErrorCode.TIMEOUT, "Firecrawl fetch timed out after 30 seconds."
+            ToolErrorCode.TIMEOUT, "Firecrawl fetch timed out."
         ) from exc
     except httpx.HTTPStatusError as exc:
         raise ToolError(
@@ -243,10 +308,13 @@ def _tavily_fetch(
     url: str,
     *,
     api_key: str = "",
+    deadline: float | None = None,
 ) -> str | None:
     """Extract webpage content using Tavily Extract API."""
     if not api_key:
         return None
+    if deadline is None:
+        deadline = monotonic() + FETCH_TIMEOUT_SECONDS
 
     headers = {
         **DEFAULT_HEADERS,
@@ -254,18 +322,20 @@ def _tavily_fetch(
         "Authorization": f"Bearer {api_key}",
     }
     try:
-        with httpx.Client(timeout=httpx.Timeout(30, connect=10), headers=headers) as client:
-            response = client.post(
-                TAVILY_EXTRACT_URL,
-                json={
-                    "api_key": api_key,
-                    "urls": [url],
-                    "extract_depth": "basic",
-                    "format": "markdown",
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = _get_http_client().post(
+            TAVILY_EXTRACT_URL,
+            headers=headers,
+            timeout=_request_timeout(deadline),
+            json={
+                "api_key": api_key,
+                "urls": [url],
+                "extract_depth": "basic",
+                "format": "markdown",
+            },
+        )
+        _remaining_seconds(deadline)
+        response.raise_for_status()
+        data = response.json()
 
         results = data.get("results") or []
         if results and isinstance(results, list):
@@ -286,7 +356,7 @@ def _tavily_fetch(
         return "No content found."
     except httpx.TimeoutException as exc:
         raise ToolError(
-            ToolErrorCode.TIMEOUT, "Tavily extract timed out after 30 seconds."
+            ToolErrorCode.TIMEOUT, "Tavily extract timed out."
         ) from exc
     except httpx.HTTPStatusError as exc:
         raise ToolError(
@@ -324,9 +394,10 @@ def _build_web_fetch_tool(config: dict[str, ToolConfigValue]) -> StructuredTool:
             raise ToolError(ToolErrorCode.INVALID_INPUT, f"Invalid web_fetch connection: {exc}.") from exc
 
 
-    def _fetch_sync(url: str) -> str:
+    def _fetch_with_deadline(url: str, deadline: float) -> str:
+        _remaining_seconds(deadline)
         if provider == "local":
-            return _local_fetch(url)
+            return _local_fetch(url, deadline=deadline)
 
         if provider == "firecrawl":
             api_key = credential("FIRECRAWL_API_KEY")
@@ -336,7 +407,7 @@ def _build_web_fetch_tool(config: dict[str, ToolConfigValue]) -> StructuredTool:
                     ToolErrorCode.INVALID_INPUT,
                     ("Firecrawl fetch is not configured. Configure a Firecrawl connection in Settings > Providers > Search & Web, or set FIRECRAWL_API_KEY or FIRECRAWL_BASE_URL."),
                 )
-            result = _firecrawl_fetch(url, api_key=api_key, base_url=base_url)
+            result = _firecrawl_fetch(url, api_key=api_key, base_url=base_url, deadline=deadline)
             if result is not None:
                 return result
             return "No content found."
@@ -348,7 +419,7 @@ def _build_web_fetch_tool(config: dict[str, ToolConfigValue]) -> StructuredTool:
                     ToolErrorCode.INVALID_INPUT,
                     ("Tavily extract is not configured. Configure a Tavily connection in Settings > Providers > Search & Web, or set TAVILY_API_KEY."),
                 )
-            result = _tavily_fetch(url, api_key=api_key)
+            result = _tavily_fetch(url, api_key=api_key, deadline=deadline)
             if result is not None:
                 return result
             return "No content found."
@@ -363,8 +434,11 @@ def _build_web_fetch_tool(config: dict[str, ToolConfigValue]) -> StructuredTool:
         firecrawl_key = _auto_credential("FIRECRAWL_API_KEY")
         firecrawl_base = _auto_credential("FIRECRAWL_BASE_URL")
         if firecrawl_key or firecrawl_base:
+            _remaining_seconds(deadline)
             try:
-                res = _firecrawl_fetch(url, api_key=firecrawl_key, base_url=firecrawl_base)
+                res = _firecrawl_fetch(
+                    url, api_key=firecrawl_key, base_url=firecrawl_base, deadline=deadline,
+                )
                 if res is not None:
                     return res
             except ToolError:
@@ -375,8 +449,9 @@ def _build_web_fetch_tool(config: dict[str, ToolConfigValue]) -> StructuredTool:
 
         tavily_key = _auto_credential("TAVILY_API_KEY")
         if tavily_key:
+            _remaining_seconds(deadline)
             try:
-                res = _tavily_fetch(url, api_key=tavily_key)
+                res = _tavily_fetch(url, api_key=tavily_key, deadline=deadline)
                 if res is not None:
                     return res
             except ToolError:
@@ -385,10 +460,22 @@ def _build_web_fetch_tool(config: dict[str, ToolConfigValue]) -> StructuredTool:
                     exc_info=True,
                 )
 
-        return _local_fetch(url)
+        _remaining_seconds(deadline)
+        return _local_fetch(url, deadline=deadline)
+
+    def _fetch_sync(url: str) -> str:
+        return _fetch_with_deadline(url, monotonic() + FETCH_TIMEOUT_SECONDS)
 
     async def _fetch_async(url: str) -> str:
-        return await asyncio.to_thread(_fetch_sync, url)
+        deadline = monotonic() + FETCH_TIMEOUT_SECONDS
+        try:
+            async with asyncio.timeout(FETCH_TIMEOUT_SECONDS):
+                return await asyncio.to_thread(_fetch_with_deadline, url, deadline)
+        except TimeoutError as exc:
+            raise ToolError(
+                ToolErrorCode.TIMEOUT,
+                f"Web fetch timed out after {FETCH_TIMEOUT_SECONDS:g} seconds.",
+            ) from exc
 
     return StructuredTool.from_function(
         func=_fetch_sync,

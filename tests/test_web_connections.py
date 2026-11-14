@@ -177,7 +177,7 @@ def test_materialized_tool_reads_updated_connection_without_recreation(monkeypat
     monkeypatch.setattr("agent.shared.config.get_config_service", lambda: service)
     seen = []
 
-    def fetch(url, *, api_key):
+    def fetch(url, *, api_key, deadline=None):
         seen.append(api_key)
         return "page content"
 
