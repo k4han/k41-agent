@@ -29,8 +29,16 @@ export type AgentForm = {
   acp: AcpAgentSettings | null;
 };
 
-export const AGENT_TABS = ["general", "tools", "prompt"] as const;
+export const AGENT_TABS = [
+  "general",
+  "tools",
+  "mcp",
+  "delegation",
+  "permissions",
+  "prompt",
+] as const;
 export type AgentTab = (typeof AGENT_TABS)[number];
+export type AgentCapabilityTab = Exclude<AgentTab, "general" | "prompt">;
 
 export function isAgentTab(value: string | undefined): value is AgentTab {
   return typeof value === "string" && (AGENT_TABS as readonly string[]).includes(value);

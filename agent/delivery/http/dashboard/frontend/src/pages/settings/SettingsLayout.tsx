@@ -117,6 +117,8 @@ export function SettingsLayout(props: {
   breadcrumbLabel?: string;
   breadcrumbSegments?: BreadcrumbSegment[];
   contentWidth?: "narrow" | "medium" | "wide";
+  hideHeading?: boolean;
+  fillContent?: boolean;
   children: JSX.Element;
 }) {
   const location = useLocation();
@@ -246,7 +248,7 @@ export function SettingsLayout(props: {
 
   return (
     <div
-      class={`app-layout settings-app-layout ${collapsed() ? "sidebar-collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""}`}
+      class={`app-layout settings-app-layout ${props.fillContent ? "settings-app-layout-fill" : ""} ${collapsed() ? "sidebar-collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""}`}
       onClick={handleAppLayoutClick}
     >
       <aside id="settings-layout-sidebar" class="sidebar settings-sidebar">
@@ -441,12 +443,14 @@ export function SettingsLayout(props: {
           </nav>
           <div class="row-wrap settings-topbar-actions">{props.actions}</div>
         </header>
-        <div class={`content settings-content settings-content-${props.contentWidth || "medium"}`}>
-          <div class="settings-page-heading">
-            <div class="settings-page-heading-text">
-              <h1 class="page-title">{props.title}</h1>
+        <div class={`content settings-content settings-content-${props.contentWidth || "medium"} ${props.fillContent ? "settings-content-fill" : ""}`}>
+          <Show when={!props.hideHeading}>
+            <div class="settings-page-heading">
+              <div class="settings-page-heading-text">
+                <h1 class="page-title">{props.title}</h1>
+              </div>
             </div>
-          </div>
+          </Show>
           <div class="settings-page-body">{props.children}</div>
         </div>
       </main>

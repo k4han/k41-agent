@@ -1,68 +1,92 @@
-import { createSignal, For, Show } from "solid-js";
-import { RotateCcw } from "lucide-solid";
-import { useLocation, useNavigate } from "@solidjs/router";
+import "@/styles/agent-tools.css";
 
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  Index,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
+import { Dynamic } from "solid-js/web";
+import { A } from "@solidjs/router";
+import {
+  Bot,
+  ChevronRight,
+  Clock3,
+  FileText,
+  Globe,
+  Image,
+  Info,
+  Layers,
+  LayoutGrid,
+  Plug,
+  Search,
+  SearchX,
+  Settings2,
+  ShieldCheck,
+  Terminal,
+  Users,
+  X,
+} from "lucide-solid";
+
+import { Dialog } from "@/components/Dialog";
 import { PermissionModePicker } from "@/components/PermissionModePicker";
-import { ModelPicker } from "@/components/ModelPicker";
 import { isAcpCard } from "@/lib/acp";
-import type { AgentMcpInstall, AgentsPayload, ToolConfigField, ToolConfigSchema } from "@/types";
+import type { AgentMcpInstall, AgentsPayload, ToolConfigSchema } from "@/types";
+import { AgentToolConfig } from "./AgentToolConfig";
+import type {
+  AgentCapabilityTab,
+  AgentForm,
+  AgentToolGroup,
+  ToolConfigValue,
+} from "./agentForm";
 
-import type { AgentForm, AgentToolGroup, ToolConfigValue } from "./agentForm";
-import { manualToolNames } from "./agentForm";
-
-function formatToolCategory(category: string) {
-  return category === "unknown"
-    ? "Other"
-    : category.charAt(0).toUpperCase() + category.slice(1);
+const categoryIcons: Record<string, typeof FileText> = {
+  file: FileText,
+  shell: Terminal,
+  web: Globe,
+  browser: Globe,
+  image: Image,
+  schedule: Clock3,
+  agent: Bot,
+  skill: Layers,
+  utility: Clock3,
+};
+const toolTitles: Record<string, string> = {
+  web_search: "Search the web",
+  web_fetch: "Read a web page",
+  read: "Read a file",
+  list_dir: "List a directory",
+  glob: "Find files",
+  grep: "Search file contents",
+  edit: "Edit a file",
+  write: "Write a file",
+  bash: "Run a command",
+  read_process_output: "Read process output",
+  write_process_input: "Send process input",
+  stop_process: "Stop a process",
+  generate_image: "Generate an image",
+  get_current_time: "Get the current time",
+};
+function formatCategory(category: string) {
+  if (category === "unknown") return "Other";
+  if (category === "file") return "Files";
+  return category.charAt(0).toUpperCase() + category.slice(1);
 }
-
-function optionCardClass(checked: boolean, readOnly: boolean) {
-  return `agent-config-option ${checked ? "active" : ""} ${readOnly ? "read-only" : ""}`;
-}
-
-function hasOverride(form: AgentForm, toolName: string, fieldName: string) {
-  return Object.prototype.hasOwnProperty.call(form.tool_configs[toolName] || {}, fieldName);
-}
-
-function fieldValue(form: AgentForm, toolName: string, field: ToolConfigField) {
-  if (hasOverride(form, toolName, field.name)) {
-    return form.tool_configs[toolName][field.name];
-  }
-  return field.input_type === "boolean" ? false : "";
-}
-
-function schemaDefaultLabel(field: ToolConfigField) {
-  if (field.default === undefined || field.default === null || field.default === "") {
-    return "Inherit";
-  }
-  return `Inherit (${String(field.default)})`;
-}
-
-function formatDefault(
-  field: ToolConfigField,
-  toolName: string,
-  effective: Record<string, Record<string, unknown>> | undefined,
-) {
-  const globalValue = effective?.[toolName]?.[field.name];
-  const hasGlobal =
-    globalValue !== undefined && globalValue !== null && globalValue !== "";
-  if (!hasGlobal) {
-    return schemaDefaultLabel(field);
-  }
-  if (field.secret || field.input_type === "password") {
-    return "Global (set)";
-  }
-  return `Global: ${globalValue === "__default__" ? "shared default" : String(globalValue)}`;
-}
-
-function isImageOutputModel(model: { output_types?: string[] | null }) {
-  return Boolean(model.output_types?.includes("image"));
+function toolTitle(name: string) {
+  const title = name.replaceAll("_", " ");
+  return toolTitles[name] || title.charAt(0).toUpperCase() + title.slice(1);
 }
 
 export function AgentToolsTab(props: {
+  section: AgentCapabilityTab;
   form: AgentForm;
   onUpdate: <K extends keyof AgentForm>(key: K, value: AgentForm[K]) => void;
   readOnly: boolean;
+  canManageMcp: boolean;
   toolGroups: AgentToolGroup[];
   totalBuiltInTools: number;
   mcpServerOptions: string[];
@@ -80,520 +104,896 @@ export function AgentToolsTab(props: {
   ) => void;
   onToggleToolGroup: (tools: string[], checked: boolean) => void;
   onToggleMcpInstall: (serverName: string, checked: boolean) => void;
-  onUpdateToolConfig: (toolName: string, fieldName: string, value: ToolConfigValue) => void;
+  onUpdateToolConfig: (
+    toolName: string,
+    fieldName: string,
+    value: ToolConfigValue,
+  ) => void;
   onResetToolConfigField: (toolName: string, fieldName: string) => void;
 }) {
-  const [advancedTools, setAdvancedTools] = createSignal<Record<string, boolean>>({});
-  const location = useLocation();
-  const navigate = useNavigate();
-  const isWebCredential = (tool: string, field: ToolConfigField) =>
-    (tool === "web_search" || tool === "web_fetch") &&
-    !field.name.endsWith("_connection") && field.name !== "provider";
-  const currentProvider = (tool: string) => {
-    const overrideVal = props.form.tool_configs[tool]?.provider;
-    const globalVal = props.toolConfigEffective?.[tool]?.provider;
-    const defaultVal = props.toolConfigSchemas[tool]?.fields.find((f) => f.name === "provider")?.default;
-    const currentVal =
-      overrideVal !== undefined && overrideVal !== "" && overrideVal !== null
-        ? overrideVal
-        : globalVal !== undefined && globalVal !== "" && globalVal !== null
-          ? globalVal
-          : (defaultVal ?? "auto");
-    return String(currentVal).toLowerCase();
-  };
-  const connectionKindForTool = (tool: string) => {
-    const provider = currentProvider(tool);
-    if (tool === "web_search" && ["google", "tavily", "brave", "bing", "firecrawl"].includes(provider)) return provider;
-    if (tool === "web_fetch" && ["firecrawl", "tavily"].includes(provider)) return provider;
-    return tool === "web_fetch" ? "firecrawl" : "tavily";
-  };
-  const hasLegacyOverride = (tool: string) => {
-    const configs = props.form.tool_configs[tool] || {};
-    return Object.keys(configs).some((name) => name !== "provider" && !name.endsWith("_connection"));
-  };
-  const inheritedSource = (tool: string, field: ToolConfigField) => {
-    const kind = field.name.split("_")[0];
-    const reference = props.form.tool_configs[tool]?.[`${kind}_connection`];
-    if (!reference) return props.payload.tool_config_sources?.[tool]?.[field.name] || "default";
-    const name = reference === "__default__" ? props.payload.web_connections?.defaults[kind] : String(reference);
-    const connection = props.payload.web_connections?.connections.find((entry) => entry.name.toLowerCase() === name?.toLowerCase());
-    if (!connection) return "environment or service default";
-    const source = connection.sources[field.name.slice(kind.length + 1)];
-    return source === "connection" ? `connection:${connection.name}` : source;
-  };
+  const section = () => props.section;
+  const [category, setCategory] = createSignal("all");
+  const [query, setQuery] = createSignal("");
+  const [selectedOnly, setSelectedOnly] = createSignal(false);
+  const [focusedTool, setFocusedTool] = createSignal<string>();
+  const [detailsOpen, setDetailsOpen] = createSignal(false);
+  const [contentWidth, setContentWidth] = createSignal(0);
+  let explorerRef!: HTMLDivElement;
+  let toolDetailsRef: HTMLDivElement | undefined;
+  let searchRef: HTMLInputElement | undefined;
+  let catalogRef: HTMLDivElement | undefined;
+  const inlineDetails = () => contentWidth() >= 900;
+  const availableTools = createMemo(() =>
+    props.toolGroups.flatMap((group) => group.tools),
+  );
+  const selectedBuiltIns = createMemo(() =>
+    availableTools().filter((tool) => props.form.tools.includes(tool)),
+  );
+  const selectedTool = createMemo(() => {
+    const current = focusedTool();
+    if (current && availableTools().includes(current)) return current;
+    return (
+      selectedBuiltIns().find((tool) => props.toolConfigSchemas[tool]) ||
+      selectedBuiltIns()[0] ||
+      availableTools()[0]
+    );
+  });
+  const categoryFor = (tool: string) =>
+    props.toolGroups.find((group) => group.tools.includes(tool))?.category ||
+    "unknown";
+  const descriptionFor = (tool: string) =>
+    props.payload.tool_descriptions?.[tool]?.trim().split(/\n\s*\n/)[0] ||
+    `Use ${toolTitle(tool).toLowerCase()} in this agent’s workflow.`;
   const activeMcpCount = () =>
     props.mcpInstalls.filter((install) => install.agent_enabled).length;
-  const installForServer = (serverName: string) =>
-    props.mcpInstalls.find((install) => install.server_name === serverName);
-
-  const isFieldVisible = (tool: string, field: ToolConfigField) => {
-    if (tool === "generate_image" && field.name === "provider") {
-      return false;
-    }
-    if (!field.show_when || Object.keys(field.show_when).length === 0) {
-      return true;
-    }
-    for (const [depField, allowedValues] of Object.entries(field.show_when)) {
-      const overrideVal = props.form.tool_configs[tool]?.[depField];
-      const globalVal = props.toolConfigEffective?.[tool]?.[depField];
-      const defaultVal = props.toolConfigSchemas[tool]?.fields.find((f) => f.name === depField)?.default;
-      const currentVal =
-        overrideVal !== undefined && overrideVal !== "" && overrideVal !== null
-          ? overrideVal
-          : globalVal !== undefined && globalVal !== "" && globalVal !== null
-            ? globalVal
-            : (defaultVal ?? "");
-      if (!allowedValues.includes(String(currentVal))) {
-        return false;
+  const installFor = (name: string) =>
+    props.mcpInstalls.find((install) => install.server_name === name);
+  const activeMcpToolCount = () =>
+    props.mcpServerOptions
+      .filter((server) => installFor(server)?.agent_enabled)
+      .reduce(
+        (count, server) =>
+          count +
+          (props.payload.mcp_tools?.[server] || []).filter((tool) =>
+            props.form.tools.includes(tool),
+          ).length,
+        0,
+      );
+  const permissionLabel = () => {
+    const mode = props.form.permission_mode;
+    return mode === "ask"
+      ? "Ask for approval"
+      : mode === "auto"
+        ? "Approve for me"
+        : mode === "full_access"
+          ? "Full access"
+          : "Inherit permissions";
+  };
+  const visibleGroups = createMemo(() => {
+    const needle = query().trim().toLowerCase();
+    return props.toolGroups
+      .filter((group) => category() === "all" || category() === group.category)
+      .map((group) => ({
+        ...group,
+        visibleTools: group.tools.filter(
+          (tool) =>
+            (!selectedOnly() || props.form.tools.includes(tool)) &&
+            (!needle ||
+              `${tool} ${toolTitle(tool)} ${descriptionFor(tool)}`
+                .toLowerCase()
+                .includes(needle)),
+        ),
+      }))
+      .filter((group) => group.visibleTools.length > 0);
+  });
+  const visibleCount = () =>
+    visibleGroups().reduce(
+      (count, group) => count + group.visibleTools.length,
+      0,
+    );
+  const inspectTool = (tool: string) => {
+    const changed = selectedTool() !== tool;
+    setFocusedTool(tool);
+    if (!inlineDetails()) setDetailsOpen(true);
+    else if (changed && toolDetailsRef) toolDetailsRef.scrollTop = 0;
+  };
+  createEffect(() => {
+    category();
+    query();
+    selectedOnly();
+    if (catalogRef) catalogRef.scrollTop = 0;
+  });
+  createEffect(() => {
+    if (inlineDetails()) setDetailsOpen(false);
+    if (
+      category() !== "all" &&
+      !props.toolGroups.some((group) => group.category === category())
+    )
+      setCategory("all");
+  });
+  onMount(() => {
+    setContentWidth(explorerRef.getBoundingClientRect().width);
+    const observer = new ResizeObserver((entries) =>
+      setContentWidth(entries[0].contentRect.width),
+    );
+    observer.observe(explorerRef);
+    const handleKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      if (
+        event.key === "/" &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        !detailsOpen() &&
+        section() === "tools" &&
+        !target.closest("input, textarea, select, [contenteditable=true]")
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        searchRef?.focus();
       }
-    }
-    return true;
-  };
+    };
+    document.addEventListener("keydown", handleKey, true);
+    onCleanup(() => {
+      observer.disconnect();
+      document.removeEventListener("keydown", handleKey, true);
+    });
+  });
 
-  const isDuckDuckGo = (tool: string) => {
-    if (tool !== "web_search") return false;
-    const overrideVal = props.form.tool_configs[tool]?.provider;
-    const globalVal = props.toolConfigEffective?.[tool]?.provider;
-    const defaultVal = props.toolConfigSchemas[tool]?.fields.find((f) => f.name === "provider")?.default;
-    const currentVal =
-      overrideVal !== undefined && overrideVal !== "" && overrideVal !== null
-        ? overrideVal
-        : globalVal !== undefined && globalVal !== "" && globalVal !== null
-          ? globalVal
-          : (defaultVal ?? "auto");
-    return String(currentVal) === "duckduckgo";
-  };
+  const ToolDetails = () => (
+    <Show
+      when={selectedTool()}
+      keyed
+      fallback={
+        <div class="agent-tools-empty">
+          <Info size={22} />
+          <h4>Choose a tool</h4>
+          <p>Select a tool to see its details and configuration.</p>
+        </div>
+      }
+    >
+      {(tool) => (
+        <div class="agent-tool-details">
+          <span class="agent-tools-symbol agent-tools-symbol-lg">
+            <Dynamic
+              component={categoryIcons[categoryFor(tool)] || LayoutGrid}
+              size={21}
+            />
+          </span>
+          <h3>{toolTitle(tool)}</h3>
+          <div class="agent-tools-tool-name mono">{tool}</div>
+          <p class="agent-tool-description">{descriptionFor(tool)}</p>
+          <div class="agent-tools-tags">
+            <span class="agent-tools-badge">Built-in</span>
+            <span class="agent-tools-badge">
+              {formatCategory(categoryFor(tool))}
+            </span>
+          </div>
+          <label class="agent-tool-enable">
+            <span>
+              {props.form.tools.includes(tool)
+                ? "Enabled for this agent"
+                : "Enable for this agent"}
+            </span>
+            <input
+              class="agent-tools-switch"
+              type="checkbox"
+              role="switch"
+              aria-label={`Enable ${tool} for this agent`}
+              checked={props.form.tools.includes(tool)}
+              disabled={props.readOnly}
+              onChange={(event) =>
+                props.onToggleListValue(
+                  "tools",
+                  tool,
+                  event.currentTarget.checked,
+                )
+              }
+            />
+          </label>
+          <Show
+            when={props.form.tools.includes(tool)}
+            fallback={
+              <p class="agent-tool-notice">
+                Enable this tool to configure it for this agent.
+              </p>
+            }
+          >
+            <Show
+              when={props.toolConfigSchemas[tool]?.fields.length}
+              fallback={
+                <p class="agent-tool-notice">
+                  This tool uses workspace defaults. No agent-specific
+                  configuration is needed.
+                </p>
+              }
+            >
+              <AgentToolConfig
+                tool={tool}
+                form={props.form}
+                readOnly={props.readOnly}
+                schema={props.toolConfigSchemas[tool]}
+                effective={props.toolConfigEffective}
+                payload={props.payload}
+                onUpdate={props.onUpdateToolConfig}
+                onReset={props.onResetToolConfigField}
+              />
+            </Show>
+          </Show>
+          <p class="agent-tool-permission-note">
+            <ShieldCheck size={14} />
+            Selected tools follow the agent’s permission mode.
+          </p>
+        </div>
+      )}
+    </Show>
+  );
+  const AgentChoices = (choiceProps: {
+    options: string[];
+    field: "sub_agents" | "plan_approval_targets";
+    label: string;
+  }) => (
+    <div class="agent-tools-agent-list">
+      <For
+        each={choiceProps.options}
+        fallback={
+          <div class="agent-tools-empty">
+            <Users size={22} />
+            <p>No {choiceProps.label} available.</p>
+          </div>
+        }
+      >
+        {(name) => {
+          const card = () =>
+            props.payload.cards.find((card) => card.name === name);
+          return (
+            <label class="agent-tools-agent-option">
+              <span class="agent-tools-symbol">
+                <Bot size={17} />
+              </span>
+              <span class="agent-tools-agent-copy">
+                <strong>{card()?.display_name || name}</strong>
+                <span class="mono">{name}</span>
+                <Show when={card()?.description}>
+                  <small>{card()?.description}</small>
+                </Show>
+              </span>
+              <input
+                type="checkbox"
+                aria-label={`Select ${name} as ${choiceProps.field === "sub_agents" ? "sub-agent" : "approval target"}`}
+                checked={props.form[choiceProps.field].includes(name)}
+                disabled={props.readOnly}
+                onChange={(event) =>
+                  props.onToggleListValue(
+                    choiceProps.field,
+                    name,
+                    event.currentTarget.checked,
+                  )
+                }
+              />
+            </label>
+          );
+        }}
+      </For>
+    </div>
+  );
 
   return (
-    <div class="agent-config-tools">
-      <fieldset disabled={props.readOnly}>
-        <legend>Permission mode</legend>
-        <PermissionModePicker value={props.form.permission_mode} disabled={props.readOnly}
-          acp={isAcpCard(props.form)} includeInherit onChange={(value) => props.onUpdate("permission_mode", value ?? null)} />
-      </fieldset>
-      <fieldset disabled={props.readOnly}>
-        <legend>Permission exceptions</legend>
-        <p>Deny always wins. Otherwise the last matching rule applies. Full access ignores Ask exceptions. Inherit uses global rules; an empty override uses the mode defaults.</p>
-        <label><input type="checkbox" checked={props.form.tool_permissions !== null}
-          onChange={(event) => props.onUpdate("tool_permissions", event.currentTarget.checked ? [] : null)} /> Override global permissions</label>
-        <For each={props.form.tool_permissions || []}>{(rule, index) => {
-          const update = (key: string, value: string) => props.onUpdate("tool_permissions",
-            (props.form.tool_permissions || []).map((item, at) => at === index() ? { ...item, [key]: value } : item));
-          return <div class="stack" style="gap: 8px;">
-            <label>Action<input value={rule.action || "*"} onInput={(event) => update("action", event.currentTarget.value)} /></label>
-            <label>Resource pattern<input value={rule.resource || "*"} onInput={(event) => update("resource", event.currentTarget.value)} /></label>
-            <label>Decision<select value={rule.effect} onChange={(event) => update("effect", event.currentTarget.value)}>
-              <option value="allow">Allow</option><option value="ask">Ask</option><option value="deny">Deny</option>
-            </select></label>
-            <button type="button" class="btn btn-sm" onClick={() => props.onUpdate("tool_permissions", (props.form.tool_permissions || []).filter((_, at) => at !== index()))}>Remove rule</button>
-          </div>;
-        }}</For>
-        <Show when={props.form.tool_permissions !== null}>
-          <button type="button" class="btn btn-sm" onClick={() => props.onUpdate("tool_permissions", [...(props.form.tool_permissions || []), { action: "*", resource: "*", effect: "ask" }])}>Add permission rule</button>
-        </Show>
-      </fieldset>
-      <div class="agent-config-summary">
-        <div class="agent-config-stat">
-          <span>Built-in tools</span>
-          <strong>{`${manualToolNames(props.form.tools).filter((tool) => !tool.startsWith("mcp__")).length}/${props.totalBuiltInTools}`}</strong>
-        </div>
-        <div class="agent-config-stat">
-          <span>MCP servers</span>
-          <strong>{`${activeMcpCount()}/${props.mcpServerOptions.length}`}</strong>
-        </div>
-        <Show when={!isAcpCard(props.form)}>
-          <div class="agent-config-stat">
-            <span>Sub-agents</span>
-            <strong>{`${props.form.sub_agents.length}/${props.subAgentOptions.length}`}</strong>
-          </div>
-          <div class="agent-config-stat">
-            <span>Plan targets</span>
-            <strong>{`${props.form.plan_approval_targets.length}/${props.planApprovalTargetOptions.length}`}</strong>
-          </div>
-        </Show>
-      </div>
-
-      <section class="agent-config-section">
-        <div class="agent-config-section-header">
+    <div
+      ref={explorerRef}
+      class="agent-tools"
+      classList={{
+        "agent-tools-wide": inlineDetails(),
+        "agent-tools-compact": contentWidth() < 600,
+        "agent-tools-explorer": section() === "tools",
+      }}
+    >
+      <Show when={section() === "tools"}>
+        <div class="agent-tools-heading">
           <div>
-            <div class="agent-config-eyebrow">Capabilities</div>
-            <h3>Built-in Tools</h3>
+            <h3>Built-in tools</h3>
+            <p>Choose tools for this agent. Select a tool to configure it.</p>
           </div>
+          <span class="agent-tools-badge">
+            {selectedBuiltIns().length}/{props.totalBuiltInTools} selected
+          </span>
         </div>
-        <div class="agent-config-section-body">
-          <For
-            each={props.toolGroups}
-            fallback={<div class="agent-config-empty">No built-in tools available</div>}
-          >
-            {(group) => {
-              const checkedCount = () =>
-                group.tools.filter((tool) => props.form.tools.includes(tool)).length;
-              const allChecked = () =>
-                group.tools.length > 0 && checkedCount() === group.tools.length;
-              const configurableTools = () =>
-                group.tools.filter(
-                  (tool) => props.form.tools.includes(tool) && props.toolConfigSchemas[tool],
-                );
-              return (
-                <div class="agent-config-group">
-                  <div class="agent-config-group-header">
-                    <label class="agent-config-group-toggle">
-                      <input
-                        type="checkbox"
-                        checked={allChecked()}
-                        disabled={props.readOnly}
-                        onChange={(event) =>
-                          props.onToggleToolGroup(group.tools, event.currentTarget.checked)
-                        }
-                      />
-                      <span>{formatToolCategory(group.category)}</span>
-                    </label>
-                    <span class="hint">{`${checkedCount()}/${group.tools.length}`}</span>
-                  </div>
-                  <div class="agent-config-option-grid">
-                    <For each={group.tools}>
-                      {(tool) => {
-                        const isChecked = () => props.form.tools.includes(tool);
-                        return (
-                          <label class={optionCardClass(isChecked(), props.readOnly)}>
-                            <input
-                              type="checkbox"
-                              checked={isChecked()}
-                              disabled={props.readOnly}
-                              onChange={(event) =>
-                                props.onToggleListValue("tools", tool, event.currentTarget.checked)
-                              }
-                            />
-                            <span class="agent-config-option-text mono">{tool}</span>
-                          </label>
-                        );
-                      }}
-                    </For>
-                  </div>
-                  <Show when={configurableTools().length > 0}>
-                    <div class="agent-config-tool-settings">
-                      <For each={configurableTools()}>
-                        {(tool) => {
-                          const schema = () => props.toolConfigSchemas[tool];
-                          return (
-                            <div class="agent-config-tool-config">
-                              <div class="agent-config-tool-config-header">
-                                <div>
-                                  <div class="agent-config-tool-config-title mono">{tool}</div>
-                                  <div class="hint">Tool-specific overrides</div>
-                                </div>
-                              </div>
-                              <Show when={tool === "web_search" || tool === "web_fetch"}>
-                                <button class="btn btn-sm" type="button" onClick={() => navigate(`/settings/providers?tab=web&new=${connectionKindForTool(tool)}&returnTo=${encodeURIComponent(location.pathname)}`)}>
-                                  Create a separate connection
-                                </button>
-                                <button class="btn btn-sm" type="button" aria-expanded={Boolean(advancedTools()[tool] || hasLegacyOverride(tool))}
-                                  onClick={() => setAdvancedTools({ ...advancedTools(), [tool]: !advancedTools()[tool] })}>
-                                  Advanced credential overrides
-                                </button>
-                              </Show>
-                              <div class="agent-config-tool-config-grid">
-                                <For each={schema().fields}>
-                                  {(field) => {
-                                    const value = () => fieldValue(props.form, tool, field);
-                                    const fieldHelp = () => [
-                                      field.description,
-                                      isWebCredential(tool, field) && !hasOverride(props.form, tool, field.name)
-                                        ? `Inherited source: ${inheritedSource(tool, field)}`
-                                        : "",
-                                    ].filter(Boolean).join("\n") || undefined;
-                                    return (
-                                      <Show when={isFieldVisible(tool, field) && (!isWebCredential(tool, field) || advancedTools()[tool] || hasOverride(props.form, tool, field.name))}>
-                                        <div class="agent-config-tool-field">
-                                        <label class="agent-config-tool-field-label" for={`${tool}-${field.name}`} title={fieldHelp()}>
-                                          <span>{field.label}</span>
-                                          <Show when={field.required}>
-                                            <span class="setting-required" title="Required">*</span>
-                                          </Show>
-                                          <Show when={hasOverride(props.form, tool, field.name)}>
-                                            <span class="hint" title="This agent overrides the global value.">Override</span>
-                                          </Show>
-                                        </label>
-                                        <Show
-                                          when={tool === "generate_image" && field.name === "model"}
-                                          fallback={
-                                        <div class="agent-config-tool-field-control">
-                                          <Show
-                                            when={field.input_type === "boolean"}
-                                            fallback={
-                                              <Show
-                                                when={field.input_type === "select"}
-                                                fallback={
-                                                  <input
-                                                    id={`${tool}-${field.name}`}
-                                                    class="input"
-                                                    type={
-                                                      field.input_type === "number"
-                                                        ? "number"
-                                                        : field.input_type === "password" || field.secret
-                                                          ? "password"
-                                                          : "text"
-                                                    }
-                                                    value={String(value() ?? "")}
-                                                    disabled={props.readOnly}
-                                                    placeholder={formatDefault(field, tool, props.toolConfigEffective)}
-                                                    min={field.min}
-                                                    max={field.max}
-                                                    step={field.step}
-                                                    onInput={(event) => {
-                                                      const nextValue = event.currentTarget.value;
-                                                      if (nextValue === "") {
-                                                        props.onResetToolConfigField(tool, field.name);
-                                                        return;
-                                                      }
-                                                      props.onUpdateToolConfig(tool, field.name, nextValue);
-                                                    }}
-                                                  />
-                                                }
-                                              >
-                                                <select
-                                                  id={`${tool}-${field.name}`}
-                                                  class="input"
-                                                  value={String(value() ?? "")}
-                                                  disabled={props.readOnly}
-                                                  onChange={(event) => {
-                                                    const nextValue = event.currentTarget.value;
-                                                    if (nextValue === "") {
-                                                      props.onResetToolConfigField(tool, field.name);
-                                                      return;
-                                                    }
-                                                    props.onUpdateToolConfig(tool, field.name, nextValue);
-                                                  }}
-                                                >
-                                                  <option value="">{formatDefault(field, tool, props.toolConfigEffective)}</option>
-                                                  <For each={field.options}>
-                                                    {(option) => <option value={option}>{option === "__default__" ? "Use shared default" : option}</option>}
-                                                  </For>
-                                                </select>
-                                              </Show>
-                                            }
-                                          >
-                                            <label class="agent-config-tool-boolean">
-                                              <input
-                                                id={`${tool}-${field.name}`}
-                                                type="checkbox"
-                                                checked={Boolean(value())}
-                                                disabled={props.readOnly}
-                                                onChange={(event) =>
-                                                  props.onUpdateToolConfig(
-                                                    tool,
-                                                    field.name,
-                                                    event.currentTarget.checked,
-                                                  )
-                                                }
-                                              />
-                                              <span>Enabled</span>
-                                            </label>
-                                          </Show>
-                                          <button
-                                            class="btn btn-sm btn-ghost"
-                                            type="button"
-                                            title="Reset override"
-                                            disabled={props.readOnly || !hasOverride(props.form, tool, field.name)}
-                                            onClick={() => props.onResetToolConfigField(tool, field.name)}
-                                          >
-                                            <RotateCcw size={13} />
-                                            Reset
-                                          </button>
-                                        </div>
-                                          }
-                                        >
-                                          <div class="agent-config-tool-model-control">
-                                            <ModelPicker
-                                              catalogs={props.payload.model_catalogs}
-                                              providerNames={props.payload.provider_names}
-                                              defaultProvider={props.payload.default_provider}
-                                              defaultModel={props.payload.default_model}
-                                              provider={String(props.form.tool_configs[tool]?.provider || "")}
-                                              model={String(value() || "")}
-                                              disabled={props.readOnly}
-                                              resolveDefault
-                                              modelFilter={isImageOutputModel}
-                                              onChange={(provider, model) => {
-                                                props.onUpdateToolConfig(tool, "provider", provider);
-                                                props.onUpdateToolConfig(tool, "model", model);
-                                              }}
-                                            />
-                                            <button
-                                              class="btn btn-sm btn-ghost"
-                                              type="button"
-                                              title="Reset model override"
-                                              disabled={
-                                                props.readOnly ||
-                                                (!hasOverride(props.form, tool, "provider") &&
-                                                  !hasOverride(props.form, tool, "model"))
-                                              }
-                                              onClick={() => {
-                                                props.onResetToolConfigField(tool, "provider");
-                                                props.onResetToolConfigField(tool, "model");
-                                              }}
-                                            >
-                                              <RotateCcw size={13} />
-                                              Reset
-                                            </button>
-                                          </div>
-                                        </Show>
-                                      </div>
-                                    </Show>
-                                  );
-                                }}
-                              </For>
-                              <Show when={isDuckDuckGo(tool)}>
-                                <div class="hint" style={{ "grid-column": "1 / -1", "margin-top": "4px" }}>
-                                  DuckDuckGo operates without API credentials.
-                                </div>
-                              </Show>
-                            </div>
-                            </div>
-                          );
-                        }}
-                      </For>
-                    </div>
-                  </Show>
-                </div>
-              );
-            }}
-          </For>
-        </div>
-      </section>
-
-      <Show when={props.mcpServerOptions.length > 0}>
-        <section class="agent-config-section">
-          <div class="agent-config-section-header">
-            <div>
-              <div class="agent-config-eyebrow">External context</div>
-              <h3>MCP Servers</h3>
+      </Show>
+      <div
+        class="agent-tools-layout"
+        classList={{ "agent-tools-section-view": section() !== "tools" }}
+      >
+        <Show when={section() === "tools"}>
+          <nav class="agent-tools-navigation" aria-label="Tool categories">
+            <div class="agent-tools-eyebrow">Categories</div>
+            <div class="agent-tools-category-nav">
+              <button
+                type="button"
+                class="agent-tools-nav-item"
+                classList={{ active: category() === "all" }}
+                aria-current={category() === "all" ? "true" : undefined}
+                onClick={() => setCategory("all")}
+              >
+                <LayoutGrid size={16} />
+                <span>All tools</span>
+                <span class="agent-tools-nav-count">
+                  {props.totalBuiltInTools}
+                </span>
+              </button>
+              <For each={props.toolGroups}>
+                {(group) => (
+                  <button
+                    type="button"
+                    class="agent-tools-nav-item"
+                    classList={{ active: category() === group.category }}
+                    aria-current={
+                      category() === group.category ? "true" : undefined
+                    }
+                    onClick={() => setCategory(group.category)}
+                  >
+                    <Dynamic
+                      component={categoryIcons[group.category] || LayoutGrid}
+                      size={16}
+                    />
+                    <span>{formatCategory(group.category)}</span>
+                    <span class="agent-tools-nav-count">
+                      {group.tools.length}
+                    </span>
+                  </button>
+                )}
+              </For>
             </div>
-          </div>
-          <div class="agent-config-section-body">
-            <div class="agent-config-option-grid">
-              <For each={props.mcpServerOptions}>
-                {(server) => {
-                  const install = () => installForServer(server);
-                  const isChecked = () => Boolean(install()?.agent_enabled);
+          </nav>
+        </Show>
+        <div class="agent-tools-main">
+          <Show when={section() === "tools"}>
+            <div class="agent-tools-search">
+              <Search size={16} />
+              <input
+                ref={searchRef}
+                class="input"
+                type="search"
+                placeholder="Search tools…"
+                aria-label="Search tools by name or description"
+                value={query()}
+                onInput={(event) => setQuery(event.currentTarget.value)}
+              />
+              <kbd class="kbd">/</kbd>
+            </div>
+            <div class="agent-tools-filters">
+              <button
+                type="button"
+                classList={{ active: !selectedOnly() }}
+                aria-pressed={!selectedOnly()}
+                onClick={() => setSelectedOnly(false)}
+              >
+                All tools
+              </button>
+              <button
+                type="button"
+                classList={{ active: selectedOnly() }}
+                aria-pressed={selectedOnly()}
+                onClick={() => setSelectedOnly(true)}
+              >
+                Selected {selectedBuiltIns().length}
+              </button>
+              <span role="status">{visibleCount()} shown</span>
+            </div>
+            <div
+              class="agent-tools-catalog"
+              ref={catalogRef}
+              role="region"
+              aria-label="Built-in tool catalog"
+              tabIndex={0}
+            >
+              <For
+                each={visibleGroups()}
+                fallback={
+                  <div class="agent-tools-empty">
+                    <SearchX size={24} />
+                    <h4>
+                      {availableTools().length
+                        ? "No tools found"
+                        : "No built-in tools available"}
+                    </h4>
+                    <p>
+                      {query()
+                        ? "Try another name or a broader search."
+                        : selectedOnly()
+                          ? "Select tools from the catalog to see them here."
+                          : "Choose another category to see more tools."}
+                    </p>
+                    <Show
+                      when={query() || selectedOnly() || category() !== "all"}
+                    >
+                      <button
+                        class="btn btn-sm"
+                        type="button"
+                        onClick={() => {
+                          setQuery("");
+                          setSelectedOnly(false);
+                          setCategory("all");
+                        }}
+                      >
+                        Clear filters
+                      </button>
+                    </Show>
+                  </div>
+                }
+              >
+                {(group) => {
+                  const checkedCount = () =>
+                    group.tools.filter((tool) =>
+                      props.form.tools.includes(tool),
+                    ).length;
+                  const allChecked = () =>
+                    checkedCount() === group.tools.length;
                   return (
-                    <div>
-                      <label class={optionCardClass(isChecked(), props.mcpUpdating)}>
-                        <input
-                          type="checkbox"
-                          checked={isChecked()}
-                          disabled={props.mcpUpdating}
-                          onChange={(event) =>
-                            props.onToggleMcpInstall(server, event.currentTarget.checked)
-                          }
-                        />
-                        <span class="agent-config-option-text mono">{server}</span>
-                      </label>
-                      <Show when={isChecked()}>
-                        <For each={props.payload.mcp_tools?.[server] || []}>
-                          {(toolName) => (
-                            <label class={optionCardClass(props.form.tools.includes(toolName), props.readOnly || props.mcpUpdating)}>
-                              <input
-                                type="checkbox"
-                                checked={props.form.tools.includes(toolName)}
-                                disabled={props.readOnly || props.mcpUpdating}
-                                onChange={(event) => props.onToggleListValue("tools", toolName, event.currentTarget.checked)}
-                              />
-                              <span class="agent-config-option-text mono">{toolName}</span>
-                            </label>
+                    <section
+                      class="agent-tools-group"
+                      aria-label={`${formatCategory(group.category)} tools`}
+                    >
+                      <div class="agent-tools-group-heading">
+                        <label title="Select or clear this entire category, including tools hidden by search">
+                          <input
+                            type="checkbox"
+                            checked={allChecked()}
+                            ref={(input) =>
+                              createEffect(() => {
+                                input.indeterminate =
+                                  checkedCount() > 0 && !allChecked();
+                              })
+                            }
+                            disabled={props.readOnly}
+                            aria-label={`Select all ${formatCategory(group.category).toLowerCase()} tools`}
+                            onChange={(event) =>
+                              props.onToggleToolGroup(
+                                group.tools,
+                                event.currentTarget.checked,
+                              )
+                            }
+                          />
+                          <span>{formatCategory(group.category)}</span>
+                        </label>
+                        <span>
+                          {checkedCount()}/{group.tools.length} selected
+                        </span>
+                      </div>
+                      <div class="agent-tools-rows">
+                        <For each={group.visibleTools}>
+                          {(tool) => (
+                            <div
+                              class="agent-tools-row"
+                              classList={{ focused: selectedTool() === tool }}
+                            >
+                              <label class="agent-tools-row-check">
+                                <input
+                                  type="checkbox"
+                                  aria-label={`Enable ${tool}`}
+                                  checked={props.form.tools.includes(tool)}
+                                  disabled={props.readOnly}
+                                  onChange={(event) =>
+                                    props.onToggleListValue(
+                                      "tools",
+                                      tool,
+                                      event.currentTarget.checked,
+                                    )
+                                  }
+                                />
+                              </label>
+                              <button
+                                class="agent-tools-row-main"
+                                type="button"
+                                aria-label={`Details for ${tool}`}
+                                onClick={() => inspectTool(tool)}
+                              >
+                                <span class="agent-tools-symbol">
+                                  <Dynamic
+                                    component={
+                                      categoryIcons[group.category] ||
+                                      LayoutGrid
+                                    }
+                                    size={16}
+                                  />
+                                </span>
+                                <span class="agent-tools-row-copy">
+                                  <strong>{toolTitle(tool)}</strong>
+                                  <span class="agent-tools-tool-name mono">
+                                    {tool}
+                                  </span>
+                                  <span class="agent-tools-row-description">
+                                    {descriptionFor(tool)}
+                                  </span>
+                                </span>
+                              </button>
+                              <button
+                                class="btn btn-ghost btn-icon agent-tools-configure"
+                                type="button"
+                                aria-label={`Configure ${tool}`}
+                                title="View details and configuration"
+                                onClick={() => inspectTool(tool)}
+                              >
+                                <Show
+                                  when={
+                                    props.toolConfigSchemas[tool]?.fields.length
+                                  }
+                                  fallback={<ChevronRight size={15} />}
+                                >
+                                  <Settings2 size={15} />
+                                </Show>
+                              </button>
+                            </div>
                           )}
                         </For>
-                        <Show when={!props.payload.mcp_tools?.[server]?.length}>
-                          <div class="agent-config-empty">No tools loaded. Refresh after checking the server connection.</div>
-                        </Show>
+                      </div>
+                    </section>
+                  );
+                }}
+              </For>
+            </div>
+            <p class="agent-tools-catalog-note">
+              <Info size={14} />
+              Choose a tool to see its details and configuration.
+            </p>
+          </Show>
+          <Show when={section() === "mcp"}>
+            <div class="agent-tools-subheading">
+              <h3>Connect external tools</h3>
+              <p>
+                Enable a server, then choose which of its tools this agent can
+                use.
+              </p>
+            </div>
+            <Show when={!props.canManageMcp}>
+              <p class="agent-tool-notice">
+                Save this agent before enabling MCP servers.
+              </p>
+            </Show>
+            <div class="agent-tools-panels" aria-busy={props.mcpUpdating}>
+              <For
+                each={props.mcpServerOptions}
+                fallback={
+                  <div class="agent-tools-empty">
+                    <Plug size={24} />
+                    <h4>No MCP servers available</h4>
+                    <p>
+                      Add a server in Connections to make its tools available
+                      here.
+                    </p>
+                    <A class="btn btn-sm" href="/settings/connections?tab=mcp">
+                      Manage MCP servers
+                    </A>
+                  </div>
+                }
+              >
+                {(server) => {
+                  const install = () => installFor(server);
+                  const enabled = () => Boolean(install()?.agent_enabled);
+                  return (
+                    <section class="agent-tools-server">
+                      <div class="agent-tools-server-heading">
+                        <span class="agent-tools-symbol">
+                          <Plug size={18} />
+                        </span>
+                        <div>
+                          <h4>
+                            {install()?.title || server}
+                            <span
+                              class="agent-tools-badge"
+                              classList={{ enabled: enabled() }}
+                            >
+                              {enabled() ? "Enabled" : "Disabled"}
+                            </span>
+                          </h4>
+                          <p>{install()?.description || server}</p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          class="agent-tools-switch"
+                          role="switch"
+                          aria-label={`Enable ${server} MCP server`}
+                          checked={enabled()}
+                          disabled={
+                            props.readOnly ||
+                            props.mcpUpdating ||
+                            !props.canManageMcp
+                          }
+                          onChange={(event) => {
+                            props.onToggleMcpInstall(
+                              server,
+                              event.currentTarget.checked,
+                            );
+                            event.currentTarget.checked = enabled();
+                          }}
+                        />
+                      </div>
+                      <Show when={enabled()}>
+                        <div class="agent-tools-server-list">
+                          <For
+                            each={props.payload.mcp_tools?.[server] || []}
+                            fallback={
+                              <p class="agent-tool-notice">
+                                No tools loaded. Check the server connection and
+                                reopen this agent to refresh its tools.
+                              </p>
+                            }
+                          >
+                            {(tool) => (
+                              <label class="agent-tools-server-tool">
+                                <input
+                                  type="checkbox"
+                                  checked={props.form.tools.includes(tool)}
+                                  aria-label={`Enable ${tool}`}
+                                  disabled={props.readOnly || props.mcpUpdating}
+                                  onChange={(event) =>
+                                    props.onToggleListValue(
+                                      "tools",
+                                      tool,
+                                      event.currentTarget.checked,
+                                    )
+                                  }
+                                />
+                                <span class="mono">{tool}</span>
+                              </label>
+                            )}
+                          </For>
+                        </div>
                       </Show>
-                    </div>
+                    </section>
                   );
                 }}
               </For>
             </div>
-          </div>
-        </section>
-      </Show>
-
-      <Show when={!isAcpCard(props.form)}>
-      <section class="agent-config-section">
-        <div class="agent-config-section-header">
-          <div>
-            <div class="agent-config-eyebrow">Delegation</div>
-            <h3>Sub-agents</h3>
-            <p class="hint">Delegation is enabled automatically when at least one selected sub-agent is available.</p>
-          </div>
-        </div>
-        <div class="agent-config-section-body">
-          <Show
-            when={props.subAgentOptions.length > 0}
-            fallback={<div class="agent-config-empty">No sub-agents available</div>}
-          >
-            <div class="agent-config-option-grid">
-              <For each={props.subAgentOptions}>
-                {(agent) => {
-                  const isChecked = () => props.form.sub_agents.includes(agent);
-                  return (
-                    <label class={optionCardClass(isChecked(), props.readOnly)}>
-                      <input
-                        type="checkbox"
-                        checked={isChecked()}
-                        disabled={props.readOnly}
-                        onChange={(event) =>
-                          props.onToggleListValue("sub_agents", agent, event.currentTarget.checked)
-                        }
-                      />
-                      <span class="agent-config-option-text mono">{agent}</span>
-                    </label>
-                  );
-                }}
-              </For>
+            <Show when={props.mcpServerOptions.length}>
+              <p class="agent-tools-catalog-note">
+                <Info size={14} />
+                Server changes apply immediately. Save the agent to apply tool
+                selections.
+              </p>
+            </Show>
+          </Show>
+          <Show when={section() === "delegation" && !isAcpCard(props.form)}>
+            <div class="agent-tools-subheading">
+              <h3>Bring in the right agents</h3>
+              <p>Choose collaborators and decide who can review a plan.</p>
+            </div>
+            <div class="agent-tools-panels">
+              <section class="agent-config-section">
+                <div class="agent-config-section-header">
+                  <div>
+                    <h3>Sub-agents</h3>
+                    <p class="hint">
+                      Delegation is enabled automatically when at least one
+                      selected sub-agent is available.
+                    </p>
+                  </div>
+                  <span class="agent-tools-badge">
+                    {props.form.sub_agents.length}
+                  </span>
+                </div>
+                <div class="agent-config-section-body">
+                  <AgentChoices
+                    options={props.subAgentOptions}
+                    field="sub_agents"
+                    label="sub-agents"
+                  />
+                </div>
+              </section>
+              <section class="agent-config-section">
+                <div class="agent-config-section-header">
+                  <div>
+                    <h3>Plan approval targets</h3>
+                    <p class="hint">
+                      Agents that can review a plan before execution.
+                    </p>
+                  </div>
+                  <span class="agent-tools-badge">
+                    {props.form.plan_approval_targets.length}
+                  </span>
+                </div>
+                <div class="agent-config-section-body">
+                  <AgentChoices
+                    options={props.planApprovalTargetOptions}
+                    field="plan_approval_targets"
+                    label="approval target agents"
+                  />
+                </div>
+              </section>
+            </div>
+          </Show>
+          <Show when={section() === "permissions"}>
+            <div class="agent-tools-subheading">
+              <h3>Set the boundaries</h3>
+              <p>Control how this agent gets approval to use its tools.</p>
+            </div>
+            <div class="agent-tools-panels">
+              <fieldset
+                class="agent-tools-permissions"
+                disabled={props.readOnly}
+              >
+                <legend>Permission mode</legend>
+                <p class="hint">
+                  Choose a mode for this agent, or inherit the global settings.
+                </p>
+                <PermissionModePicker
+                  value={props.form.permission_mode}
+                  disabled={props.readOnly}
+                  acp={isAcpCard(props.form)}
+                  includeInherit
+                  onChange={(value) =>
+                    props.onUpdate("permission_mode", value ?? null)
+                  }
+                />
+              </fieldset>
+              <fieldset
+                class="agent-tools-permissions"
+                disabled={props.readOnly}
+              >
+                <legend>Permission exceptions</legend>
+                <p class="hint">
+                  Deny always wins. Otherwise the last matching rule applies.
+                  Full access ignores Ask exceptions. Inherit uses global rules;
+                  an empty override uses the mode defaults.
+                </p>
+                <label class="agent-tools-override">
+                  <input
+                    type="checkbox"
+                    aria-label="Override global permissions"
+                    checked={props.form.tool_permissions !== null}
+                    onChange={(event) =>
+                      props.onUpdate(
+                        "tool_permissions",
+                        event.currentTarget.checked ? [] : null,
+                      )
+                    }
+                  />
+                  Override global permissions
+                </label>
+                <Index each={props.form.tool_permissions || []}>
+                  {(rule, index) => {
+                    const update = (
+                      key: "action" | "resource" | "effect",
+                      value: string,
+                    ) =>
+                      props.onUpdate(
+                        "tool_permissions",
+                        (props.form.tool_permissions || []).map((item, at) =>
+                          at === index ? { ...item, [key]: value } : item,
+                        ),
+                      );
+                    return (
+                      <div class="agent-tools-permission-rule">
+                        <label>
+                          Action
+                          <input
+                            class="input"
+                            value={rule().action ?? "*"}
+                            onInput={(event) =>
+                              update("action", event.currentTarget.value)
+                            }
+                          />
+                        </label>
+                        <label class="agent-tools-rule-resource">
+                          Resource pattern
+                          <input
+                            class="input"
+                            value={rule().resource ?? "*"}
+                            onInput={(event) =>
+                              update("resource", event.currentTarget.value)
+                            }
+                          />
+                        </label>
+                        <label>
+                          Decision
+                          <select
+                            class="input"
+                            value={rule().effect}
+                            onChange={(event) =>
+                              update("effect", event.currentTarget.value)
+                            }
+                          >
+                            <option value="allow">Allow</option>
+                            <option value="ask">Ask</option>
+                            <option value="deny">Deny</option>
+                          </select>
+                        </label>
+                        <button
+                          class="btn btn-sm btn-ghost btn-icon"
+                          type="button"
+                          aria-label={`Remove permission rule ${index + 1}`}
+                          onClick={() =>
+                            props.onUpdate(
+                              "tool_permissions",
+                              (props.form.tool_permissions || []).filter(
+                                (_, at) => at !== index,
+                              ),
+                            )
+                          }
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    );
+                  }}
+                </Index>
+                <Show when={props.form.tool_permissions !== null}>
+                  <Show when={props.form.tool_permissions?.length === 0}>
+                    <p class="agent-tool-notice">
+                      No exceptions. This override uses the selected mode’s
+                      defaults.
+                    </p>
+                  </Show>
+                  <button
+                    class="btn btn-sm"
+                    type="button"
+                    onClick={() =>
+                      props.onUpdate("tool_permissions", [
+                        ...(props.form.tool_permissions || []),
+                        { action: "*", resource: "*", effect: "ask" },
+                      ])
+                    }
+                  >
+                    Add permission rule
+                  </button>
+                </Show>
+              </fieldset>
             </div>
           </Show>
         </div>
-      </section>
-
-      <section class="agent-config-section">
-        <div class="agent-config-section-header">
-          <div>
-            <div class="agent-config-eyebrow">Plan review</div>
-            <h3>Approval Targets</h3>
-          </div>
-        </div>
-        <div class="agent-config-section-body">
-          <Show
-            when={props.planApprovalTargetOptions.length > 0}
-            fallback={<div class="agent-config-empty">No approval target agents available</div>}
+        <Show when={section() === "tools" && inlineDetails()}>
+          <aside
+            class="agent-tools-inspector"
+            aria-label="Tool details"
           >
-            <div class="agent-config-option-grid">
-              <For each={props.planApprovalTargetOptions}>
-                {(agent) => {
-                  const isChecked = () => props.form.plan_approval_targets.includes(agent);
-                  return (
-                    <label class={optionCardClass(isChecked(), props.readOnly)}>
-                      <input
-                        type="checkbox"
-                        checked={isChecked()}
-                        disabled={props.readOnly}
-                        onChange={(event) =>
-                          props.onToggleListValue(
-                            "plan_approval_targets",
-                            agent,
-                            event.currentTarget.checked,
-                          )
-                        }
-                      />
-                      <span class="agent-config-option-text mono">{agent}</span>
-                    </label>
-                  );
-                }}
-              </For>
+            <div class="agent-tools-inspector-heading">
+              <span>Tool details</span>
+              <Settings2 size={14} />
             </div>
-          </Show>
-        </div>
-      </section>
-      </Show>
+            <div class="agent-tools-inspector-body" ref={toolDetailsRef}>
+              <ToolDetails />
+            </div>
+          </aside>
+        </Show>
+      </div>
+      <footer class="agent-tools-summary">
+        <span>
+          <LayoutGrid size={14} />
+          <strong>
+            {selectedBuiltIns().length}/{props.totalBuiltInTools}
+          </strong>{" "}
+          built-in tools
+        </span>
+        <span>
+          <Plug size={14} />
+          <strong>{activeMcpCount()}</strong> MCP servers ·{" "}
+          {activeMcpToolCount()} tools
+        </span>
+        <Show when={!isAcpCard(props.form)}>
+          <span>
+            <Users size={14} />
+            <strong>{props.form.sub_agents.length}</strong> sub-agents
+          </span>
+          <span>
+            <ShieldCheck size={14} />
+            <strong>{props.form.plan_approval_targets.length}</strong> plan
+            targets
+          </span>
+        </Show>
+        <span class="agent-tools-summary-mode">
+          <ShieldCheck size={14} />
+          {permissionLabel()}
+        </span>
+      </footer>
+      <Dialog
+        open={detailsOpen() && !inlineDetails()}
+        title="Tool details & configuration"
+        class="agent-tools-details-dialog"
+        bodyClass="agent-tools-details-dialog-body"
+        size="sm"
+        onClose={() => setDetailsOpen(false)}
+      >
+        <ToolDetails />
+      </Dialog>
     </div>
   );
 }

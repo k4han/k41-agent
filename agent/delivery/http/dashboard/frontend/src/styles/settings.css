@@ -487,10 +487,11 @@
 
 /* Content */
 .settings-content {
+  --settings-content-padding-top: 18px;
   display: flex;
   flex-direction: column;
   gap: 20px;
-  padding-top: 18px;
+  padding-top: var(--settings-content-padding-top);
   padding-bottom: 96px; /* space for pending bar */
 }
 
@@ -504,6 +505,38 @@
 
 .settings-content-wide {
   width: min(100%, 1280px);
+}
+
+.settings-app-layout.settings-app-layout-fill {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settings-app-layout-fill > .main {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settings-app-layout-fill .settings-topbar {
+  flex-shrink: 0;
+}
+
+.settings-content.settings-content-fill {
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 20px;
+  overflow: hidden;
+}
+
+.settings-content-fill > .settings-page-body {
+  flex: 1;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 @media (min-width: 981px) {

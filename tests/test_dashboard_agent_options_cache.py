@@ -52,7 +52,7 @@ async def test_manual_tool_options_exclude_automatic_delegation(monkeypatch):
     monkeypatch.setattr(agent_helpers, "find_descriptors", lambda **kwargs: [
         SimpleNamespace(name="delegate_task", category=SimpleNamespace(value="agent")),
         SimpleNamespace(name="call_agent", category=SimpleNamespace(value="agent")),
-        SimpleNamespace(name="read", category=SimpleNamespace(value="coding")),
+        SimpleNamespace(name="read", description="Read workspace file contents.", category=SimpleNamespace(value="coding")),
     ])
     monkeypatch.setattr(agent_helpers, "serialize_tool_config_schemas", lambda descriptors: {
         item.name: {} for item in descriptors
@@ -61,6 +61,7 @@ async def test_manual_tool_options_exclude_automatic_delegation(monkeypatch):
     payload = await agent_helpers.agent_tools_payload()
 
     assert payload["tools"] == ["custom", "read"]
+    assert payload["tool_descriptions"] == {"read": "Read workspace file contents."}
     assert "delegate_task" not in payload["tool_config_schemas"]
     assert "call_agent" not in payload["tool_config_schemas"]
     assert all("delegate_task" not in group["tools"] for group in payload["tool_groups"])

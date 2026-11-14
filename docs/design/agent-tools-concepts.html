@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>K41 — Agent tools design concepts</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #fafafa; --fg: #0a0a0a; --muted: #595959; --muted-2: #6b6b6b;
+      --surface: #fff; --surface-1: #fafafa; --surface-2: #f5f5f5; --surface-3: #ededed;
+      --border: #e5e5e5; --border-strong: #d4d4d4; --accent: #0a0a0a; --accent-fg: #fff;
+      --success: #059669; --success-bg: #ecfdf5; --info: #2563eb; --danger: #dc2626;
+      --radius: 8px; --shadow: 0 16px 48px #0000000b;
+    }
+    :root.dark {
+      color-scheme: dark;
+      --bg: #0a0a0a; --fg: #fafafa; --muted: #a3a3a3; --muted-2: #949494;
+      --surface: #111; --surface-1: #141414; --surface-2: #171717; --surface-3: #262626;
+      --border: #ffffff1a; --border-strong: #ffffff29; --accent: #fff; --accent-fg: #0a0a0a;
+      --success: #34d399; --success-bg: #34d39912; --info: #60a5fa; --danger: #f87171;
+      --shadow: 0 16px 48px #00000040;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+    button, input, select, textarea { font: inherit; }
+    button { color: inherit; cursor: pointer; }
+    button:disabled { cursor: default; opacity: .45; }
+    button, a, input, select, summary { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--info); outline-offset: 3px; }
+    button { touch-action: manipulation; }
+    input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+    h1, h2, h3, h4, p { margin: 0; }
+    h1, h2, h3, h4 { font-weight: 600; letter-spacing: -.025em; }
+    svg.icon { width: 18px; height: 18px; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; fill: none; flex-shrink: 0; }
+    .icon.sm { width: 15px; height: 15px; }
+    .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+    .eyebrow { color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .row { display: flex; align-items: center; gap: 8px; }
+    .spread { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .stack { display: grid; gap: 18px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 7px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 7px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .button:hover:not(:disabled) { background: var(--surface-2); border-color: var(--border-strong); }
+    .button.primary { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
+    .button.primary:hover:not(:disabled) { opacity: .85; }
+    .button.ghost { border-color: transparent; background: transparent; }
+    .button.danger { color: var(--danger); }
+    .icon-button { display: inline-flex; justify-content: center; align-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid transparent; border-radius: 7px; background: transparent; flex-shrink: 0; }
+    .icon-button:hover { background: var(--surface-2); border-color: var(--border); }
+    .badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: 5px; background: var(--surface-2); color: var(--muted); font-size: 10px; font-weight: 500; line-height: 1.5; white-space: nowrap; }
+    .badge.outline { border: 1px solid var(--border); background: transparent; }
+    .badge.success { background: var(--success-bg); color: var(--success); }
+    .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; display: inline-block; flex-shrink: 0; }
+    .divider { width: 1px; height: 18px; background: var(--border); }
+    .lab { max-width: 1664px; margin: auto; padding: 0 32px 32px; }
+    .lab-header { min-height: 72px; gap: 16px; }
+    .wordmark { display: flex; gap: 9px; align-items: center; font-size: 18px; font-weight: 750; letter-spacing: -.08em; }
+    .brand-mark { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 7px; background: var(--accent); color: var(--accent-fg); }
+    .brand-mark .icon { width: 18px; height: 18px; }
+    .lab-title { font-size: 12px; color: var(--muted); letter-spacing: 0; font-weight: 400; }
+    .lab-meta { font-size: 11px; color: var(--muted); }
+    .intro { padding: 22px 0 25px; }
+    .intro h1 { font-size: clamp(26px, 3vw, 36px); line-height: 1.2; letter-spacing: -.05em; margin: 8px 0 10px; }
+    .intro p { color: var(--muted); max-width: 610px; font-size: 13px; }
+    .concept-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .concept-card { display: grid; grid-template-columns: 40px 1fr auto; gap: 12px; align-items: center; padding: 16px; text-align: left; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; transition: border-color .15s, box-shadow .15s; }
+    .concept-card:hover { border-color: var(--border-strong); }
+    .concept-card[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .concept-letter { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; font-size: 15px; font-weight: 600; background: var(--surface-1); }
+    .concept-card[aria-pressed="true"] .concept-letter { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+    .concept-label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+    .concept-description { font-size: 11px; color: var(--muted); display: block; }
+    .concept-radio { width: 14px; height: 14px; border: 1px solid var(--border-strong); border-radius: 50%; }
+    .concept-card[aria-pressed="true"] .concept-radio { border: 4px solid var(--accent); }
+    .preview-caption { margin: 0 0 12px; font-size: 11px; color: var(--muted); }
+    .preview-caption strong { color: var(--fg); font-weight: 500; }
+    .app-frame { display: grid; grid-template-columns: 174px minmax(0, 1fr); min-height: 780px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); overflow: clip; }
+    .app-sidebar { display: flex; flex-direction: column; padding: 20px 12px 16px; border-right: 1px solid var(--border); background: var(--surface-1); }
+    .workspace-brand { padding: 0 8px 26px; font-size: 12px; font-weight: 600; }
+    .workspace-brand .workspace-logo { width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 6px; display: grid; place-items: center; background: var(--surface); }
+    .app-sidebar .eyebrow { padding: 0 10px 9px; font-size: 9px; }
+    .shell-link { display: flex; align-items: center; gap: 9px; min-height: 37px; padding: 8px 10px; border-radius: 6px; color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+    .shell-link.active { color: var(--fg); background: var(--surface-3); font-weight: 550; }
+    .shell-link .icon { width: 15px; height: 15px; }
+    .sidebar-bottom { margin-top: auto; border-top: 1px solid var(--border); padding: 16px 5px 0; font-size: 10px; color: var(--muted); }
+    .avatar { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--surface-3); color: var(--fg); font-size: 10px; }
+    .app-main { min-width: 0; }
+    .app-topbar { min-height: 62px; padding: 13px 26px; border-bottom: 1px solid var(--border); }
+    .breadcrumbs { font-size: 11px; color: var(--muted); flex-wrap: wrap; }
+    .breadcrumbs .icon { width: 12px; height: 12px; }
+    .breadcrumbs strong { color: var(--fg); font-weight: 500; }
+    .save-state { font-size: 10px; color: var(--muted); }
+    .save-state.unsaved { color: var(--fg); }
+    .agent-heading { padding: 24px 26px 0; }
+    .agent-avatar { width: 42px; height: 42px; border: 1px solid var(--border); background: var(--surface-2); border-radius: 10px; display: grid; place-items: center; }
+    .agent-avatar .icon { width: 23px; height: 23px; }
+    .agent-heading h2 { font-size: 20px; letter-spacing: -.04em; }
+    .agent-heading p { margin-top: 3px; font-size: 11px; color: var(--muted); }
+    .agent-tabs { display: flex; gap: 23px; border-bottom: 1px solid var(--border); margin-top: 23px; color: var(--muted); font-size: 11px; }
+    .agent-tabs span { display: inline-flex; align-items: center; gap: 6px; padding-bottom: 12px; }
+    .agent-tabs .active { color: var(--fg); border-bottom: 2px solid var(--accent); margin-bottom: -1px; font-weight: 550; }
+    .agent-tabs .icon { width: 14px; height: 14px; }
+    .workspace { padding: 24px 26px 0; }
+    .section-heading { margin-bottom: 20px; }
+    .section-heading h3 { font-size: 16px; }
+    .section-heading p { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .section-heading .badge { font-size: 10px; }
+    .explorer { display: grid; grid-template-columns: 144px minmax(0, 1fr) 262px; gap: 20px; align-items: start; }
+    .category-nav { min-width: 0; }
+    .category-nav .eyebrow { margin: 2px 9px 10px; font-size: 9px; }
+    .nav-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 35px; border: 1px solid transparent; padding: 7px 9px; margin-bottom: 3px; border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; text-align: left; }
+    .nav-item:hover { background: var(--surface-1); }
+    .nav-item.active { color: var(--fg); background: var(--surface-2); font-weight: 550; }
+    .nav-item .icon { width: 15px; height: 15px; }
+    .nav-item .count { margin-left: auto; font-size: 10px; color: var(--muted); }
+    .nav-divider { height: 1px; background: var(--border); margin: 15px 8px; }
+    .tool-catalog { min-width: 0; }
+    .explorer.section-view { grid-template-columns: 144px minmax(0, 1fr); }
+    .catalog-list { max-height: 574px; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: thin; padding: 2px 5px 2px 2px; margin: -2px -5px -2px -2px; }
+    .catalog-toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+    .search-box { display: flex; align-items: center; gap: 8px; min-height: 37px; padding: 0 11px; border: 1px solid var(--border); background: var(--surface); border-radius: 7px; flex: 1; min-width: 0; color: var(--muted); }
+    .search-box:focus-within { border-color: var(--border-strong); box-shadow: 0 0 0 2px var(--surface-3); }
+    .search-box input { width: 100%; min-width: 0; padding: 8px 0; color: var(--fg); border: 0; outline: 0; background: transparent; font-size: 11px; }
+    .search-box input:focus-visible { outline: none; }
+    .search-box .icon { width: 15px; height: 15px; }
+    .key-hint { font-size: 10px; border: 1px solid var(--border); padding: 0 4px; border-radius: 3px; }
+    .filter-select { min-width: 0; max-width: 140px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--fg); font-size: 11px; }
+    .filter-bar { display: flex; align-items: center; gap: 5px; margin-bottom: 15px; }
+    .filter-chip { min-height: 28px; padding: 4px 9px; background: transparent; border: 1px solid transparent; border-radius: 5px; color: var(--muted); font-size: 10px; }
+    .filter-chip.active { background: var(--surface-2); color: var(--fg); border-color: var(--border); }
+    .result-count { margin-left: auto; color: var(--muted); font-size: 10px; }
+    .tool-group { margin-bottom: 18px; }
+    .group-heading { min-height: 30px; display: flex; justify-content: space-between; align-items: center; padding: 0 3px 7px; color: var(--muted); font-size: 10px; }
+    .group-selector { display: flex; align-items: center; gap: 8px; min-height: 30px; cursor: pointer; font-size: 11px; color: var(--fg); font-weight: 550; }
+    .group-selector input { width: 13px; height: 13px; }
+    .tool-rows { border: 1px solid var(--border); border-radius: 8px; overflow: clip; }
+    .tool-row { display: flex; align-items: center; gap: 9px; min-height: 71px; padding: 10px 12px; background: var(--surface); position: relative; }
+    .tool-row + .tool-row { border-top: 1px solid var(--border); }
+    .tool-row:hover { background: var(--surface-1); }
+    .tool-row.focused { background: var(--surface-2); }
+    .tool-row.focused::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: var(--accent); }
+    .tool-check { display: flex; align-items: center; align-self: stretch; padding: 0 3px; cursor: pointer; }
+    .tool-main { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; padding: 0; text-align: left; border: 0; background: transparent; }
+    .tool-symbol { width: 31px; height: 31px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); flex-shrink: 0; color: var(--muted); }
+    .tool-symbol .icon { width: 16px; height: 16px; }
+    .tool-text { min-width: 0; }
+    .tool-title { display: block; font-size: 12px; font-weight: 550; line-height: 1.5; }
+    .tool-name { display: block; font-size: 10px; color: var(--muted); margin: 1px 0 3px; overflow-wrap: anywhere; }
+    .tool-description { display: block; font-size: 11px; color: var(--muted); line-height: 1.5; }
+    .tool-row .icon-button { width: 28px; height: 32px; color: var(--muted); }
+    .tool-row .icon-button .icon { width: 14px; height: 14px; }
+    .catalog-note { padding: 0 0 20px; font-size: 10px; color: var(--muted); }
+    .inspector { position: sticky; top: 20px; border: 1px solid var(--border); border-radius: 9px; overflow: clip; min-width: 0; }
+    .inspector-top { padding: 15px 17px; border-bottom: 1px solid var(--border); font-size: 10px; color: var(--muted); background: var(--surface-1); }
+    .detail-content { padding: 20px 17px; }
+    .detail-content > .tool-symbol { width: 39px; height: 39px; margin-bottom: 14px; }
+    .detail-content > .tool-symbol .icon { width: 20px; height: 20px; }
+    .detail-content h4 { font-size: 15px; margin-bottom: 4px; }
+    .detail-content .tool-name { font-size: 10px; margin-bottom: 12px; }
+    .detail-description { font-size: 11px; color: var(--muted); line-height: 1.7; margin-bottom: 15px; }
+    .enable-control { padding: 13px 0; margin-top: 18px; border-block: 1px solid var(--border); font-size: 11px; }
+    .switch { display: inline-flex; position: relative; width: 29px; height: 17px; border: none; border-radius: 999px; background: var(--surface-3); padding: 2px; flex-shrink: 0; }
+    .switch::after { content: ""; width: 13px; height: 13px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 3px #0002; transition: transform .15s; }
+    .switch[aria-checked="true"] { background: var(--accent); }
+    .switch[aria-checked="true"]::after { background: var(--accent-fg); transform: translateX(12px); }
+    .config-title { margin: 20px 0 13px; font-size: 11px; font-weight: 550; }
+    .config-field { display: block; margin-bottom: 15px; min-width: 0; }
+    .field-label { font-size: 10px; font-weight: 500; margin-bottom: 6px; }
+    .field-label .badge { padding: 1px 4px; font-size: 8px; }
+    .field-input { width: 100%; min-width: 0; min-height: 34px; padding: 7px 9px; border: 1px solid var(--border); background: var(--surface); border-radius: 6px; color: var(--fg); font-size: 10px; }
+    .field-help { color: var(--muted); font-size: 9px; margin-top: 5px; line-height: 1.6; }
+    .reset-field { width: 22px; height: 22px; }
+    .reset-field .icon { width: 12px; height: 12px; }
+    .advanced { border-top: 1px solid var(--border); margin-top: 18px; padding-top: 14px; }
+    .advanced summary { cursor: pointer; font-size: 10px; color: var(--muted); margin-bottom: 12px; min-height: 25px; }
+    .disabled-note { background: var(--surface-2); border-radius: 6px; padding: 10px; color: var(--muted); font-size: 10px; }
+    .app-footer { display: flex; align-items: center; gap: 17px; flex-wrap: wrap; margin-top: 22px; padding: 14px 26px; border-top: 1px solid var(--border); color: var(--muted); font-size: 10px; background: var(--surface-1); }
+    .app-footer .icon { width: 13px; height: 13px; }
+    .app-footer strong { color: var(--fg); font-weight: 550; }
+    .app-footer .footer-mode { margin-left: auto; }
+    .section-tabs { display: flex; gap: 5px; flex-wrap: wrap; padding: 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-1); margin-bottom: 22px; }
+    .section-tab { display: flex; align-items: center; justify-content: center; gap: 7px; flex: 1; padding: 8px 10px; min-height: 35px; border: 1px solid transparent; border-radius: 5px; background: transparent; font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .section-tab.active { background: var(--surface); border-color: var(--border); color: var(--fg); box-shadow: 0 1px 2px #00000004; }
+    .section-tab .icon { width: 14px; height: 14px; }
+    .section-tab .badge { padding: 0 5px; font-size: 9px; }
+    .split-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(250px, .85fr); gap: 22px; align-items: start; }
+    .split-heading { font-size: 12px; margin-bottom: 12px; }
+    .split-heading .badge { font-size: 9px; }
+    .selected-panel { position: sticky; top: 20px; padding: 16px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-1); }
+    .selected-panel > p { font-size: 10px; color: var(--muted); margin: 4px 0 17px; }
+    .selected-item { padding: 12px 0; display: flex; gap: 9px; align-items: center; border-bottom: 1px solid var(--border); }
+    .selected-item .tool-main { gap: 8px; }
+    .selected-item .tool-symbol { width: 28px; height: 28px; }
+    .selected-item .tool-title { font-size: 11px; }
+    .selected-item .tool-name { margin-bottom: 0; }
+    .selected-item .icon-button { width: 27px; height: 32px; }
+    .selected-item .icon-button .icon { width: 14px; height: 14px; }
+    .selection-total { padding-top: 15px; font-size: 10px; color: var(--muted); }
+    .selection-total strong { color: var(--fg); }
+    .empty-state { padding: 30px 18px; text-align: center; border: 1px dashed var(--border-strong); border-radius: 8px; color: var(--muted); }
+    .empty-state > .icon { width: 24px; height: 24px; margin-bottom: 10px; }
+    .empty-state h4 { color: var(--fg); font-size: 12px; margin-bottom: 4px; }
+    .empty-state p { font-size: 11px; }
+    .empty-state .button { margin-top: 14px; }
+    .content-panel { border: 1px solid var(--border); border-radius: 9px; padding: 20px; }
+    .content-panel h4 { font-size: 13px; }
+    .content-panel > p { font-size: 11px; color: var(--muted); margin: 5px 0 20px; }
+    .server-card { border: 1px solid var(--border); border-radius: 8px; overflow: clip; }
+    .server-header { padding: 16px; display: flex; align-items: center; gap: 12px; }
+    .server-header .server-text { flex: 1; min-width: 0; }
+    .server-header h4 { font-size: 12px; }
+    .server-header p { color: var(--muted); font-size: 10px; margin-top: 3px; }
+    .server-tools { border-top: 1px solid var(--border); padding: 7px 16px; background: var(--surface-1); }
+    .server-tool { min-height: 48px; padding: 7px 0; display: flex; align-items: center; gap: 9px; font-size: 11px; cursor: pointer; }
+    .server-tool + .server-tool { border-top: 1px solid var(--border); }
+    .server-tool .tool-name { margin: 1px 0 0; }
+    .server-empty { text-align: center; padding: 20px; color: var(--muted); font-size: 11px; }
+    .server-empty .button { margin-top: 11px; }
+    .option-list { border: 1px solid var(--border); border-radius: 7px; overflow: clip; }
+    .agent-option { display: flex; gap: 11px; align-items: center; padding: 14px; min-height: 66px; cursor: pointer; }
+    .agent-option + .agent-option { border-top: 1px solid var(--border); }
+    .agent-option:hover { background: var(--surface-1); }
+    .agent-option .option-copy { flex: 1; min-width: 0; }
+    .agent-option strong { display: block; font-size: 11px; font-weight: 550; }
+    .agent-option small { display: block; font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .permission-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .permission-option { text-align: left; display: flex; align-items: flex-start; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
+    .permission-option.active { border-color: var(--accent); background: var(--surface-1); }
+    .permission-option .icon { width: 17px; height: 17px; margin-top: 2px; }
+    .permission-option strong { display: block; font-size: 11px; font-weight: 550; }
+    .permission-option small { display: block; color: var(--muted); font-size: 10px; margin-top: 4px; }
+    .permission-copy { flex: 1; }
+    .permission-option .concept-radio { margin-top: 3px; flex-shrink: 0; }
+    .permission-option.active .concept-radio { border: 4px solid var(--accent); }
+    .permission-info { display: flex; gap: 8px; font-size: 10px; color: var(--muted); background: var(--surface-2); border-radius: 6px; padding: 12px; margin-top: 15px; }
+    .permission-info .icon { width: 14px; height: 14px; margin-top: 1px; }
+    .override-label { display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: 11px; margin: 17px 0; min-height: 30px; }
+    .rule-row { display: grid; grid-template-columns: 1fr 1.1fr 95px 32px; gap: 9px; align-items: end; margin-bottom: 12px; }
+    .rule-row .config-field { margin: 0; }
+    .rule-row .icon-button { width: 32px; height: 34px; color: var(--muted); }
+    .rule-row input, .rule-row select { font-size: 11px; }
+    .wizard-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 25px; gap: 12px; }
+    .wizard-step { display: flex; align-items: center; gap: 10px; padding: 0 0 14px; border: 0; border-bottom: 2px solid var(--border); background: transparent; color: var(--muted); text-align: left; }
+    .wizard-step.active { color: var(--fg); border-color: var(--accent); }
+    .step-number { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 50%; font-size: 10px; flex-shrink: 0; }
+    .wizard-step.active .step-number, .wizard-step.complete .step-number { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+    .wizard-step strong { display: block; font-size: 11px; font-weight: 550; }
+    .wizard-step small { display: block; font-size: 9px; margin-top: 2px; color: var(--muted); }
+    .guided-layout { display: grid; grid-template-columns: minmax(0, 1fr) 240px; align-items: start; gap: 24px; }
+    .preset-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin: 16px 0 23px; }
+    .preset { text-align: left; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 14px 12px; }
+    .preset:hover { border-color: var(--border-strong); background: var(--surface-1); }
+    .preset > .icon { margin-bottom: 10px; }
+    .preset strong { display: block; font-size: 11px; font-weight: 550; }
+    .preset small { display: block; font-size: 9px; color: var(--muted); margin: 5px 0 11px; min-height: 28px; }
+    .preset .badge { font-size: 9px; padding: 2px 5px; }
+    .guided-summary { position: sticky; top: 20px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-1); padding: 17px; }
+    .guided-summary h4 { font-size: 12px; }
+    .guided-summary > p { font-size: 10px; color: var(--muted); margin: 5px 0 19px; }
+    .summary-stat { padding: 12px 0; border-top: 1px solid var(--border); font-size: 10px; }
+    .summary-stat strong { font-size: 12px; font-weight: 550; }
+    .summary-tags { display: flex; gap: 5px; flex-wrap: wrap; margin: 9px 0 3px; }
+    .summary-tags .badge { max-width: 100%; overflow-wrap: anywhere; white-space: normal; font-size: 9px; }
+    .summary-tip { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 13px; color: var(--muted); font-size: 10px; line-height: 1.7; }
+    .wizard-footer { border-top: 1px solid var(--border); margin-top: 22px; padding: 16px 0 22px; display: flex; justify-content: space-between; align-items: center; }
+    .wizard-footer .small { font-size: 10px; }
+    .review-card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 18px; }
+    .review-card .summary-tags { margin-top: 12px; }
+    .review-card h4 { font-size: 12px; }
+    .review-line { font-size: 10px; padding: 11px 0; border-bottom: 1px solid var(--border); }
+    .review-line:last-child { border-bottom: none; padding-bottom: 0; }
+    .review-line span:last-child { color: var(--fg); }
+    .lab-footnote { display: flex; justify-content: space-between; gap: 15px; margin-top: 17px; color: var(--muted); font-size: 10px; }
+    .lab-footnote .icon { width: 12px; height: 12px; }
+    dialog { padding: 0; position: fixed; inset: 0 0 0 auto; margin: 0; border: 0; border-left: 1px solid var(--border); width: min(430px, 100%); max-width: 100%; height: 100dvh; max-height: 100dvh; background: var(--surface); color: var(--fg); box-shadow: var(--shadow); }
+    dialog::backdrop { background: #0005; backdrop-filter: blur(2px); }
+    .drawer-header { position: sticky; top: 0; z-index: 1; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--surface); font-size: 12px; }
+    dialog .detail-content { padding: 25px; }
+    dialog .detail-content h4 { font-size: 20px; }
+    dialog .detail-description, dialog .config-title, dialog .enable-control { font-size: 12px; }
+    dialog .field-label { font-size: 11px; }
+    dialog .field-input { min-height: 40px; font-size: 12px; }
+    dialog .field-help { font-size: 10px; }
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translate(-50%, 16px); opacity: 0; pointer-events: none; z-index: 10; display: flex; align-items: center; gap: 9px; max-width: calc(100% - 32px); padding: 12px 17px; border: 1px solid var(--border); background: var(--fg); color: var(--bg); border-radius: 9px; font-size: 12px; box-shadow: var(--shadow); transition: opacity .15s, transform .15s; }
+    .toast.visible { opacity: 1; transform: translate(-50%, 0); }
+    .toast .icon { width: 15px; height: 15px; }
+    @media (min-width: 1600px) { .explorer { grid-template-columns: 165px minmax(0, 1fr) 290px; gap: 26px; } }
+    @media (max-width: 1279px) {
+      .app-frame { grid-template-columns: minmax(0, 1fr); }
+      .app-sidebar { display: none; }
+      .guided-layout { grid-template-columns: minmax(0, 1fr) 225px; }
+    }
+    @media (max-width: 1119px) {
+      .explorer { grid-template-columns: 155px minmax(0, 1fr); }
+      .inspector { display: none; }
+      .concept-card { gap: 10px; padding: 13px; grid-template-columns: 34px 1fr; }
+      .concept-letter { width: 34px; height: 36px; }
+      .concept-radio { display: none; }
+      .permission-option .concept-radio { display: block; }
+    }
+    @media (max-width: 760px) {
+      .lab { padding: 0 16px 22px; }
+      .lab-header { min-height: 62px; }
+      .lab-meta, .lab-title, .lab-header .divider { display: none; }
+      .intro { padding: 20px 0; }
+      .intro p { font-size: 12px; }
+      .concept-picker { gap: 8px; margin-bottom: 20px; }
+      .concept-card { grid-template-columns: 1fr; padding: 12px; gap: 9px; }
+      .concept-letter { width: 29px; height: 29px; font-size: 12px; }
+      .concept-label { font-size: 11px; line-height: 1.4; margin-bottom: 0; gap: 5px; }
+      .concept-label .badge { padding: 1px 4px; font-size: 8px; }
+      .concept-description { display: none; }
+      .preview-caption { align-items: flex-start; line-height: 1.6; }
+      .preview-caption .badge { display: none; }
+      .app-topbar { padding: 12px 16px; gap: 10px; flex-wrap: wrap; }
+      .app-topbar .breadcrumbs { font-size: 10px; }
+      .app-topbar .save-state { display: none; }
+      .agent-heading { padding: 21px 16px 0; }
+      .agent-heading h2 { font-size: 18px; }
+      .agent-heading .badge { display: none; }
+      .agent-heading p { max-width: 230px; line-height: 1.6; }
+      .agent-tabs { gap: 19px; font-size: 10px; }
+      .workspace { padding: 20px 16px 0; }
+      .section-heading { align-items: flex-start; gap: 8px; }
+      .section-heading h3 { font-size: 15px; }
+      .section-heading > .badge { display: none; }
+      .explorer, .explorer.section-view { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+      .catalog-list { max-height: none; overflow-y: visible; }
+      .category-nav .eyebrow, .nav-divider { display: none; }
+      .category-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 9px; }
+      .category-list .nav-item { width: auto; min-height: 35px; padding: 7px 9px; font-size: 10px; margin: 0; }
+      .category-list .nav-item .icon { display: none; }
+      .category-list .nav-item .count { font-size: 9px; margin-left: 3px; }
+      .section-nav { display: flex; gap: 3px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+      .section-nav .nav-item { flex: 1; width: auto; justify-content: center; font-size: 10px; padding: 7px 6px; gap: 5px; }
+      .section-nav .count { display: none; }
+      .section-nav .icon { width: 13px; height: 13px; }
+      .split-layout, .guided-layout { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+      .selected-panel, .guided-summary { position: static; }
+      .section-tabs { gap: 3px; padding: 4px; }
+      .section-tab { font-size: 10px; padding: 8px 6px; gap: 5px; }
+      .section-tab .badge, .section-tab .icon { display: none; }
+      .tool-row { padding: 11px 10px; gap: 7px; }
+      .tool-row .tool-symbol { display: none; }
+      .tool-title { font-size: 12px; }
+      .tool-name, .tool-description { font-size: 10px; }
+      .filter-select { max-width: 108px; font-size: 10px; }
+      .search-box input { font-size: 16px; }
+      .key-hint { display: none; }
+      .tool-row .icon-button { width: 34px; height: 40px; }
+      .tool-check { min-width: 27px; }
+      .content-panel { padding: 16px; }
+      .permission-options { grid-template-columns: minmax(0, 1fr); }
+      .rule-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; gap: 8px; padding-bottom: 15px; border-bottom: 1px solid var(--border); }
+      .rule-row .rule-resource { grid-column: 1 / -1; grid-row: 2; }
+      .field-input { font-size: 16px; }
+      .wizard-steps { gap: 8px; }
+      .wizard-step { gap: 6px; align-items: flex-start; }
+      .wizard-step small { display: none; }
+      .wizard-step strong { font-size: 10px; margin-top: 5px; }
+      .step-number { width: 24px; height: 24px; }
+      .preset-grid { gap: 7px; }
+      .preset { padding: 12px 9px; }
+      .preset strong { font-size: 10px; }
+      .preset small { font-size: 9px; min-height: 41px; }
+      .preset .badge { font-size: 8px; }
+      .app-footer { padding: 14px 16px; gap: 10px 14px; font-size: 9px; }
+      .app-footer .footer-mode { margin-left: 0; }
+      .lab-footnote { flex-direction: column; gap: 6px; font-size: 9px; }
+      .button { min-height: 40px; }
+      .icon-button { width: 40px; height: 40px; }
+      .switch { width: 34px; height: 21px; padding: 3px; }
+      .switch::after { width: 15px; height: 15px; }
+      .switch[aria-checked="true"]::after { transform: translateX(13px); }
+      .switch::before { content: ""; position: absolute; inset: -12px -5px; }
+      dialog .field-input { font-size: 16px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-mark" viewBox="0 0 24 24"><path d="M6 4v16M18 4 9 12l9 8M6 12h3"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="13" rx="4"/><path d="M12 3v4M9 13v1m6-1v1M1 12v4m22-4v4M9 17h6"/><circle cx="12" cy="3" r="1"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8m-8 4h6"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L5 21"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M7 2v5m10-5v5M5 7h14v4a7 7 0 0 1-14 0Zm7 11v4"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m3 10v-3a6 6 0 0 0-2-4"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10m4 0h2M4 17h2m4 0h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 12H4m6-6-6 6 6 6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 13A9 9 0 0 1 11 4a9 9 0 1 0 9 9Z"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 4v6h6M3.5 10a9 9 0 1 1 1 8"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2ZM7 3v6h10V3M7 21v-8h10v8"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v.1"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 6-6 6 6 6m8-12 6 6-6 6m-3-15-2 18"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5ZM20 2v4m-2-2h4"/></symbol>
+    <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 11a8 8 0 0 1-8 8H7l-5 3 2-6a8 8 0 1 1 17-5Z"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-4 1-4-2-6-2m12 5v-3.5c0-1 .1-1.5-.5-2 3.5-.5 6.5-2 6.5-7a5.5 5.5 0 0 0-1.5-4c.2-1 .2-2-.3-3-1.5 0-3 1-4 1.5a14 14 0 0 0-6.4 0C7.8 3.5 6.3 2.5 4.8 2.5c-.5 1-.5 2-.3 3A5.5 5.5 0 0 0 3 9.5c0 5 3 6.5 6.5 7-.6.5-.5 1-.5 2V22"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 10 5-10 5L2 8Zm-10 9 10 5 10-5M2 16l10 5 10-5"/></symbol>
+  </svg>
+
+  <main class="lab">
+    <header class="lab-header spread">
+      <div class="row" style="gap: 16px">
+        <span class="wordmark"><span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-mark"/></svg></span>K41</span>
+        <span class="divider"></span><span class="lab-title">Design lab <span style="margin: 0 7px">/</span> Agent capabilities</span>
+      </div>
+      <div class="row">
+        <span class="lab-meta row" style="margin-right: 10px"><span class="dot" style="color: var(--success)"></span> Interactive prototype</span>
+        <button class="icon-button" id="themeButton" data-action="theme" aria-label="Switch to dark theme" title="Switch to dark theme" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg></button>
+        <button class="button" data-action="reset" title="Reset the current concept to its initial demo data"><svg class="icon sm" aria-hidden="true"><use href="#i-reset"/></svg>Reset demo</button>
+      </div>
+    </header>
+    <section class="intro" aria-labelledby="pageTitle">
+      <div class="eyebrow">Three ways to build an agent</div>
+      <h1 id="pageTitle">The right tools. A clearer workspace.</h1>
+      <p>Explore three approaches to choosing tools, connecting services, and setting boundaries. Same agent, different experience.</p>
+    </section>
+    <nav class="concept-picker" aria-label="Design concepts">
+      <button class="concept-card" id="concept-A" data-action="concept" data-value="A" aria-pressed="true">
+        <span class="concept-letter">A</span><span><span class="concept-label">Tool explorer <span class="badge">Recommended</span></span><span class="concept-description">Browse categories. Configure in context.</span></span><span class="concept-radio" aria-hidden="true"></span>
+      </button>
+      <button class="concept-card" id="concept-B" data-action="concept" data-value="B" aria-pressed="false">
+        <span class="concept-letter">B</span><span><span class="concept-label">Split selection</span><span class="concept-description">Available on the left. Enabled on the right.</span></span><span class="concept-radio" aria-hidden="true"></span>
+      </button>
+      <button class="concept-card" id="concept-C" data-action="concept" data-value="C" aria-pressed="false">
+        <span class="concept-letter">C</span><span><span class="concept-label">Guided setup</span><span class="concept-description">Start with a task. Refine step by step.</span></span><span class="concept-radio" aria-hidden="true"></span>
+      </button>
+    </nav>
+    <div class="preview-caption spread"><span id="conceptCaption"></span><span class="badge outline">Live preview</span></div>
+    <section id="stage" aria-label="Agent configuration preview"></section>
+    <footer class="lab-footnote">
+      <span class="row"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>Sample data only. Saves stay in this tab; reloading starts fresh.</span>
+      <span>Each concept keeps its own selections <span style="margin: 0 5px">·</span> No external dependencies</span>
+    </footer>
+  </main>
+  <dialog id="detailsDialog" aria-labelledby="drawerTitle">
+    <div class="drawer-header spread"><span id="drawerTitle">Tool details & configuration</span><button class="icon-button" data-action="close-dialog" aria-label="Close tool details" autofocus><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div id="drawerContent"></div>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span id="toastText"></span></div>
+
+  <script>
+    "use strict";
+
+    const tools = [
+      { id: "web_search", title: "Search the web", description: "Find current information across the web.", group: "web", icon: "search", detail: "Search the web for relevant sources, recent information, and answers. Choose a search provider or inherit your workspace connection." },
+      { id: "web_fetch", title: "Read a web page", description: "Turn a URL into readable page content.", group: "web", icon: "globe", detail: "Retrieve a web page and extract its readable content so the agent can work with complete sources." },
+      { id: "read", title: "Read a file", description: "Read text and inspect files in the workspace.", group: "file", icon: "file" },
+      { id: "list_dir", title: "List a directory", description: "Explore files and folders in the workspace.", group: "file", icon: "layers" },
+      { id: "glob", title: "Find files", description: "Find files using a path or glob pattern.", group: "file", icon: "search" },
+      { id: "grep", title: "Search file contents", description: "Find matching text across workspace files.", group: "file", icon: "search" },
+      { id: "edit", title: "Edit a file", description: "Make targeted changes to existing files.", group: "file", icon: "code", mutates: true },
+      { id: "write", title: "Write a file", description: "Create files or replace their contents.", group: "file", icon: "file", mutates: true },
+      { id: "bash", title: "Run a command", description: "Execute commands in the workspace shell.", group: "shell", icon: "terminal", mutates: true },
+      { id: "read_process_output", title: "Read process output", description: "Collect output from a running process.", group: "shell", icon: "terminal" },
+      { id: "write_process_input", title: "Send process input", description: "Send text or keystrokes to a process.", group: "shell", icon: "terminal", mutates: true },
+      { id: "stop_process", title: "Stop a process", description: "Stop a running workspace process.", group: "shell", icon: "terminal", mutates: true },
+      { id: "generate_image", title: "Generate an image", description: "Create images from a text description.", group: "image", icon: "image", detail: "Create an image using an image-capable model. Override the workspace model, output size, or quality for this agent." },
+      { id: "get_current_time", title: "Get the current time", description: "Read the current date and local time.", group: "utility", icon: "clock" },
+    ];
+    const groups = [
+      { id: "web", label: "Web", icon: "globe" }, { id: "file", label: "Files", icon: "file" },
+      { id: "shell", label: "Shell", icon: "terminal" }, { id: "image", label: "Images", icon: "image" },
+      { id: "utility", label: "Utilities", icon: "clock" },
+    ];
+    const servers = [
+      { id: "github", title: "GitHub", description: "Issues, pull requests, and repository context.", icon: "github", tools: [
+        { id: "mcp__github__search_issues", title: "Search issues" }, { id: "mcp__github__get_pull_request", title: "Read a pull request" },
+      ] },
+      { id: "notion", title: "Notion", description: "Pages and shared knowledge from your workspace.", icon: "file", tools: [
+        { id: "mcp__notion__search", title: "Search pages" }, { id: "mcp__notion__fetch_page", title: "Read a page" },
+      ] },
+    ];
+    const subAgents = [
+      { id: "research-agent", title: "Research agent", description: "Deep research and source gathering.", icon: "search" },
+      { id: "frontend-agent", title: "Frontend agent", description: "Interface development and browser work.", icon: "code" },
+      { id: "backend-agent", title: "Backend agent", description: "APIs, data, and server-side implementation.", icon: "terminal" },
+    ];
+    const reviewers = [
+      { id: "reviewer", title: "Review agent", description: "Review a plan before execution.", icon: "shield" },
+      { id: "planner", title: "Planning agent", description: "Check the approach and task breakdown.", icon: "layers" },
+    ];
+    const modes = [
+      { id: "inherit", title: "Inherit permissions", short: "Inherit", icon: "layers", description: "Use the workspace default: Approve for me." },
+      { id: "ask", title: "Ask for approval", short: "Ask", icon: "message", description: "Ask before actions that require approval." },
+      { id: "auto", title: "Approve for me", short: "Auto", icon: "shield", description: "Automatically review and approve actions." },
+      { id: "full_access", title: "Full access", short: "Full", icon: "spark", description: "Run without approval prompts; explicit denials still apply." },
+    ];
+    const schemas = {
+      web_search: [
+        { name: "provider", label: "Search provider", default: "auto", options: [["auto", "Automatic"], ["tavily", "Tavily"], ["brave", "Brave"], ["duckduckgo", "DuckDuckGo"]] },
+        { name: "tavily_connection", label: "Tavily connection", default: "team-search", options: [["team-search", "Team search"], ["research-search", "Research search"]], providers: ["auto", "tavily"] },
+        { name: "tavily_api_key", label: "Tavily API key", default: "", type: "password", advanced: true, providers: ["auto", "tavily"] },
+      ],
+      web_fetch: [
+        { name: "provider", label: "Fetch provider", default: "auto", options: [["auto", "Automatic"], ["firecrawl", "Firecrawl"], ["tavily", "Tavily"], ["local", "Local fetch"]] },
+      ],
+      generate_image: [
+        { name: "model", label: "Image model", default: "workspace-image", options: [["workspace-image", "Workspace image model"], ["studio-image", "Studio image model (demo)"]] },
+        { name: "size", label: "Image size", default: "1024x1024", options: [["1024x1024", "1024 × 1024"], ["1536x1024", "1536 × 1024"], ["1024x1536", "1024 × 1536"]] },
+        { name: "quality", label: "Quality", default: "auto", options: [["auto", "Automatic"], ["low", "Low"], ["medium", "Medium"], ["high", "High"]] },
+      ],
+    };
+    const captions = {
+      A: "<strong>A / Tool explorer</strong> <span style='margin:0 7px'>—</span> A familiar settings layout, with details always in reach.",
+      B: "<strong>B / Split selection</strong> <span style='margin:0 7px'>—</span> A clear inventory of what is available and what this agent can use.",
+      C: "<strong>C / Guided setup</strong> <span style='margin:0 7px'>—</span> A focused path from a starting toolkit to a reviewed configuration.",
+    };
+    function createState() {
+      return {
+        selected: new Set(["web_search", "web_fetch", "read", "list_dir"]),
+        mcpEnabled: new Set(["github"]), mcpSelected: new Set(["mcp__github__search_issues"]), loadedServers: new Set(["github"]), loadingServers: new Set(),
+        subAgents: new Set(["research-agent"]), reviewers: new Set(["reviewer"]),
+        mode: "inherit", overridePermissions: false, rules: [], configs: {}, advanced: new Set(),
+        section: "tools", group: "all", filter: "all", query: "", focusedTool: "web_search", step: 1,
+      };
+    }
+    function snapshot(state) {
+      return JSON.stringify({
+        selected: [...state.selected].sort(), mcpEnabled: [...state.mcpEnabled].sort(), mcpSelected: [...state.mcpSelected].sort(),
+        subAgents: [...state.subAgents].sort(), reviewers: [...state.reviewers].sort(), mode: state.mode,
+        overridePermissions: state.overridePermissions, rules: state.overridePermissions ? state.rules : [],
+        configs: Object.fromEntries(Object.entries(state.configs).filter(([id, fields]) => state.selected.has(id) && Object.keys(fields).length)),
+      });
+    }
+    const states = Object.fromEntries(["A", "B", "C"].map(id => { const state = createState(); state.saved = snapshot(state); return [id, state]; }));
+    let currentConcept = "A";
+    let returnFocusId = "";
+    let toastTimer;
+    let ruleSequence = 0;
+    const stage = document.getElementById("stage");
+    const dialog = document.getElementById("detailsDialog");
+    const state = () => states[currentConcept];
+    const escape = value => String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+    const icon = (name, extra = "") => `<svg class="icon ${extra}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+    const toolById = id => tools.find(tool => tool.id === id);
+    const modeInfo = () => modes.find(mode => mode.id === state().mode);
+    const isWide = () => window.matchMedia("(min-width: 1120px)").matches;
+    const activeMcpTools = () => servers.filter(server => state().mcpEnabled.has(server.id)).flatMap(server => server.tools.filter(tool => state().mcpSelected.has(tool.id)));
+    const selectedCount = () => state().selected.size + activeMcpTools().length;
+    const dirty = () => snapshot(state()) !== state().saved;
+    function toast(message) {
+      clearTimeout(toastTimer);
+      document.getElementById("toastText").textContent = message;
+      document.getElementById("toast").classList.add("visible");
+      toastTimer = setTimeout(() => document.getElementById("toast").classList.remove("visible"), 2800);
+    }
+    function emptyState(title, description, action = "") {
+      return `<div class="empty-state">${icon("search")}<h4>${title}</h4><p>${description}</p>${action}</div>`;
+    }
+    function sectionHeader(title, description, extra = "") {
+      return `<div class="section-heading spread"><div><h3>${title}</h3><p>${description}</p></div>${extra}</div>`;
+    }
+    function countBadge(count) { return `<span class="badge">${count}</span>`; }
+    function navigationItem(section, label, glyph, count) {
+      return `<button class="nav-item ${state().section === section ? "active" : ""}" data-action="section" data-value="${section}" ${state().section === section ? 'aria-current="page"' : ""}>${icon(glyph)}<span>${label}</span><span class="count">${count}</span></button>`;
+    }
+    function categoryNavigation() {
+      const categories = [{ id: "all", label: "All tools", icon: "grid" }, ...groups];
+      return `<nav class="category-nav" aria-label="Capability categories">
+        <div class="eyebrow">Capabilities</div><div class="section-nav">
+          ${navigationItem("tools", "Tools", "grid", state().selected.size)}
+          ${navigationItem("mcp", "MCP", "plug", state().mcpEnabled.size)}
+          ${navigationItem("delegation", "Delegation", "users", state().subAgents.size)}
+          ${navigationItem("permissions", "Permissions", "shield", modeInfo().short)}
+        </div>
+        ${state().section === "tools" ? `<div class="nav-divider"></div><div class="eyebrow">Built-in tools</div><div class="category-list">${categories.map(group => `<button class="nav-item ${state().group === group.id ? "active" : ""}" data-action="group" data-value="${group.id}" ${state().group === group.id ? 'aria-current="true"' : ""}>${icon(group.icon)}<span>${group.label}</span><span class="count">${group.id === "all" ? tools.length : tools.filter(tool => tool.group === group.id).length}</span></button>`).join("")}</div>` : ""}
+      </nav>`;
+    }
+    function sectionTabs() {
+      return `<nav class="section-tabs" aria-label="Capability sections">${[
+        ["tools", "Built-in tools", "grid", state().selected.size], ["mcp", "MCP servers", "plug", state().mcpEnabled.size],
+        ["delegation", "Delegation", "users", state().subAgents.size], ["permissions", "Permissions", "shield", modeInfo().short],
+      ].map(([id, label, glyph, count]) => `<button class="section-tab ${state().section === id ? "active" : ""}" data-action="section" data-value="${id}" ${state().section === id ? 'aria-current="page"' : ""}>${icon(glyph)}${label}${countBadge(count)}</button>`).join("")}</nav>`;
+    }
+    function searchToolbar(split = false) {
+      return `<div class="catalog-toolbar"><label class="search-box" for="toolSearch">${icon("search")}<input id="toolSearch" type="search" placeholder="Search tools…" aria-label="Search tools by name or description" value="${escape(state().query)}" autocomplete="off"><kbd class="key-hint">/</kbd></label>
+        ${currentConcept !== "A" ? `<select class="filter-select" id="categoryFilter" aria-label="Filter by category"><option value="all">All categories</option>${groups.map(group => `<option value="${group.id}" ${state().group === group.id ? "selected" : ""}>${group.label}</option>`).join("")}</select>` : ""}</div>
+        ${split ? "" : `<div class="filter-bar"><button class="filter-chip ${state().filter === "all" ? "active" : ""}" data-action="filter" data-value="all" aria-pressed="${state().filter === "all"}">All tools</button><button class="filter-chip ${state().filter === "selected" ? "active" : ""}" data-action="filter" data-value="selected" aria-pressed="${state().filter === "selected"}">Selected ${state().selected.size}</button><span class="result-count" role="status">${filteredTools().length} shown</span></div>`}`;
+    }
+    function filteredTools(split = false) {
+      const query = state().query.trim().toLowerCase();
+      return tools.filter(tool => (state().group === "all" || tool.group === state().group)
+        && (!query || `${tool.id} ${tool.title} ${tool.description}`.toLowerCase().includes(query))
+        && (split ? !state().selected.has(tool.id) : state().filter !== "selected" || state().selected.has(tool.id)));
+    }
+    function toolRow(tool, split = false) {
+      const checked = state().selected.has(tool.id);
+      const focused = !split && currentConcept === "A" && state().focusedTool === tool.id;
+      return `<div class="tool-row ${focused ? "focused" : ""}" data-tool="${tool.id}">
+        ${split ? "" : `<label class="tool-check"><input type="checkbox" data-tool-toggle="${tool.id}" id="enable-${tool.id}" aria-label="Enable ${tool.id}" ${checked ? "checked" : ""}></label>`}
+        <button class="tool-main" id="details-${tool.id}" data-action="detail" data-id="${tool.id}" aria-label="Details for ${tool.id}"><span class="tool-symbol">${icon(tool.icon)}</span><span class="tool-text"><span class="tool-title">${tool.title}</span><span class="tool-name mono">${tool.id}</span><span class="tool-description">${tool.description}</span></span></button>
+        <button class="icon-button" id="${split ? "toggle" : "configure"}-${tool.id}" data-action="${split ? "toggle-tool" : "detail"}" data-id="${tool.id}" aria-label="${split ? "Add" : "Configure"} ${tool.id}" title="${split ? "Add tool" : "View details & configuration"}">${icon(split ? "plus" : schemas[tool.id] ? "settings" : "chevron")}</button>
+      </div>`;
+    }
+    function toolCatalog(split = false) {
+      const visible = filteredTools(split);
+      return `${searchToolbar(split)}<div class="catalog-list">${visible.length ? groups.filter(group => visible.some(tool => tool.group === group.id)).map(group => {
+        const members = tools.filter(tool => tool.group === group.id);
+        const selected = members.filter(tool => state().selected.has(tool.id)).length;
+        return `<section class="tool-group" aria-label="${group.label} tools"><div class="group-heading"><label class="group-selector"><input type="checkbox" data-group-toggle="${group.id}" id="group-${group.id}" aria-label="Select all ${group.label.toLowerCase()} tools" ${selected === members.length ? "checked" : ""} data-partial="${selected > 0 && selected < members.length}"><span>${group.label}</span></label><span>${selected}/${members.length} selected</span></div><div class="tool-rows">${visible.filter(tool => tool.group === group.id).map(tool => toolRow(tool, split)).join("")}</div></section>`;
+      }).join("") : emptyState(state().query ? "No tools found" : split ? "All matching tools are selected" : "No tools to show", state().query ? "Try another name or a broader search." : "Change the filter or add tools to your selection.", `<button class="button" data-action="clear-filters">${icon("reset", "sm")}Clear filters</button>`)}</div><p class="catalog-note">${icon("info", "sm")} ${split ? "Add a tool to move it into your enabled list." : "Choose a tool to see its details and configuration."}</p>`;
+    }
+    function configField(tool, field, prefix) {
+      const overrides = state().configs[tool.id] || {};
+      const overridden = Object.hasOwn(overrides, field.name);
+      const value = overridden ? overrides[field.name] : "";
+      const id = `${prefix}-${tool.id}-${field.name}`;
+      const inherited = field.type === "password" ? "Workspace credential" : field.options?.find(option => option[0] === field.default)?.[1] || field.default;
+      return `<div class="config-field"><div class="field-label spread"><label for="${id}">${field.label}</label><span class="row" style="gap: 2px">${overridden ? '<span class="badge">Override</span>' : ""}<button class="icon-button reset-field" data-action="reset-field" data-id="${tool.id}" data-field="${field.name}" aria-label="Reset ${field.label.toLowerCase()} to inherited value" title="Use inherited value" ${overridden ? "" : "disabled"}>${icon("reset")}</button></span></div>
+        ${field.options ? `<select class="field-input" id="${id}" data-config-tool="${tool.id}" data-config-field="${field.name}"><option value="">Inherit · ${escape(inherited)}</option>${field.options.map(([key, label]) => `<option value="${escape(key)}" ${value === key ? "selected" : ""}>${escape(label)}</option>`).join("")}</select>` : `<input class="field-input" type="${field.type || "text"}" id="${id}" data-config-tool="${tool.id}" data-config-field="${field.name}" value="${escape(value)}" placeholder="Inherit workspace credential" autocomplete="off">`}
+        <p class="field-help">${overridden ? "Used only by this agent." : "Inherited from workspace settings."}</p></div>`;
+    }
+    function detailContent(prefix) {
+      const tool = toolById(state().focusedTool) || tools[0];
+      const checked = state().selected.has(tool.id);
+      const fields = schemas[tool.id] || [];
+      const provider = state().configs[tool.id]?.provider || "auto";
+      const visibleFields = fields.filter(field => !field.providers || field.providers.includes(provider));
+      const basic = visibleFields.filter(field => !field.advanced);
+      const advanced = visibleFields.filter(field => field.advanced);
+      return `<div class="detail-content"><span class="tool-symbol">${icon(tool.icon)}</span><h4>${tool.title}</h4><div class="tool-name mono">${tool.id}</div><p class="detail-description">${tool.detail || tool.description}</p><div class="row" style="flex-wrap: wrap"><span class="badge outline">Built-in</span><span class="badge outline">${groups.find(group => group.id === tool.group).label}</span>${tool.mutates ? '<span class="badge outline">Modifies state</span>' : ""}</div>
+        <div class="enable-control spread"><span>${checked ? "Enabled for this agent" : "Enable for this agent"}</span><button class="switch" role="switch" id="${prefix}-toggle-${tool.id}" aria-checked="${checked}" aria-label="Enable ${tool.id} for this agent" data-action="toggle-tool" data-id="${tool.id}"></button></div>
+        ${checked ? fields.length ? `<h5 class="config-title">Configuration</h5>${basic.map(field => configField(tool, field, prefix)).join("")}${advanced.length ? `<details class="advanced" data-advanced="${tool.id}" ${state().advanced.has(tool.id) ? "open" : ""}><summary>Advanced credential override</summary>${advanced.map(field => configField(tool, field, prefix)).join("")}</details>` : ""}${tool.id === "web_search" && provider === "duckduckgo" ? '<p class="field-help">DuckDuckGo does not require API credentials.</p>' : ""}` : '<p class="disabled-note" style="margin-top: 18px">This tool uses workspace defaults. No agent-specific configuration is needed.</p>' : '<p class="disabled-note" style="margin-top: 18px">Enable this tool to configure it for this agent.</p>'}
+        <p class="field-help" style="border-top: 1px solid var(--border); padding-top: 14px; margin-top: 20px">${icon("shield", "sm")} Selected tools follow the agent’s permission mode.</p></div>`;
+    }
+    function selectedPanel() {
+      const selected = tools.filter(tool => state().selected.has(tool.id));
+      return `<aside class="selected-panel" aria-label="Selected built-in tools"><div class="spread"><h4 style="font-size: 12px">Enabled for this agent</h4><span class="badge outline">${selected.length}</span></div><p>Your agent can use these built-in tools.</p>${selected.length ? selected.map(tool => `<div class="selected-item" data-selected-tool="${tool.id}"><button class="tool-main" id="selected-details-${tool.id}" data-action="detail" data-id="${tool.id}" aria-label="Configure selected tool ${tool.id}"><span class="tool-symbol">${icon(tool.icon)}</span><span class="tool-text"><span class="tool-title">${tool.title}</span><span class="tool-name mono">${tool.id}</span></span></button><button class="icon-button" id="toggle-${tool.id}" data-action="toggle-tool" data-id="${tool.id}" aria-label="Remove ${tool.id}" title="Remove tool">${icon("close")}</button></div>`).join("") : emptyState("Your toolkit starts here", "Add tools from the catalog on the left.")}<div class="selection-total spread"><span>Built-in tools</span><strong>${selected.length} / ${tools.length}</strong></div><p class="field-help" style="margin-top: 12px">Click an enabled tool to adjust its configuration.</p></aside>`;
+    }
+    function mcpContent(includeHeading = true) {
+      return `${includeHeading ? sectionHeader("Connect external tools", "Enable a server, then choose which of its tools this agent can use.", `<span class="badge outline">${state().mcpEnabled.size} connected</span>`) : ""}<div class="stack">${servers.map(server => {
+        const enabled = state().mcpEnabled.has(server.id);
+        const loaded = state().loadedServers.has(server.id);
+        const loading = state().loadingServers.has(server.id);
+        return `<section class="server-card" aria-label="${server.title} MCP server"><div class="server-header"><span class="tool-symbol">${icon(server.icon)}</span><div class="server-text"><h4>${server.title} <span class="badge ${enabled ? "success" : ""}" style="margin-left: 5px">${enabled ? "Connected" : "Not enabled"}</span></h4><p>${server.description}</p></div><button class="switch" id="server-${server.id}" role="switch" aria-checked="${enabled}" aria-label="Enable ${server.title} MCP server" data-action="server" data-id="${server.id}"></button></div>${enabled ? `<div class="server-tools">${loaded ? server.tools.map(tool => `<label class="server-tool"><input type="checkbox" data-mcp-tool="${tool.id}" id="mcp-${tool.id}" aria-label="Enable ${tool.id}" ${state().mcpSelected.has(tool.id) ? "checked" : ""}><span><span>${tool.title}</span><span class="tool-name mono">${tool.id}</span></span></label>`).join("") : `<div class="server-empty"><p>${loading ? "Discovering server tools…" : "No tools loaded yet. Discover tools to finish connecting."}</p><button class="button" id="discover-${server.id}" data-action="discover" data-id="${server.id}" ${loading ? "disabled" : ""}>${icon("reset", "sm")}${loading ? "Discovering…" : "Discover tools"}</button></div>`}</div>` : ""}</section>`;
+      }).join("")}</div><p class="field-help" style="margin-top: 15px">Server connections and tool discovery are simulated in this preview. Disabling a server keeps its tool choices for when you reconnect.</p>`;
+    }
+    function agentOptions(options, key) {
+      const selected = state()[key];
+      return `<div class="option-list">${options.map(agent => `<label class="agent-option"><span class="tool-symbol">${icon(agent.icon)}</span><span class="option-copy"><strong>${agent.title}</strong><small>${agent.description}</small></span><input type="checkbox" id="${key}-${agent.id}" data-agent-key="${key}" data-agent-id="${agent.id}" aria-label="Select ${agent.id} as ${key === "reviewers" ? "approval target" : "sub-agent"}" ${selected.has(agent.id) ? "checked" : ""}></label>`).join("")}</div>`;
+    }
+    function delegationContent(includeHeading = true) {
+      return `${includeHeading ? sectionHeader("Bring in the right agents", "Choose collaborators and decide who can review a plan.") : ""}<div class="stack"><section class="content-panel"><div class="spread"><h4>Sub-agents</h4>${countBadge(state().subAgents.size)}</div><p>Delegation becomes available when at least one selected sub-agent is available.</p>${agentOptions(subAgents, "subAgents")}</section><section class="content-panel"><div class="spread"><h4>Plan approval targets</h4>${countBadge(state().reviewers.size)}</div><p>Agents that can review a plan before execution.</p>${agentOptions(reviewers, "reviewers")}</section></div>`;
+    }
+    function permissionsContent(includeHeading = true) {
+      return `${includeHeading ? sectionHeader("Set the boundaries", "Control how this agent gets approval to use its tools.") : ""}<div class="stack"><section class="content-panel"><h4>Permission mode</h4><p>Choose a mode for this agent, or inherit your workspace settings.</p><div class="permission-options">${modes.map(mode => `<button class="permission-option ${state().mode === mode.id ? "active" : ""}" id="mode-${mode.id}" data-action="mode" data-value="${mode.id}" aria-pressed="${state().mode === mode.id}">${icon(mode.icon)}<span class="permission-copy"><strong>${mode.title}</strong><small>${mode.description}</small></span><span class="concept-radio" aria-hidden="true"></span></button>`).join("")}</div><div class="permission-info">${icon("info")}<span>${state().mode === "full_access" ? "Full access removes approval prompts. Explicit deny rules and hard blocks still apply." : state().mode === "inherit" ? "Workspace default: Approve for me. This agent follows future changes to the workspace default." : "The selected mode applies to this agent’s enabled tools."}</span></div></section>
+        <section class="content-panel"><h4>Permission exceptions</h4><p>Deny always wins. Otherwise, the last matching rule applies. Full access ignores Ask exceptions.</p><label class="override-label"><input id="overridePermissions" type="checkbox" ${state().overridePermissions ? "checked" : ""}>Override global permission rules</label>${state().overridePermissions ? `${state().rules.length ? state().rules.map(rule => `<div class="rule-row"><div class="config-field"><label class="field-label" for="rule-${rule.id}-action">Action</label><input class="field-input mono" id="rule-${rule.id}-action" data-rule="${rule.id}" data-rule-field="action" value="${escape(rule.action)}" placeholder="*"></div><div class="config-field rule-resource"><label class="field-label" for="rule-${rule.id}-resource">Resource pattern</label><input class="field-input mono" id="rule-${rule.id}-resource" data-rule="${rule.id}" data-rule-field="resource" value="${escape(rule.resource)}" placeholder="*"></div><div class="config-field"><label class="field-label" for="rule-${rule.id}-effect">Decision</label><select class="field-input" id="rule-${rule.id}-effect" data-rule="${rule.id}" data-rule-field="effect">${["allow", "ask", "deny"].map(effect => `<option value="${effect}" ${rule.effect === effect ? "selected" : ""}>${effect.charAt(0).toUpperCase() + effect.slice(1)}</option>`).join("")}</select></div><button class="icon-button" data-action="remove-rule" data-id="${rule.id}" aria-label="Remove permission rule">${icon("close")}</button></div>`).join("") : '<p class="disabled-note" style="margin-bottom: 14px">No exceptions. This override uses the selected mode’s defaults.</p>'}<button class="button" data-action="add-rule">${icon("plus", "sm")}Add permission rule</button>` : '<p class="field-help">Using global permission rules.</p>'}</section></div>`;
+    }
+    function sectionContent() {
+      if (state().section === "mcp") return mcpContent();
+      if (state().section === "delegation") return delegationContent();
+      return permissionsContent();
+    }
+    function explorerContent() {
+      return `${sectionHeader("A toolkit for this agent", "Choose the tools your agent needs. Configure them as you go.", `<span class="badge outline">${selectedCount()} tools enabled</span>`)}<div class="explorer ${state().section !== "tools" ? "section-view" : ""}">${categoryNavigation()}${state().section === "tools" ? `<div class="tool-catalog">${toolCatalog()}</div><aside class="inspector" aria-label="Tool details"><div class="inspector-top spread"><span>Tool details</span>${icon("settings", "sm")}</div>${detailContent("inspector")}</aside>` : `<div style="min-width: 0">${sectionContent()}</div>`}</div>`;
+    }
+    function splitContent() {
+      return `${sectionTabs()}${state().section === "tools" ? `${sectionHeader("Build your agent’s toolkit", "Move tools into your enabled list. Everything you choose stays visible.")}<div class="split-layout"><div class="tool-catalog"><div class="split-heading spread"><h4>Available tools</h4>${countBadge(tools.length - state().selected.size)}</div>${toolCatalog(true)}</div>${selectedPanel()}</div>` : sectionContent()}`;
+    }
+    function guidedSummary() {
+      return `<aside class="guided-summary" aria-label="Live configuration summary"><div class="spread"><h4>Your agent’s toolkit</h4>${icon("bot", "sm")}</div><p>Research assistant</p><div class="summary-stat"><div class="spread"><span class="muted">Built-in tools</span><strong>${state().selected.size}</strong></div><div class="summary-tags">${tools.filter(tool => state().selected.has(tool.id)).map(tool => `<span class="badge outline mono">${tool.id}</span>`).join("") || '<span class="muted">None selected</span>'}</div></div><div class="summary-stat spread"><span class="muted">MCP connections</span><strong>${state().mcpEnabled.size}</strong></div><div class="summary-stat spread"><span class="muted">External tools</span><strong>${activeMcpTools().length}</strong></div><div class="summary-stat spread"><span class="muted">Sub-agents</span><strong>${state().subAgents.size}</strong></div><div class="summary-stat spread"><span class="muted">Plan reviewers</span><strong>${state().reviewers.size}</strong></div><div class="summary-stat spread"><span class="muted">Permissions</span><span class="badge outline">${modeInfo().short}</span></div><p class="summary-tip">${icon("info", "sm")} Keep the toolkit focused on the tasks you want this agent to handle.</p></aside>`;
+    }
+    function presets() {
+      return `<div class="preset-grid"><button class="preset" data-action="preset" data-value="research">${icon("globe")}<strong>Research</strong><small>Search the web and read sources.</small><span class="badge">${icon("plus", "sm")}2 web tools</span></button><button class="preset" data-action="preset" data-value="coding">${icon("code")}<strong>Development</strong><small>Work with files and run commands.</small><span class="badge">${icon("plus", "sm")}10 coding tools</span></button><button class="preset" data-action="custom">${icon("settings")}<strong>Custom toolkit</strong><small>Choose exactly what your agent needs.</small><span class="badge">Browse tools ${icon("arrow", "sm")}</span></button></div>`;
+    }
+    function reviewCard() {
+      return `<section class="review-card"><div class="spread"><h4>Ready for a final check</h4><span class="badge success">${selectedCount()} enabled tools</span></div><div class="summary-tags">${[...tools.filter(tool => state().selected.has(tool.id)), ...activeMcpTools()].map(tool => `<span class="badge outline mono">${tool.id}</span>`).join("") || '<span class="small muted">No manually selected tools.</span>'}</div><div class="review-line spread"><span class="muted">MCP servers</span><span>${servers.filter(server => state().mcpEnabled.has(server.id)).map(server => server.title).join(", ") || "None"}</span></div><div class="review-line spread"><span class="muted">Sub-agents</span><span>${state().subAgents.size} selected</span></div><div class="review-line spread"><span class="muted">Plan reviewers</span><span>${state().reviewers.size} selected</span></div></section>`;
+    }
+    function guidedContent() {
+      const steps = [[1, "Choose tools", "Start with a focused toolkit"], [2, "Connect & delegate", "Add services and collaborators"], [3, "Review & permissions", "Set boundaries and finish"]];
+      return `<nav class="wizard-steps" aria-label="Setup steps">${steps.map(([step, title, description]) => `<button class="wizard-step ${state().step === step ? "active" : state().step > step ? "complete" : ""}" data-action="step" data-value="${step}" ${state().step === step ? 'aria-current="step"' : ""}><span class="step-number">${state().step > step ? icon("check", "sm") : `0${step}`}</span><span><strong>${title}</strong><small>${description}</small></span></button>`).join("")}</nav><div class="guided-layout"><div style="min-width: 0">${state().step === 1 ? `${sectionHeader("What should this agent do?", "Add a starting toolkit, then fine-tune the tools below.")}${presets()}<div class="split-heading spread"><h4>Customize your tools</h4><span class="small muted">${state().selected.size} selected</span></div>${toolCatalog()}` : state().step === 2 ? `<div class="stack">${mcpContent()}<div style="border-top: 1px solid var(--border); padding-top: 20px">${delegationContent()}</div></div>` : `${sectionHeader("Review your agent", "Check the toolkit and choose how actions are approved.")}${reviewCard()}${permissionsContent(false)}`}<div class="wizard-footer"><div>${state().step > 1 ? `<button class="button ghost" data-action="step" data-value="${state().step - 1}">${icon("back", "sm")}Back</button>` : '<span class="small muted">Step 1 of 3</span>'}</div>${state().step < 3 ? `<button class="button primary" data-action="step" data-value="${state().step + 1}">Continue${icon("arrow", "sm")}</button>` : `<button class="button primary" data-action="save" ${dirty() ? "" : "disabled"}>${icon("check", "sm")}Save configuration</button>`}</div></div>${guidedSummary()}</div>`;
+    }
+    function shellSidebar() {
+      return `<aside class="app-sidebar" aria-label="Application context"><div class="workspace-brand row"><span class="workspace-logo">${icon("mark", "sm")}</span>K41 Workspace</div><div class="eyebrow">Workspace</div>${[["message", "Conversations"], ["layers", "Projects"], ["clock", "Scheduled tasks"]].map(([glyph, label]) => `<div class="shell-link">${icon(glyph)}${label}</div>`).join("")}<div class="eyebrow" style="margin-top: 24px">Settings</div>${[["settings", "General"], ["spark", "Models & providers"], ["bot", "Agents"], ["plug", "Integrations"], ["shield", "Permissions"]].map(([glyph, label]) => `<div class="shell-link ${label === "Agents" ? "active" : ""}">${icon(glyph)}${label}</div>`).join("")}<div class="sidebar-bottom row"><span class="avatar">KW</span><span>Personal workspace<br><span style="font-size: 9px">Local environment</span></span></div></aside>`;
+    }
+    function renderHeaderState() {
+      const unsaved = dirty();
+      const status = document.getElementById("saveState");
+      if (status) { status.classList.toggle("unsaved", unsaved); status.innerHTML = `${unsaved ? '<span class="dot"></span>' : icon("check", "sm")}${unsaved ? "Unsaved changes" : "All changes saved"}`; }
+      document.querySelectorAll('[data-action="save"]').forEach(button => { button.disabled = !unsaved; });
+    }
+    function render() {
+      const active = document.activeElement;
+      const focusId = active?.id;
+      const selection = active instanceof HTMLInputElement && ["text", "search", "password"].includes(active.type) ? [active.selectionStart, active.selectionEnd] : null;
+      stage.innerHTML = `<div class="app-frame">${shellSidebar()}<div class="app-main"><header class="app-topbar spread"><div class="breadcrumbs row">Settings${icon("chevron")}Agents${icon("chevron")}<strong>Research assistant</strong></div><div class="row" style="gap: 14px"><span class="save-state row" id="saveState" role="status"></span><button class="button primary" id="saveButton" data-action="save">${icon("save", "sm")}Save changes</button></div></header><div class="agent-heading"><div class="spread"><div class="row" style="gap: 12px"><span class="agent-avatar">${icon("bot")}</span><div><h2>Research assistant</h2><p>Find useful information and turn it into clear answers.</p></div></div><span class="badge outline">${icon("bot", "sm")}Chat agent</span></div><div class="agent-tabs" aria-label="Agent settings context"><span>General</span><span class="active">${icon("grid")}Capabilities & tools</span><span>System prompt</span></div></div><div class="workspace">${currentConcept === "A" ? explorerContent() : currentConcept === "B" ? splitContent() : guidedContent()}</div><footer class="app-footer"><span class="row">${icon("grid")}<strong>${state().selected.size}</strong> built-in tools</span><span class="row">${icon("plug")}<strong>${state().mcpEnabled.size}</strong> MCP servers <span class="muted">/ ${activeMcpTools().length} tools</span></span><span class="row">${icon("users")}<strong>${state().subAgents.size}</strong> sub-agents</span><span class="row footer-mode">${icon("shield")}${modeInfo().title}</span></footer></div></div>`;
+      document.getElementById("categoryFilter")?.querySelector(`option[value="${state().group}"]`)?.setAttribute("selected", "");
+      document.querySelectorAll("[data-group-toggle]").forEach(input => { input.indeterminate = input.dataset.partial === "true"; });
+      if (dialog.open) document.getElementById("drawerContent").innerHTML = detailContent("drawer");
+      document.querySelectorAll(".concept-card").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.value === currentConcept)));
+      document.getElementById("conceptCaption").innerHTML = captions[currentConcept];
+      renderHeaderState();
+      if (focusId) {
+        const replacement = document.getElementById(focusId);
+        if (replacement && (!dialog.open || dialog.contains(replacement))) {
+          replacement.focus({ preventScroll: true });
+          if (selection && replacement instanceof HTMLInputElement) replacement.setSelectionRange(...selection);
+        }
+      }
+    }
+    function toggleInSet(set, value, checked = !set.has(value)) { if (checked) set.add(value); else set.delete(value); }
+    function openDetails(id, invoker) {
+      state().focusedTool = id;
+      returnFocusId = invoker?.id || `details-${id}`;
+      if (currentConcept === "A" && isWide()) { render(); return; }
+      document.getElementById("drawerContent").innerHTML = detailContent("drawer");
+      if (!dialog.open) dialog.showModal();
+    }
+    function save() {
+      if (!dirty()) return;
+      state().saved = snapshot(state());
+      render();
+      toast(`Concept ${currentConcept} saved in this preview.`);
+    }
+    function scrollToWorkspace() { document.querySelector(".workspace")?.scrollIntoView({ block: "start", behavior: "instant" }); }
+
+    document.addEventListener("click", event => {
+      const button = event.target.closest("[data-action]");
+      if (!button || button.disabled) return;
+      const { action, value, id, field } = button.dataset;
+      if (action === "concept") { if (dialog.open) dialog.close(); currentConcept = value; render(); return; }
+      if (action === "theme") {
+        const dark = document.documentElement.classList.toggle("dark");
+        const label = `Switch to ${dark ? "light" : "dark"} theme`;
+        button.setAttribute("aria-label", label); button.title = label; button.setAttribute("aria-pressed", String(dark)); button.innerHTML = icon(dark ? "sun" : "moon"); return;
+      }
+      if (action === "reset") { if (dialog.open) dialog.close(); const fresh = createState(); fresh.saved = snapshot(fresh); states[currentConcept] = fresh; render(); toast(`Concept ${currentConcept} reset to its starting toolkit.`); return; }
+      if (action === "detail") { openDetails(id, button); return; }
+      if (action === "close-dialog") { dialog.close(); return; }
+      if (action === "save") { save(); return; }
+      if (action === "section") { state().section = value; }
+      if (action === "group") { state().group = value; }
+      if (action === "filter") { state().filter = value; }
+      if (action === "clear-filters") { state().query = ""; state().group = "all"; state().filter = "all"; }
+      if (action === "toggle-tool") { toggleInSet(state().selected, id); }
+      if (action === "server") { toggleInSet(state().mcpEnabled, id); }
+      if (action === "mode") { state().mode = value; }
+      if (action === "step") { state().step = Number(value); render(); scrollToWorkspace(); return; }
+      if (action === "preset") {
+        const additions = value === "research" ? ["web_search", "web_fetch"] : tools.filter(tool => ["file", "shell"].includes(tool.group)).map(tool => tool.id);
+        const before = state().selected.size; additions.forEach(tool => state().selected.add(tool));
+        const added = state().selected.size - before; toast(added ? `${added} tools added. Your other selections are kept.` : "These tools are already in your toolkit.");
+      }
+      if (action === "custom") { document.getElementById("toolSearch")?.focus(); return; }
+      if (action === "reset-field") { delete state().configs[id]?.[field]; }
+      if (action === "add-rule") { const rule = { id: ++ruleSequence, action: "*", resource: "*", effect: "ask" }; state().rules.push(rule); render(); document.getElementById(`rule-${rule.id}-action`)?.focus(); return; }
+      if (action === "remove-rule") { state().rules = state().rules.filter(rule => String(rule.id) !== id); }
+      if (action === "discover") {
+        const targetState = state();
+        if (targetState.loadingServers.has(id)) return;
+        targetState.loadingServers.add(id); render();
+        setTimeout(() => {
+          targetState.loadingServers.delete(id); targetState.loadedServers.add(id);
+          if (state() === targetState) { render(); toast(`${servers.find(server => server.id === id).title} tools are ready to select.`); }
+        }, 750); return;
+      }
+      render();
+    });
+    document.addEventListener("change", event => {
+      const input = event.target;
+      if (input.matches("[data-tool-toggle]")) toggleInSet(state().selected, input.dataset.toolToggle, input.checked);
+      else if (input.matches("[data-group-toggle]")) tools.filter(tool => tool.group === input.dataset.groupToggle).forEach(tool => toggleInSet(state().selected, tool.id, input.checked));
+      else if (input.id === "categoryFilter") state().group = input.value;
+      else if (input.matches("[data-mcp-tool]")) toggleInSet(state().mcpSelected, input.dataset.mcpTool, input.checked);
+      else if (input.matches("[data-agent-key]")) toggleInSet(state()[input.dataset.agentKey], input.dataset.agentId, input.checked);
+      else if (input.id === "overridePermissions") state().overridePermissions = input.checked;
+      else if (input.matches("select[data-config-tool]")) { const fields = state().configs[input.dataset.configTool] ||= {}; if (input.value === "") delete fields[input.dataset.configField]; else fields[input.dataset.configField] = input.value; }
+      else if (input.matches("[data-rule-field=effect]")) state().rules.find(rule => String(rule.id) === input.dataset.rule).effect = input.value;
+      else return;
+      render();
+    });
+    document.addEventListener("input", event => {
+      const input = event.target;
+      if (input.id === "toolSearch") { state().query = input.value; render(); }
+      else if (input.matches("input[data-rule]")) { state().rules.find(rule => String(rule.id) === input.dataset.rule)[input.dataset.ruleField] = input.value; renderHeaderState(); }
+      else if (input.matches("input[data-config-tool]")) {
+        const fields = state().configs[input.dataset.configTool] ||= {};
+        if (input.value === "") delete fields[input.dataset.configField]; else fields[input.dataset.configField] = input.value;
+        render();
+      }
+    });
+    document.addEventListener("toggle", event => {
+      if (event.target.matches("details[data-advanced]")) toggleInSet(state().advanced, event.target.dataset.advanced, event.target.open);
+    }, true);
+    document.addEventListener("keydown", event => {
+      if (event.key === "/" && !dialog.open && !event.ctrlKey && !event.metaKey && !event.altKey && !event.target.matches("input, textarea, select")) {
+        const search = document.getElementById("toolSearch"); if (search) { event.preventDefault(); search.focus(); }
+      }
+    });
+    dialog.addEventListener("click", event => { if (event.target === dialog) { const bounds = dialog.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dialog.close(); } });
+    dialog.addEventListener("keydown", event => {
+      if (event.key !== "Tab") return;
+      const controls = [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, [tabindex="0"]')].filter(control => control.getClientRects().length > 0);
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    });
+    dialog.addEventListener("close", () => document.getElementById(returnFocusId)?.focus({ preventScroll: true }));
+    let wideLayout = isWide();
+    window.addEventListener("resize", () => { const wide = isWide(); if (wide !== wideLayout) { wideLayout = wide; if (wide && currentConcept === "A" && dialog.open) dialog.close(); render(); } });
+    render();
+  </script>
+</body>
+</html>

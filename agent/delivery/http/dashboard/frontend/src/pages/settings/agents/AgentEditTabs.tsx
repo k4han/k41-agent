@@ -1,8 +1,15 @@
-import { Show } from "solid-js";
+import { createEffect, Show } from "solid-js";
 
 import type { AgentMcpInstall, AgentsPayload, PromptVariable } from "@/types";
 
-import { type AgentForm, type AgentTab, type AgentToolGroup, type ToolConfigValue } from "./agentForm";
+import {
+  type AgentForm,
+  type AgentTab,
+  type AgentToolGroup,
+  type ToolConfigValue,
+} from "./agentForm";
+import { isAcpCard } from "@/lib/acp";
+import { AgentEditNavigation } from "./AgentEditNavigation";
 import { AgentGeneralTab } from "./AgentGeneralTab";
 import { AgentPromptTab } from "./AgentPromptTab";
 import { AgentToolsTab } from "./AgentToolsTab";
@@ -10,6 +17,7 @@ import { AgentToolsTab } from "./AgentToolsTab";
 export function AgentEditTabs(props: {
   form: AgentForm;
   readOnly: boolean;
+  canManageMcp: boolean;
   payload: AgentsPayload;
   promptVariables: PromptVariable[];
   activeTab: AgentTab;
@@ -29,79 +37,92 @@ export function AgentEditTabs(props: {
   ) => void;
   onToggleToolGroup: (tools: string[], checked: boolean) => void;
   onToggleMcpInstall: (serverName: string, checked: boolean) => void;
-  onUpdateToolConfig: (toolName: string, fieldName: string, value: ToolConfigValue) => void;
+  onUpdateToolConfig: (
+    toolName: string,
+    fieldName: string,
+    value: ToolConfigValue,
+  ) => void;
   onResetToolConfigField: (toolName: string, fieldName: string) => void;
   onInsertVariable: (name: string) => void;
 }) {
+  createEffect(() => {
+    if (isAcpCard(props.form) && props.activeTab === "delegation")
+      props.onTabChange("tools");
+  });
   return (
-    <div class="stack" style="gap: 16px;">
-      <div class="tab-bar">
-        <button
-          class={`btn btn-sm ${props.activeTab === "general" ? "btn-primary" : ""}`}
-          type="button"
-          onClick={() => props.onTabChange("general")}
+    <div class="agent-editor">
+      <AgentEditNavigation
+        activeTab={props.activeTab}
+        acp={isAcpCard(props.form)}
+        onChange={props.onTabChange}
+        counts={{
+          tools: props.toolGroups.reduce(
+            (count, group) =>
+              count +
+              group.tools.filter((tool) => props.form.tools.includes(tool))
+                .length,
+            0,
+          ),
+          mcp: props.mcpInstalls.filter((install) => install.agent_enabled)
+            .length,
+          delegation: props.form.sub_agents.length,
+        }}
+      />
+      <section
+        class="agent-editor-panel"
+        classList={{ "agent-editor-general": props.activeTab === "general" }}
+        role="tabpanel"
+        id={`agent-editor-panel-${props.activeTab}`}
+        aria-labelledby={`agent-editor-tab-${props.activeTab}`}
+      >
+        <Show when={props.activeTab === "general"}>
+          <AgentGeneralTab
+            form={props.form}
+            readOnly={props.readOnly}
+            workflows={props.payload.workflows}
+            payload={props.payload}
+            onUpdate={props.onUpdate}
+          />
+        </Show>
+        <Show
+          when={props.activeTab !== "general" && props.activeTab !== "prompt"}
         >
-          General Config
-        </button>
-        <button
-          class={`btn btn-sm ${props.activeTab === "tools" ? "btn-primary" : ""}`}
-          type="button"
-          onClick={() => props.onTabChange("tools")}
-        >
-          Capabilities & Tools
-        </button>
-        <button
-          class={`btn btn-sm ${props.activeTab === "prompt" ? "btn-primary" : ""}`}
-          type="button"
-          onClick={() => props.onTabChange("prompt")}
-        >
-          System Prompt
-        </button>
-      </div>
-
-      <section class="panel" style="min-height: 360px;">
-        <div class="panel-body">
-          <Show when={props.activeTab === "general"}>
-            <AgentGeneralTab
-              form={props.form}
-              readOnly={props.readOnly}
-              workflows={props.payload.workflows}
-              payload={props.payload}
-              onUpdate={props.onUpdate}
-            />
-          </Show>
-          <Show when={props.activeTab === "tools"}>
-            <AgentToolsTab
-              form={props.form}
-              onUpdate={props.onUpdate}
-              readOnly={props.readOnly}
-              toolGroups={props.toolGroups}
-              totalBuiltInTools={props.totalBuiltInTools}
-              mcpServerOptions={props.mcpServerOptions}
-              mcpInstalls={props.mcpInstalls}
-              mcpUpdating={props.mcpUpdating}
-              subAgentOptions={props.subAgentOptions}
-              planApprovalTargetOptions={props.planApprovalTargetOptions}
-              toolConfigSchemas={props.payload.tool_config_schemas || {}}
-              toolConfigEffective={props.payload.tool_config_effective || {}}
-              payload={props.payload}
-              onToggleListValue={props.onToggleListValue}
-              onToggleToolGroup={props.onToggleToolGroup}
-              onToggleMcpInstall={props.onToggleMcpInstall}
-              onUpdateToolConfig={props.onUpdateToolConfig}
-              onResetToolConfigField={props.onResetToolConfigField}
-            />
-          </Show>
-          <Show when={props.activeTab === "prompt"}>
-            <AgentPromptTab
-              readOnly={props.readOnly}
-              value={props.form.system_prompt}
-              variables={props.promptVariables}
-              onChange={(value) => props.onUpdate("system_prompt", value)}
-              onInsertVariable={props.onInsertVariable}
-            />
-          </Show>
-        </div>
+          <AgentToolsTab
+            section={
+              props.activeTab === "general" || props.activeTab === "prompt"
+                ? "tools"
+                : props.activeTab
+            }
+            form={props.form}
+            onUpdate={props.onUpdate}
+            readOnly={props.readOnly}
+            canManageMcp={props.canManageMcp}
+            toolGroups={props.toolGroups}
+            totalBuiltInTools={props.totalBuiltInTools}
+            mcpServerOptions={props.mcpServerOptions}
+            mcpInstalls={props.mcpInstalls}
+            mcpUpdating={props.mcpUpdating}
+            subAgentOptions={props.subAgentOptions}
+            planApprovalTargetOptions={props.planApprovalTargetOptions}
+            toolConfigSchemas={props.payload.tool_config_schemas || {}}
+            toolConfigEffective={props.payload.tool_config_effective || {}}
+            payload={props.payload}
+            onToggleListValue={props.onToggleListValue}
+            onToggleToolGroup={props.onToggleToolGroup}
+            onToggleMcpInstall={props.onToggleMcpInstall}
+            onUpdateToolConfig={props.onUpdateToolConfig}
+            onResetToolConfigField={props.onResetToolConfigField}
+          />
+        </Show>
+        <Show when={props.activeTab === "prompt"}>
+          <AgentPromptTab
+            readOnly={props.readOnly}
+            value={props.form.system_prompt}
+            variables={props.promptVariables}
+            onChange={(value) => props.onUpdate("system_prompt", value)}
+            onInsertVariable={props.onInsertVariable}
+          />
+        </Show>
       </section>
     </div>
   );

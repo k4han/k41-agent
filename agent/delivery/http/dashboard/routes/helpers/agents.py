@@ -221,6 +221,7 @@ async def agent_tools_payload() -> dict[str, Any]:
         payload = {
             "tools": sorted(tool_names),
             "tool_groups": _build_tool_groups(tool_names, tool_categories),
+            "tool_descriptions": {desc.name: desc.description for desc in builtin_descriptors},
             "tool_config_schemas": tool_config_schemas,
             "acp_unavailable_tools": sorted(ACP_UNAVAILABLE_TOOL_NAMES),
         }

@@ -7,7 +7,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ErrorPanel } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { API_PATHS } from "@/lib/endpoints";
-import { fetchAgentEditorOptions } from "@/lib/agents";
+import { fetchAgentEditorOptions, fetchAgentMcpOptions } from "@/lib/agents";
 import { apiFetch, postJson, putJson } from "@/lib/api";
 import { isAcpCard } from "@/lib/acp";
 import { cloneValue, uniqueSorted } from "@/lib/utils";
@@ -304,8 +304,8 @@ export function AgentEditPage(props: { agentName?: string }) {
   };
 
   const toggleMcpInstall = async (serverName: string, checked: boolean) => {
-    const name = props.agentName || form().name;
-    if (!name) {
+    const name = props.agentName;
+    if (isCreate || !name) {
       showToast("Save the agent before enabling MCP servers.", "warning");
       return;
     }
@@ -323,7 +323,8 @@ export function AgentEditPage(props: { agentName?: string }) {
         });
       }
       showToast(`${checked ? "Enabled" : "Disabled"} MCP server "${serverName}".`);
-      await load();
+      const mcp = await fetchAgentMcpOptions();
+      setPayload(current => current ? { ...current, ...mcp } : current);
     } catch (err) {
       showToast(
         err instanceof Error ? err.message : "Failed to update MCP server binding",
@@ -393,6 +394,8 @@ export function AgentEditPage(props: { agentName?: string }) {
       title={title()}
       breadcrumbSegments={breadcrumbSegments()}
       contentWidth="wide"
+      hideHeading
+      fillContent={activeTab() === "tools"}
       actions={
         <Show when={!readOnly() && payload()}>
           <button
@@ -435,6 +438,7 @@ export function AgentEditPage(props: { agentName?: string }) {
             <AgentEditTabs
               form={form()}
               readOnly={readOnly()}
+              canManageMcp={!isCreate}
               payload={p()}
               promptVariables={promptVariables()}
               activeTab={activeTab()}

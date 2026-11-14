@@ -21,6 +21,7 @@
     "test:chat-export-ui": "node scripts/verify-chat-export.mjs",
     "test:solid-ui": "node scripts/verify-solid-reactivity.mjs && node scripts/verify-solid-controls.mjs",
     "test:solid-controls": "node scripts/verify-solid-controls.mjs",
+    "test:agent-tools-ui": "node scripts/verify-agent-tools.mjs",
     "test:workspace-ui": "node scripts/verify-workspace.mjs",
     "test:workspace-preview": "node --test tests/workspace-preview.test.mjs",
     "test:workspace-refresh": "node --conditions=browser --test tests/workspace-refresh.test.mjs",

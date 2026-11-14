@@ -1,0 +1,135 @@
+@layer dashboard-controls {
+  .agent-editor {
+    --agent-editor-navigation-top: 60px;
+    container: agent-editor / inline-size;
+    display: grid;
+    min-width: 0;
+  }
+
+  .agent-editor-navigation {
+    position: sticky;
+    top: var(--agent-editor-navigation-top);
+    z-index: 18;
+    display: flex;
+    align-items: stretch;
+    gap: 20px;
+    min-width: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  .agent-editor-tab {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-width: 0;
+    min-height: 45px;
+    padding: 11px 2px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .agent-editor-tab > svg {
+    flex-shrink: 0;
+  }
+  .agent-editor-tab:hover:not(:disabled) {
+    color: var(--fg);
+  }
+  .agent-editor-tab[aria-selected="true"] {
+    color: var(--fg);
+    font-weight: 650;
+  }
+  .agent-editor-tab[aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 -1px;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: var(--accent);
+  }
+  .agent-editor-tab:focus-visible {
+    outline: 2px solid var(--info);
+    outline-offset: -3px;
+    border-radius: 4px;
+  }
+  .agent-editor-tab-count {
+    min-width: 18px;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    color: var(--muted);
+    font-size: 0.5625rem;
+    line-height: 18px;
+  }
+  .agent-editor-tab[aria-selected="true"] .agent-editor-tab-count {
+    background: var(--surface-3);
+    color: var(--fg);
+  }
+  .agent-editor-panel {
+    min-width: 0;
+    min-height: 360px;
+    padding-top: 25px;
+  }
+  .agent-editor-general {
+    max-width: 980px;
+  }
+  .settings-content-fill .agent-editor {
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+  }
+  .settings-content-fill .agent-editor-navigation {
+    position: static;
+  }
+  .settings-content-fill .agent-editor-panel {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    min-height: 0;
+  }
+  .agent-editor-loading {
+    padding: 28px 0;
+  }
+  .agent-editor-empty {
+    display: grid;
+    justify-items: center;
+    gap: 16px;
+    padding: 48px 24px;
+    text-align: center;
+  }
+
+  @media (min-width: 981px) {
+    .agent-editor {
+      /* The header is outside the scroller; account for its top padding. */
+      --agent-editor-navigation-top: calc(0px - var(--settings-content-padding-top));
+    }
+  }
+
+  @container agent-editor (max-width: 700px) {
+    .agent-editor-navigation {
+      position: static;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0 10px;
+    }
+    .agent-editor-tab {
+      justify-content: flex-start;
+      min-height: 44px;
+      padding-inline: 3px;
+      font-size: 0.6875rem;
+    }
+    .agent-editor-tab > svg {
+      width: 14px;
+      height: 14px;
+    }
+    .agent-editor-tab-count {
+      margin-left: auto;
+    }
+    .agent-editor-panel {
+      padding-top: 22px;
+    }
+  }
+}
