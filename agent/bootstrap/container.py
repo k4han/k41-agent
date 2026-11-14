@@ -668,7 +668,7 @@ class AppContainer:
         from agent.modules.github import migrate_github_tables
         from agent.modules.google_calendar import migrate_google_calendar_tables
         from agent.modules.mcp import migrate_mcp_tables
-        from agent.modules.usage import prune_usage_events
+        from agent.modules.usage import migrate_usage_tables, prune_usage_events
         from agent.modules.workspaces import migrate_workspace_tables
 
         # Legacy module-level accessors (migrations, prune_usage_events) resolve
@@ -686,6 +686,7 @@ class AppContainer:
             migrate_conversation_tables(database_url)
             migrate_agent_runtime_tables(database_url)
             migrate_google_calendar_tables(database_url)
+            migrate_usage_tables(database_url)
             from agent.modules.projects import import_existing_projects
 
             await import_existing_projects()

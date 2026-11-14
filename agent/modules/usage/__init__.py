@@ -1,4 +1,5 @@
 from agent.modules.usage.models import LLMUsageEvent
+from agent.modules.usage.migrations import migrate_usage_tables
 from agent.modules.usage.costs import estimate_usage_cost
 from agent.modules.usage.repository import LLMUsageRepository, UsageEventInput, UsageQuery
 from agent.modules.usage.service import (
@@ -56,6 +57,7 @@ __all__ = [
     "get_usage_service",
     "load_usage_context",
     "normalize_usage_query",
+    "migrate_usage_tables",
     "prune_usage_events",
     "root_thread_id",
     "usage_context_from_config",
