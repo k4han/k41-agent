@@ -184,18 +184,96 @@ async def test_producer_keeps_cancel_scope_in_one_task(monkeypatch, cancel):
 
 
 @pytest.mark.asyncio
-async def test_producer_error_is_forwarded_and_closed():
+async def test_burst_stream_preserves_order_without_per_chunk_disconnect_polls(monkeypatch):
+    monkeypatch.setattr(streaming, "DISCONNECT_POLL_SECONDS", 60)
+    request = connected_request()
+    is_disconnected = request.is_disconnected
+    polls = 0
+
+    async def count_polls():
+        nonlocal polls
+        polls += 1
+        return await is_disconnected()
+
+    monkeypatch.setattr(request, "is_disconnected", count_polls)
+    expected = [str(index) for index in range(256)]
+
+    async def source():
+        for chunk in expected:
+            yield chunk
+
+    assert [chunk async for chunk in streaming.stream_chat_chunks(source(), request)] == expected
+    assert polls == 1
+
+
+@pytest.mark.asyncio
+async def test_burst_stream_keeps_bounded_read_ahead_and_closes():
+    produced = 0
+    closed = asyncio.Event()
+
+    async def source():
+        nonlocal produced
+        try:
+            for index in range(10000):
+                produced += 1
+                yield str(index)
+        finally:
+            closed.set()
+
+    async with aclosing(streaming.stream_chat_chunks(source(), connected_request())) as chunks:
+        assert await anext(chunks) == "0"
+        await asyncio.sleep(0)
+        assert produced < 10000
+        assert not closed.is_set()
+    assert closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_closes_busy_stream(monkeypatch):
+    monkeypatch.setattr(streaming, "DISCONNECT_POLL_SECONDS", 0.01)
+    disconnect = asyncio.Event()
+    closed = asyncio.Event()
+
+    async def receive():
+        await disconnect.wait()
+        return {"type": "http.disconnect"}
+
+    async def source():
+        try:
+            while True:
+                yield "chunk"
+        finally:
+            closed.set()
+
+    async def drain(chunks):
+        async for chunk in chunks:
+            assert chunk == "chunk"
+            await asyncio.sleep(0)
+
+    request = Request({"type": "http"}, receive)
+    async with aclosing(streaming.stream_chat_chunks(source(), request)) as chunks:
+        assert await anext(chunks) == "chunk"
+        disconnect.set()
+        await asyncio.wait_for(drain(chunks), 1)
+    assert closed.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chunk_count", [1, 256])
+async def test_producer_error_is_forwarded_and_closed(chunk_count):
     closed = asyncio.Event()
 
     async def source():
         try:
-            yield "first"
+            for index in range(chunk_count):
+                yield str(index)
             raise ValueError("broken stream")
         finally:
             closed.set()
 
     async with aclosing(streaming.stream_chat_chunks(source(), connected_request())) as chunks:
-        assert await anext(chunks) == "first"
+        for index in range(chunk_count):
+            assert await anext(chunks) == str(index)
         with pytest.raises(ValueError, match="broken stream"):
             await asyncio.wait_for(anext(chunks), 1)
     assert closed.is_set()

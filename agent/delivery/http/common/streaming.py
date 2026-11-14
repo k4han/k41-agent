@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 
 STREAM_HEARTBEAT_SECONDS = 15.0
 DISCONNECT_POLL_SECONDS = 1.0
+STREAM_BUFFER_CHUNKS = 32
 
 
 class ChatStreamingResponse(StreamingResponse):
@@ -29,7 +30,8 @@ async def stream_chat_chunks(
     heartbeat: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Poll disconnects without cancelling a slow producer at each heartbeat."""
-    queue: asyncio.Queue[str | Exception | None] = asyncio.Queue(maxsize=1)
+    # Absorb small bursts while retaining backpressure for slow clients.
+    queue: asyncio.Queue[str | Exception | None] = asyncio.Queue(maxsize=STREAM_BUFFER_CHUNKS)
 
     async def produce() -> None:
         try:
@@ -48,20 +50,26 @@ async def stream_chat_chunks(
     producer = asyncio.create_task(produce())
     loop = asyncio.get_running_loop()
     last_sent = loop.time()
+    next_disconnect_check = last_sent
     try:
-        while not await request.is_disconnected():
-            timeout = DISCONNECT_POLL_SECONDS
-            if heartbeat is not None:
-                timeout = min(timeout, max(0.001, STREAM_HEARTBEAT_SECONDS - (loop.time() - last_sent)))
+        while True:
+            if loop.time() >= next_disconnect_check:
+                if await request.is_disconnected():
+                    return
+                next_disconnect_check = loop.time() + DISCONNECT_POLL_SECONDS
             try:
-                chunk = await asyncio.wait_for(queue.get(), timeout=timeout)
-            except asyncio.TimeoutError:
-                if heartbeat is not None and loop.time() - last_sent >= STREAM_HEARTBEAT_SECONDS:
-                    yield heartbeat
-                    last_sent = loop.time()
-                continue
-            if await request.is_disconnected():
-                return
+                chunk = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                timeout = max(0.001, next_disconnect_check - loop.time())
+                if heartbeat is not None:
+                    timeout = min(timeout, max(0.001, STREAM_HEARTBEAT_SECONDS - (loop.time() - last_sent)))
+                try:
+                    chunk = await asyncio.wait_for(queue.get(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    if heartbeat is not None and loop.time() - last_sent >= STREAM_HEARTBEAT_SECONDS:
+                        yield heartbeat
+                        last_sent = loop.time()
+                    continue
             if chunk is None:
                 return
             if isinstance(chunk, Exception):
