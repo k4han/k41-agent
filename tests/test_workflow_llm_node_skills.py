@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -80,10 +81,21 @@ async def test_llm_node_returns_skill_command_errors_without_calling_model(monke
 async def test_llm_node_activates_explicit_skill_before_model_call(
     monkeypatch, tmp_path, isolated_container, with_attachment,
 ):
+    from langchain_core.messages import utils as message_utils
     from agent.modules.agent_runtime.runner import _make_user_message
     from agent.modules.skills.repository import FilesystemSkillRepository
     from agent.modules.tools.builtin.skill.skill import skill
 
+    loop_thread = threading.get_ident()
+    count_tokens = message_utils.count_tokens_approximately
+    counted = []
+
+    def count_off_loop(messages, **kwargs):
+        assert threading.get_ident() != loop_thread
+        counted.append(messages)
+        return count_tokens(messages, **kwargs)
+
+    monkeypatch.setattr(message_utils, "count_tokens_approximately", count_off_loop)
     captured: dict = {}
     source = tmp_path / "skills" / "demo"
     source.mkdir(parents=True)
@@ -119,6 +131,7 @@ async def test_llm_node_activates_explicit_skill_before_model_call(
     assert "Follow these durable instructions." in captured["messages"][0].content
     assert [entry["name"] for entry in result["active_skills"].values()] == ["demo"]
     assert result["processed_skill_messages"] == [message.id]
+    assert len(counted) == 1
 
 
 @pytest.mark.asyncio

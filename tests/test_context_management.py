@@ -3,6 +3,7 @@ from tests.stream_fixtures import EventGraph
 """Context percentage configuration, automatic compaction and channel retention."""
 
 import asyncio
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -66,6 +67,76 @@ async def test_preparing_context_does_not_publish_token_estimates(monkeypatch):
     system = SystemMessage(content="Follow the user's instructions")
     await prepare(messages, tools=[read_document], system=system)
     assert not events
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome, expected_counts", [
+    ("not_needed", 1), ("accepted", 3), ("rejected", 3), ("failed", 2),
+])
+async def test_context_counts_each_history_once_off_event_loop(monkeypatch, outcome, expected_counts):
+    messages = history()
+    loop_thread = threading.get_ident()
+    counted = []
+    normalize = model_context.normalize_messages_for_chat_model
+
+    def normalize_off_loop(items):
+        assert threading.get_ident() != loop_thread
+        return normalize(items)
+
+    def count(items, **kwargs):
+        assert threading.get_ident() != loop_thread
+        counted.append(items)
+        return count_tokens_approximately(items, **kwargs)
+
+    retained = [HumanMessage(content="x" * 10000)] if outcome == "rejected" else messages[-1:]
+    compact = AsyncMock(
+        side_effect=compaction.CompactionSummaryError("timeout") if outcome == "failed" else None,
+        return_value=compaction.CompactedHistory(retained, "summary", 4, 1),
+    )
+    monkeypatch.setattr(model_context, "normalize_messages_for_chat_model", normalize_off_loop)
+    monkeypatch.setattr(model_context, "count_tokens_approximately", count)
+    monkeypatch.setattr(model_context, "compact_message_history", compact)
+    kept, updates = await prepare(
+        messages, model=resolved(128000 if outcome == "not_needed" else 1000),
+        card=agent(context_compact_threshold=10),
+    )
+    assert len(counted) == expected_counts
+    assert sum(items[1:] == messages for items in counted) == 1
+    assert compact.await_count == (outcome != "not_needed")
+    assert kept is (retained if outcome == "accepted" else messages)
+    assert add_messages(messages, updates) == kept
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("trim_changes_history", [False, True])
+async def test_context_recounts_only_when_channel_trimming_changes_history(monkeypatch, trim_changes_history):
+    messages = history()
+    counted = []
+    loop_thread = threading.get_ident()
+
+    def count(items, **kwargs):
+        counted.append(items)
+        return count_tokens_approximately(items, **kwargs)
+
+    def trim(items, limit):
+        assert threading.get_ident() != loop_thread
+        return items[-1:] if trim_changes_history else items
+
+    monkeypatch.setattr(model_context, "count_tokens_approximately", count)
+    monkeypatch.setattr(model_context, "trim_channel_history", trim)
+    monkeypatch.setattr(model_context, "compact_message_history", AsyncMock(
+        side_effect=compaction.CompactionSummaryError("timeout"),
+    ))
+    ctx = WorkflowContext(channel_context_trim_threshold=10)
+    if trim_changes_history:
+        kept, updates = await prepare(messages, ctx=ctx, model=resolved(100))
+        assert kept == messages[-1:]
+        assert add_messages(messages, updates) == kept
+    else:
+        with pytest.raises(compaction.CompactionBudgetError):
+            await prepare(messages, ctx=ctx, model=resolved(100))
+    assert len(counted) == (3 if trim_changes_history else 2)
+    assert ctx.channel_trim_applied
 
 
 @pytest.mark.asyncio
@@ -561,6 +632,16 @@ async def test_react_graph_compacts_after_tool_growth_and_resumes_checkpoint(mon
 async def test_research_checks_context_before_both_model_calls(monkeypatch):
     from agent.modules.workflows.graphs import research
     calls = []
+    breakdowns = []
+    loop_thread = threading.get_ident()
+    estimate_breakdown = research.estimate_context_breakdown
+
+    def breakdown_off_loop(messages):
+        assert threading.get_ident() != loop_thread
+        result = estimate_breakdown(messages)
+        breakdowns.append(result)
+        return result
+
     async def prepare_context(items, **kwargs):
         calls.append(kwargs["system"].content)
         return items, []
@@ -572,10 +653,13 @@ async def test_research_checks_context_before_both_model_calls(monkeypatch):
     selected = SimpleNamespace(model=model, provider_name="test", model_name="model-a")
     monkeypatch.setattr(research, "_resolve_runtime_model", lambda runtime: (selected, {}, agent()))
     monkeypatch.setattr(research, "prepare_model_context", prepare_context)
+    monkeypatch.setattr(research, "estimate_context_breakdown", breakdown_off_loop)
     runtime = SimpleNamespace(context=WorkflowContext())
     await research._research_node({"messages": history()}, {}, runtime)
     await research._summarize_node({"messages": history()}, {}, runtime)
     assert len(calls) == 2
+    assert len(breakdowns) == 2
+    assert [call.kwargs["config"]["callbacks"][-1]._context_breakdown for call in model.ainvoke.await_args_list] == breakdowns
     assert calls[0] != calls[1]
     assert len(events) == 2
     assert all(not event["estimated"] and event["current_context_tokens"] == 133 for event in events)

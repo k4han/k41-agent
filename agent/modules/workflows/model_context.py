@@ -1,5 +1,6 @@
 """Prepare model history and graph updates without external checkpoint writes."""
 
+import asyncio
 import logging
 import math
 import operator
@@ -108,26 +109,30 @@ async def prepare_model_context(
         payload = normalize_messages_for_chat_model([system, *items])
         return count_tokens_approximately(payload, tools=tools)
 
-    before = count(current)
+    before = current_tokens = await asyncio.to_thread(count, current)
     if before >= target_budget:
         try:
             compacted = await compact_message_history(
                 current,
                 thread_id=str(config.get("configurable", {}).get("thread_id", "")),
-                max_retained_tokens=target_budget - count([]),
+                max_retained_tokens=target_budget - await asyncio.to_thread(count, []),
             )
-            after = count(compacted.messages)
+            after = await asyncio.to_thread(count, compacted.messages)
             if after < before and after <= target_budget:
                 current = compacted.messages
+                current_tokens = after
         except (ValueError, CompactionSummaryError) as exc:
             logger.warning("Automatic context compaction skipped: %s", exc)
 
     trim_threshold = getattr(context, "channel_context_trim_threshold", None)
     if trim_threshold is not None and not getattr(context, "channel_trim_applied", False):
-        current = trim_channel_history(current, trim_threshold)
+        trimmed = await asyncio.to_thread(trim_channel_history, current, trim_threshold)
+        if trimmed is not current:
+            current = trimmed
+            current_tokens = await asyncio.to_thread(count, current)
         context.channel_trim_applied = True
 
-    if count(current) > hard_budget:
+    if current_tokens > hard_budget:
         raise CompactionBudgetError(
             "Conversation exceeds the model input budget after compaction. "
             "Reduce the latest message or tool output, unload instructions, or select a larger context model."

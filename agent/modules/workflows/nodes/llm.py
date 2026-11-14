@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -153,16 +154,19 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         tools = bind_tool_catalogs(tools, prompt_sections, keep_skill=bool(skill_context))
         if skill_context:
             from langchain_core.messages.utils import count_tokens_approximately
-            if count_tokens_approximately([system], tools=tools) >= getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW) * 3 // 4:
+            system_tokens = await asyncio.to_thread(count_tokens_approximately, [system], tools=tools)
+            if system_tokens >= getattr(resolved, "context_window", DEFAULT_CONTEXT_WINDOW) * 3 // 4:
                 raise ValueError("Active skill instructions exceed the context budget. Unload a skill or select a larger context model.")
         history = model_skill_history(history)
         history, history_updates = await prepare_model_context(
             history, system=system, tools=tools, context=ctx,
             agent_config=agent_config, resolved=resolved, config=config,
         )
-        messages: list[BaseMessage] = normalize_messages_for_chat_model([system, *history])
+        messages: list[BaseMessage] = await asyncio.to_thread(normalize_messages_for_chat_model, [system, *history])
         prompt_sections["active_skills"] = skill_context
-        context_breakdown = estimate_context_breakdown(messages, tools=tools, prompt_sections=prompt_sections)
+        context_breakdown = await asyncio.to_thread(
+            estimate_context_breakdown, messages, tools=tools, prompt_sections=prompt_sections,
+        )
         model_kwargs = get_workflow_reasoning_effort_kwargs(ctx, agent_config, resolved)
         llm = resolved.model.bind_tools(tools, **model_kwargs)
         response = await llm.ainvoke(

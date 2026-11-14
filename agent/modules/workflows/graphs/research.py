@@ -1,3 +1,5 @@
+import asyncio
+
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -76,8 +78,8 @@ async def _research_node(state: ResearchState, config: RunnableConfig, runtime):
             state["messages"], system=system, context=runtime.context,
             agent_config=agent_config, resolved=resolved, config=config,
         )
-        messages = normalize_messages_for_chat_model([system, *history])
-        context_breakdown = estimate_context_breakdown(messages)
+        messages = await asyncio.to_thread(normalize_messages_for_chat_model, [system, *history])
+        context_breakdown = await asyncio.to_thread(estimate_context_breakdown, messages)
         response = await llm.ainvoke(
             messages,
             config=with_usage_tracking(
@@ -112,8 +114,8 @@ async def _summarize_node(state: ResearchState, config: RunnableConfig, runtime)
             state["messages"], system=system, context=runtime.context,
             agent_config=agent_config, resolved=resolved, config=config,
         )
-        messages = normalize_messages_for_chat_model([system, *history])
-        context_breakdown = estimate_context_breakdown(messages)
+        messages = await asyncio.to_thread(normalize_messages_for_chat_model, [system, *history])
+        context_breakdown = await asyncio.to_thread(estimate_context_breakdown, messages)
         response = await llm.ainvoke(
             messages,
             config=with_usage_tracking(

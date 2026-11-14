@@ -1,5 +1,6 @@
 """Coverage for the system prompt cache wired into ``llm_node``."""
 
+import threading
 from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -125,6 +126,29 @@ def cached_llm_node(monkeypatch):
         )
 
     return SimpleNamespace(run=_run, calls=calls, captured=captured)
+
+
+@pytest.mark.asyncio
+async def test_llm_node_estimates_normalized_input_off_event_loop(cached_llm_node, monkeypatch):
+    loop_thread = threading.get_ident()
+    normalize = llm_node_module.normalize_messages_for_chat_model
+    estimate = llm_node_module.estimate_context_breakdown
+    estimated = []
+
+    def normalize_off_loop(messages):
+        assert threading.get_ident() != loop_thread
+        return normalize(messages)
+
+    def estimate_off_loop(messages, **kwargs):
+        assert threading.get_ident() != loop_thread
+        estimated.append(messages)
+        return estimate(messages, **kwargs)
+
+    monkeypatch.setattr(llm_node_module, "normalize_messages_for_chat_model", normalize_off_loop)
+    monkeypatch.setattr(llm_node_module, "estimate_context_breakdown", estimate_off_loop)
+    await cached_llm_node.run(messages=[HumanMessage(content=[{"type": "text", "text": "Hello"}])])
+    assert estimated == [cached_llm_node.captured["messages"]]
+    assert estimated[0][-1].content == "Hello"
 
 
 @pytest.mark.asyncio
