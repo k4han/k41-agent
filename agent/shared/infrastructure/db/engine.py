@@ -157,6 +157,8 @@ async def initialize_async_engine(metadata: MetaData | None = None, container=No
             pool_size=10,
             max_overflow=20,
             pool_timeout=30,
+            # Replace aged connections on checkout; pre-ping handles earlier disconnects.
+            pool_recycle=1800,
             pool_pre_ping=True,
             echo=False,
         )
