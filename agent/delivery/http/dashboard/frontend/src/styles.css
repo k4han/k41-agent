@@ -1,31 +1,18 @@
+/* Preserve the cascade regardless of the order in which lazy routes load. */
+@layer theme, base, components, utilities, dashboard-vendor,
+  dashboard-tokens, dashboard-base, dashboard-shell, dashboard-settings, dashboard-forms,
+  dashboard-channels, dashboard-backends, dashboard-providers, dashboard-sandboxes, dashboard-usage,
+  dashboard-utilities, dashboard-controls, dashboard-chat, dashboard-markdown, dashboard-transcript,
+  dashboard-composer, dashboard-workspace-selector, dashboard-composer-controls, dashboard-workspace,
+  dashboard-repositories, dashboard-projects, dashboard-tasks, dashboard-scheduler, dashboard-history,
+  dashboard-sidebar-collapsed, dashboard-responsive, dashboard-context-window, dashboard-home,
+  dashboard-composer-workspace;
+
 @import "tailwindcss";
-@import "./styles/tokens.css";
-@import "./styles/base.css";
-@import "./styles/shell.css";
-@import "./styles/settings.css";
-@import "./styles/forms.css";
-@import "./styles/channels.css";
-@import "./styles/backends.css";
-@import "./styles/providers.css";
-@import "./styles/sandboxes.css";
-@import "./styles/usage.css";
-@import "./styles/utilities.css";
-@import "./styles/controls.css";
-@import "./styles/chat.css";
-@import "./styles/markdown.css";
-@import "./styles/transcript.css";
-@import "./styles/composer.css";
-@import "./styles/workspace-selector.css";
-@import "./styles/composer-controls.css";
-@import "./styles/workspace.css";
-@import "./styles/repositories.css";
-@import "./styles/projects.css";
-@import "./styles/tasks.css";
-@import "./styles/scheduler.css";
-@import "./styles/history.css";
-@import "./styles/sidebar-collapsed.css";
-@import "./styles/responsive.css";
-@import "./styles/context-window.css";
-@import "./styles/home.css";
-@import "./styles/composer-workspace.css";
+@import "./styles/tokens.css" layer(dashboard-tokens);
+@import "./styles/base.css" layer(dashboard-base);
+@import "./styles/shell-base.css" layer(dashboard-shell);
+@import "./styles/forms.css" layer(dashboard-forms);
+@import "./styles/utilities.css" layer(dashboard-utilities);
+@import "./styles/controls.css" layer(dashboard-controls);
 

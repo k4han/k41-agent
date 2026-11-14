@@ -1,3 +1,5 @@
+import "@/styles/routes/backends.css";
+
 import {
   createMemo,
   createSignal,

@@ -1,3 +1,6 @@
+import "@/styles/routes/chat.css";
+import "@/styles/routes/workspace.css";
+
 import { handleProtocolEvent } from "@/lib/protocolStreamHandler";
 import { useLocation, useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import {

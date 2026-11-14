@@ -1,3 +1,5 @@
+import "@/styles/routes/markdown.css";
+
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import {

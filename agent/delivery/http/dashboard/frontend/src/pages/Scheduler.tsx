@@ -1,3 +1,5 @@
+import "@/styles/routes/scheduler.css";
+
 import { createEffect, createMemo, createSignal, For, type JSX, on, onCleanup, Show } from "solid-js";
 import { Bot, CalendarClock, Clock, Edit3, History, Pause, Play, Plus, Trash2 } from "lucide-solid";
 

@@ -1,3 +1,5 @@
+import "@/styles/routes/sandboxes.css";
+
 import {
   createMemo,
   createSignal,

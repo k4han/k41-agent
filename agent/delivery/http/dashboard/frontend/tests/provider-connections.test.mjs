@@ -55,7 +55,11 @@ test("provider names use the first free suffix without case collisions", () => {
 
 test("providers design tokens and stylesheet are correctly integrated", async () => {
   const stylesCss = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(stylesCss, /@import ["']\.\/styles\/providers\.css["'];/);
+  assert.doesNotMatch(stylesCss, /@import ["']\.\/styles\/providers\.css["']/);
+  const providerLayout = await readFile(new URL("../src/pages/settings/ProviderSettingsLayout.tsx", import.meta.url), "utf8");
+  assert.match(providerLayout, /import ["']@\/styles\/routes\/providers\.css["']/);
+  const providerRouteCss = await readFile(new URL("../src/styles/routes/providers.css", import.meta.url), "utf8");
+  assert.match(providerRouteCss, /@import ["']\.\.\/providers\.css["'] layer\(dashboard-providers\)/);
 
   const providersCss = await readFile(new URL("../src/styles/providers.css", import.meta.url), "utf8");
   assert.match(providersCss, /\.model-spec-capabilities\s*\{[^}]*text-overflow:\s*ellipsis/);

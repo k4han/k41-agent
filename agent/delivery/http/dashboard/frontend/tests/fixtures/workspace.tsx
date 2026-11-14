@@ -8,14 +8,17 @@ import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { fetchCatalog } from "@/lib/catalogStore";
 import { readNDJSONStream } from "@/lib/chatStreamHandler";
 import type { StreamCallbacks } from "@/lib/chatStreamHandler";
-import "@/styles/workspace.css";
+import "@/styles.css";
+
+document.getElementById("root")!.style.height = "640px";
 
 const entry = (path: string, kind = "file", size = 10) => ({
   path, name: path.split("/").pop(), kind, size, modified_at: 1,
 });
 const serviceTests = new URLSearchParams(window.location.search).has("services");
-let entries = [entry("src", "directory"), ...Array.from({ length: 200 }, (_, i) => entry(`file-${i}.txt`))];
-let changes = serviceTests ? [] : [{ path: "file-0.txt", status: "modified", additions: 1, deletions: 0 }];
+const largeWorkspace = new URLSearchParams(window.location.search).has("large");
+let entries = [entry("src", "directory"), ...Array.from({ length: largeWorkspace ? 5000 : 200 }, (_, i) => entry(`file-${i}.txt`))];
+let changes = serviceTests ? [] : Array.from({ length: largeWorkspace ? 5000 : 1 }, (_, i) => ({ path: `file-${i}.txt`, status: "modified", additions: 1, deletions: 0 }));
 let browserStatus = { open: false, generation: null as string | null, revision: 0, profile_id: null,
   mode: "agent", tabs: [], handoff: null as { handoff_id: string; reason: string; expired: boolean } | null,
   handoff_expired: false, images: [] };
@@ -93,7 +96,7 @@ window.fetch = async (input, init) => {
   } else if (kind === "file") {
     payload = { root: locator, path, content: `Preview of ${path} revision ${contentRevision}`, binary: false, truncated: false, size: 20, modified_at: path === "src/image.svg" ? nestedImageRevision : 1, mime_type: "text/plain", message: "", ...previewFiles[path] };
   } else if (kind === "diff") {
-    payload = { root: locator, path, diff: "", message: `Diff of ${path} revision ${contentRevision}`, truncated: false, is_git_repo: true, status: "modified" };
+    payload = { root: locator, path, diff: largeWorkspace ? `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+new\n` : "", message: `Diff of ${path} revision ${contentRevision}`, truncated: false, is_git_repo: true, status: "modified" };
   } else {
     throw new Error(`Unexpected workspace request: ${kind}`);
   }
@@ -147,7 +150,7 @@ function WorkspaceFixture() {
       },
       addPreviewEntries: () => {
         previewEntriesAdded = true;
-        entries = [...entries, ...Object.keys(previewFiles).filter(path => !path.includes("/")).map(path => entry(path))];
+        entries = [entries[0], ...Object.keys(previewFiles).filter(path => !path.includes("/")).map(path => entry(path)), ...entries.slice(1)];
       },
       updateNestedImage: () => { nestedImageRevision += 1; },
       refreshing: () => [...activeRequests].some(([key, count]) => count > 0 && (key.startsWith("tree:") || key.startsWith("changes:"))),
@@ -164,7 +167,9 @@ function WorkspaceFixture() {
       updateContent: () => { contentRevision += 1; },
       toolResult: (threadId = "thread-one") => readNDJSONStream(
         new ReadableStream({ start(controller) {
-          const encoded = new TextEncoder().encode(JSON.stringify({ type: "tool_result", name: "shell", content: "done" }) + "\n");
+          const encoded = new TextEncoder().encode(JSON.stringify({ method: "custom:k41", params: {
+            data: { projection: "ui", type: "tool_result", name: "shell", content: "done" },
+          } }) + "\n");
           controller.enqueue(encoded.slice(0, 20));
           controller.enqueue(encoded.slice(20));
           controller.close();
@@ -186,7 +191,7 @@ function WorkspaceFixture() {
       pendingCount: (key: string) => pending.get(key)?.length || 0,
       aborted: () => aborted,
       updateEntries: () => {
-        entries = [entries[0], ...entries.slice(1).reverse().map((item) => item.path === "file-0.txt" ? { ...item, size: 4096 } : item)];
+        entries = [entries[0], entries.at(-1)!, { ...entries[1], size: 4096 }, ...entries.slice(2, -1).reverse()];
         changes = [{ ...changes[0], additions: 5 }];
       },
       removeEntry: () => { entries = entries.filter((item) => item.path !== "file-199.txt"); },

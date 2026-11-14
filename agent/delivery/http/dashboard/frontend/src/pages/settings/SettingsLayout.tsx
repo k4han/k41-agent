@@ -1,3 +1,6 @@
+import "@/styles/routes/shell.css";
+import "@/styles/routes/settings.css";
+
 import { A, useLocation } from "@solidjs/router";
 import {
   ArrowLeft,

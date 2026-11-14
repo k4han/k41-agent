@@ -1,3 +1,5 @@
+import "@/styles/routes/projects.css";
+
 import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { AppShell } from "@/components/AppShell";

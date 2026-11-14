@@ -1,3 +1,5 @@
+import "@/styles/routes/workspace.css";
+
 import {
   ChevronDown,
   ChevronRight,
@@ -32,6 +34,7 @@ import { Portal } from "solid-js/web";
 
 import { Dialog } from "@/components/Dialog";
 import { WorkspaceFilePreview } from "@/components/WorkspaceFilePreview";
+import { WorkspaceVirtualList } from "@/components/WorkspaceVirtualList";
 import { useToast } from "@/components/Toast";
 import { apiFetch, postJson } from "@/lib/api";
 import type { BrowserHandoffResume } from "@/lib/browserViewer";
@@ -43,16 +46,9 @@ import { matchesWorkspaceEvent, singleFlight, visibleWorkspaceDirectories, WORKS
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { createDarkMode } from "@/lib/theme";
 import { localWorkspaceRef } from "@/lib/workspace";
+import { flattenWorkspaceTree, type WorkspaceTreeEntry } from "@/lib/workspaceTree";
 import type { WorkspaceBinding, WorkspaceRef, WorkspaceUsagePayload, WorkspaceBackendKey } from "@/types";
 import { isSandboxBackend } from "@/types";
-
-type WorkspaceTreeEntry = {
-  name: string;
-  path: string;
-  kind: "directory" | "file";
-  size: number | null;
-  modified_at: number;
-};
 
 type WorkspaceTreePayload = {
   root: string;
@@ -528,8 +524,10 @@ export function WorkspaceExplorer(props: {
   const rootEntries = () => entriesByPath[rootPath()] || entriesByPath[""] || [];
   const visibleDirectories = createMemo(() => visibleWorkspaceDirectories(rootEntries(), entriesByPath, expandedByPath));
   const rootLoaded = () => entriesByPath[rootPath()] !== undefined || entriesByPath[""] !== undefined;
-  const rootTreeTruncated = () =>
-    treeTruncatedByPath[rootPath()] || treeTruncatedByPath[""] || false;
+  const treeRows = createMemo(() => flattenWorkspaceTree(
+    entriesByPath, expandedByPath, treeLoadingByPath, treeTruncatedByPath,
+    entriesByPath[rootPath()] ? rootPath() : "",
+  ));
   const canQuery = () => Boolean(queryWorkspace()?.locator.trim() || props.threadId);
   const isRefreshing = () =>
     Boolean(
@@ -1287,7 +1285,6 @@ export function WorkspaceExplorer(props: {
 
   const TreeEntry = (entryProps: { entry: WorkspaceTreeEntry; depth: number }) => {
     const entry = () => entryProps.entry;
-    const children = () => entriesByPath[entry().path] || [];
     const isOpen = () => Boolean(expandedByPath[entry().path]);
     const isDirectory = () => entry().kind === "directory";
     const isSelected = () => isActiveTab(fileTabId(entry().path));
@@ -1392,21 +1389,6 @@ export function WorkspaceExplorer(props: {
             </Show>
           </div>
         </div>
-        <Show when={isDirectory() && isOpen()}>
-          <Show when={treeLoadingByPath[entry().path] && entriesByPath[entry().path] === undefined}>
-            <div class="workspace-tree-status" style={`--depth: ${entryProps.depth + 1};`}>
-              Loading...
-            </div>
-          </Show>
-          <For each={children()}>
-            {(child) => <TreeEntry entry={child} depth={entryProps.depth + 1} />}
-          </For>
-          <Show when={treeTruncatedByPath[entry().path]}>
-            <div class="workspace-tree-status" style={`--depth: ${entryProps.depth + 1};`}>
-              Tree truncated
-            </div>
-          </Show>
-        </Show>
       </>
     );
   };
@@ -1833,45 +1815,50 @@ export function WorkspaceExplorer(props: {
                   when={changes().length > 0}
                   fallback={<div class="empty compact">{gitMessage() || "No changed files."}</div>}
                 >
-                  <div class="workspace-change-list">
-                    <For each={changes()}>
+                  <WorkspaceVirtualList
+                    class="workspace-change-list"
+                    items={changes()}
+                    itemKey={change => change.path}
+                    estimateSize={34}
+                    gap={5}
+                  >
                       {(change) => (
                         <div
-                          class={`workspace-change-item ${isChangeExpanded(change.path) ? "expanded" : ""}`}
+                          class={`workspace-change-item ${isChangeExpanded(change().path) ? "expanded" : ""}`}
                         >
                           <button
-                            class={`workspace-change-row ${isChangeExpanded(change.path) ? "active" : ""}`}
+                            class={`workspace-change-row ${isChangeExpanded(change().path) ? "active" : ""}`}
                             type="button"
-                            title={change.path}
-                            aria-expanded={isChangeExpanded(change.path)}
-                            onClick={() => toggleChangeDiff(change.path)}
+                            title={change().path}
+                            aria-expanded={isChangeExpanded(change().path)}
+                            onClick={() => toggleChangeDiff(change().path)}
                           >
                             <span class="workspace-change-caret">
                               <Show
-                                when={isChangeExpanded(change.path)}
+                                when={isChangeExpanded(change().path)}
                                 fallback={<ChevronRight size={14} />}
                               >
                                 <ChevronDown size={14} />
                               </Show>
                             </span>
-                            <span class="workspace-change-path">{change.path}</span>
+                            <span class="workspace-change-path">{change().path}</span>
                             <span class="workspace-change-stats">
-                              <Show when={change.additions !== undefined}>
+                              <Show when={change().additions !== undefined}>
                                 <span class="workspace-change-additions">
-                                  +{change.additions}
+                                  +{change().additions}
                                 </span>
                               </Show>
-                              <Show when={change.deletions !== undefined}>
+                              <Show when={change().deletions !== undefined}>
                                 <span class="workspace-change-deletions">
-                                  -{change.deletions}
+                                  -{change().deletions}
                                 </span>
                               </Show>
                             </span>
-                            <span class={`workspace-change-status ${change.status}`}>
-                              {statusLabel(change.status)}
+                            <span class={`workspace-change-status ${change().status}`}>
+                              {statusLabel(change().status)}
                             </span>
                           </button>
-                          <Show when={isChangeExpanded(change.path)}>
+                          <Show when={isChangeExpanded(change().path)}>
                             <div class="workspace-change-diff">
                               <Show
                                 when={!diffLoading() || Boolean(diffPayload())}
@@ -1891,7 +1878,7 @@ export function WorkspaceExplorer(props: {
                                   >
                                     <Suspense><DiffView
                                       diff={diffPayload()?.diff || ""}
-                                      path={diffPayload()?.path || change.path}
+                                      path={diffPayload()?.path || change().path}
                                     /></Suspense>
                                     <Show when={diffPayload()?.truncated}>
                                       <div class="hint workspace-hint">Diff truncated.</div>
@@ -1903,8 +1890,7 @@ export function WorkspaceExplorer(props: {
                           </Show>
                         </div>
                       )}
-                    </For>
-                  </div>
+                  </WorkspaceVirtualList>
                 </Show>
               </Show>
             </Show>
@@ -2027,16 +2013,29 @@ export function WorkspaceExplorer(props: {
                   </Show>
                 }
               >
-                <div class="workspace-tree" aria-busy={isRefreshing()}>
-                  <For each={rootEntries()}>
-                    {(entry) => <TreeEntry entry={entry} depth={0} />}
-                  </For>
-                  <Show when={rootTreeTruncated()}>
-                    <div class="workspace-tree-status" style="--depth: 0;">
-                      Tree truncated
-                    </div>
-                  </Show>
-                </div>
+                <WorkspaceVirtualList
+                  class="workspace-tree"
+                  items={treeRows()}
+                  itemKey={row => row.key}
+                  estimateSize={28}
+                  busy={isRefreshing()}
+                >
+                  {row => {
+                    const entry = () => {
+                      const current = row();
+                      return current.kind === "entry" ? current.entry : undefined;
+                    };
+                    const text = () => {
+                      const current = row();
+                      return current.kind === "status" ? current.text : "";
+                    };
+                    return (
+                      <Show when={entry()} fallback={<div class="workspace-tree-status" style={`--depth: ${row().depth};`}>{text()}</div>}>
+                        {entry => <TreeEntry entry={entry()} depth={row().depth} />}
+                      </Show>
+                    );
+                  }}
+                </WorkspaceVirtualList>
               </Show>
             </Show>
           </section>

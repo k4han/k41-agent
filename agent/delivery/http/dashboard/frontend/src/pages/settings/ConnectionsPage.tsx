@@ -1,3 +1,5 @@
+import "@/styles/routes/channels.css";
+
 import { Show } from "solid-js";
 import { useParams, useSearchParams } from "@solidjs/router";
 import { CalendarDays, FolderGit2, PlugZap } from "lucide-solid";

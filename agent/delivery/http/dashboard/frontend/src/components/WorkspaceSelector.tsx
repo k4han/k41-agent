@@ -1,3 +1,5 @@
+import "@/styles/routes/workspace-selector.css";
+
 import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from "solid-js";
 import {
   FolderOpen,

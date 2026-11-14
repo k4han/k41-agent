@@ -1022,6 +1022,18 @@ body.workspace-row-resizing .workspace-explorer * {
 }
 
 /* File Tree */
+.workspace-virtual-content {
+  position: relative;
+  flex: none;
+  width: 100%;
+}
+
+.workspace-virtual-row {
+  position: absolute;
+  left: 0;
+  width: 100%;
+}
+
 .workspace-tree-item {
   position: relative;
   display: block;

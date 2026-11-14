@@ -172,6 +172,17 @@ try {
     }).map(el => ({ class: el.className, width: el.getBoundingClientRect().width }))`);
     assert.deepEqual(overflow, [], `Content must fit the viewport: ${selector}`);
   };
+  for (const route of ['/login', '/change-password']) {
+    await call('Page.navigate', { url: base + route });
+    await until(() => js('!!document.querySelector(".auth-panel")'), 'authentication page');
+    assert.equal(await js('getComputedStyle(document.querySelector(".page-title")).fontSize'), '17px');
+    const styles = await js('Array.from(document.styleSheets, sheet => sheet.href).filter(Boolean)');
+    assert.equal(styles.length, 1, 'Authentication must load only the shared stylesheet');
+    assert.match(styles[0], /\/index-[^/]+\.css$/);
+    assert.ok(await js('performance.getEntriesByType("resource").filter(entry => /\\.css$/.test(entry.name)).every(entry => /\\/index-[^/]+\\.css$/.test(entry.name))'),
+      'Authentication must not download styles from other routes');
+  }
+  console.log('PASS: Login and password change load only shared CSS and retain their heading styles.');
   for (const [width, height] of [[320, 568], [375, 812], [640, 480], [641, 480], [768, 1024], [980, 600], [981, 800], [1440, 900]]) {
     await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: true });
     for (const preference of ['collapsed', 'expanded']) {

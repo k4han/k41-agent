@@ -1,3 +1,5 @@
+import "@/styles/routes/home.css";
+
 import { A } from "@solidjs/router";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { MessageSquarePlus } from "lucide-solid";

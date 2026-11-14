@@ -1,3 +1,5 @@
+import "@/styles/routes/projects.css";
+
 import { A, useNavigate } from "@solidjs/router";
 import { Folder, GitBranch, MessageSquarePlus, Pin, Plus, RefreshCw } from "lucide-solid";
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";

@@ -1,3 +1,5 @@
+import "@/styles/routes/providers.css";
+
 import { useLocation, useNavigate } from "@solidjs/router";
 import { BrainCircuit, Globe, Layers, ServerCog, Workflow } from "lucide-solid";
 import { SettingsLayout } from "./SettingsLayout";

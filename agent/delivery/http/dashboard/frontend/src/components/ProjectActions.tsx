@@ -1,3 +1,5 @@
+import "@/styles/routes/projects.css";
+
 import { MoreVertical } from "lucide-solid";
 import { useNavigate } from "@solidjs/router";
 import { createEffect, createSignal, createUniqueId, onCleanup, Show } from "solid-js";

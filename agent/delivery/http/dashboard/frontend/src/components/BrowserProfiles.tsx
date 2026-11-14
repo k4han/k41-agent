@@ -1,3 +1,5 @@
+import "@/styles/routes/settings.css";
+
 import { A } from "@solidjs/router";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { apiFetch, deleteJson, patchJson, postJson, putJson } from "@/lib/api";

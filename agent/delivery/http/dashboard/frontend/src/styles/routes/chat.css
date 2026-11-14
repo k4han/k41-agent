@@ -1,0 +1,6 @@
+@import "../chat.css" layer(dashboard-chat);
+@import "../transcript.css" layer(dashboard-transcript);
+@import "../composer.css" layer(dashboard-composer);
+@import "../composer-controls.css" layer(dashboard-composer-controls);
+@import "../context-window.css" layer(dashboard-context-window);
+@import "../composer-workspace.css" layer(dashboard-composer-workspace);

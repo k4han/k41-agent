@@ -57,6 +57,15 @@ async function until(callback, label, timeout = 30000) {
     if (await callback()) return;
     await delay(100);
   }
+  if (call) console.error(await call('Runtime.evaluate', { expression: `JSON.stringify({
+    text: document.body.innerText.slice(0, 1000),
+    visibility: document.visibilityState, visible: window.workspaceTest?.isVisible(),
+    polls: window.workspaceTest?.pollCount(),
+    requests: window.workspaceTest?.requests,
+    tree: Array.from(document.querySelectorAll('.workspace-tree, .workspace-virtual-content, #root')).map(element => ({
+      class: element.className, height: element.clientHeight, size: element.scrollHeight, style: element.getAttribute('style')
+    }))
+  })`, returnByValue: true }));
   throw new Error(`Timeout: ${label}`);
 }
 
@@ -83,7 +92,10 @@ try {
       pending.delete(message.id);
       if (message.error) entry?.reject(new Error(message.error.message)); else entry?.resolve(message.result);
     }
-    if (message.method === 'Runtime.exceptionThrown') exceptions.push(message.params.exceptionDetails);
+    if (message.method === 'Runtime.exceptionThrown') {
+      exceptions.push(message.params.exceptionDetails);
+      console.error(JSON.stringify(message.params.exceptionDetails));
+    }
   });
   ws.addEventListener('close', () => {
     for (const entry of pending.values()) entry.reject(new Error('Browser closed'));
@@ -99,9 +111,36 @@ try {
   const row = path => `Array.from(document.querySelectorAll('.workspace-tree-row')).find(row => row.title === ${JSON.stringify(path)})`;
   const tab = title => `Array.from(document.querySelectorAll('.workspace-tab')).find(tab => tab.title === ${JSON.stringify(title)})`;
   if (!process.argv.includes('--services-only')) {
+  await call('Page.navigate', { url: base + '/__workspace?large=1' });
+  await until(() => js('document.querySelectorAll(".workspace-tree-row").length > 0'), 'large workspace');
+  assert.ok(await js('document.querySelectorAll(".workspace-tree-row").length < 100'), '5000 files must have bounded DOM');
+  await js('document.querySelector(".workspace-tree").scrollTop = 1e9');
+  await until(() => js(`!!(${row('file-4999.txt')})`), 'last virtual file');
+  assert.ok(await js('document.querySelectorAll(".workspace-tree-row").length < 100'));
+  await js(`${row('file-4999.txt')}.click()`);
+  await until(() => js('document.querySelector(".workspace-file-panel")?.textContent.includes("file-4999.txt")'), 'virtual file opens');
+  await js(`${tab('Git Changes')}.click()`);
+  await until(() => js('document.querySelectorAll(".workspace-change-row").length > 0'), 'large Git list');
+  assert.ok(await js('document.querySelectorAll(".workspace-change-row").length < 100'), '5000 changes must have bounded DOM');
+  await js('document.querySelector(".workspace-change-list").scrollTop = 4995 * 39');
+  await until(() => js('!!document.querySelector(\'.workspace-change-row[title="file-4995.txt"]\')'), 'far virtual change');
+  await js('document.querySelector(\'.workspace-change-row[title="file-4995.txt"]\').click()');
+  await until(() => js('!!document.querySelector(".workspace-change-diff .d2h-wrapper")'), 'virtual diff rendered');
+  await until(() => js(`(() => {
+    const current = document.querySelector('.workspace-change-row[title="file-4995.txt"]').closest('.workspace-virtual-row');
+    const next = document.querySelector('.workspace-change-row[title="file-4996.txt"]').closest('.workspace-virtual-row');
+    return next.getBoundingClientRect().top >= current.getBoundingClientRect().bottom;
+  })()`), 'expanded diff measurement');
+  await js('document.querySelector(".workspace-change-list").scrollTop = 0');
+  await until(() => js('!document.querySelector(".workspace-change-diff")'), 'offscreen diff unmounted');
+  await js('document.querySelector(".workspace-change-list").scrollTop = 4995 * 39');
+  await until(() => js('!!document.querySelector(".workspace-change-diff .d2h-wrapper")'), 'diff restored after scrolling');
+  assert.ok(await js('document.querySelectorAll(".workspace-change-row").length < 100'));
+  console.log('PASS: 5000 files and 5000 changes keep bounded DOM, support far-row actions and measure lazy diffs after scrolling.');
+
   await call('Page.navigate', { url: base + '/__workspace' });
 
-  await until(() => js('!!window.workspaceTest && document.querySelectorAll(".workspace-tree-row").length === 201'), 'initial workspace tree');
+  await until(() => js('!!window.workspaceTest && document.querySelectorAll(".workspace-tree-row").length > 0'), 'initial workspace tree');
   await until(() => js('!workspaceTest.refreshing()'), 'initial workspace load');
   const refreshDone = () => js('!workspaceTest.refreshing()');
 
@@ -113,7 +152,9 @@ try {
   await js(`${row('src')}.click()`);
   await until(() => js(`!!(${row('src/nested.txt')})`), 'expanded directory');
   await js(`window.nestedRow = ${row('src/nested.txt')};
-    window.treeBody = document.querySelector('.workspace-tree'); treeBody.style.maxHeight = '240px'; treeBody.scrollTop = 120;
+    window.treeBody = document.querySelector('.workspace-tree'); treeBody.style.maxHeight = '240px'; treeBody.scrollTop = 120;`);
+  await delay(150);
+  await js(`
     window.visualMutations = [];
     window.visualObserver = new MutationObserver(records => visualMutations.push(...records.filter(record => record.type === 'childList')));
     visualObserver.observe(document.querySelector('.workspace-explorer'), { childList: true, subtree: true });
@@ -141,14 +182,14 @@ try {
   await js(`${row('src')}.click(); workspaceTest.release('tree:'); workspaceTest.release('changes:');`);
   await until(refreshDone, 'refreshed tree');
   assert.equal(await js(`!!(${row('src/nested.txt')})`), false, 'refresh must not reopen a folder collapsed during loading');
-  assert.equal(await js('Array.from(document.querySelectorAll(".workspace-tree-row")).every(row => originalRows.get(row.title) === row)'), true, 'reordered snapshots must preserve row identity');
+  assert.equal(await js('Array.from(document.querySelectorAll(".workspace-tree-row")).filter(row => originalRows.has(row.title)).every(row => originalRows.get(row.title) === row)'), true, 'reordered snapshots must preserve visible row identity');
   assert.equal(await js(`${row('file-0.txt')}.querySelector('.workspace-tree-meta').textContent`), '4.0 KB');
   assert.equal(await js('document.querySelectorAll(".workspace-tree-row")[1].title'), 'file-199.txt');
   await js('workspaceTest.removeEntry(); workspaceTest.refresh();');
-  await until(() => js('document.querySelectorAll(".workspace-tree-row").length === 200'), 'removed tree entry');
+  await until(() => js(`!(${row('file-199.txt')})`), 'removed tree entry');
   assert.equal(await js(`!!(${row('file-199.txt')})`), false);
   await until(refreshDone, 'removal refresh');
-  console.log('PASS: 200 tree rows survive refresh and reorder, changed metadata updates, and removals and folder toggles remain correct.');
+  console.log('PASS: virtual tree rows survive refresh and reorder, changed metadata updates, and removals and folder toggles remain correct.');
 
   const countBefore = await js('workspaceTest.requests.length');
   await js('workspaceTest.replaceWorkspaceObject(); workspaceTest.refresh("another-thread");');
@@ -183,8 +224,9 @@ try {
   console.log('PASS: tab switches retain the tree; duplicate events coalesce and pending file previews complete across refresh.');
 
   await js(`document.querySelector('button[aria-label="New tab"]').click();
-    Array.from(document.querySelectorAll('.workspace-plus-menu-item')).find(item => item.textContent.includes('Git Changes')).click();
-    workspaceTest.hold('diff:file-0.txt'); document.querySelector('.workspace-change-row').click();`);
+    Array.from(document.querySelectorAll('.workspace-plus-menu-item')).find(item => item.textContent.includes('Git Changes')).click();`);
+  await until(() => js('!!document.querySelector(".workspace-change-row")'), 'changes tab measured');
+  await js(`workspaceTest.hold('diff:file-0.txt'); document.querySelector('.workspace-change-row').click();`);
   await until(() => js('workspaceTest.pendingCount("diff:file-0.txt") === 1'), 'pending diff');
   await js(`window.originalChange = document.querySelector('.workspace-change-row');
     workspaceTest.hold('changes:'); workspaceTest.refresh();`);
@@ -220,6 +262,9 @@ try {
 
   await js(`${tab('Git Changes')}.click();`);
   await until(() => js('document.querySelector(".workspace-change-diff").textContent.includes("revision 4")'), 'dirty diff reloads on activation');
+  // Let the activation refresh settle before holding the next invalidation.
+  await delay(400);
+  await until(() => js('workspaceTest.pollCount() === 1'), 'diff activation refresh completed');
   await js('workspaceTest.hold("diff:file-0.txt"); workspaceTest.toolResult();');
   await until(() => js('workspaceTest.pendingCount("diff:file-0.txt") === 1'), 'background diff request');
   await js('document.querySelector(".workspace-change-row").click(); workspaceTest.release("diff:file-0.txt");');
@@ -316,6 +361,8 @@ try {
 
   await js(`${tab('Files Explorer')}.click(); ${row('src')}.click();`);
   await until(() => js(`!!(${row('src/nested.txt')})`), 'expanded directory before workspace change');
+  await js('document.querySelector(".workspace-tree").scrollTop = 1e9');
+  await until(() => js(`!!(${row('file-1.txt')})`), 'far file before workspace change');
   await js(`workspaceTest.hold('tree:'); workspaceTest.hold('file:file-1.txt'); workspaceTest.refresh(); ${row('file-1.txt')}.click();`);
   await until(() => js('workspaceTest.pendingCount("tree:") === 1 && workspaceTest.pendingCount("file:file-1.txt") === 1'), 'old workspace requests');
   // Allow new root requests through without completing the old response yet.
@@ -361,7 +408,7 @@ try {
   }
 
   await call('Page.navigate', { url: base + '/__workspace?services=1' });
-  await until(() => js('!!window.workspaceTest && document.querySelectorAll(".workspace-tree-row").length === 201 && workspaceTest.serviceRequests.length >= 2'), 'service discovery fixture');
+  await until(() => js('!!window.workspaceTest && document.querySelectorAll(".workspace-tree-row").length > 0 && workspaceTest.serviceRequests.length >= 2'), 'service discovery fixture');
   await delay(400);
   assert.equal(await js('document.querySelectorAll(".workspace-primary-tabs .workspace-tab").length'), 1, 'an idle workspace starts with Files only');
   assert.equal(await js('workspaceTest.serviceRequests.every(request => request.method === "GET")'), true, 'service discovery must never start a service');

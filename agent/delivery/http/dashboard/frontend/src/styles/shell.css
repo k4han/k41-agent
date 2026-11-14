@@ -70,18 +70,6 @@ body.sidebar-resizing * {
   box-sizing: border-box;
 }
 
-.brand-mark {
-  display: grid;
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  min-height: 40px;
-  flex-shrink: 0;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-2);
-}
 
 .brand-text {
   flex: 1;
@@ -1195,17 +1183,7 @@ body.sidebar-resizing * {
   box-sizing: border-box;
 }
 
-.page-title {
-  margin: 0;
-  font-size: 1.0625rem;
-  font-weight: 650;
-}
 
-.page-subtitle {
-  margin: 3px 0 0;
-  color: var(--muted);
-  font-size: 0.75rem;
-}
 
 .page-subtitle-input {
   width: min(520px, 100%);
@@ -1223,11 +1201,6 @@ body.sidebar-resizing * {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 8%, transparent);
 }
 
-.content {
-  width: min(100%, 1420px);
-  margin-inline: auto;
-  padding: 20px 24px 36px;
-}
 
 .content.content-no-header {
   width: 100%;

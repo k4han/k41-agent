@@ -1,3 +1,5 @@
+import "@/styles/routes/history.css";
+
 import { A, useSearchParams } from "@solidjs/router";
 import { Download, Folder, Folders, FolderOpen, GitBranch, MessageSquare, Pencil, PlaySquare, Trash2 } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";

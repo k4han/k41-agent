@@ -1,3 +1,5 @@
+import "@/styles/routes/repositories.css";
+
 import { A, useNavigate, useParams } from "@solidjs/router";
 import { createMemo, createSignal, For, JSX, onMount, Show } from "solid-js";
 import {

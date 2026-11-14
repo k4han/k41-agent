@@ -1,3 +1,5 @@
+import "@/styles/routes/workspace-selector.css";
+
 import { ChevronDown, FolderOpen, Lock, X } from "lucide-solid";
 import { createEffect, createMemo, createSignal, createUniqueId, onCleanup, Show } from "solid-js";
 import { Portal } from "solid-js/web";

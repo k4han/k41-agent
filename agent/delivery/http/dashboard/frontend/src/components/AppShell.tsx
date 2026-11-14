@@ -1,3 +1,5 @@
+import "@/styles/routes/shell.css";
+
 import { A, useLocation, useNavigate } from "@solidjs/router";
 import {
   Bot,
