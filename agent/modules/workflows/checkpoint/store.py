@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import sys
 from contextlib import asynccontextmanager
 
 import aiosqlite
@@ -8,6 +9,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
+from agent.modules.workflows.checkpoint.queries import initialize_checkpoint_query_indexes
 from agent.shared.infrastructure.db.engine import (
     SQLITE_BUSY_TIMEOUT_MS,
     get_database_type,
@@ -37,6 +39,10 @@ async def _create_sqlite_saver(conn_string: str, serde: JsonPlusSerializer):
     """Create AsyncSqliteSaver with custom serializer."""
     conn = await aiosqlite.connect(conn_string, timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
     try:
+        async with conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}"):
+            pass
+        async with conn.execute("PRAGMA synchronous=NORMAL"):
+            pass
         checkpointer = AsyncSqliteSaver(conn, serde=serde)
         yield checkpointer
     finally:
@@ -67,11 +73,16 @@ async def _build_checkpointer(database_url: str | None = None) -> tuple[BaseChec
     else:
         raise ValueError(f"Unsupported database type: {db_type}")
     checkpointer = await cm.__aenter__()
-    setup = getattr(checkpointer, "setup", None)
-    if callable(setup):
-        result = setup()
-        if inspect.isawaitable(result):
-            await result
+    try:
+        setup = getattr(checkpointer, "setup", None)
+        if callable(setup):
+            result = setup()
+            if inspect.isawaitable(result):
+                await result
+        await initialize_checkpoint_query_indexes(checkpointer)
+    except BaseException:
+        await cm.__aexit__(*sys.exc_info())
+        raise
     return checkpointer, cm
 
 

@@ -21,6 +21,11 @@ from agent.modules.workflows.constants import (
     REACT_AGENT_GRAPH_TYPE,
     ROUTER_GRAPH_TYPE,
 )
+from agent.modules.workflows.checkpoint.queries import (
+    find_delegation_checkpoint,
+    get_checkpoint_stats_batch,
+    list_checkpoint_summaries,
+)
 from agent.modules.workflows.prompt_builders import (
     build_llm_system_prompt,
     get_system_default_variables,
@@ -115,7 +120,12 @@ async def _release_thread_machines(thread_id: str) -> None:
 
 
 async def _list_workflow_child_thread_ids(checkpointer: object, thread_id: str) -> set[str]:
+    from agent.modules.workflows.checkpoint.queries import list_checkpoint_child_thread_ids
+
     thread_id = resolve_thread_id(thread_id)
+    indexed_ids = await list_checkpoint_child_thread_ids(checkpointer, thread_id)
+    if indexed_ids is not None:
+        return indexed_ids
     child_prefix = f"{thread_id}:sub:"
     child_thread_ids: set[str] = set()
     alist = getattr(checkpointer, "alist", None)
@@ -199,6 +209,9 @@ __all__ = [
     "thread_is_acp",
     "initialize_checkpointer",
     "get_checkpointer",
+    "find_delegation_checkpoint",
+    "get_checkpoint_stats_batch",
+    "list_checkpoint_summaries",
     "list_registered_workflows",
     "make_run_context",
     "make_run_config",

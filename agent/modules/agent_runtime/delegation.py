@@ -9,7 +9,7 @@ from langgraph.types import Command
 
 
 async def find_delegation(parent_thread_id: str, *, delegation_id=None, tool_call_id=None, parent_message_id=None):
-    from agent.modules.workflows import get_checkpointer
+    from agent.modules.workflows import find_delegation_checkpoint, get_checkpointer
     criteria = {"k41_parent_thread_id": parent_thread_id}
     if delegation_id:
         criteria["k41_delegation_id"] = delegation_id
@@ -17,10 +17,7 @@ async def find_delegation(parent_thread_id: str, *, delegation_id=None, tool_cal
         criteria["k41_parent_tool_call_id"] = tool_call_id
     if parent_message_id:
         criteria["k41_parent_message_id"] = parent_message_id
-    async for checkpoint in get_checkpointer().alist(None, filter=criteria):
-        if not checkpoint.config["configurable"].get("checkpoint_ns"):
-            return checkpoint
-    return None
+    return await find_delegation_checkpoint(get_checkpointer(), criteria)
 
 
 def delegation_reference(checkpoint, *, status="completed") -> dict[str, Any]:

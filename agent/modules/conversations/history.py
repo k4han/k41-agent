@@ -47,11 +47,21 @@ def get_history_checkpointer():
 
 
 async def get_checkpoint_stats(thread_id: str) -> dict[str, Any]:
-    """Read lightweight checkpoint stats via the checkpointer API."""
+    """Read root checkpoint statistics without loading persistent state payloads."""
     thread_id = resolve_thread_id(thread_id)
     try:
         checkpointer = get_history_checkpointer()
     except ConversationHistoryUnavailableError:
+        return {"latest_checkpoint_id": "", "checkpoint_count": 0}
+
+    from agent.modules.workflows import get_checkpoint_stats_batch
+
+    try:
+        stats = await get_checkpoint_stats_batch(checkpointer, [thread_id])
+        if stats is not None:
+            return stats[thread_id]
+    except Exception as exc:
+        logger.warning("Failed to get checkpoint stats for %s: %s", thread_id, exc)
         return {"latest_checkpoint_id": "", "checkpoint_count": 0}
 
     config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
@@ -92,6 +102,30 @@ async def list_legacy_threads_from_checkpoints(
         checkpointer = get_history_checkpointer()
     except ConversationHistoryUnavailableError:
         return []
+
+    from agent.modules.workflows import list_checkpoint_summaries
+
+    try:
+        checkpoint_summaries = await list_checkpoint_summaries(checkpointer)
+    except Exception as exc:
+        logger.warning("Failed to list legacy checkpoint threads: %s", exc)
+        return []
+    if checkpoint_summaries is not None:
+        rows = [
+            {
+                **summary,
+                "agent_name": "",
+                "title": summary["thread_id"],
+                "kind": THREAD_KIND_USER,
+                "created_at": None,
+                "updated_at": None,
+                **parse_thread_metadata(summary["thread_id"]),
+            }
+            for summary in checkpoint_summaries
+            if summary["thread_id"] and infer_thread_kind(summary["thread_id"]) == THREAD_KIND_USER
+        ]
+        rows = rows[offset:]
+        return rows if limit is None else rows[:limit]
 
     summaries: dict[str, dict[str, Any]] = {}
     try:
@@ -140,6 +174,23 @@ async def list_legacy_threads_from_checkpoints(
 async def _attach_checkpoint_stats(
     threads: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    from agent.modules.workflows import get_checkpoint_stats_batch
+
+    if not threads:
+        return []
+    try:
+        checkpointer = get_history_checkpointer()
+    except ConversationHistoryUnavailableError:
+        checkpointer = None
+    if checkpointer is not None:
+        try:
+            stats = await get_checkpoint_stats_batch(checkpointer, [thread["thread_id"] for thread in threads])
+        except Exception as exc:
+            logger.warning("Failed to get batch checkpoint stats: %s", exc)
+            return [{**thread, "latest_checkpoint_id": "", "checkpoint_count": 0} for thread in threads]
+        if stats is not None:
+            return [{**thread, **stats[thread["thread_id"]]} for thread in threads]
+
     semaphore = asyncio.Semaphore(CHECKPOINT_STATS_CONCURRENCY)
 
     async def load_one(thread: dict[str, Any]) -> dict[str, Any]:
