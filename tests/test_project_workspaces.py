@@ -1965,6 +1965,46 @@ async def test_idle_monitor_does_not_execute_commands_and_uses_backoff(switch_se
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("runtime_status", ["ready", "stopped"])
+@pytest.mark.parametrize("restored_status", ["active", "archived"])
+async def test_removed_project_stops_background_probes_and_resumes_when_restored(
+    project_service, monkeypatch, runtime_status, restored_status,
+):
+    import agent.modules.workspaces.host_mirror as host_mirror
+
+    service, project, _, maker = project_service
+    await service.ensure(project["id"])
+    ref = WorkspaceRef(backend="instabox", locator="removed-project-machine")
+    async with maker() as session:
+        runtime = (await session.execute(select(WorkspaceRuntime))).scalar_one()
+        runtime.execution_json = ref.model_dump_json()
+        runtime.status = runtime_status
+        identity = ("project", runtime.project_workspace_id, runtime.generation)
+        await session.commit()
+
+    probe = AsyncMock(return_value="paused")
+    monkeypatch.setattr(host_mirror, "workspace_runtime_status", probe)
+    clock = [100.0]
+    monkeypatch.setattr(host_mirror, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    async def finish_cycle(delay):
+        await asyncio.gather(*service.host_mirrors.jobs.values())
+        service.closing = True
+
+    monkeypatch.setattr(host_mirror, "asyncio", SimpleNamespace(**(vars(asyncio) | {"sleep": finish_cycle})))
+    for status, expected_probes in (("active", 1), ("removed", 1), (restored_status, 2)):
+        await catalog.update_project(project["id"], {"status": status})
+        clock[0] += 120
+        service.closing = False
+        await service.host_mirrors._periodic()
+        assert probe.await_count == expected_probes
+        if status == "removed":
+            assert identity not in service.host_mirrors.jobs
+            assert identity not in service.host_mirrors.next_poll
+    assert all(call.args[0] == ref for call in probe.await_args_list)
+
+
+@pytest.mark.asyncio
 async def test_new_workspace_defaults_to_manual_apply(project_service, tmp_path):
     service, _, _, _ = project_service
     directory = tmp_path / "new-project"

@@ -1059,7 +1059,8 @@ class HostMirrorService:
                     projects = (await session.execute(select(ProjectWorkspace, WorkspaceRuntime).join(
                         WorkspaceRuntime, WorkspaceRuntime.project_workspace_id == ProjectWorkspace.id,
                     ).join(Project, Project.id == ProjectWorkspace.project_id).where(
-                        Project.migration_status == "ready", ProjectWorkspace.kind != "legacy", WorkspaceRuntime.status.in_(["ready", "stopped"]),
+                        Project.status != "removed", Project.migration_status == "ready",
+                        ProjectWorkspace.kind != "legacy", WorkspaceRuntime.status.in_(["ready", "stopped"]),
                     ))).all()
                 operations = []
                 for workspace, runtime in projects:
