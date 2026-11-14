@@ -39,13 +39,13 @@ def build_decision_agent_graph(
     """Build a decision-guided agent graph template.
 
     Workflow:
-    START -> prepare_context -> decision -> llm -> (conditional)
-                                              ^        |
-                                              |        v
-                                              +-- tool +
-                                                       |
-                                                       v
-                                                      END
+    START -> decision -> llm -> (conditional)
+                         ^        |
+                         |        v
+                         +-- tool +
+                                  |
+                                  v
+                                 END
     """
     if checkpointer is None:
         try:
@@ -54,12 +54,13 @@ def build_decision_agent_graph(
             checkpointer = None
 
     graph = StateGraph(DecisionAgentState, context_schema=WorkflowContext)
+    # Keep the old entry node available for resuming existing checkpoints.
     graph.add_node("prepare_context", make_prepare_context_node())
     graph.add_node("decision", decision_node)
     graph.add_node("llm", llm_node)
     graph.add_node("tool", tool_node)
 
-    graph.add_edge(START, "prepare_context")
+    graph.add_edge(START, "decision")
     graph.add_edge("prepare_context", "decision")
     graph.add_edge("decision", "llm")
     graph.add_conditional_edges("llm", _should_continue, {"tool": "tool", END: END})

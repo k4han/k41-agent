@@ -139,11 +139,12 @@ async def _summarize_node(state: ResearchState, config: RunnableConfig, runtime)
 
 def build_research_graph() -> None:
     graph = StateGraph(ResearchState, context_schema=WorkflowContext)
+    # Keep the old entry node available for resuming existing checkpoints.
     graph.add_node("prepare_context", make_prepare_context_node())
     graph.add_node("research", _research_node)
     graph.add_node("summarize", _summarize_node)
 
-    graph.add_edge(START, "prepare_context")
+    graph.add_edge(START, "research")
     graph.add_edge("prepare_context", "research")
     graph.add_edge("research", "summarize")
     graph.add_edge("summarize", END)

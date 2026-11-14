@@ -42,11 +42,12 @@ def build_react_graph(
         checkpointer = get_checkpointer()
 
     graph = StateGraph(BaseState, context_schema=WorkflowContext)
+    # Keep the old entry node available for resuming existing checkpoints.
     graph.add_node("prepare_context", make_prepare_context_node())
     graph.add_node("llm", llm_node)
     graph.add_node("tool", tool_node)
 
-    graph.add_edge(START, "prepare_context")
+    graph.add_edge(START, "llm")
     graph.add_edge("prepare_context", "llm")
     graph.add_conditional_edges("llm", _should_continue, {"tool": "tool", END: END})
     graph.add_edge("tool", "llm")
