@@ -1,5 +1,6 @@
 """Tests for decision-guided context curation workflow graph."""
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -17,6 +18,9 @@ from agent.modules.workflows.nodes.decision import (
     CONTEXT_MARKER,
     FileCandidateSelection,
     FileInclusionDecision,
+    FileInclusionBatch,
+    FileInclusionEntry,
+    build_decision_context,
     decision_node,
     generate_directory_tree,
     read_file_safe,
@@ -43,8 +47,11 @@ class _FakeDecisionModel:
             self.invocations.append({"schema": schema, "messages": messages, "kwargs": kwargs})
             if schema == FileCandidateSelection:
                 return self.candidate_selection
-            if schema == FileInclusionDecision:
-                return self.inclusion_decision
+            if schema == FileInclusionBatch:
+                files = json.loads(messages[-1].content)["files"]
+                return FileInclusionBatch(files=[FileInclusionEntry(
+                    path=item["path"], **self.inclusion_decision.model_dump(),
+                ) for item in files])
             raise ValueError(f"Unknown schema: {schema}")
 
         return SimpleNamespace(ainvoke=_ainvoke)
@@ -114,8 +121,8 @@ def test_read_file_safe(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_decision_node_enriches_user_message(tmp_path: Path, monkeypatch):
-    """Verify decision_node inspects directory tree, selects files, and injects context."""
+async def test_decision_node_keeps_file_bodies_out_of_state(tmp_path: Path, monkeypatch):
+    """Verify references hydrate context without persisting enriched messages."""
     # Setup test workspace
     (tmp_path / "agent.py").write_text("class Agent: pass", encoding="utf-8")
     (tmp_path / "ignored.txt").write_text("unrelated text", encoding="utf-8")
@@ -151,13 +158,15 @@ async def test_decision_node_enriches_user_message(tmp_path: Path, monkeypatch):
 
     assert "messages" in result
     assert len(result["messages"]) == 1
-    enriched_msg = result["messages"][0]
-    assert enriched_msg.id == "msg-user-1"
-    assert "How is the agent defined?" in enriched_msg.content
-    assert CONTEXT_MARKER in enriched_msg.content
-    assert "<directory_tree>" in enriched_msg.content
-    assert "agent.py" in enriched_msg.content
-    assert "class Agent: pass" in enriched_msg.content
+    assert result["messages"][0] == initial_msg
+    hydrated = await build_decision_context({**state, **result}, str(tmp_path))
+    assert CONTEXT_MARKER in hydrated
+    assert "<directory_tree>" in hydrated
+    assert "agent.py" in hydrated
+    assert "class Agent: pass" in hydrated
+    assert "class Agent: pass" not in str(result)
+    assert result["curated_context"] is None
+    assert [call["schema"] for call in fake_model.invocations] == [FileCandidateSelection, FileInclusionBatch]
 
     # Structured metadata in state updates
     assert result["candidate_files"] == ["agent.py"]
@@ -177,6 +186,88 @@ async def test_decision_node_skips_when_already_prepared(tmp_path: Path):
 
     result = await decision_node(state, config, runtime=None)
     assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_decision_batches_candidates_and_bounds_previews(tmp_path, monkeypatch):
+    from agent.modules.workflows.nodes import decision as decision_module
+
+    paths = [f"file_{index}.txt" for index in range(6)]
+    for path in paths:
+        (tmp_path / path).write_text("raw-file-body-" * 5_000, encoding="utf-8")
+    (tmp_path / "binary.bin").write_bytes(b"\0\1\2")
+    previews = []
+
+    class Model(_FakeDecisionModel):
+        def with_structured_output(self, schema):
+            if schema != FileInclusionBatch:
+                return super().with_structured_output(schema)
+
+            async def invoke(messages, **kwargs):
+                self.invocations.append({"schema": schema})
+                previews.extend(json.loads(messages[-1].content)["files"])
+                return FileInclusionBatch(files=[
+                    FileInclusionEntry(path=paths[0], should_include=True, use_full_content=False,
+                                       relevant_summary_or_excerpt="focused excerpt " * 1_000),
+                    FileInclusionEntry(path=paths[1], should_include=False),
+                    FileInclusionEntry(path="not-a-candidate.txt", should_include=True),
+                ])
+
+            return SimpleNamespace(ainvoke=invoke)
+
+    model = Model(candidate_selection=FileCandidateSelection(candidate_files=[
+        paths[0], paths[0], *paths[1:], "binary.bin", "../outside.txt",
+    ]))
+    monkeypatch.setattr(decision_module, "get_resolved_chat_model", lambda **kwargs: _fake_resolved(model))
+    user = HumanMessage(content="inspect files", id="batch-user")
+    result = await decision_node({"messages": [user]}, {
+        "configurable": {"working_dir": str(tmp_path), "decision_max_candidates": 8},
+    })
+    assert len(model.invocations) == 2
+    assert [item["path"] for item in previews] == paths
+    assert sum(len(item["preview"]) for item in previews) <= decision_module.MAX_INCLUSION_PREVIEW_CHARS
+    assert [item["path"] for item in result["included_files"]] == [paths[0], *paths[2:]]
+    assert len(result["included_files"][0]["excerpt"]) == decision_module.MAX_EXCERPT_CHARS
+    assert "raw-file-body-" not in str(result)
+    assert await decision_node(result, {}) == {}
+
+    hydrated = await build_decision_context(result, str(tmp_path))
+    assert "focused excerpt" in hydrated
+    assert f'<file path="{paths[1]}">' not in hydrated
+    assert "not-a-candidate.txt" not in hydrated
+    # References read the current workspace and tolerate files removed after selection.
+    (tmp_path / paths[2]).write_text("updated file contents", encoding="utf-8")
+    (tmp_path / paths[3]).unlink()
+    hydrated = await build_decision_context(result, str(tmp_path))
+    assert "updated file contents" in hydrated
+    assert f'<file path="{paths[3]}">' not in hydrated
+    assert await build_decision_context({**result, "messages": [HumanMessage(content="next", id="new-turn")]}, str(tmp_path)) == ""
+
+
+@pytest.mark.asyncio
+async def test_batch_inclusion_keeps_json_fallback_and_default_inclusion(monkeypatch):
+    from agent.modules.workflows.nodes.decision import _decide_file_inclusions_llm
+
+    class Model:
+        def with_structured_output(self, schema):
+            raise NotImplementedError("Structured output unavailable")
+
+        async def ainvoke(self, messages, **kwargs):
+            return AIMessage(content='{"files": [{"path": "keep.py", "should_include": true}, '
+                             '{"path": "drop.py", "should_include": false}]}')
+
+    kwargs = dict(llm=Model(), user_input="inspect", files={"keep.py": "code", "drop.py": "unrelated"},
+                  caller_agent_name="default", provider_name="test", model_name="test", model_kwargs={},
+                  system_prompt="Evaluate context")
+    result = await _decide_file_inclusions_llm(**kwargs)
+    assert result["keep.py"].should_include
+    assert not result["drop.py"].should_include
+
+    async def fail(*args, **kwargs):
+        raise OSError("Model unavailable")
+
+    kwargs["llm"].ainvoke = fail
+    assert await _decide_file_inclusions_llm(**kwargs) == {}
 
 
 def test_should_continue_evaluates_tool_calls():
@@ -230,6 +321,7 @@ async def test_decision_graph_full_flow(tmp_path: Path, monkeypatch):
 
     # Fake LLM node model: calls a tool, then finishes
     call_count = 0
+    model_inputs = []
 
     class _FakeMainLLM:
         def bind_tools(self, tools, **kwargs):
@@ -237,6 +329,7 @@ async def test_decision_graph_full_flow(tmp_path: Path, monkeypatch):
 
         async def ainvoke(self, messages, **kwargs):
             nonlocal call_count
+            model_inputs.append(messages)
             call_count += 1
             if call_count == 1:
                 return AIMessage(
@@ -300,7 +393,10 @@ async def test_decision_graph_full_flow(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(GraphRegistry, "_descriptions", {})
     monkeypatch.setattr(GraphRegistry, "_routeable", set())
 
-    build_decision_agent_graph(graph_name="test_decision_graph")
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    saver = InMemorySaver()
+    build_decision_agent_graph(checkpointer=saver, graph_name="test_decision_graph")
     compiled = GraphRegistry.get("test_decision_graph")
 
     context = make_context(
@@ -327,12 +423,14 @@ async def test_decision_graph_full_flow(tmp_path: Path, monkeypatch):
     assert isinstance(final_message, AIMessage)
     assert final_message.content == "Result is 42"
 
-    # Verify the initial HumanMessage was enriched with workspace tree & math_utils.py
+    # The main model sees context on each pass, while checkpoints keep references.
     first_human = next(m for m in messages if isinstance(m, HumanMessage))
-    assert "Calculate 20 + 22" in first_human.content
-    assert "<workspace_context>" in first_human.content
-    assert "math_utils.py" in first_human.content
-    assert "def add(a, b)" in first_human.content
+    assert first_human.content == "Calculate 20 + 22"
+    assert len(model_inputs) == 2
+    assert all("def add(a, b)" in items[0].content for items in model_inputs)
+    assert "content" not in result["included_files"][0]
+    async for checkpoint in saver.alist(config):
+        assert "def add(a, b)" not in str(checkpoint.checkpoint)
 
 
 @pytest.mark.asyncio
@@ -387,7 +485,8 @@ async def test_decision_node_with_cloudflare_clef_client(tmp_path: Path):
         assert result["candidate_files"] == ["service.py", "notes.txt"]
         assert len(result["included_files"]) == 1
         assert result["included_files"][0]["path"] == "service.py"
-        assert "class MyService" in result["messages"][0].content
+        assert result["messages"][0].content == initial_msg.content
+        assert "class MyService" in await build_decision_context(result, str(tmp_path))
         assert "Cloudflare Clef decision" in result["included_files"][0]["reasoning"]
     finally:
         set_default_decision_client(None)

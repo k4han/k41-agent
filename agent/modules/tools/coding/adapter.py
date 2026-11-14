@@ -252,6 +252,7 @@ def make_coding_tool(name: str, *, retained_only: bool = False, targeted: bool =
                                        infer_schema=False)
     from agent.modules.tools.permissions.risk import RiskLevel
     tool.metadata = {**(tool.metadata or {}), "permission_self_authorizing": True,
+                     "parallel_safe": name in {"read", "list_dir", "glob", "grep"},
                      "permission_may_interrupt": False,
                      "permission_risk": RiskLevel.MUTATING if name in {"bash", "edit", "write", "stop_process", "write_process_input"} else RiskLevel.SAFE}
     object.__setattr__(tool, "coding_definition", definition)

@@ -1,3 +1,5 @@
+import asyncio
+
 from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -16,6 +18,31 @@ from agent.modules.tools import (
 )
 from agent.modules.workflows.run_config import WorkflowContext
 from agent.modules.tools import coding_authorization_scope
+
+
+MAX_PARALLEL_TOOL_CALLS = 8
+
+
+def _execution_batches(calls, tools):
+    """Group explicitly independent reads; other calls form ordering barriers."""
+    parallel_names = {
+        tool.name for tool in tools
+        if (getattr(tool, "metadata", None) or {}).get("parallel_safe") is True
+    }
+    batch = []
+    for call in calls:
+        if call.get("name") not in parallel_names:
+            if batch:
+                yield batch
+                batch = []
+            yield [call]
+        else:
+            batch.append(call)
+            if len(batch) == MAX_PARALLEL_TOOL_CALLS:
+                yield batch
+                batch = []
+    if batch:
+        yield batch
 
 
 def make_tool_node(tools: list[BaseTool]) -> ToolNode:
@@ -219,10 +246,13 @@ async def tool_node(
 
         from langgraph.types import Command
         result = []
-        for call in calls:
-            value = await execute_tool_call(call)
-            parts = value if isinstance(value, list) else [value]
-            result.extend(parts)
+        for batch in _execution_batches(calls, tools):
+            # Schedule durable tasks in model order so interrupt replay uses the
+            # same task positions. Gather also preserves tool-result order.
+            values = await asyncio.gather(*(execute_tool_call(call) for call in batch))
+            for value in values:
+                parts = value if isinstance(value, list) else [value]
+                result.extend(parts)
         if not calls:
             result = await ToolNode(tools).ainvoke(state, config=next_config, runtime=runtime)
         elif all(isinstance(part, dict) for part in result):

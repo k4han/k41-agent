@@ -432,3 +432,119 @@ def test_router_system_resolves_prompt_variables_without_changing_missing_variab
     assert "- researcher: Research specialist" in system_prompt
     assert "Request: Plan the work" in system_prompt
     assert "Caller: orchestrator" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_router_streams_nested_tokens_and_tools_before_completion(monkeypatch, isolated_registry):
+    import asyncio
+    from contextlib import aclosing
+
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langchain_core.tools import tool
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.config import get_stream_writer
+    from langgraph.graph import END, START, MessagesState, StateGraph
+    from langgraph.prebuilt import ToolNode
+
+    from agent.modules.agent_runtime.protocol import stream_graph
+
+    saver = InMemorySaver()
+    release = asyncio.Event()
+    completed = asyncio.Event()
+    model = FakeListChatModel(responses=["hello"])
+
+    @tool
+    async def echo() -> str:
+        """Return a tool result for the streaming probe."""
+        return "tool result"
+
+    async def work(state, config):
+        get_stream_writer()({"probe": "live"})
+        await model.ainvoke(state["messages"], config=config)
+        await ToolNode([echo]).ainvoke({"messages": [AIMessage(content="", tool_calls=[
+            {"name": "echo", "args": {}, "id": "probe-tool"},
+        ])]}, config=config)
+        await release.wait()
+        completed.set()
+        return {"messages": [AIMessage(content="done")]}
+
+    child = StateGraph(MessagesState)
+    child.add_node("work", work)
+    child.add_edge(START, "work")
+    child.add_edge("work", END)
+    GraphRegistry.register("react_agent", child.compile(checkpointer=saver))
+
+    async def select(state):
+        return {"target_agent": _make_agent(name="default", graph_type="react_agent")}
+
+    monkeypatch.setattr(router_module, "llm_call_router", select)
+    monkeypatch.setattr(router_module, "get_checkpointer", lambda: saver)
+    router_module.build_router_graph()
+    graph = GraphRegistry.get("router")
+    config = {"configurable": {"thread_id": "router-stream-probe"}}
+    seen = set()
+    async with asyncio.timeout(5), aclosing(stream_graph(
+        graph, {"messages": [HumanMessage(content="hi")]}, config=config,
+        context=_runtime_context(), stream_mode=["messages", "values", "custom"],
+        protocol_events=True,
+    )) as events:
+        async for mode, event in events:
+            if mode != "protocol":
+                continue
+            method = event["method"]
+            data = event["params"]["data"]
+            if method == "messages" and isinstance(data[0], dict) and data[0].get("event") == "content-block-delta":
+                seen.add("token")
+            if method == "custom" and data == {"probe": "live"}:
+                seen.add("custom")
+            if method == "tools" and data.get("event") == "tool-finished":
+                seen.add("tool")
+            if seen == {"token", "custom", "tool"} and not release.is_set():
+                assert not completed.is_set()
+                release.set()
+    assert seen == {"token", "custom", "tool"}
+    assert completed.is_set()
+    # The parent and child persist different execution scopes for resumption.
+    namespaces = {item.config["configurable"]["checkpoint_ns"] async for item in saver.alist(config)}
+    assert "" in namespaces
+    assert any(namespace.startswith("llm_call:") for namespace in namespaces)
+
+
+@pytest.mark.asyncio
+async def test_router_resumes_child_checkpoint_without_repeating_completed_steps(monkeypatch, isolated_registry):
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, MessagesState, StateGraph
+    from langgraph.types import Command, interrupt
+
+    saver = InMemorySaver()
+    executed = []
+
+    async def prepare(state):
+        executed.append("prepared")
+        return {}
+
+    async def approve(state):
+        answer = interrupt({"type": "approval-probe"})
+        return {"messages": [AIMessage(content=answer)]}
+
+    child = StateGraph(MessagesState)
+    child.add_node("prepare", prepare)
+    child.add_node("approve", approve)
+    child.add_edge(START, "prepare")
+    child.add_edge("prepare", "approve")
+    child.add_edge("approve", END)
+    GraphRegistry.register("react_agent", child.compile(checkpointer=saver))
+
+    async def select(state):
+        return {"target_agent": _make_agent(name="default", graph_type="react_agent")}
+
+    monkeypatch.setattr(router_module, "llm_call_router", select)
+    monkeypatch.setattr(router_module, "get_checkpointer", lambda: saver)
+    router_module.build_router_graph()
+    graph = GraphRegistry.get("router")
+    config = {"configurable": {"thread_id": "router-resume-probe"}}
+    first = await graph.ainvoke({"messages": [HumanMessage(content="hi")]}, config, context=_runtime_context())
+    assert first["__interrupt__"]
+    result = await graph.ainvoke(Command(resume="approved"), config, context=_runtime_context())
+    assert result["messages"][-1].content == "approved"
+    assert executed == ["prepared"]

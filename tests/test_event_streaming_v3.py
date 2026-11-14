@@ -23,6 +23,47 @@ from agent.modules.agent_runtime.protocol import (
 )
 
 
+def test_primitive_protocol_events_skip_fastapi_encoding(monkeypatch):
+    from agent.modules.agent_runtime import protocol
+
+    def unexpected_encoder(value):
+        pytest.fail("Primitive streaming payloads must bypass the deep FastAPI encoder")
+
+    monkeypatch.setattr(protocol, "jsonable_encoder", unexpected_encoder)
+    sequence = EventSequence("primitive-run")
+    for index in range(1_000):
+        event = protocol_event("messages", [{
+            "event": "content-block-delta", "index": 0,
+            "delta": {"type": "text-delta", "text": "token"},
+        }, {"run_id": "model", "index": index}])
+        assert sequence.stamp(event)["seq"] == index + 1
+
+
+def test_protocol_encoding_preserves_rich_payload_support(monkeypatch):
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from agent.modules.agent_runtime import protocol
+
+    encoded_types = []
+    original = protocol.jsonable_encoder
+
+    def track_encoder(value):
+        encoded_types.append(type(value))
+        return original(value)
+
+    monkeypatch.setattr(protocol, "jsonable_encoder", track_encoder)
+    event = protocol_event("tools", {
+        "output": AIMessage(content="answer"), "path": Path("example.txt"),
+        "time": datetime(2026, 1, 1, tzinfo=timezone.utc),
+    })
+    stamped = EventSequence("rich-run").stamp(event)
+    assert encoded_types == [AIMessage, type(Path("example.txt")), datetime]
+    assert stamped["params"]["data"]["output"]["content"] == "answer"
+    assert stamped["params"]["data"]["path"] == "example.txt"
+    json.dumps(stamped)
+
+
 def compile_graph(node, *, saver=None):
     builder = StateGraph(MessagesState)
     builder.add_node("work", node)

@@ -664,6 +664,7 @@ def _build_web_search_tool(config: dict[str, ToolConfigValue]) -> StructuredTool
         coroutine=_search_async,
         name=WEB_SEARCH_TOOL_NAME,
         description=WEB_SEARCH_TOOL_DESCRIPTION,
+        metadata={"parallel_safe": True},
     )
 
 

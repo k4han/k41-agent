@@ -24,6 +24,7 @@ class DecisionAgentState(BaseState):
     """State for decision-guided context curation agent."""
 
     directory_tree: Optional[str] = None
+    decision_message_id: Optional[str] = None
     candidate_files: Optional[list[str]] = None
     included_files: Optional[list[dict]] = None
     curated_context: Optional[str] = None

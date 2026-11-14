@@ -277,6 +277,23 @@ async def test_replay_keeps_all_events_and_final_after_spilling_to_disk(monkeypa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["ascii", "\U0001f600" * 100])
+async def test_replay_memory_estimate_bounds_unicode_and_oversized_events(monkeypatch, text):
+    monkeypatch.setattr(stream_module, "MAX_BUFFER_BYTES", 8_192)
+    session = ChatStreamSession("estimated-buffer", {})
+    expected = [{"type": "message", "content": text, "index": index} for index in range(30)]
+    expected.append({"type": "final", "content": text * 10_000})
+    try:
+        for update in expected:
+            await session.push_event(_wire_event(update))
+            assert session._event_log._memory_bytes <= stream_module.MAX_BUFFER_BYTES
+        session.done = True
+        assert [event async for event in _subscribe_updates(session)] == expected
+    finally:
+        session.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("memory_limit", [128, 8_192])
 async def test_slow_and_fast_subscribers_keep_independent_cursors_and_bounded_wakeups(monkeypatch, memory_limit) -> None:
     monkeypatch.setattr(stream_module, "MAX_BUFFER_BYTES", memory_limit)

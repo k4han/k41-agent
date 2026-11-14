@@ -17,6 +17,18 @@ from langgraph.stream import CustomTransformer, ProtocolEvent
 from agent.shared.infrastructure.parsing import extract_message_thinking
 
 
+def _encode_stream_data(value: Any) -> Any:
+    """Normalize native JSON cheaply, using FastAPI only for rich objects."""
+    if type(value) in (str, int, float, bool, type(None)):
+        return value
+    if isinstance(value, dict):
+        if all(type(key) is str for key in value):
+            return {key: _encode_stream_data(item) for key, item in value.items()}
+    elif isinstance(value, (list, tuple)):
+        return [_encode_stream_data(item) for item in value]
+    return jsonable_encoder(value)
+
+
 def protocol_event(method: str, data: Any, namespace=()) -> ProtocolEvent:
     return {
         "type": "event",
@@ -24,7 +36,7 @@ def protocol_event(method: str, data: Any, namespace=()) -> ProtocolEvent:
         "params": {
             "namespace": list(namespace),
             "timestamp": int(time.time() * 1000),
-            "data": jsonable_encoder(data),
+            "data": _encode_stream_data(data),
         },
     }
 
@@ -37,9 +49,10 @@ class EventSequence:
         self.seq = 0
 
     def stamp(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Stamp an event already normalized at the protocol boundary."""
         self.seq += 1
         return {
-            **jsonable_encoder(event),
+            **event,
             "seq": self.seq,
             "event_id": f"{self.run_id}:{self.seq}",
         }
@@ -336,7 +349,7 @@ async def stream_graph(
                 first_values = False
             if protocol_events:
                 for item in native:
-                    yield "protocol", jsonable_encoder(item)
+                    yield "protocol", _encode_stream_data(item)
             if namespace:
                 continue
             if method == "messages" and chunk is not None and "messages" in modes:

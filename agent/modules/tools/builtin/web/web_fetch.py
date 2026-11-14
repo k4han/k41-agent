@@ -395,6 +395,7 @@ def _build_web_fetch_tool(config: dict[str, ToolConfigValue]) -> StructuredTool:
         coroutine=_fetch_async,
         name=WEB_FETCH_TOOL_NAME,
         description=WEB_FETCH_TOOL_DESCRIPTION,
+        metadata={"parallel_safe": True},
     )
 
 

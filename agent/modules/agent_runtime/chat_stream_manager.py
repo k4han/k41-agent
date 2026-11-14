@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sys
 import tempfile
 from bisect import bisect_right
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -49,24 +48,29 @@ def _snapshot_json(value: Any) -> Any:
 
 
 def _snapshot_json_with_size(value: Any) -> tuple[Any, int]:
-    """Snapshot an event and conservatively account for its retained memory."""
+    """Snapshot JSON and estimate memory without measuring every Python object.
+
+    Container overhead and four bytes per character deliberately overestimate
+    typical JSON payloads, including non-ASCII text. Snapshots still isolate
+    replay from producer and subscriber mutations.
+    """
     if isinstance(value, dict):
         result = {}
-        size = 0
+        size = 256 + 64 * len(value)
         for key, item in value.items():
             child, child_size = _snapshot_json_with_size(item)
             result[key] = child
-            size += sys.getsizeof(key) + child_size
-        return result, sys.getsizeof(result) + size
+            size += (80 + 4 * len(key) if isinstance(key, str) else 32) + child_size
+        return result, size
     if isinstance(value, (list, tuple)):
         result = []
-        size = 0
+        size = 64 + 16 * len(value)
         for item in value:
             child, child_size = _snapshot_json_with_size(item)
             result.append(child)
             size += child_size
-        return result, sys.getsizeof(result) + size
-    return value, sys.getsizeof(value)
+        return result, size
+    return value, 80 + 4 * len(value) if isinstance(value, str) else 32
 
 
 class _ReplayLog:
