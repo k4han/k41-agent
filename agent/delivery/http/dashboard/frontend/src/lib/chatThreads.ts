@@ -99,6 +99,10 @@ export type ThreadMessagesPayload = {
   thread_id: string;
   active_checkpoint_id?: string;
   messages: ThreadMessage[];
+  total_messages?: number;
+  total_user_messages?: number;
+  has_more?: boolean;
+  next_before?: number | null;
   pending_requests?: Record<string, unknown>[];
   pending_browser_handoffs?: Record<string, unknown>[];
   resume_error?: { checkpoint_id: string; code: string; content: string; message?: string } | null;

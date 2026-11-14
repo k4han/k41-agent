@@ -1611,15 +1611,24 @@ def test_dashboard_chat_thread_messages_include_agent_and_model_metadata(
 ) -> None:
     conversations_module = importlib.import_module("agent.modules.conversations")
 
-    async def fake_get_thread_messages_payload(
+    async def fake_get_thread_messages_page(
         thread_id: str,
         checkpoint_id=None,
         include_branch_metadata=False,
+        limit=100,
+        before=None,
     ):
         assert thread_id == "api_dashboard_123"
         assert checkpoint_id is None
         assert include_branch_metadata is True
-        return ([{"id": "user-1", "role": "user", "content": "hello"}], "checkpoint-1")
+        assert limit == 100
+        assert before is None
+        return {
+            "messages": [{"id": "user-1", "role": "user", "content": "hello"}],
+            "active_checkpoint_id": "checkpoint-1", "total_messages": 1,
+            "total_user_messages": 1,
+            "has_more": False, "next_before": None,
+        }
 
     async def fake_get_conversation_thread(thread_id: str):
         assert thread_id == "api_dashboard_123"
@@ -1651,8 +1660,8 @@ def test_dashboard_chat_thread_messages_include_agent_and_model_metadata(
     _patch_dashboard_attr(monkeypatch, "get_thread_resume_error", fake_get_thread_resume_error)
     _patch_dashboard_attr(
         monkeypatch,
-        "get_thread_messages_payload",
-        fake_get_thread_messages_payload,
+        "get_thread_messages_page",
+        fake_get_thread_messages_page,
     )
     _patch_dashboard_attr(
         monkeypatch,

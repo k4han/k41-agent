@@ -5,6 +5,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { protocolFixture } from './protocol-fixture.mjs';
 
 const staticRoot = fileURLToPath(new URL('../../static/', import.meta.url));
 const executable = process.env.BROWSER_EXECUTABLE || [
@@ -61,13 +62,32 @@ const fixtures = {
 };
 const historyRequests = [];
 const writes = [];
+const edits = [];
 let failHistory = false;
 let holdHistory = false;
 let heldHistory;
 let failRename = false;
+let paginateHistory = false;
+let historyPageSize = 2;
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (req.method !== 'GET') writes.push(req.url);
+  if (url.pathname === '/v2/api/chat/events/edit') {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    const payload = JSON.parse(body);
+    edits.push(payload);
+    history.active_checkpoint_id = 'regenerated';
+    history.messages = [
+      ...history.messages.slice(0, payload.message_index + 1),
+      { id: 'regenerated-answer', role: 'assistant', content: 'Regenerated answer',
+        message_index: payload.message_index + 1, source_checkpoint_id: 'regenerated' },
+    ];
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    protocolFixture(res, threadId);
+    res.end(JSON.stringify({ type: 'message', content: 'Regenerated answer' }) + '\n');
+    return;
+  }
   if (url.pathname === '/dashboard-api/sessions/events') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     res.write('event: snapshot\ndata: {"sessions":[]}\n\n');
@@ -86,12 +106,20 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const checkpointId = url.searchParams.get('checkpoint_id');
-      historyRequests.push({ checkpointId });
+      const before = url.searchParams.get('before');
+      historyRequests.push({ checkpointId, before });
       if (failHistory) {
         res.writeHead(503).end(JSON.stringify({ detail: 'History is temporarily unavailable.' }));
         return;
       }
-      const payload = checkpointId === 'older' ? older : history;
+      let payload = checkpointId === 'older' ? older : history;
+      payload = { ...payload, total_user_messages: payload.messages.filter(message => message.role === 'user').length };
+      if (paginateHistory) {
+        const end = before === null ? payload.messages.length : Number(before);
+        const start = Math.max(0, end - historyPageSize);
+        payload = { ...payload, messages: payload.messages.slice(start, end),
+          total_messages: payload.messages.length, has_more: start > 0, next_before: start || null };
+      }
       if (holdHistory) { heldHistory = { res, payload }; return; }
       res.end(JSON.stringify(payload));
     } else {
@@ -166,6 +194,12 @@ try {
     await js(`document.querySelector('.chat-header button[aria-label="Conversation actions"]').click()`);
     await until(() => js('!!document.querySelector(".chat-actions-menu")'), 'conversation menu');
   };
+  const userMessageCount = async () => {
+    await openMenu();
+    const count = await js('Number(document.querySelectorAll(".chat-session-insights dd")[1].textContent)');
+    await js('document.querySelector(".chat-actions-menu").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))');
+    return count;
+  };
   const openExport = async () => {
     await openMenu();
     await until(() => js(`Array.from(document.querySelectorAll('.chat-actions-menu button')).find(button => button.textContent.includes('Export conversation'))?.disabled === false`), 'export available');
@@ -235,6 +269,22 @@ try {
   await until(() => exportedFiles().some(name => !beforeTools.has(name)), 'download tool activity');
   await until(() => js('!document.querySelector(".dialog")'), 'close tool activity export');
   assert.ok(fs.readFileSync(path.join(downloads, exportedFiles().find(name => !beforeTools.has(name))), 'utf8').includes('Tool output'));
+
+  paginateHistory = true;
+  await call('Page.reload');
+  await until(() => js(`Array.from(document.querySelectorAll('button')).some(button => button.textContent === 'Load earlier messages')`), 'paginated history loaded');
+  assert.equal(await js(`document.querySelector('.transcript').textContent.includes('Revised prompt')`), false);
+  assert.equal(await userMessageCount(), 1, 'session count includes prompts outside the loaded page');
+  const requestsBeforeExport = historyRequests.length;
+  const paginatedExport = JSON.parse(await exportFile('json'));
+  assert.deepEqual(paginatedExport.messages.map(message => message.id), history.messages.map(message => message.id));
+  assert.equal(historyRequests.length - requestsBeforeExport, 2, 'export reads every history page');
+  assert.deepEqual(historyRequests.at(-1), { checkpointId: 'latest', before: '2' });
+  await js(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Load earlier messages').click()`);
+  await until(() => js(`document.querySelector('.transcript').textContent.includes('Revised prompt')`), 'earlier messages rendered');
+  assert.deepEqual(historyRequests.at(-1), { checkpointId: 'latest', before: '2' });
+  assert.equal(await js(`Array.from(document.querySelectorAll('button')).some(button => button.textContent === 'Load earlier messages')`), false);
+  assert.equal(await userMessageCount(), 1, 'loading older pages does not change the session count');
 
   await js(`document.querySelector('button[aria-label="Previous branch"]').click()`);
   await until(() => js('document.querySelector(".message-branch-count")?.textContent.trim() === "1/2"'), 'older branch loaded');
@@ -312,8 +362,52 @@ try {
   assert.equal(await js('Array.from(document.querySelectorAll(".chat-actions-menu > button")).every(button => button.disabled)'), true, 'new chats disable conversation actions');
   assert.ok((await js('document.querySelector(".chat-session-insights").textContent')).includes('Unavailable'));
   assert.equal(writes.length, 2, 'only the explicit rename attempts write to the server');
+
+  historyPageSize = 100;
+  history.active_checkpoint_id = 'long-checkpoint';
+  const previousTurns = Array.from({ length: 126 }, (_, index) => [
+    { id: `user-${index}`, role: 'user', content: `Question ${index}`,
+      message_index: index * 2, source_checkpoint_id: 'prior-checkpoint' },
+    { id: `answer-${index}`, role: 'assistant', content: `Answer ${index}`,
+      message_index: index * 2 + 1, source_checkpoint_id: 'prior-checkpoint' },
+  ]).flat();
+  const promptIndex = previousTurns.length;
+  history.messages = [
+    ...previousTurns,
+    { id: 'long-prompt', role: 'user', content: 'Long original question',
+      message_index: promptIndex, source_checkpoint_id: 'prompt-checkpoint' },
+    ...Array.from({ length: 110 }, (_, index) => [
+      { id: `long-call-${index}`, role: 'assistant', content: '',
+        tool_calls: [{ id: `long-tool-${index}`, name: 'read_file', args: { path: `file-${index}` } }] },
+      { id: `long-result-${index}`, role: 'tool', tool_call_id: `long-tool-${index}`,
+        name: 'read_file', content: `Result ${index}` },
+    ]).flat(),
+    { id: 'long-answer', role: 'assistant', content: 'Long final answer',
+      message_index: promptIndex + 221, source_checkpoint_id: 'long-checkpoint' },
+  ];
+  await navigate(`/c/${encodeURIComponent(threadId)}`);
+  await until(() => js('document.querySelector(\'button[aria-label="Regenerate response"]\')?.disabled === false'), 'long turn loaded');
+  assert.equal(await js('document.querySelector(".transcript").textContent.includes("Long original question")'), false);
+  assert.equal(await userMessageCount(), 127, 'all 127 user messages are counted with none on the latest page');
+  failHistory = true;
+  await js('document.querySelector(\'button[aria-label="Regenerate response"]\').click()');
+  await until(() => js('document.body.textContent.includes("History is temporarily unavailable.")'), 'regeneration history error');
+  assert.equal(edits.length, 0, 'failed prompt loading never starts a new run');
+  failHistory = false;
+  const requestsBeforeRegeneration = historyRequests.length;
+  await js('document.querySelector(\'button[aria-label="Regenerate response"]\').click()');
+  await until(() => edits.length === 1, 'regeneration finds the original prompt');
+  assert.equal(edits[0].message, 'Long original question');
+  assert.equal(edits[0].message_index, promptIndex);
+  assert.equal(edits[0].source_checkpoint_id, 'prompt-checkpoint');
+  assert.deepEqual(historyRequests.slice(requestsBeforeRegeneration).filter(request => request.before !== null), [
+    { checkpointId: 'long-checkpoint', before: '374' },
+    { checkpointId: 'long-checkpoint', before: '274' },
+  ]);
+  await until(() => js('document.querySelector(".transcript").textContent.includes("Regenerated answer")'), 'regenerated answer rendered');
+  assert.equal(await userMessageCount(), 127, 'regeneration preserves the total user message count');
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
-  console.log('PASS: conversation menu ordering, session insights, renaming, exports, selected branches, retries, cancellation, and mobile layout.');
+  console.log('PASS: conversation menus, paginated history, session counts, long-turn regeneration, complete exports, selected branches, retries, cancellation, and mobile layout.');
 } finally {
   heldHistory?.res.end();
   if (call && ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});

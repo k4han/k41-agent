@@ -53,12 +53,12 @@ export const API_PATHS = {
   providersUpdateCatalog: "/dashboard-api/providers/update-catalog",
   settings: "/settings",
   settingsKey: (key: string) => `/settings/${encodeURIComponent(key)}`,
-  thread: (threadId: string, checkpointId?: string) => {
+  thread: (threadId: string, checkpointId?: string, before?: number) => {
     const path = `/dashboard-api/chat-history/${encodeURIComponent(threadId)}`;
-    if (!checkpointId) {
-      return path;
-    }
-    return `${path}?checkpoint_id=${encodeURIComponent(checkpointId)}`;
+    const query = new URLSearchParams();
+    if (checkpointId) query.set("checkpoint_id", checkpointId);
+    if (before !== undefined) query.set("before", String(before));
+    return query.size ? `${path}?${query}` : path;
   },
   taskCancel: (taskId: string) => `/tasks/${encodeURIComponent(taskId)}/cancel`,
   schedulerJob: (jobId: string) => `/scheduler/jobs/${encodeURIComponent(jobId)}`,

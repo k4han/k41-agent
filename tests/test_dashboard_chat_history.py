@@ -27,12 +27,19 @@ async def test_chat_history_queries_overlap_and_use_resolved_checkpoint(monkeypa
             ready[phase].set()
         await asyncio.wait_for(ready[phase].wait(), timeout=1)
 
-    async def messages(thread, *, checkpoint_id, include_branch_metadata):
+    async def messages(thread, *, checkpoint_id, include_branch_metadata, limit, before):
         assert thread == thread_id
         assert checkpoint_id == "requested-checkpoint"
         assert include_branch_metadata is True
+        assert limit == 100
+        assert before is None
         await synchronize(0, "messages")
-        return [{"role": "user", "content": "hello"}], "resolved-checkpoint"
+        return {
+            "messages": [{"role": "user", "content": "hello"}],
+            "active_checkpoint_id": "resolved-checkpoint", "total_messages": 1,
+            "total_user_messages": 1,
+            "has_more": False, "next_before": None,
+        }
 
     async def metadata(thread):
         assert thread == thread_id
@@ -68,7 +75,7 @@ async def test_chat_history_queries_overlap_and_use_resolved_checkpoint(monkeypa
     if persistence_ready:
         container.browser_service = SimpleNamespace(owned_handoff=handoff)
     monkeypatch.setattr(container_module, "require_active_container", lambda: container)
-    monkeypatch.setattr(conversations, "get_thread_messages_payload", messages)
+    monkeypatch.setattr(conversations, "get_thread_messages_page", messages)
     monkeypatch.setattr(conversations, "get_conversation_thread", metadata)
     monkeypatch.setattr(conversations, "workspace_ref_for_thread", workspace)
     monkeypatch.setattr(conversations, "get_thread_resume_error", resume_error)
@@ -101,7 +108,7 @@ async def test_parallel_chat_history_preserves_checkpoint_errors(monkeypatch, er
     async def no_metadata(*args, **kwargs):
         return None
 
-    monkeypatch.setattr(conversations, "get_thread_messages_payload", messages)
+    monkeypatch.setattr(conversations, "get_thread_messages_page", messages)
     monkeypatch.setattr(conversations, "get_conversation_thread", no_metadata)
     monkeypatch.setattr(conversations, "workspace_ref_for_thread", no_metadata)
     with pytest.raises(HTTPException) as caught:

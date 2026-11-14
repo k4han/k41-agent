@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import Any, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -35,6 +35,15 @@ class ConversationHistoryUnavailableError(RuntimeError):
 
 class CheckpointNotFoundError(LookupError):
     """Raised when a requested checkpoint does not exist for a thread."""
+
+
+class ThreadMessagesPage(TypedDict):
+    messages: list[dict[str, Any]]
+    active_checkpoint_id: str
+    total_messages: int
+    total_user_messages: int
+    has_more: bool
+    next_before: int | None
 
 
 def get_history_checkpointer():
@@ -500,14 +509,19 @@ def _message_source_by_index(
     *,
     active_messages: list[Any],
     active_path: list[Any],
+    start: int = 0,
+    end: int | None = None,
 ) -> dict[int, tuple[str, str]]:
     sources: dict[int, tuple[str, str]] = {}
     for checkpoint_tuple in active_path:
         checkpoint_messages = _checkpoint_messages(checkpoint_tuple)
         checkpoint_id = _checkpoint_id_from_tuple(checkpoint_tuple)
         parent_id = _parent_checkpoint_id(checkpoint_tuple)
-        max_index = min(len(active_messages), len(checkpoint_messages))
-        for index in range(max_index):
+        max_index = min(
+            len(active_messages), len(checkpoint_messages),
+            end if end is not None else len(active_messages),
+        )
+        for index in range(start, max_index):
             if index in sources:
                 continue
             if _message_prefix_key(checkpoint_messages, index + 1) != _message_prefix_key(
@@ -524,9 +538,12 @@ def _branch_metadata_by_index(
     active_messages: list[Any],
     active_checkpoint_id: str,
     leaf_tuples: list[Any],
+    start: int = 0,
+    end: int | None = None,
 ) -> dict[int, dict[str, Any]]:
     branches: dict[int, dict[str, Any]] = {}
-    for index, active_message in enumerate(active_messages):
+    for index in range(start, end if end is not None else len(active_messages)):
+        active_message = active_messages[index]
         if not isinstance(active_message, HumanMessage):
             continue
         prefix_key = _message_prefix_key(active_messages, index)
@@ -609,6 +626,8 @@ def _serialize_thread_messages(
     *,
     sources: dict[int, tuple[str, str]] | None = None,
     branches: dict[int, dict[str, Any]] | None = None,
+    start: int = 0,
+    end: int | None = None,
 ) -> list[dict[str, Any]]:
     sources = sources or {}
     branches = branches or {}
@@ -620,7 +639,8 @@ def _serialize_thread_messages(
     forkable = set() if is_acp_thread else forkable_message_indices(messages)
 
     result = []
-    for message_index, msg in enumerate(messages):
+    for message_index in range(start, end if end is not None else len(messages)):
+        msg = messages[message_index]
         entry: dict[str, Any] = {"id": getattr(msg, "id", None)}
         if isinstance(msg, HumanMessage):
             attachments = _serialize_message_attachments(msg)
@@ -679,16 +699,30 @@ def _serialize_thread_messages(
     return result
 
 
-async def get_thread_messages_payload(
+async def get_thread_messages_page(
     thread_id: str,
     *,
     checkpoint_id: str | None = None,
     include_branch_metadata: bool = False,
-) -> tuple[list[dict[str, Any]], str]:
-    """Get serialized messages and active checkpoint from a thread.
+    limit: int | None = 100,
+    before: int | None = None,
+) -> ThreadMessagesPage:
+    """Read a chronological page ending before an absolute message index.
 
+    The latest page is returned when before is omitted. Pin checkpoint_id when
+    reading earlier pages so concurrent writes cannot shift message boundaries.
+    Only the selected page is serialized and enriched.
     Raises CheckpointNotFoundError when an explicit checkpoint_id cannot be loaded.
     """
+    if limit is not None and limit < 1:
+        raise ValueError("Message limit must be positive.")
+    if before is not None and before < 0:
+        raise ValueError("Message boundary must not be negative.")
+    empty_page: ThreadMessagesPage = {
+        "messages": [], "active_checkpoint_id": "", "total_messages": 0,
+        "total_user_messages": 0,
+        "has_more": False, "next_before": None,
+    }
     thread_id = resolve_thread_id(thread_id)
     checkpointer = get_history_checkpointer()
     config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
@@ -701,18 +735,31 @@ async def get_thread_messages_payload(
         logger.warning("Failed to get checkpoint for thread %s: %s", thread_id, exc)
         if checkpoint_id:
             raise CheckpointNotFoundError("Checkpoint not found.") from exc
-        return [], ""
+        return empty_page
 
     if checkpoint_tuple is None:
         if checkpoint_id:
             raise CheckpointNotFoundError("Checkpoint not found.")
-        return [], ""
+        return empty_page
 
     active_checkpoint_id = _checkpoint_id_from_tuple(checkpoint_tuple)
     messages = _checkpoint_messages(checkpoint_tuple)
+    end = min(before, len(messages)) if before is not None else len(messages)
+    start = max(0, end - limit) if limit is not None else 0
+    page: ThreadMessagesPage = {
+        "messages": [], "active_checkpoint_id": active_checkpoint_id,
+        "total_messages": len(messages), "has_more": start > 0,
+        "total_user_messages": sum(isinstance(message, HumanMessage) for message in messages),
+        "next_before": start if start > 0 else None,
+    }
+    if start == end:
+        return page
     from agent.modules.agent_runtime import enrich_delegated_calls
     if not include_branch_metadata:
-        return await enrich_delegated_calls(_serialize_thread_messages(messages), thread_id), active_checkpoint_id
+        page["messages"] = await enrich_delegated_calls(
+            _serialize_thread_messages(messages, start=start, end=end), thread_id,
+        )
+        return page
 
     checkpoint_tuples = await _list_checkpoint_tuples(thread_id)
     checkpoint_ids = {
@@ -725,20 +772,41 @@ async def get_thread_messages_payload(
     sources = _message_source_by_index(
         active_messages=messages,
         active_path=active_path,
+        start=start,
+        end=end,
     )
     branches = _branch_metadata_by_index(
         active_messages=messages,
         active_checkpoint_id=active_checkpoint_id,
         leaf_tuples=_leaf_checkpoint_tuples(checkpoint_tuples),
+        start=start,
+        end=end,
     )
-    return (
-        await enrich_delegated_calls(_serialize_thread_messages(
+    page["messages"] = await enrich_delegated_calls(
+        _serialize_thread_messages(
             messages,
             sources=sources,
             branches=branches,
-        ), thread_id),
-        active_checkpoint_id,
+            start=start,
+            end=end,
+        ),
+        thread_id,
     )
+    return page
+
+
+async def get_thread_messages_payload(
+    thread_id: str,
+    *,
+    checkpoint_id: str | None = None,
+    include_branch_metadata: bool = False,
+) -> tuple[list[dict[str, Any]], str]:
+    """Read the complete message payload for internal conversation operations."""
+    page = await get_thread_messages_page(
+        thread_id, checkpoint_id=checkpoint_id,
+        include_branch_metadata=include_branch_metadata, limit=None,
+    )
+    return page["messages"], page["active_checkpoint_id"]
 
 
 async def get_thread_messages(thread_id: str) -> list[dict[str, Any]]:

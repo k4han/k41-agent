@@ -3,9 +3,8 @@ import { createSignal, createUniqueId, onCleanup, Show } from "solid-js";
 
 import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
-import { apiFetch } from "@/lib/api";
 import { createChatExport, downloadChatExport, type ChatExportFormat, type ChatExportTarget } from "@/lib/chatExport";
-import { threadApiPath, type ThreadMessagesPayload } from "@/lib/chatThreads";
+import { fetchCompleteThread } from "@/lib/threadHistory";
 
 export function ExportChatDialog(props: { target: ChatExportTarget | null; onClose: () => void }) {
   const [format, setFormat] = createSignal<ChatExportFormat>("markdown");
@@ -33,9 +32,7 @@ export function ExportChatDialog(props: { target: ChatExportTarget | null; onClo
     setExporting(true);
     setError("");
     try {
-      const payload = await apiFetch<ThreadMessagesPayload>(threadApiPath(target.thread_id, target.checkpoint_id), {
-        signal: request.signal,
-      });
+      const payload = await fetchCompleteThread(target.thread_id, target.checkpoint_id, request.signal);
       if (request.signal.aborted) return;
       downloadChatExport(createChatExport({ ...payload, title: target.title || payload.title }, format(), includeTools()));
       showToast("Conversation exported.", "success");

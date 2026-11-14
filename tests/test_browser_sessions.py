@@ -1563,8 +1563,11 @@ async def test_history_returns_live_handoff_independently_of_checkpoint(browser,
         prior = await browser.repository.invocation("chat", "handoff")
         await browser.repository.record("chat", "handoff", prior.arguments_hash, "handoff", pending)
     monkeypatch.setattr(browser.container, "_persistence_ready", True)
-    messages = AsyncMock(return_value=([], checkpoint_id or "current-checkpoint"))
-    monkeypatch.setattr(conversations, "get_thread_messages_payload", messages)
+    messages = AsyncMock(return_value={
+        "messages": [], "active_checkpoint_id": checkpoint_id or "current-checkpoint",
+        "total_messages": 0, "total_user_messages": 0, "has_more": False, "next_before": None,
+    })
+    monkeypatch.setattr(conversations, "get_thread_messages_page", messages)
     monkeypatch.setattr(conversations, "get_conversation_thread", AsyncMock(return_value={"agent_name": "default"}))
     monkeypatch.setattr(conversations, "workspace_ref_for_thread", AsyncMock(return_value=None))
     monkeypatch.setattr(conversations, "get_thread_resume_error", AsyncMock(return_value=None))
@@ -1579,7 +1582,8 @@ async def test_history_returns_live_handoff_independently_of_checkpoint(browser,
     assert response.json().get("pending_browser_handoffs", []) == ([expected] if admin == "1" else [])
     if expired and admin == "1":
         assert not browser.sessions
-    messages.assert_awaited_once_with(browser.canonical("chat"), checkpoint_id=checkpoint_id, include_branch_metadata=True)
+    messages.assert_awaited_once_with(browser.canonical("chat"), checkpoint_id=checkpoint_id,
+        include_branch_metadata=True, limit=100, before=None)
     assert (await graph.aget_state(config)).tasks[0].interrupts
     resumed = await graph.ainvoke(Command(resume={
         "action": "browser_handoff", "handoff_id": pending["handoff_id"], "decision": "return",

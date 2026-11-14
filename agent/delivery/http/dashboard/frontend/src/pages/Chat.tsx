@@ -39,6 +39,7 @@ import {
   toThreadTranscript,
 } from "@/lib/chatThreads";
 import type { NewChatNavigationState, ThreadMessagesPayload } from "@/lib/chatThreads";
+import { fetchEarlierThreadPage, fetchThreadForRegeneration } from "@/lib/threadHistory";
 import type { ChatExportTarget } from "@/lib/chatExport";
 import {
   localWorkspaceRef,
@@ -207,6 +208,7 @@ export function ChatPage() {
   const [threadData, setThreadData] = createSignal<ThreadMessagesPayload>();
   const [threadError, setThreadError] = createSignal("");
   const [threadLoading, setThreadLoading] = createSignal(false);
+  const [earlierMessagesLoading, setEarlierMessagesLoading] = createSignal(false);
   const [currentThreadId, setCurrentThreadId] = createSignal("");
   const [browserHandoffThreads, setBrowserHandoffThreads] = createSignal(new Set<string>());
   const updateBrowserHandoff = (pending: boolean, threadId: string) => {
@@ -777,7 +779,7 @@ export function ChatPage() {
     }
   };
 
-  const applyThreadPayload = (payload: ThreadMessagesPayload, preserveStreamError = false) => batch(() => {
+  const applyThreadPayload = (payload: ThreadMessagesPayload, preserveStreamError = false, showEarlier = false) => batch(() => {
     flushPendingMessageChunks();
     const lastItem = preserveStreamError ? items().at(-1) : undefined;
     const streamErrors = lastItem?.type === "message" && lastItem.role === "error"
@@ -790,7 +792,7 @@ export function ChatPage() {
     setCurrentThreadId(payload.thread_id);
     setActiveCheckpointId(payload.active_checkpoint_id || "");
     setWorkspace(payload.workspace || null);
-    if (!persistedStreams.has(payload.thread_id)) {
+    if (showEarlier || !persistedStreams.has(payload.thread_id)) {
       updateBrowserHandoff(Boolean(payload.pending_browser_handoffs?.length), payload.thread_id);
       const historyItems = [
         ...toThreadTranscript(payload.messages, payload.thread_id),
@@ -811,8 +813,8 @@ export function ChatPage() {
       }] : streamErrors;
       setItems([...historyItems, ...savedErrors]);
     }
-    scroll.setAutoScroll(true);
-    scroll.scrollToBottom(true);
+    scroll.setAutoScroll(!showEarlier);
+    if (!showEarlier) scroll.scrollToBottom(true);
   });
 
   const onThreadCreated = (threadId: string, streamThreadIdRef: StreamThreadIdRef) => batch(() => {
@@ -938,7 +940,7 @@ export function ChatPage() {
     return Boolean(task && ACTIVE_TASK_STATUSES.has(task.status));
   });
   const conversationBusy = createMemo(() => (
-    streaming() || threadLoading() || backgroundTaskActive() || backgroundLive() || Boolean(activeSession()) || forking()
+    streaming() || threadLoading() || earlierMessagesLoading() || backgroundTaskActive() || backgroundLive() || Boolean(activeSession()) || forking()
   ));
   const stopActive = createMemo(() => (
     streaming() || backgroundTaskActive() || backgroundLive() || Boolean(activeSession())
@@ -958,6 +960,7 @@ export function ChatPage() {
     threadLoadController?.abort();
     const requestController = new AbortController();
     threadLoadController = requestController;
+    setEarlierMessagesLoading(false);
     setCurrentThreadId(threadId);
     if (threadData()?.thread_id !== threadId) setThreadData(undefined);
     setThreadError("");
@@ -1009,6 +1012,7 @@ export function ChatPage() {
     threadLoadController?.abort();
     const requestController = new AbortController();
     threadLoadController = requestController;
+    setEarlierMessagesLoading(false);
     try {
       const payload = await apiFetch<ThreadMessagesPayload>(
         threadApiPath(threadId, checkpointId),
@@ -1022,6 +1026,31 @@ export function ChatPage() {
       if (!isUnmounting && requestId === threadLoadRequestId && !requestController.signal.aborted) {
         showToast(err instanceof Error ? err.message : "Failed to refresh thread", "error");
       }
+    }
+  };
+
+  const loadEarlierMessages = async () => {
+    const current = threadData();
+    if (!current?.has_more || conversationBusy() || compacting()) return;
+    const requestId = threadLoadRequestId;
+    const requestController = threadLoadController;
+    setEarlierMessagesLoading(true);
+    try {
+      const page = await fetchEarlierThreadPage(current, requestController?.signal);
+      if (isUnmounting || requestId !== threadLoadRequestId || current !== threadData() || stopActive() || compacting()) return;
+      applyThreadPayload({
+        ...current, messages: [...page.messages, ...current.messages],
+        has_more: page.has_more, next_before: page.next_before,
+      }, true, true);
+      window.requestAnimationFrame(() => {
+        if (!isUnmounting && requestId === threadLoadRequestId && transcriptRef) transcriptRef.scrollTop = 0;
+      });
+    } catch (err) {
+      if (!isUnmounting && requestId === threadLoadRequestId && !requestController?.signal.aborted) {
+        showToast(err instanceof Error ? err.message : "Failed to load earlier messages", "error");
+      }
+    } finally {
+      if (!isUnmounting && requestId === threadLoadRequestId) setEarlierMessagesLoading(false);
     }
   };
 
@@ -1099,6 +1128,7 @@ export function ChatPage() {
       restoreSelection();
       scroll.clearTurnAnchor();
       setThreadLoading(false);
+      setEarlierMessagesLoading(false);
       if (threadId) void loadThread(threadId);
       else setItems([]);
     },
@@ -1219,7 +1249,7 @@ export function ChatPage() {
       showToast("Enter a message or attach a file.", "warning");
       return;
     }
-    if (threadLoading()) {
+    if (threadLoading() || earlierMessagesLoading()) {
       showToast("Wait for the thread to load.", "warning");
       return;
     }
@@ -1279,6 +1309,8 @@ export function ChatPage() {
     setCurrentStreamThreadId(streamThreadIdRef.id);
 
     if (!resume) {
+      setThreadData((current) => current?.total_user_messages !== undefined
+        ? { ...current, total_user_messages: current.total_user_messages + 1 } : current);
       appendItem(
         {
           type: "message",
@@ -1849,7 +1881,7 @@ export function ChatPage() {
     }
   };
 
-  const handleRegenerateMessage = (payload?: {
+  const handleRegenerateMessage = async (payload?: {
     itemId?: number;
     messageIndex?: number;
     sourceCheckpointId?: string;
@@ -1870,28 +1902,50 @@ export function ChatPage() {
       return;
     }
 
-    const currentItems = items();
-    let targetIndex = -1;
-    if (payload?.itemId !== undefined) {
-      targetIndex = currentItems.findIndex((it) => it.id === payload.itemId);
-    } else if (payload?.messageIndex !== undefined) {
-      targetIndex = currentItems.findIndex(
-        (it) => it.type === "message" && it.role === "assistant" && it.messageIndex === payload.messageIndex
-      );
-    }
-
-    const searchSlice = targetIndex >= 0 ? currentItems.slice(0, targetIndex) : currentItems;
-    for (let i = searchSlice.length - 1; i >= 0; i--) {
-      const it = searchSlice[i];
-      if (it.type === "message" && it.role === "user" && it.messageIndex !== undefined && it.sourceCheckpointId) {
-        void handleEditMessage({
-          itemId: it.id,
-          messageIndex: it.messageIndex,
-          sourceCheckpointId: it.sourceCheckpointId,
-          text: it.text || "",
-        });
-        return;
+    const findPrompt = () => {
+      const currentItems = items();
+      let targetIndex = payload?.itemId === undefined
+        ? -1 : currentItems.findIndex((item) => item.id === payload.itemId);
+      if (targetIndex < 0 && payload?.messageIndex !== undefined) {
+        targetIndex = currentItems.findIndex(
+          (item) => item.type === "message" && item.role === "assistant" && item.messageIndex === payload.messageIndex,
+        );
       }
+      const searchSlice = targetIndex >= 0 ? currentItems.slice(0, targetIndex) : currentItems;
+      for (let index = searchSlice.length - 1; index >= 0; index--) {
+        const item = searchSlice[index];
+        if (item.type === "message" && item.role === "user"
+          && item.messageIndex !== undefined && item.sourceCheckpointId) return item;
+      }
+      return undefined;
+    };
+
+    let prompt = findPrompt();
+    const current = threadData();
+    if (!prompt && current?.has_more) {
+      const requestId = threadLoadRequestId;
+      const requestController = threadLoadController;
+      setEarlierMessagesLoading(true);
+      try {
+        const expanded = await fetchThreadForRegeneration(current, payload?.messageIndex, requestController?.signal);
+        if (isUnmounting || requestId !== threadLoadRequestId || current !== threadData() || stopActive() || compacting()) return;
+        applyThreadPayload(expanded, true, true);
+        prompt = findPrompt();
+      } catch (err) {
+        if (!isUnmounting && requestId === threadLoadRequestId && !requestController?.signal.aborted) {
+          showToast(err instanceof Error ? err.message : "Failed to load the original prompt", "error");
+        }
+        return;
+      } finally {
+        if (!isUnmounting && requestId === threadLoadRequestId) setEarlierMessagesLoading(false);
+      }
+    }
+    if (prompt?.type === "message" && prompt.messageIndex !== undefined && prompt.sourceCheckpointId) {
+      void handleEditMessage({
+        itemId: prompt.id, messageIndex: prompt.messageIndex,
+        sourceCheckpointId: prompt.sourceCheckpointId, text: prompt.text || "",
+      });
+      return;
     }
     showToast("No earlier user prompt found to regenerate from.", "warning");
   };
@@ -2072,6 +2126,11 @@ export function ChatPage() {
           return;
         }
         setActiveCheckpointId(payload.active_checkpoint_id || "");
+        setThreadData((current) => current ? {
+          ...current, messages: payload.messages, active_checkpoint_id: payload.active_checkpoint_id,
+          total_messages: payload.messages.length, has_more: false, next_before: null,
+          total_user_messages: payload.messages.filter((message) => message.role === "user").length,
+        } : current);
         const newTranscriptItems = toThreadTranscript(payload.messages, threadId).map((item) => ({
           ...item,
           id: allocItemId(),
@@ -2205,7 +2264,8 @@ export function ChatPage() {
                   <ChatActionsMenu
                     threadId={currentThreadId()}
                     actionsDisabled={!currentThreadId() || conversationBusy() || compacting() || threadData()?.thread_id !== currentThreadId()}
-                    userMessages={items().filter((item) => item.type === "message" && item.role === "user").length}
+                    userMessages={threadData()?.total_user_messages
+                      ?? items().filter((item) => item.type === "message" && item.role === "user").length}
                     contextTokens={contextWindowData().hasReportedUsage || contextWindowData().estimated ? contextWindowData().totalTokens : null}
                     usage={threadUsage()}
                     backend={workspaceRef()?.backend}
@@ -2258,6 +2318,14 @@ export function ChatPage() {
                       onApplied={() => void workspaceRuntime.refresh()}
                       onContinue={(token) => workspaceRuntime.confirmRecovery("local", token)} />
                   </Show>
+                </div>
+              </Show>
+              <Show when={threadData()?.has_more && threadData()?.thread_id === currentThreadId()}>
+                <div class="row-wrap" style={{ "justify-content": "center", padding: "8px" }}>
+                  <button class="btn" type="button" disabled={conversationBusy() || compacting()}
+                    onClick={() => void loadEarlierMessages()}>
+                    {earlierMessagesLoading() ? "Loading earlier messages..." : "Load earlier messages"}
+                  </button>
                 </div>
               </Show>
               <ChatTranscript

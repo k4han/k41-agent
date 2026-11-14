@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import Annotated, Any
 
 from agent.shared.thread_ids import resolve_thread_id
 
@@ -40,7 +40,7 @@ from agent.modules.conversations import (
     get_checkpoint_stats,
     get_conversation_thread,
     get_thread_messages,
-    get_thread_messages_payload,
+    get_thread_messages_page,
     get_thread_resume_error,
     has_pending_interrupt,
     list_background_threads_with_stats,
@@ -238,15 +238,21 @@ async def get_chat_thread_messages(
     thread_id: str,
     checkpoint_id: str | None = Query(default=None, min_length=1, description="Specific checkpoint ID to load."),
     admin: str = Depends(get_current_admin),
+    limit: Annotated[int, Query(ge=1, le=500, description="Max messages to return.")] = 100,
+    before: Annotated[int | None, Query(ge=0, description="Load messages before this absolute index.")] = None,
 ) -> dict[str, Any]:
-    """Get all messages and metadata for a specific conversation thread."""
+    """Get recent messages and metadata, with older pages pinned to a checkpoint."""
+    if before is not None and not checkpoint_id:
+        raise HTTPException(status_code=422, detail="checkpoint_id is required when loading earlier messages.")
     thread_id = resolve_thread_id(thread_id)
     try:
-        (messages, active_checkpoint_id), metadata, workspace = await asyncio.gather(
-            get_thread_messages_payload(
+        page, metadata, workspace = await asyncio.gather(
+            get_thread_messages_page(
                 thread_id,
                 checkpoint_id=checkpoint_id,
                 include_branch_metadata=True,
+                limit=limit,
+                before=before,
             ),
             get_conversation_thread(thread_id),
             workspace_ref_for_thread(thread_id, include_default=False),
@@ -256,6 +262,7 @@ async def get_chat_thread_messages(
     except ConversationHistoryUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    active_checkpoint_id = page["active_checkpoint_id"]
     parsed = metadata or _parse_thread_id_safe(thread_id)
     from agent.modules.tools import pending_permission_requests
     from agent.bootstrap.container import require_active_container
@@ -276,13 +283,12 @@ async def get_chat_thread_messages(
     handoff = handoffs[0] if handoffs else None
     return {
         "thread_id": thread_id,
-        "active_checkpoint_id": active_checkpoint_id,
         "pending_requests": pending_requests,
         **({"pending_browser_handoffs": [handoff]} if handoff else {}),
         "resume_error": resume_error,
-        "messages": messages,
         "workspace": workspace.model_dump() if workspace else None,
         **parsed,
+        **page,
     }
 
 

@@ -26,11 +26,13 @@ SQLITE_BUSY_TIMEOUT_MS = 30_000
 
 
 def _configure_sqlite_connection(dbapi_connection, connection_record) -> None:
-    """Apply concurrency settings to each physical SQLite connection."""
+    """Apply concurrency and integrity settings to each physical SQLite connection."""
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
         cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA foreign_keys=ON")
     finally:
         cursor.close()
 
@@ -41,7 +43,7 @@ def _configure_sqlite_engine(engine: Engine) -> None:
 
 
 def create_sync_engine(database_url: str, **kwargs) -> Engine:
-    """Create a sync engine with the shared SQLite concurrency settings."""
+    """Create a sync engine with the shared SQLite connection settings."""
     engine = _create_sync_engine(_normalize_url_to_sync(database_url), **kwargs)
     _configure_sqlite_engine(engine)
     return engine

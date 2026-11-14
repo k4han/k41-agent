@@ -4,7 +4,8 @@ from contextlib import closing
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import MetaData, text
+from sqlalchemy import MetaData, select, text
+from sqlalchemy.exc import IntegrityError
 
 import agent.shared.infrastructure.db.engine as db_engine
 from agent.bootstrap.container import AppContainer, create_test_container, set_active_container
@@ -108,10 +109,14 @@ def test_sync_engine_configures_existing_database_and_new_connections(tmp_path, 
             for connection in (first, second):
                 assert connection.exec_driver_sql("PRAGMA journal_mode").scalar_one() == "wal"
                 assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 30_000
+                assert connection.exec_driver_sql("PRAGMA synchronous").scalar_one() == 1
+                assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
                 assert connection.exec_driver_sql("SELECT value FROM sample").scalar_one() == 42
         engine.dispose()
         with engine.connect() as connection:
             assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 30_000
+            assert connection.exec_driver_sql("PRAGMA synchronous").scalar_one() == 1
+            assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
     finally:
         engine.dispose()
 
@@ -122,6 +127,8 @@ def test_sync_engine_supports_in_memory_sqlite():
         with engine.connect() as connection:
             assert connection.exec_driver_sql("PRAGMA journal_mode").scalar_one() == "memory"
             assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 30_000
+            assert connection.exec_driver_sql("PRAGMA synchronous").scalar_one() == 1
+            assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
     finally:
         engine.dispose()
 
@@ -133,9 +140,13 @@ async def test_async_engine_configures_all_pooled_connections(shared_db):
         for connection in (first, second):
             assert (await connection.exec_driver_sql("PRAGMA journal_mode")).scalar_one() == "wal"
             assert (await connection.exec_driver_sql("PRAGMA busy_timeout")).scalar_one() == 30_000
+            assert (await connection.exec_driver_sql("PRAGMA synchronous")).scalar_one() == 1
+            assert (await connection.exec_driver_sql("PRAGMA foreign_keys")).scalar_one() == 1
     await engine.dispose()
     async with engine.connect() as connection:
         assert (await connection.exec_driver_sql("PRAGMA busy_timeout")).scalar_one() == 30_000
+        assert (await connection.exec_driver_sql("PRAGMA synchronous")).scalar_one() == 1
+        assert (await connection.exec_driver_sql("PRAGMA foreign_keys")).scalar_one() == 1
 
 
 @pytest.mark.asyncio
@@ -146,8 +157,31 @@ async def test_async_engine_supports_in_memory_sqlite(tmp_path):
         async with engine.connect() as connection:
             assert (await connection.exec_driver_sql("PRAGMA journal_mode")).scalar_one() == "memory"
             assert (await connection.exec_driver_sql("PRAGMA busy_timeout")).scalar_one() == 30_000
+            assert (await connection.exec_driver_sql("PRAGMA synchronous")).scalar_one() == 1
+            assert (await connection.exec_driver_sql("PRAGMA foreign_keys")).scalar_one() == 1
     finally:
         await close_async_engine(container=container)
+
+
+@pytest.mark.asyncio
+async def test_sqlite_enforces_foreign_keys_and_cascades_user_deletion(shared_db):
+    from agent.modules.users.models import User
+    from agent.shared.infrastructure.db.user_preferences import UserPreferences
+
+    engine = get_async_engine()
+    users = User.__table__
+    preferences = UserPreferences.__table__
+    async with engine.begin() as connection:
+        user_id = (await connection.execute(users.insert().returning(users.c.id))).scalar_one()
+        await connection.execute(preferences.insert().values(user_id=user_id, key="theme"))
+
+    with pytest.raises(IntegrityError, match="FOREIGN KEY constraint failed"):
+        async with engine.begin() as connection:
+            await connection.execute(preferences.insert().values(user_id=-1, key="theme"))
+
+    async with engine.begin() as connection:
+        await connection.execute(users.delete().where(users.c.id == user_id))
+        assert (await connection.execute(select(preferences.c.id))).all() == []
 
 
 @pytest.mark.asyncio
