@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import subprocess
@@ -327,7 +328,6 @@ class LocalWorkspaceBackend:
             except BaseException:
                 await service.processes.stop(job)
                 raise
-            import asyncio
             output = await asyncio.to_thread(job.retained_plain)
             limit = _clamp_max_output(max_output_chars)
             output, truncated = _truncate_tail(output, limit) if limit is not None else (output, False)
@@ -339,13 +339,15 @@ class LocalWorkspaceBackend:
             return CommandResult(output=f"[error] {exc.code}: {exc}", exit_code=1)
 
     async def tree(self, path: str | None = None) -> dict[str, Any]:
-        return list_workspace_tree(working_dir=str(self.root), path=path)
+        return await asyncio.to_thread(
+            list_workspace_tree, working_dir=str(self.root), path=path,
+        )
 
     async def file(self, path: str) -> dict[str, Any]:
         return get_workspace_file(working_dir=str(self.root), path=path)
 
     async def changes(self) -> dict[str, Any]:
-        result = get_workspace_changes(str(self.root))
+        result = await asyncio.to_thread(get_workspace_changes, str(self.root))
         changes = result.get("changes", [])
         status_by_path: dict[str, dict[str, Any]] = {}
         for change in changes:
@@ -362,7 +364,8 @@ class LocalWorkspaceBackend:
             elapsed = time.monotonic() - self._git_status_cache_ts
             if elapsed > GIT_STATUS_CACHE_TTL:
                 cached_status = None
-        return get_workspace_diff(
+        return await asyncio.to_thread(
+            get_workspace_diff,
             working_dir=str(self.root),
             path=path,
             cached_status=cached_status,

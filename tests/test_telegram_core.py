@@ -404,5 +404,5 @@ def test_telegram_webhook_feeds_update() -> None:
     finally:
         set_telegram_webhook_runtime(None)
 
-    assert response.status_code == 204
+    assert response.status_code == 200
     assert dispatcher.calls == [(bot, 99)]

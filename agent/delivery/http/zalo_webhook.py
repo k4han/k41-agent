@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response
 
 from agent.modules.channels import get_channel_webhook_runtime
 from agent.shared.config import get_config_service
@@ -28,6 +28,7 @@ def _expected_zalo_webhook_secret() -> str:
 @router.post("/channels/zalo/webhook")
 async def zalo_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     secret_token: str | None = Header(
         default=None,
         alias=ZALO_WEBHOOK_SECRET_HEADER,
@@ -64,14 +65,14 @@ async def zalo_webhook(
     if inner is None or "event_name" not in inner:
         raise HTTPException(status_code=400, detail="Invalid Zalo update payload.")
 
+    background_tasks.add_task(_process_zalo_webhook, payload=inner)
+    return Response(status_code=200)
+
+
+async def _process_zalo_webhook(*, payload: dict[str, Any]) -> None:
     try:
         from agent.modules.channels import handle_zalo_update
 
-        await handle_zalo_update(inner)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Zalo webhook handler failed.")
-        raise HTTPException(status_code=500, detail="Zalo handler failed.") from exc
-
-    return Response(status_code=204)
+        await handle_zalo_update(payload)
+    except Exception:
+        logger.exception("Zalo webhook processing failed: event=%s", payload.get("event_name"))

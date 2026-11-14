@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Header, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response
 
 from agent.modules.channels import get_channel_webhook_runtime
 from agent.shared.config import get_config_service
+
+if TYPE_CHECKING:
+    from aiogram.types import Update
+
+    from agent.modules.channels.telegram.bot import TelegramWebhookRuntime
 
 router = APIRouter(tags=["telegram"])
 logger = logging.getLogger(__name__)
@@ -26,6 +31,7 @@ def _expected_webhook_secret() -> str:
 @router.post("/channels/telegram/webhook")
 async def telegram_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     secret_token: str | None = Header(
         default=None,
         alias=TELEGRAM_WEBHOOK_SECRET_HEADER,
@@ -51,10 +57,12 @@ async def telegram_webhook(
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid Telegram update payload.") from exc
 
+    background_tasks.add_task(_process_telegram_webhook, runtime=runtime, update=update)
+    return Response(status_code=200)
+
+
+async def _process_telegram_webhook(*, runtime: TelegramWebhookRuntime, update: Update) -> None:
     try:
         await runtime.dispatcher.feed_update(runtime.bot, update)
-    except Exception as exc:
-        logger.exception("Telegram webhook dispatcher failed.")
-        raise HTTPException(status_code=500, detail="Telegram dispatcher failed.") from exc
-
-    return Response(status_code=204)
+    except Exception:
+        logger.exception("Telegram webhook processing failed: update_id=%s", update.update_id)
