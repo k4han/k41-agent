@@ -1,17 +1,23 @@
-"""Short-lived metadata cache for cloud workspace backends."""
+"""Thread-safe, bounded TTL/LRU metadata cache for cloud workspace backends."""
 
 from __future__ import annotations
 
 import copy
+import threading
 import time
+from collections import OrderedDict
 from typing import Any
 
-from agent.modules.workspaces.constants import METADATA_CACHE_TTL_SECONDS
+from agent.modules.workspaces.constants import (
+    METADATA_CACHE_MAX_ENTRIES,
+    METADATA_CACHE_TTL_SECONDS,
+)
 from agent.modules.workspaces.refs import WorkspaceRef
 
 MetadataCacheKey = tuple[str, str, str, str, tuple[Any, ...]]
 
-_metadata_cache: dict[MetadataCacheKey, tuple[float, Any]] = {}
+_metadata_cache: OrderedDict[MetadataCacheKey, tuple[float, Any]] = OrderedDict()
+_metadata_cache_lock = threading.Lock()
 
 
 def _make_key(
@@ -40,14 +46,16 @@ def get_workspace_metadata_cache(
 ) -> tuple[bool, Any]:
     """Return cached metadata if it is still fresh."""
     key = _make_key(ref, root=root, operation=operation, parts=parts)
-    cached = _metadata_cache.get(key)
-    if cached is None:
-        return False, None
+    with _metadata_cache_lock:
+        cached = _metadata_cache.get(key)
+        if cached is None:
+            return False, None
 
-    cached_at, value = cached
-    if (time.monotonic() - cached_at) > ttl_seconds:
-        _metadata_cache.pop(key, None)
-        return False, None
+        cached_at, value = cached
+        if (time.monotonic() - cached_at) > ttl_seconds:
+            _metadata_cache.pop(key, None)
+            return False, None
+        _metadata_cache.move_to_end(key)
     return True, copy.deepcopy(value)
 
 
@@ -61,7 +69,12 @@ def set_workspace_metadata_cache(
 ) -> None:
     """Store metadata in the short-lived workspace cache."""
     key = _make_key(ref, root=root, operation=operation, parts=parts)
-    _metadata_cache[key] = (time.monotonic(), copy.deepcopy(value))
+    cached_value = copy.deepcopy(value)
+    with _metadata_cache_lock:
+        _metadata_cache[key] = (time.monotonic(), cached_value)
+        _metadata_cache.move_to_end(key)
+        while len(_metadata_cache) > METADATA_CACHE_MAX_ENTRIES:
+            _metadata_cache.popitem(last=False)
 
 
 def invalidate_workspace_metadata_cache(
@@ -73,18 +86,20 @@ def invalidate_workspace_metadata_cache(
     backend = str(ref.backend)
     locator = str(ref.locator)
     root_value = None if root is None else str(root)
-    for key in list(_metadata_cache):
-        key_backend, key_locator, key_root, _, _ = key
-        if key_backend != backend or key_locator != locator:
-            continue
-        if root_value is not None and key_root != root_value:
-            continue
-        _metadata_cache.pop(key, None)
+    with _metadata_cache_lock:
+        for key in list(_metadata_cache):
+            key_backend, key_locator, key_root, _, _ = key
+            if key_backend != backend or key_locator != locator:
+                continue
+            if root_value is not None and key_root != root_value:
+                continue
+            _metadata_cache.pop(key, None)
 
 
 def clear_workspace_metadata_cache() -> None:
     """Clear all cached workspace metadata."""
-    _metadata_cache.clear()
+    with _metadata_cache_lock:
+        _metadata_cache.clear()
 
 
 __all__ = [
