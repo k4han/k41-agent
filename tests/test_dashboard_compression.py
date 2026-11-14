@@ -185,11 +185,12 @@ def test_bootstrap_mount_serves_precompressed_assets_without_runtime_compression
     tmp_path, monkeypatch, isolated_container,
 ):
     from agent.bootstrap import app as app_module
+    from agent.delivery.http.dashboard import spa
 
     (tmp_path / "assets").mkdir()
     (tmp_path / "assets/app-abc123.js").write_bytes(SOURCE)
     (tmp_path / "assets/app-abc123.js.br").write_bytes(BROTLI)
-    monkeypatch.setattr(app_module, "STATIC_DIR", tmp_path)
+    monkeypatch.setattr(spa, "STATIC_DIR", tmp_path)
 
     def fail_compression(*args, **kwargs):
         raise AssertionError("Static requests must not compress data at runtime")

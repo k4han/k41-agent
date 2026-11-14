@@ -16,6 +16,9 @@ def test_run_swallows_keyboard_interrupt(monkeypatch):
         raise KeyboardInterrupt()
 
     monkeypatch.setattr(app_module.asyncio, "run", fake_asyncio_run)
+    monkeypatch.setattr(
+        app_module, "_get_default_container", lambda: SimpleNamespace(database_type="sqlite")
+    )
 
     app_module.run()
 
@@ -41,15 +44,19 @@ async def test_web_server_uses_bounded_graceful_shutdown(monkeypatch):
 
     monkeypatch.setattr(
         app_module,
-        "settings",
-        SimpleNamespace(enable_web=True, host="127.0.0.1", port=4141),
+        "_get_default_container",
+        lambda: SimpleNamespace(
+            bootstrap_config=SimpleNamespace(enable_web=True, host="127.0.0.1", port=4141)
+        ),
     )
-    monkeypatch.setattr(app_module, "app", object())
+    fastapi_app = object()
+    monkeypatch.setattr(app_module, "_get_default_app", lambda: fastapi_app)
     monkeypatch.setattr(app_module.uvicorn, "Config", FakeConfig)
     monkeypatch.setattr(app_module.uvicorn, "Server", FakeServer)
 
     await app_module.main()
 
+    assert captured["app"] is fastapi_app
     assert (
         captured["timeout_graceful_shutdown"]
         == app_module.SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS
@@ -66,7 +73,10 @@ async def test_shutdown_monitor_ignores_another_instances_signal(tmp_path, monke
     signal_file = tmp_path / "shutdown.signal"
     signal_file.write_text(str(os.getpid() + 1000000))
     monkeypatch.setattr(app_module, "SHUTDOWN_SIGNAL", signal_file)
-    monkeypatch.setattr(app_module, "settings", SimpleNamespace(enable_web=enable_web, host="127.0.0.1", port=4141))
+    container = SimpleNamespace(
+        bootstrap_config=SimpleNamespace(enable_web=enable_web, host="127.0.0.1", port=4141)
+    )
+    monkeypatch.setattr(app_module, "_get_default_container", lambda: container)
     original_sleep = app_module.asyncio.sleep
     polls = []
 
@@ -102,7 +112,17 @@ async def test_shutdown_monitor_ignores_another_instances_signal(tmp_path, monke
             pytest.fail("Server did not consume its own shutdown request")
 
     runtime = Runtime()
-    monkeypatch.setattr(app_module, "app", SimpleNamespace(state=SimpleNamespace(runtime=runtime)))
+
+    def get_app():
+        assert enable_web, "Headless startup must not create a web application"
+        return object()
+
+    def create_runtime(*, container):
+        assert container is app_module._get_default_container()
+        return runtime
+
+    monkeypatch.setattr(app_module, "_get_default_app", get_app)
+    monkeypatch.setattr("agent.bootstrap.runtime.AppRuntime", create_runtime)
     monkeypatch.setattr(app_module.uvicorn, "Server", Server)
     monkeypatch.setattr(app_module.asyncio, "sleep", sleep)
     await app_module.main()

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -5,6 +7,8 @@ import time
 from contextlib import asynccontextmanager, suppress
 from copy import deepcopy
 from pathlib import Path
+from threading import RLock
+from typing import TYPE_CHECKING
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -17,21 +21,10 @@ from agent.shared.infrastructure.http_logging import HTTPLoggingMiddleware, LogV
 from agent.shared.infrastructure.csrf_protection import CSRFProtectionMiddleware, CSRF_HEADER_NAME
 from agent.shared.infrastructure.http_errors import register_http_exception_handlers
 
-from agent.bootstrap.container import activate_context_container, restore_context_container
-from agent.bootstrap.runtime import AppRuntime
-from agent.bootstrap.settings import BootstrapConfig
-from agent.delivery.http import (
-    api_router,
-    dashboard_router,
-    github_webhook_router,
-    google_calendar_router,
-    telegram_webhook_router,
-    zalo_webhook_router,
-)
-from agent.delivery.http.common import LegacyAPIRedirectMiddleware
-from agent.delivery.http.dashboard.auth_router import router as auth_router
-from agent.delivery.http.dashboard.spa import STATIC_DIR, CachedStaticFiles
-from agent.modules.channels import list_channel_statuses
+from agent.bootstrap.container import AppContainer, activate_context_container, restore_context_container
+
+if TYPE_CHECKING:
+    from agent.bootstrap.settings import BootstrapConfig
 
 log_level = "INFO"
 logging.basicConfig(
@@ -42,6 +35,42 @@ logger = logging.getLogger(__name__)
 
 SHUTDOWN_SIGNAL = Path.home() / ".k41-agent" / "shutdown.signal"
 SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 2
+
+_default_container: AppContainer | None = None
+_default_app: FastAPI | None = None
+_default_lock = RLock()
+
+
+def _get_default_container() -> AppContainer:
+    """Share bootstrap configuration without constructing the web application."""
+    global _default_container
+    with _default_lock:
+        if _default_container is None:
+            from agent.bootstrap.container import create_app_container
+
+            _default_container = create_app_container()
+        return _default_container
+
+
+def _get_default_app() -> FastAPI:
+    """Construct the default ASGI application only when it is requested."""
+    global _default_app
+    with _default_lock:
+        if _default_app is None:
+            _default_app = create_app(container=_get_default_container())
+        return _default_app
+
+
+def __getattr__(name: str):
+    if name == "app":
+        return _get_default_app()
+    if name == "settings":
+        return _get_default_container().bootstrap_config
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | {"app", "settings"})
 
 
 class ContainerActivationMiddleware:
@@ -96,6 +125,18 @@ async def _warm_dashboard_caches() -> None:
 
 def create_app(bootstrap_config: BootstrapConfig | None = None, container=None) -> FastAPI:
     from agent.bootstrap.container import create_app_container, set_active_container
+    from agent.bootstrap.runtime import AppRuntime
+    from agent.delivery.http import (
+        api_router,
+        dashboard_router,
+        github_webhook_router,
+        google_calendar_router,
+        telegram_webhook_router,
+        zalo_webhook_router,
+    )
+    from agent.delivery.http.common import LegacyAPIRedirectMiddleware
+    from agent.delivery.http.dashboard.auth_router import router as auth_router
+    from agent.delivery.http.dashboard.spa import STATIC_DIR, CachedStaticFiles
 
     if container is None:
         # create_app_container loads bootstrap config through its own config
@@ -240,6 +281,8 @@ def create_app(bootstrap_config: BootstrapConfig | None = None, container=None) 
 
     @fastapi_app.get("/health")
     async def health(request: Request):
+        from agent.modules.channels import list_channel_statuses
+
         current_settings: BootstrapConfig = request.app.state.bootstrap_config
         channel_manager = request.app.state.channel_manager
         return {
@@ -275,17 +318,15 @@ def create_app(bootstrap_config: BootstrapConfig | None = None, container=None) 
     return fastapi_app
 
 
-app = create_app()
-settings: BootstrapConfig = app.state.bootstrap_config
-
-
 async def main() -> None:
+    container = _get_default_container()
+    settings = container.bootstrap_config
     if settings.enable_web:
         log_config = deepcopy(uvicorn.config.LOGGING_CONFIG)
         log_config["filters"] = {"exclude_log_viewer": {"()": LogViewerAccessFilter}}
         log_config["handlers"]["access"]["filters"] = ["exclude_log_viewer"]
         config = uvicorn.Config(
-            app=app,
+            app=_get_default_app(),
             host=settings.host,
             port=settings.port,
             reload=False,
@@ -314,7 +355,9 @@ async def main() -> None:
         return
 
     logger.info("Web host disabled. Running managed channels only.")
-    runtime: AppRuntime = app.state.runtime
+    from agent.bootstrap.runtime import AppRuntime
+
+    runtime = AppRuntime(container=container)
     await runtime.startup()
     try:
         from agent.bootstrap.process_utils import consume_shutdown_signal
@@ -330,7 +373,7 @@ async def main() -> None:
 
 def run() -> None:
     try:
-        loop_factory = get_event_loop_factory(app.state.container.database_type)
+        loop_factory = get_event_loop_factory(_get_default_container().database_type)
         asyncio.run(main(), loop_factory=loop_factory)
     except KeyboardInterrupt:
         logger.info("Shutdown requested by user.")

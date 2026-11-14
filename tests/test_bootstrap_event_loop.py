@@ -32,7 +32,7 @@ def test_sqlite_entrypoints_use_proactor(monkeypatch, entrypoint):
     container = SimpleNamespace(database_type="sqlite")
     if entrypoint == "server":
         module = importlib.import_module("agent.bootstrap.app")
-        monkeypatch.setattr(module, "app", SimpleNamespace(state=SimpleNamespace(container=container)))
+        monkeypatch.setattr(module, "_get_default_container", lambda: container)
         monkeypatch.setattr(module, "main", check)
         module.run()
     else:

@@ -80,13 +80,24 @@ async def test_request_task_resolves_app_container() -> None:
         clear_active_container()
 
 
-def test_module_import_activates_app_container() -> None:
+def test_lazy_app_access_activates_app_container(tmp_path) -> None:
     script = (
         "import asyncio\n"
         "import sys\n"
+        "from pathlib import Path\n"
+        "Path.home = classmethod(lambda cls: cls(sys.argv[1]))\n"
         "\n"
-        "from agent.bootstrap import app as app_module\n"
+        "import importlib\n"
+        "app_module = importlib.import_module('agent.bootstrap.app')\n"
         "from agent.bootstrap.container import get_active_container\n"
+        "from uvicorn.importer import import_from_string\n"
+        "\n"
+        "assert get_active_container() is None\n"
+        "assert app_module._default_app is None\n"
+        "settings = app_module.settings\n"
+        "assert app_module._default_app is None\n"
+        "assert 'agent.delivery.http' not in sys.modules\n"
+        "app = import_from_string('agent.bootstrap.app:app')\n"
         "\n"
         "async def probe():\n"
         "    return get_active_container() is app_module.app.state.container\n"
@@ -95,6 +106,9 @@ def test_module_import_activates_app_container() -> None:
         "ok = (\n"
         "    get_active_container() is app_module.app.state.container\n"
         "    and app_module.settings is app_module.app.state.bootstrap_config\n"
+        "    and settings is app_module.settings\n"
+        "    and app is app_module.app\n"
+        "    and import_from_string('main:app') is app\n"
         "    and container_module._default_container is None\n"
         "    and asyncio.run(probe())\n"
         ")\n"
@@ -102,7 +116,7 @@ def test_module_import_activates_app_container() -> None:
         "sys.exit(0 if ok else 1)\n"
     )
     result = subprocess.run(
-        [sys.executable, "-c", script],
+        [sys.executable, "-c", script, str(tmp_path)],
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
