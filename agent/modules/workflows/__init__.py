@@ -28,7 +28,6 @@ from agent.modules.workflows.checkpoint.queries import (
 )
 from agent.modules.workflows.prompt_builders import (
     build_llm_system_prompt,
-    estimate_thread_prompt_breakdown,
     get_system_default_variables,
     replace_known_prompt_placeholders,
     resolve_prompt_variables,
@@ -72,6 +71,14 @@ async def close_checkpointer(container=None) -> None:
     )
 
     await _close_checkpointer(container=container)
+
+
+async def estimate_thread_prompt_breakdown(thread_id: str, *, agent_name: str, state: dict) -> dict[str, int]:
+    from agent.modules.workflows.prompt_builders import (
+        estimate_thread_prompt_breakdown as _estimate,
+    )
+
+    return await _estimate(thread_id, agent_name=agent_name, state=state)
 
 
 def get_checkpointer():

@@ -146,9 +146,10 @@ async def estimate_thread_prompt_breakdown(thread_id: str, *, agent_name: str, s
 
     catalog = get_catalog_service()
     card = catalog.get_agent(agent_name) or catalog.get_agent("default")
-    context = WorkflowContext(agent_name=card.name, workspace=await get_thread_workspace_ref(thread_id))
+    resolved_name = card.name if card is not None else (agent_name or "default")
+    context = WorkflowContext(agent_name=resolved_name, workspace=await get_thread_workspace_ref(thread_id))
     workspace = context.get_workspace()
-    tools = ToolResolver().for_workspace(await ToolResolver().aresolve_for_agent(card.name), workspace)
+    tools = ToolResolver().for_workspace(await ToolResolver().aresolve_for_agent(resolved_name), workspace)
     variables = await get_runtime_prompt_variable_values(workspace, thread_id=thread_id)
     skills_xml = await get_effective_skills_catalog_xml(workspace=workspace,
         repository_dir=get_repository_skill_dir(), thread_id=thread_id) if any(tool.name == "skill" for tool in tools) else ""
