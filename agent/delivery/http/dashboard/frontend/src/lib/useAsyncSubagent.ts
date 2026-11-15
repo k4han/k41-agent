@@ -1,20 +1,28 @@
-import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import type { SubagentActivity, TranscriptItem, TranscriptTool } from "@/components/Transcript";
 import { apiFetch, fetchWithCsrf } from "@/lib/api";
 import { asyncTaskPath, liveAsyncTask, mergeAsyncTask, type AsyncTask } from "@/lib/asyncSubagents";
-import { readNDJSONStream, mergeToolActivity, type StreamCallbacks } from "@/lib/chatStreamHandler";
+import { readNDJSONStream, mergeToolActivity, type AssistantIdRef, type StreamCallbacks } from "@/lib/chatStreamHandler";
 import { handleProtocolEvent } from "@/lib/protocolStreamHandler";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
+import { SSE_RECONNECT_DELAY_MS } from "@/lib/uiConstants";
 
 export function useAsyncSubagent(activity: Accessor<SubagentActivity>, opened: Accessor<boolean>) {
   const [task, setTask] = createSignal<AsyncTask>();
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal("");
-  const [liveItems, setLiveItems] = createSignal<Array<TranscriptItem & { id: number }>>([]);
+  const [live, setLive] = createStore<{ items: Array<TranscriptItem & { id: number }> }>({ items: [] });
+  const setLiveItems = (update: (items: typeof live.items) => typeof live.items) =>
+    setLive("items", reconcile(update(live.items), { key: "id" }));
   const enabled = () => activity().execution_mode === "async" && !activity().read_only;
   const identity = createMemo(() => `${activity().parent_thread_id}/${activity().task_id || activity().delegation_id}`);
+  const currentTask = createMemo(() => enabled() ? mergeAsyncTask(activity() as AsyncTask, task() || {}) : undefined);
   let snapshotRequest: AbortController | undefined;
+  let nextId = 0;
+  let refs: AssistantIdRef = { id: null };
+  let streamed = { received: false };
+  let streamRunId = "";
 
   const refresh = async () => {
     if (!enabled()) return;
@@ -23,7 +31,10 @@ export function useAsyncSubagent(activity: Accessor<SubagentActivity>, opened: A
     snapshotRequest = controller;
     try {
       const value = await apiFetch<AsyncTask>(asyncTaskPath(activity().parent_thread_id, activity().task_id || activity().delegation_id), { signal: controller.signal });
-      if (!controller.signal.aborted && key === identity()) setTask((current) => mergeAsyncTask(current || value, value));
+      if (!controller.signal.aborted && key === identity()) {
+        setTask((current) => mergeAsyncTask(current || value, value));
+        setError("");
+      }
     } catch (failure) {
       if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "Task could not be loaded.");
     }
@@ -50,7 +61,18 @@ export function useAsyncSubagent(activity: Accessor<SubagentActivity>, opened: A
     }
   };
 
-  createEffect(on(identity, () => { setTask(undefined); setLiveItems([]); setError(""); void refresh(); }));
+  createEffect(on(identity, () => {
+    batch(() => {
+      setTask(undefined);
+      setLive("items", []);
+      setError("");
+    });
+    nextId = 0;
+    refs = { id: null };
+    streamed = { received: false };
+    streamRunId = "";
+    void refresh();
+  }));
   const updated = (event: Event) => {
     const value = (event as CustomEvent<AsyncTask>).detail;
     if (enabled() && value?.task_id === (activity().task_id || activity().delegation_id) && value.parent_thread_id === activity().parent_thread_id) {
@@ -66,13 +88,16 @@ export function useAsyncSubagent(activity: Accessor<SubagentActivity>, opened: A
     window.removeEventListener(CUSTOM_DOM_EVENTS.SESSIONS_RECONNECTED, refresh);
   });
 
-  const streamIdentity = createMemo(() => JSON.stringify([opened(), enabled(), task()?.thread_id, task()?.run_id, task()?.status === "running"]));
+  const streamIdentity = createMemo(() => JSON.stringify([identity(), opened(), enabled(), currentTask()?.thread_id,
+    currentTask()?.run_id, currentTask()?.status === "running"]));
   createEffect(on(streamIdentity, () => {
-    if (!opened() || !enabled() || task()?.status !== "running") { setLiveItems([]); return; }
+    if (!opened() || !enabled() || currentTask()?.status !== "running") return;
     const controller = new AbortController();
-    onCleanup(() => controller.abort());
-    setLiveItems([]);
-    let nextId = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => {
+      controller.abort();
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+    });
     const patch = (id: number, change: (item: TranscriptItem & { id: number }) => TranscriptItem & { id: number }) => {
       setLiveItems((items) => items.map((item) => item.id === id ? change(item) : item));
     };
@@ -88,24 +113,37 @@ export function useAsyncSubagent(activity: Accessor<SubagentActivity>, opened: A
       updateToolActivity: toolPatch, updatePlanReviewResult: () => {}, updateUserInputRequestResult: () => {},
       setRecursionLimitReached: () => {}, onThreadCreated: () => {},
     };
-    const refs = { id: null }, streamed = { received: false }, thread = { id: task()!.thread_id, message: "" };
-    void (async () => {
+    const thread = { id: currentTask()!.thread_id, message: "" };
+    const connect = async () => {
       try {
         const response = await fetchWithCsrf("/v2/api/chat/events/reconnect", {
           method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
           body: JSON.stringify({ thread_id: thread.id }),
         });
         if (response.ok && response.body) await readNDJSONStream(response.body, (event) => {
-          if (!controller.signal.aborted) handleProtocolEvent(event, refs, streamed, thread, callbacks);
+          if (controller.signal.aborted) return;
+          const runId = String(event.event_id || "").split(":")[0];
+          if (runId && streamRunId !== runId) {
+            streamRunId = runId;
+            refs = { id: null };
+            streamed = { received: false };
+          }
+          handleProtocolEvent(event, refs, streamed, thread, callbacks);
         });
       } catch (failure) {
         if (!controller.signal.aborted) console.debug("Subagent live stream unavailable", failure);
       }
-    })();
+      if (!controller.signal.aborted) {
+        void refresh();
+        // Task admission can be published before its stream session exists.
+        retryTimer = setTimeout(() => void connect(), SSE_RECONNECT_DELAY_MS);
+      }
+    };
+    void connect();
   }));
 
-  return { task, enabled, busy, error, refresh, perform, liveItems,
-    activity: () => enabled() ? { ...activity(), ...task() } : activity() };
+  return { task: currentTask, enabled, busy, error, refresh, perform, liveItems: () => live.items,
+    activity: () => currentTask() || activity() };
 }
 
 export function useAsyncTasks(threadId: Accessor<string>) {

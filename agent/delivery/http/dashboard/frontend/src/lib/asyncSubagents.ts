@@ -17,7 +17,63 @@ export function missingAsyncTasks(tasks: readonly AsyncTask[], items: readonly T
   const represented = new Set(items.flatMap((item) => item.type === "tool" && item.subagent
     && item.subagent.execution_mode === "async" && !item.subagent.read_only
     ? [`${item.subagent.parent_thread_id}/${item.subagent.task_id || item.subagent.delegation_id}`] : []));
-  return tasks.filter((task) => !represented.has(`${task.parent_thread_id}/${task.task_id}`));
+  const launches = new Set(items.flatMap((item) => item.type === "tool" && item.name === "start_async_task"
+    && !item.subagent?.read_only && item.tool_call_id ? [item.tool_call_id] : []));
+  return tasks.filter((task) => !represented.has(`${task.parent_thread_id}/${task.task_id}`)
+    && !launches.has(task.tool_call_id));
+}
+
+/** Bind recovered tasks to their original call before its result arrives. */
+export function attachAsyncTaskActivities<T extends TranscriptItem>(items: T[], tasks: readonly AsyncTask[], parent: string): T[] {
+  const calls = new Map(tasks.filter((task) => task.parent_thread_id === parent)
+    .map((task) => [task.tool_call_id, task]));
+  let changed = false;
+  const linked = items.map((item) => {
+    if (item.type !== "tool" || item.name !== "start_async_task" || item.subagent || !item.tool_call_id) return item;
+    const task = calls.get(item.tool_call_id);
+    if (!task) return item;
+    changed = true;
+    return { ...item, subagent: task };
+  });
+  return changed ? linked : items;
+}
+
+export type SubagentTranscriptItem = TranscriptItem & { key: string };
+
+function transcriptKey(item: TranscriptItem & { key?: string; id?: number }, index: number): string {
+  if (item.type === "async_wakeup") return `async_wakeup:${item.wakeup_id}`;
+  if ((item.type === "message" || item.type === "thinking") && item.messageId) {
+    return `${item.type}:${item.messageId.replace(/^lc_run--/, "")}`;
+  }
+  if ("tool_call_id" in item && item.tool_call_id) return `${item.type}:${item.tool_call_id}`;
+  return item.key || `${item.type}:${item.id ?? index}`;
+}
+
+/** Merge replay with checkpoints without shrinking already visible content. */
+export function mergeSubagentTranscript(saved: readonly TranscriptItem[], live: readonly TranscriptItem[]): SubagentTranscriptItem[] {
+  const history = saved.map((item, index) => ({ ...item, key: transcriptKey(item, index) }));
+  const existing = new Map(history.map((item) => [item.key, item]));
+  const before = new Map<string, SubagentTranscriptItem[]>();
+  let pending: SubagentTranscriptItem[] = [];
+  live.forEach((item, index) => {
+    const key = transcriptKey(item, index);
+    const previous = existing.get(key);
+    if (!previous) {
+      pending.push({ ...item, key });
+      return;
+    }
+    before.set(key, pending);
+    pending = [];
+    let merged = { ...previous, ...item, key };
+    if ((previous.type === "message" && item.type === "message")
+      || (previous.type === "thinking" && item.type === "thinking")) {
+      if (previous.text.startsWith(item.text)) merged = { ...merged, text: previous.text } as SubagentTranscriptItem;
+    } else if (previous.type === "tool" && item.type === "tool" && !item.resultReceived && item.result == null) {
+      merged = { ...merged, result: previous.result, resultReceived: previous.resultReceived } as SubagentTranscriptItem;
+    }
+    existing.set(key, merged);
+  });
+  return [...history.flatMap((item) => [...(before.get(item.key) || []), existing.get(item.key)!]), ...pending];
 }
 
 export function asyncTaskPath(parent: string, taskId?: string): string {

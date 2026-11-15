@@ -811,6 +811,45 @@
   white-space: nowrap;
 }
 
+.transcript-async-wait,
+.transcript-run-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-block: 16px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.transcript-async-wait::before,
+.transcript-async-wait::after,
+.transcript-run-divider::before,
+.transcript-run-divider::after {
+  content: "";
+  flex: 1;
+  min-width: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.transcript-async-wait-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.transcript-async-wait-content svg {
+  flex-shrink: 0;
+}
+
+.transcript-async-wait-label,
+.transcript-run-divider-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .subagent-details {
   min-width: 0;
   max-width: 100%;

@@ -39,6 +39,25 @@ def task_reference(task: dict[str, Any]) -> dict[str, Any]:
             "delegation_id": task["task_id"], "execution_mode": "async"}
 
 
+def async_wakeup_references(messages) -> dict[int, dict[str, Any]]:
+    """Group delivered notifications by execution, including across history pages."""
+    groups, references = {}, {}
+    previous = None
+    for index, message in enumerate(messages):
+        metadata = getattr(message, "additional_kwargs", {})
+        if metadata.get("source") != "async_subagent":
+            previous = None
+            continue
+        wakeup_id = metadata.get("async_wakeup_id") or previous or f"async-event:{message.id}"
+        group = groups.setdefault(wakeup_id, {"wakeup_id": wakeup_id, "agent_names": []})
+        name = metadata.get("async_agent_name")
+        if name and name not in group["agent_names"]:
+            group["agent_names"].append(name)
+        references[index] = group
+        previous = wakeup_id
+    return references
+
+
 def request_key(*parts: str) -> str:
     import hashlib
     import json

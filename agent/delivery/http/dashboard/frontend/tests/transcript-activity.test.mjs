@@ -47,6 +47,15 @@ const groupIds = (view, key) =>
 test('delegated activity stays visible outside collapsed tool groups', () => {
   assert.equal(isTranscriptActivityBoundary(toolCall(1, 'delegate_task')), true);
 });
+
+test('wakeup dividers remain standalone and preserve answer actions for earlier completed runs', () => {
+  const items = [assistantMessage(1, 'Waiting for the worker'),
+    { id: 2, type: 'async_wakeup', wakeup_id: 'wake-1', agentNames: ['Browser'] },
+    toolCall(3), assistantMessage(4, 'Final answer')];
+  const view = buildTranscriptActivityView(items, false);
+  assert.deepEqual(Array.from(view.keys), ['item-1', 'item-2', 'activity-3', 'item-4']);
+  assert.deepEqual(Array.from(findTranscriptCompletedAnswerIds(items)), [1, 4]);
+});
 const rowKeys = (view) => Array.from(view.keys);
 
 test('tool runs are independent groups and assistant messages retain chronological order', () => {

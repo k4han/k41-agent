@@ -65,6 +65,7 @@ import {
   cleanupStreamSignals,
   cleanupStaleStreams,
   allocItemId,
+  type ChatTranscriptItem,
 } from "@/lib/chatStreamStore";
 import {
   toTranscriptAttachment,
@@ -95,8 +96,9 @@ import { ACTIVE_TASK_STATUSES, DRAWER_MEDIA_QUERY, MOBILE_MEDIA_QUERY } from "@/
 import { createMediaQuery } from "@/lib/useMediaQuery";
 import { useChatScroll } from "@/lib/useChatScroll";
 import { useChatStreams } from "@/lib/useChatStreams";
+import { createReplayCallbacks, preserveTranscriptIds } from "@/lib/chatStreamReplay";
 import { useAsyncTasks } from "@/lib/useAsyncSubagent";
-import { missingAsyncTasks } from "@/lib/asyncSubagents";
+import { attachAsyncTaskActivities, missingAsyncTasks } from "@/lib/asyncSubagents";
 import { useWorkspaceExplorer } from "@/lib/useWorkspaceExplorer";
 import { useBrowserSession } from "@/lib/useBrowserSession";
 import { useWorkspaceRuntime } from "@/lib/useWorkspaceRuntime";
@@ -785,6 +787,7 @@ export function ChatPage() {
 
   const applyThreadPayload = (payload: ThreadMessagesPayload, preserveStreamError = false, showEarlier = false) => batch(() => {
     flushPendingMessageChunks();
+    const previous = threadData()?.thread_id === payload.thread_id ? items() : [];
     const lastItem = preserveStreamError ? items().at(-1) : undefined;
     const streamErrors = lastItem?.type === "message" && lastItem.role === "error"
       ? [lastItem]
@@ -798,14 +801,14 @@ export function ChatPage() {
     setWorkspace(payload.workspace || null);
     if (showEarlier || !persistedStreams.has(payload.thread_id)) {
       updateBrowserHandoff(Boolean(payload.pending_browser_handoffs?.length), payload.thread_id);
-      const historyItems = [
+      const historyItems = preserveTranscriptIds([
         ...toThreadTranscript(payload.messages, payload.thread_id),
         ...(payload.pending_requests || []).map((value) => {
           const request = normalizeUserInputRequest(value);
           return createTranscriptUserInputRequest({ toolCallId: request.tool_call_id, interruptId: request.interrupt_id,
             title: request.title, questions: request.questions, submitLabel: request.submit_label });
         }),
-      ].map((item) => ({ ...item, id: allocItemId() }));
+      ], previous, allocItemId);
       // Restore continuation from the saved graph state on every thread load.
       // Keep a local transport error only when there is no checkpoint error.
       const savedErrors = payload.resume_error ? [{
@@ -902,6 +905,11 @@ export function ChatPage() {
   };
 
   const background = useBackgroundStream({ applyThreadPayload, streamCallbacks });
+  createEffect(() => {
+    const current = items();
+    const linked = attachAsyncTaskActivities(current, asyncTasks.tasks(), currentThreadId());
+    if (linked !== current) setItems(linked);
+  });
   const {
     backgroundTask,
     setBackgroundTask,
@@ -1182,6 +1190,7 @@ export function ChatPage() {
     assistantIdRef: AssistantIdRef,
     streamedRef: StreamedRef,
     streamThreadIdRef: StreamThreadIdRef,
+    replayItems?: readonly ChatTranscriptItem[],
   ) => {
     const callbacks: StreamCallbacks = {
       ...streamCallbacks,
@@ -1189,8 +1198,9 @@ export function ChatPage() {
         if (!isUnmounting && currentStreamThreadId() === streamThreadIdRef.id) showToast(message, "error");
       },
     };
+    const projection = replayItems ? createReplayCallbacks(callbacks, replayItems) : callbacks;
     return (event: Record<string, unknown>) =>
-      handleProtocolEvent(event, assistantIdRef, streamedRef, streamThreadIdRef, callbacks);
+      handleProtocolEvent(event, assistantIdRef, streamedRef, streamThreadIdRef, projection);
   };
 
   const markLocalStreamFinished = (threadId: string) => {
@@ -1456,10 +1466,6 @@ export function ChatPage() {
     }
 
     const currentItems = items();
-    const lastUserIndex = currentItems.map(item => item.type === "message" && item.role === "user").lastIndexOf(true);
-    if (lastUserIndex !== -1) {
-      setItems(currentItems.slice(0, lastUserIndex + 1));
-    }
 
     const streamThreadIdRef: StreamThreadIdRef = { id: threadId, message: "" };
     getOrCreateStreamSignals(streamThreadIdRef.id, items()).selection = rememberSelection();
@@ -1488,7 +1494,7 @@ export function ChatPage() {
         throw new Error("Streaming response is not available.");
       }
 
-      const handleEvent = makeEventHandler(assistantIdRef, streamedRef, streamThreadIdRef);
+      const handleEvent = makeEventHandler(assistantIdRef, streamedRef, streamThreadIdRef, currentItems);
       await readNDJSONStream(response.body, (event) => {
         eventCount += 1;
         handleEvent(event);
@@ -2340,7 +2346,7 @@ export function ChatPage() {
                   <button type="button" onClick={() => void asyncTasks.refresh()}>Retry</button>
                 </div>
               </Show>
-              <Show when={missingAsyncTasks(asyncTasks.tasks(), items()).length > 0}>
+              <Show when={!threadLoading() && missingAsyncTasks(asyncTasks.tasks(), items()).length > 0}>
                 <section class="async-task-list chat-column" aria-label="Background tasks">
                   <For each={missingAsyncTasks(asyncTasks.tasks(), items())}>{(task) => <SubagentDetails activity={task} />}</For>
                 </section>
@@ -2358,6 +2364,7 @@ export function ChatPage() {
                 currentThreadId={currentThreadId()}
                 streaming={streaming()}
                 backgroundLive={backgroundLive()}
+                asyncTasks={asyncTasks.tasks()}
                 compacting={compacting()}
                 forkingItemId={forking() ? forkRequest()?.itemId : null}
                 onForkMessage={acpAgentSelected() ? undefined : (payload) => void handleForkMessage(payload)}

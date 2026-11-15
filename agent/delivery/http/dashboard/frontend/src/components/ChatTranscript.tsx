@@ -1,4 +1,4 @@
-import { ArrowDown, Loader2, Sparkles } from "lucide-solid";
+import { ArrowDown, CirclePause, Loader2, Sparkles } from "lucide-solid";
 import { createVirtualizer, defaultRangeExtractor, type Range, type VirtualItem } from "@tanstack/solid-virtual";
 import { createEffect, createMemo, For, onCleanup, onMount, Show } from "solid-js";
 
@@ -6,6 +6,7 @@ import { TranscriptActivityGroup } from "@/components/TranscriptActivityGroup";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { TranscriptItemView, type ForkMessagePayload, type TranscriptAttachment, type TranscriptRole } from "@/components/Transcript";
 import type { ChatTranscriptItem } from "@/lib/chatStreamStore";
+import { liveAsyncTask, type AsyncTask } from "@/lib/asyncSubagents";
 import { findTranscriptAnswerId, findTranscriptCompletedAnswerIds, findTranscriptResumeId, isTranscriptWaitingForModel, type TranscriptActivityEntry } from "@/lib/transcriptActivity";
 import { THINKING_TEXT } from "@/lib/chatStatus";
 import { useShowThinking } from "@/lib/useShowThinking";
@@ -39,6 +40,7 @@ export interface ChatTranscriptProps {
   currentThreadId: string;
   streaming: boolean;
   backgroundLive: boolean;
+  asyncTasks?: readonly AsyncTask[];
   compacting?: boolean;
   forkingItemId?: number | null;
   onForkMessage?: (payload: ForkMessagePayload) => void;
@@ -142,6 +144,18 @@ export function ChatTranscript(props: ChatTranscriptProps) {
     && props.items[props.items.length - 1]?.type === "thinking");
   const waitingForModel = createMemo(() => !props.compacting
     && (isTranscriptWaitingForModel(props.items, streamActive()) || thinkingHidden()));
+  const pendingAgents = createMemo(() => (props.asyncTasks || []).filter((task) =>
+    task.parent_thread_id === props.currentThreadId && !task.read_only && liveAsyncTask(task.status)));
+  const waitingForAgents = createMemo(() => !streamActive() && !props.conversationBusy
+    && !props.threadLoading && !props.compacting && pendingAgents().length > 0);
+  const agentsNeedInput = () => pendingAgents().every((task) => task.status === "waiting");
+  const agentWaitLabel = () => {
+    const count = pendingAgents().length;
+    const agents = `${count} background agent${count === 1 ? "" : "s"}`;
+    return agentsNeedInput()
+      ? `${agents} ${count === 1 ? "needs" : "need"} your response`
+      : `Waiting for ${agents}...`;
+  };
   // Each completed turn can be copied or forked; regeneration stays on the latest answer.
   const showAssistantActions = (itemId: number) =>
     !streamActive() && (completedAnswerIds().has(itemId) || answerItemId() === itemId);
@@ -186,7 +200,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
         tabIndex={0}
       >
         <Show
-          when={props.items.length > 0}
+          when={props.items.length > 0 || pendingAgents().length > 0}
           fallback={
             <Show
               when={props.threadLoading}
@@ -298,6 +312,17 @@ export function ChatTranscript(props: ChatTranscriptProps) {
               <div class="message-bubble">
                 <StatusIndicator text={THINKING_TEXT} />
               </div>
+            </div>
+          </Show>
+          <Show when={waitingForAgents()}>
+            <div class="transcript-async-wait" role="status" aria-live="polite" aria-atomic="true"
+              title={`${agentWaitLabel()}\n${pendingAgents().map((task) => task.agent_name).join(", ")}`}>
+              <span class="transcript-async-wait-content">
+                <Show when={agentsNeedInput()} fallback={<Loader2 size={14} class="spin-icon" aria-hidden="true" />}>
+                  <CirclePause size={14} aria-hidden="true" />
+                </Show>
+                <span class="transcript-async-wait-label">{agentWaitLabel()}</span>
+              </span>
             </div>
           </Show>
           <Show when={props.compacting}>

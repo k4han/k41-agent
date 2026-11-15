@@ -100,6 +100,12 @@ async def enrich_delegated_calls(messages: list[dict], parent_thread_id: str):
     completed = {message.get("tool_call_id") for message in messages if message.get("role") == "tool"}
     for message in messages:
         for call in message.get("tool_calls", []):
+            if call.get("name") == "start_async_task" and call.get("id") not in completed and subagents:
+                task = await subagents.repository.find_task_by_call(parent_thread_id, call.get("id"),
+                    parent_message_id=message.get("id"))
+                if task:
+                    call["subagent"] = task_reference(task)
+                continue
             if call.get("name") != "delegate_task" or call.get("id") in completed:
                 continue
             try:

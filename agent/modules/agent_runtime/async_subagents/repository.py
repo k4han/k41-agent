@@ -107,6 +107,16 @@ class AsyncSubagentRepository:
                 raise LookupError("Async task not found.")
             return task_dict(row, private=True)
 
+    async def find_task_by_call(self, parent_thread_id: str, tool_call_id: str,
+                                parent_message_id: str | None = None) -> dict | None:
+        filters = [Task.parent_thread_id == parent_thread_id, Task.tool_call_id == tool_call_id,
+                   Task.deleted_at.is_(None)]
+        if parent_message_id:
+            filters.append(Task.parent_message_id == parent_message_id)
+        async with await self._session_factory() as session:
+            row = await session.scalar(select(Task).where(*filters).order_by(Task.id.desc()).limit(1))
+            return task_dict(row) if row else None
+
     async def list_tasks(self, parent_thread_id: str, *, status=None, limit=50, offset=0) -> dict:
         filters = [Task.parent_thread_id == parent_thread_id, Task.deleted_at.is_(None)]
         if status == "active":

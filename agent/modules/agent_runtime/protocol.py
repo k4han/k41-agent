@@ -250,6 +250,10 @@ async def stream_graph(
                         },
                     }
                 native.append(child)
+            elif method == "custom" and isinstance(data, dict) and data.get("type") == "async_wakeup":
+                native.append({**event, "method": "custom:k41", "params": {
+                    **params, "data": {**data, "projection": "ui"},
+                }})
             elif method == "messages":
                 payload, metadata = data
                 metadata = metadata if isinstance(metadata, dict) else {}
@@ -410,6 +414,7 @@ async def run_agent_protocol_stream(*, edit=False, **params) -> AsyncIterator[di
     from agent.shared.infrastructure.errors import classify_agent_error
 
     sequence = EventSequence(params.pop("_run_id", None))
+    wakeup = params.pop("_async_wakeup", None)
     thread_id = str(params.get("thread_id") or "")
     yield sequence.stamp(
         protocol_event(
@@ -422,6 +427,10 @@ async def run_agent_protocol_stream(*, edit=False, **params) -> AsyncIterator[di
             },
         )
     )
+    if wakeup:
+        yield sequence.stamp(protocol_event("custom:k41", {
+            "type": "async_wakeup", **wakeup, "projection": "ui",
+        }))
     interrupted = False
     run_fn = run_agent_edit_stream if edit else run_agent_stream
     params["_protocol_events"] = True

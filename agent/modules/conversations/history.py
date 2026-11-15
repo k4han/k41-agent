@@ -639,6 +639,9 @@ def _serialize_thread_messages(
     forkable = set() if is_acp_thread else forkable_message_indices(messages)
 
     result = []
+    from agent.shared.async_subagents import async_wakeup_references
+
+    wakeups = async_wakeup_references(messages)
     for message_index in range(start, end if end is not None else len(messages)):
         msg = messages[message_index]
         entry: dict[str, Any] = {"id": getattr(msg, "id", None)}
@@ -648,6 +651,7 @@ def _serialize_thread_messages(
             if msg.additional_kwargs.get("source") == "async_subagent":
                 entry["role"] = "system"
                 entry["source"] = "async_subagent"
+                entry["async_wakeup"] = wakeups[message_index]
             entry["content"] = _human_content_text(
                 msg.content,
                 has_attachments=bool(attachments),

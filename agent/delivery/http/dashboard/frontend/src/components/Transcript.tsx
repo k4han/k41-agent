@@ -112,6 +112,7 @@ export type ForkMessagePayload = {
 
 export type TranscriptMessage = {
   type: "message";
+  messageId?: string;
   role: TranscriptRole;
   text: string;
   resumable?: boolean;
@@ -157,6 +158,7 @@ export type TranscriptTool = {
 /** Model reasoning that preceded the next answer or tool call. */
 export type TranscriptThinking = {
   type: "thinking";
+  messageId?: string;
   text: string;
   /** Measured on the client while streaming; history rows may not have it. */
   durationMs?: number;
@@ -190,10 +192,17 @@ export type TranscriptUserInputRequest = {
   result?: unknown;
 };
 
+export type TranscriptAsyncWakeup = {
+  type: "async_wakeup";
+  wakeup_id: string;
+  agentNames: string[];
+};
+
 export type TranscriptItem =
   | TranscriptMessage
   | TranscriptThinking
   | TranscriptTool
+  | TranscriptAsyncWakeup
   | TranscriptPlanReview
   | TranscriptUserInputRequest;
 
@@ -1755,6 +1764,16 @@ export interface TranscriptItemViewProps {
 }
 
 export function TranscriptItemView(props: TranscriptItemViewProps) {
+  if (props.item.type === "async_wakeup") {
+    const wakeup = () => props.item as TranscriptAsyncWakeup;
+    const label = () => wakeup().agentNames.length
+      ? `Continuing after updates from ${new Intl.ListFormat("en", { style: "long", type: "conjunction" }).format(wakeup().agentNames)}`
+      : "Continuing after background updates";
+    return <div class="transcript-run-divider" role="separator" aria-label={label()} title={label()}
+      data-transcript-item-id={props.itemId} data-wakeup-id={wakeup().wakeup_id}>
+      <span class="transcript-run-divider-label">{label()}</span>
+    </div>;
+  }
   if (props.item.type === "message") {
     return (
     <TranscriptMessageView

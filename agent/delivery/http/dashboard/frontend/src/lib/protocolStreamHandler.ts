@@ -15,6 +15,7 @@ type Scope = {
   streamed: StreamedRef;
   callbacks: StreamCallbacks;
   tools: Set<string>;
+  wakeups: Set<string>;
   items: Array<TranscriptItem & { id: number }>;
   descriptor?: SubagentActivity;
   currentMessage: string;
@@ -38,7 +39,7 @@ function childScope(parent: Scope, descriptor: SubagentActivity, thread: StreamT
   let timer: ReturnType<typeof setTimeout> | undefined;
   const scope: Scope = {
     refs: { id: null }, streamed: { received: false }, callbacks: parent.callbacks,
-    tools: new Set(), items: [], descriptor, currentMessage: "", messages: new Map(),
+    tools: new Set(), wakeups: new Set(), items: [], descriptor, currentMessage: "", messages: new Map(),
     toolBlocks: new Map(), outputDeltas: new Map(),
     commit: () => {
       if (timer !== undefined) clearTimeout(timer);
@@ -96,7 +97,7 @@ export function handleProtocolEvent(
   const runId = eventId.split(":")[0];
   let state = refs.protocol;
   if (!state || (runId && state.runId && state.runId !== runId)) {
-    const root: Scope = { refs, streamed, callbacks, tools: new Set(), items: [],
+    const root: Scope = { refs, streamed, callbacks, tools: new Set(), wakeups: new Set(), items: [],
       currentMessage: "", messages: new Map(), toolBlocks: new Map(), outputDeltas: new Map(), commit: () => {} };
     refs.protocol = state = { runId, seq: 0, scopes: new Map([["[]", root]]) };
   }
@@ -110,6 +111,11 @@ export function handleProtocolEvent(
   }
   scope ??= state.scopes.get("[]")!;
   const dispatch = (data: Record<string, unknown>, target = scope!) => {
+    if (data.type === "async_wakeup") {
+      const id = String(data.wakeup_id || "");
+      if (target.wakeups.has(id)) return;
+      target.wakeups.add(id);
+    }
     if (data.type === "tool_call") {
       const id = String(data.id || "");
       if (target.tools.has(id)) {

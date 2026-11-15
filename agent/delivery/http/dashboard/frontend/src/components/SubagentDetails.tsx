@@ -1,19 +1,25 @@
 import { AlertCircle, Check, ChevronRight, CirclePause, Loader2 } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js";
+import { createStore, reconcile } from "solid-js/store";
 import { TranscriptItemView, type SubagentActivity } from "@/components/Transcript";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { summarizeSubagent } from "@/lib/subagentSummary";
 import { useSubagentHistory } from "@/lib/useSubagentHistory";
 import { useAsyncSubagent } from "@/lib/useAsyncSubagent";
 import { AsyncTaskControls } from "@/components/AsyncTaskControls";
+import { mergeSubagentTranscript, type SubagentTranscriptItem } from "@/lib/asyncSubagents";
 
 export function SubagentDetails(props: { activity: SubagentActivity; itemId?: number }) {
   const [opened, setOpened] = createSignal(false);
   const background = useAsyncSubagent(() => props.activity, opened);
   const history = useSubagentHistory(background.activity);
-  const items = () => background.liveItems().length ? background.liveItems() : history.items();
+  const [transcript, setTranscript] = createStore<{ items: SubagentTranscriptItem[] }>({ items: [] });
+  createEffect(() => {
+    setTranscript("items", reconcile(mergeSubagentTranscript(history.items(), background.liveItems()), { key: "key" }));
+  });
+  const items = () => transcript.items;
   const activity = createMemo(() => summarizeSubagent(background.activity(), items()));
-  const summaryLabel = () => history.ready()
+  const summaryLabel = () => history.ready() || background.liveItems().length
     ? activity().summary.fullLabel
     : history.error() ? "Tools unavailable" : "Loading tools...";
   const failed = () => ["failed", "timed_out"].includes(background.activity().status);
@@ -48,9 +54,9 @@ export function SubagentDetails(props: { activity: SubagentActivity; itemId?: nu
       </summary>
       <Show when={opened()}>
         <div class="subagent-transcript">
-          <Show when={history.loading()}><p>Loading subagent history...</p></Show>
+          <Show when={history.loading() && !history.ready() && !background.liveItems().length}><p>Loading subagent history...</p></Show>
           <Show when={history.error()}><p role="alert">{history.error()} <button type="button" onClick={() => void history.retry()}>Retry</button></p></Show>
-          <Show when={props.activity.error}><p role="alert">{props.activity.error}</p></Show>
+          <Show when={background.activity().error}><p role="alert">{background.activity().error}</p></Show>
           <For each={items()}>{(item) => <TranscriptItemView item={item}
             streaming={activity().live} threadId={props.activity.thread_id} />}</For>
           <Show when={background.enabled()}><AsyncTaskControls task={background.task()} busy={background.busy()}

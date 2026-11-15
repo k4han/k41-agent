@@ -1,4 +1,5 @@
-import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
+import { createStore, reconcile } from "solid-js/store";
 import type { SubagentActivity, TranscriptItem } from "@/components/Transcript";
 import { apiFetch } from "@/lib/api";
 import { toThreadTranscript, type ThreadMessage } from "@/lib/chatThreads";
@@ -6,36 +7,41 @@ import { toThreadTranscript, type ThreadMessage } from "@/lib/chatThreads";
 export function useSubagentHistory(activity: Accessor<SubagentActivity>) {
   const identity = createMemo(() => JSON.stringify([
     activity().parent_thread_id, activity().delegation_id, activity().thread_id,
-    activity().run_id, activity().version,
+  ]));
+  const revision = createMemo(() => JSON.stringify([
+    identity(), activity().run_id, activity().version, activity().checkpoint_id, activity().status,
   ]));
   const hasLiveItems = createMemo(() => activity().items !== undefined);
-  const [history, setHistory] = createSignal<{ key: string; items: TranscriptItem[] } | null>(null);
+  const [history, setHistory] = createStore<{ key: string; revision: string; items: TranscriptItem[] }>({ key: "", revision: "", items: [] });
   const [loadingKey, setLoadingKey] = createSignal<string | null>(null);
   const [error, setError] = createSignal("");
   let controller: AbortController | undefined;
-  const savedItems = () => history()?.key === identity() ? history()!.items : undefined;
+  const savedItems = () => history.key === identity() ? history.items : undefined;
   const items = () => activity().items ?? savedItems() ?? [];
   const ready = () => hasLiveItems() || savedItems() !== undefined;
 
   const load = async () => {
     const snapshot = activity();
-    const key = identity();
-    if (hasLiveItems() || savedItems() !== undefined || loadingKey() === key) return;
+    const key = identity(), version = revision();
+    if (hasLiveItems() || history.revision === version || loadingKey() === version) return;
     controller?.abort();
     const request = new AbortController();
     controller = request;
-    setLoadingKey(key);
+    setLoadingKey(version);
     setError("");
     try {
       const result = await apiFetch<{ messages: ThreadMessage[] }>(
         `/v2/api/chat/${encodeURIComponent(snapshot.parent_thread_id)}/subagents/${encodeURIComponent(snapshot.delegation_id)}`,
         { signal: request.signal },
       );
-      if (!request.signal.aborted && identity() === key && !hasLiveItems()) {
-        setHistory({ key, items: toThreadTranscript(result.messages, snapshot.thread_id) });
+      if (!request.signal.aborted && revision() === version && !hasLiveItems()) {
+        batch(() => {
+          setHistory("items", reconcile(toThreadTranscript(result.messages, snapshot.thread_id), { key: "key" }));
+          setHistory({ key, revision: version });
+        });
       }
     } catch (failure) {
-      if (!request.signal.aborted && identity() === key) {
+      if (!request.signal.aborted && revision() === version) {
         setError(failure instanceof Error ? failure.message : "Subagent history could not be loaded.");
       }
     } finally {
@@ -46,7 +52,7 @@ export function useSubagentHistory(activity: Accessor<SubagentActivity>) {
     }
   };
 
-  createEffect(on([identity, hasLiveItems], () => {
+  createEffect(on([revision, hasLiveItems], () => {
     controller?.abort();
     controller = undefined;
     setLoadingKey(null);
@@ -58,5 +64,5 @@ export function useSubagentHistory(activity: Accessor<SubagentActivity>) {
     controller = undefined;
   });
 
-  return { identity, items, ready, error, loading: () => loadingKey() === identity(), retry: load };
+  return { identity, items, ready, error, loading: () => loadingKey() === revision(), retry: load };
 }

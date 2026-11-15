@@ -50,6 +50,32 @@ const threads = loadModule('../src/lib/chatThreads.ts', {
   '@/lib/workspace': { isNoWorkspace: () => false },
 });
 
+test('internal async completion notifications do not become transcript messages', () => {
+  const items = threads.toThreadTranscript([
+    { id: 'user', role: 'user', content: 'Combine both results.' },
+    { id: 'browser-event', role: 'system', source: 'async_subagent', content: 'Background task completed: Browser' },
+    { id: 'system', role: 'system', content: 'A visible system message' },
+    { id: 'answer', role: 'assistant', content: 'Combined answer' },
+  ]);
+  assert.deepEqual(Array.from(items, item => item.text), ['Combine both results.', 'A visible system message', 'Combined answer']);
+});
+
+test('saved notification batches restore one divider per wakeup at their original positions', () => {
+  const wakeup = { wakeup_id: 'wake-1', agent_names: ['Browser', 'Researcher'] };
+  const items = threads.toThreadTranscript([
+    { id: 'launch', role: 'assistant', content: 'Waiting for both agents.' },
+    { id: 'browser', role: 'system', source: 'async_subagent', content: 'Internal', async_wakeup: wakeup },
+    { id: 'researcher', role: 'system', source: 'async_subagent', content: 'Internal', async_wakeup: wakeup },
+    { id: 'combined', role: 'assistant', content: 'Combined answer' },
+    { id: 'next', role: 'system', source: 'async_subagent', content: 'Internal', async_wakeup: { wakeup_id: 'wake-2', agent_names: ['Browser'] } },
+    { id: 'follow-up', role: 'assistant', content: 'Follow-up answer' },
+  ]);
+  assert.deepEqual(Array.from(items, item => item.type), ['message', 'async_wakeup', 'message', 'async_wakeup', 'message']);
+  assert.equal(items[1].wakeup_id, 'wake-1');
+  assert.deepEqual(Array.from(items[1].agentNames), ['Browser', 'Researcher']);
+  assert.equal(items[3].wakeup_id, 'wake-2');
+});
+
 function createStream(placeholderText = 'Thinking...') {
   const items = [];
   let nextId = 1;

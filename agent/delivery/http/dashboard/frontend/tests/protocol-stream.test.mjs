@@ -31,10 +31,13 @@ const handler = load('../src/lib/chatStreamHandler.ts', {
 const protocol = load('../src/lib/protocolStreamHandler.ts', {
   '@/lib/chatStreamHandler': handler,
 });
+const replay = load('../src/lib/chatStreamReplay.ts', {
+  '@/lib/asyncSubagents': load('../src/lib/asyncSubagents.ts', { '@/lib/userInputRequest': {} }),
+});
 
-function fixture() {
-  let seq = 0, nextId = 1;
-  const items = [];
+function fixture(previous = [], replaying = false) {
+  let seq = 0, nextId = Math.max(0, ...previous.map(item => item.id)) + 1;
+  const items = [...previous];
   const errors = [];
   const callbacks = {
     appendItem: (item) => { const id = nextId++; items.push({ ...item, id }); return id; },
@@ -52,9 +55,10 @@ function fixture() {
     updatePlanReviewResult: () => {}, updateUserInputRequestResult: () => {},
     setRecursionLimitReached: () => {}, onThreadCreated: () => {}, onError: (error) => errors.push(error),
   };
-  const refs = { id: callbacks.appendItem({ type: 'message', role: 'assistant', text: 'Thinking...' }) };
+  const refs = { id: previous.length ? null : callbacks.appendItem({ type: 'message', role: 'assistant', text: 'Thinking...' }) };
   const streamed = { received: false }, thread = { id: 'parent', message: '' };
-  const sendEvent = (event) => protocol.handleProtocolEvent(event, refs, streamed, thread, callbacks);
+  const projection = replaying ? replay.createReplayCallbacks(callbacks, previous) : callbacks;
+  const sendEvent = (event) => protocol.handleProtocolEvent(event, refs, streamed, thread, projection);
   const send = (method, data, namespace = []) => {
     const event = { type: 'event', method, params: { namespace, data, timestamp: 0 },
       seq: ++seq, event_id: `run:${seq}` };
@@ -63,6 +67,88 @@ function fixture() {
   };
   return { items, errors, send, sendEvent, callbacks };
 }
+
+test('a parent continuation retains both completed subagents while streaming its final answer', () => {
+  const previous = [
+    { id: 1, type: 'message', role: 'user', messageId: 'user', text: 'Use two agents' },
+    ...['browser', 'researcher'].map((id, index) => ({ id: index + 2, type: 'tool', name: 'start_async_task',
+      tool_call_id: id, result: 'Accepted', resultReceived: true,
+      subagent: { delegation_id: id, execution_mode: 'async', version: 3, status: 'completed' } })),
+    { id: 4, type: 'message', role: 'assistant', messageId: 'launch-answer', text: 'Waiting for both agents.' },
+  ];
+  const f = fixture(previous, true);
+  f.send('lifecycle', { event: 'started', thread_id: 'parent' });
+  f.send('messages', [{ event: 'message-start', id: 'combined-answer' }, { run_id: 'combined-answer' }]);
+  f.send('custom:k41', { type: 'message', message_id: 'combined-answer', content: 'Combined ', projection: 'ui' });
+  assert.deepEqual(f.items.slice(0, 4), previous);
+  assert.equal(f.items.filter(item => item.subagent).length, 2);
+  assert.equal(f.items.at(-1).text, 'Combined ');
+  f.send('custom:k41', { type: 'message', message_id: 'combined-answer', content: 'answer', projection: 'ui' });
+  assert.equal(f.items.at(-1).text, 'Combined answer');
+});
+
+test('reconnecting the same run reuses tools and answers without shrinking checkpoint text', () => {
+  const previous = [
+    { id: 1, type: 'message', role: 'user', messageId: 'user', text: 'Delegate work' },
+    { id: 2, type: 'thinking', messageId: 'lc_run--launch', text: 'Review the source.', durationMs: 1000 },
+    { id: 3, type: 'message', role: 'assistant', messageId: 'lc_run--launch', text: 'Starting a worker.' },
+    { id: 4, type: 'tool', name: 'start_async_task', tool_call_id: 'worker', resultReceived: true, result: 'Accepted',
+      subagent: { delegation_id: 'worker', execution_mode: 'async', version: 3, status: 'completed' } },
+    { id: 5, type: 'message', role: 'assistant', messageId: 'lc_run--answer', text: 'Partial answer' },
+  ];
+  const f = fixture(previous, true);
+  f.send('messages', [{ event: 'message-start', id: 'launch' }, { run_id: 'launch' }]);
+  f.send('custom:k41', { type: 'thinking', message_id: 'launch', content: 'Review', projection: 'ui' });
+  assert.equal(f.items[1].text, 'Review the source.');
+  f.send('custom:k41', { type: 'message', message_id: 'launch', content: 'Starting', projection: 'ui' });
+  assert.equal(f.items[2].text, 'Starting a worker.');
+  f.send('tools', { event: 'tool-started', tool_call_id: 'worker', tool_name: 'start_async_task', input: {} });
+  f.send('custom:k41', { type: 'tool_result', tool_call_id: 'worker', name: 'start_async_task',
+    content: 'Accepted', projection: 'ui', subagent: { delegation_id: 'worker', execution_mode: 'async', version: 1, status: 'pending' } });
+  f.send('messages', [{ event: 'message-start', id: 'answer' }, { run_id: 'answer' }]);
+  f.send('custom:k41', { type: 'message', message_id: 'answer', content: 'Partial', projection: 'ui' });
+  assert.equal(f.items[4].text, 'Partial answer');
+  f.send('custom:k41', { type: 'message', message_id: 'answer', content: ' answer and more', projection: 'ui' });
+  assert.equal(f.items[4].text, 'Partial answer and more');
+  assert.equal(f.items.length, 5);
+  assert.equal(f.items[3].subagent.status, 'completed');
+  assert.deepEqual(f.items.map(item => item.id), [1, 2, 3, 4, 5]);
+});
+
+test('checkpoint refreshes preserve subagent row IDs and allocate IDs only for new content', () => {
+  const previous = [
+    { id: 10, type: 'tool', name: 'start_async_task', tool_call_id: 'worker', result: 'Accepted' },
+    { id: 11, type: 'message', role: 'assistant', messageId: 'answer', text: 'Partial' },
+  ];
+  let nextId = 20;
+  const snapshot = replay.preserveTranscriptIds([
+    { type: 'tool', name: 'start_async_task', tool_call_id: 'worker', result: 'Accepted' },
+    { type: 'message', role: 'assistant', messageId: 'lc_run--answer', text: 'Full answer' },
+    { type: 'message', role: 'assistant', messageId: 'new-answer', text: 'New content' },
+  ], previous, () => nextId++);
+  assert.deepEqual(Array.from(snapshot, item => item.id), [10, 11, 20]);
+});
+
+test('wakeups add a fixed boundary before output and deduplicate stream and checkpoint replays', () => {
+  const f = fixture();
+  const wakeup = { type: 'async_wakeup', wakeup_id: 'wake-1', agent_names: ['Browser', 'Researcher'], projection: 'ui' };
+  f.send('custom:k41', wakeup);
+  f.send('custom:k41', wakeup);
+  f.send('custom:k41', { type: 'message', message_id: 'wake-answer', content: 'Combined answer', projection: 'ui' });
+  assert.deepEqual(f.items.map(item => item.type), ['async_wakeup', 'message']);
+  assert.deepEqual(Array.from(f.items[0].agentNames), ['Browser', 'Researcher']);
+  const previous = [...f.items];
+  const repeated = fixture(previous, true);
+  repeated.send('custom:k41', wakeup);
+  assert.equal(repeated.items.filter(item => item.type === 'async_wakeup').length, 1);
+  const saved = replay.preserveTranscriptIds([
+    { type: 'async_wakeup', wakeup_id: 'wake-1', agentNames: ['Browser', 'Researcher'] },
+    { type: 'message', role: 'assistant', messageId: 'lc_run--wake-answer', text: 'Combined answer' },
+  ], previous, () => 99);
+  assert.deepEqual(Array.from(saved, item => item.id), previous.map(item => item.id));
+  repeated.send('custom:k41', { ...wakeup, wakeup_id: 'wake-2', agent_names: ['Browser'] });
+  assert.equal(repeated.items.filter(item => item.type === 'async_wakeup').length, 2);
+});
 
 test('joining and reconnecting a running background stream renders each projected delta once', (t) => {
   const sources = [];

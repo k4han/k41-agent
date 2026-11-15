@@ -37,10 +37,13 @@ export interface StreamCallbacks {
 }
 
 export function mergeToolActivity<T extends TranscriptTool>(item: T, patch: Partial<TranscriptTool>): T {
+  const staleSubagent = item.subagent?.execution_mode === "async"
+    && patch.subagent?.delegation_id === item.subagent.delegation_id
+    && (patch.subagent.version ?? 0) < (item.subagent.version ?? 0);
   return {
     ...item,
     ...patch,
-    subagent: patch.subagent ? {
+    subagent: staleSubagent ? item.subagent : patch.subagent ? {
       ...item.subagent,
       ...patch.subagent,
       items: patch.subagent.items?.length ? patch.subagent.items : item.subagent?.items ?? patch.subagent.items,
@@ -114,6 +117,7 @@ export function isWorkspaceAffectingTool(toolName: string): boolean {
 
 // Any of these means the model stopped reasoning and moved on.
 const THINKING_SETTLING_EVENTS: ReadonlySet<unknown> = new Set([
+  STREAM_EVENTS.ASYNC_WAKEUP,
   STREAM_EVENTS.MESSAGE,
   STREAM_EVENTS.FINAL,
   STREAM_EVENTS.TOOL_CALL,
@@ -151,6 +155,21 @@ export function applyApplicationEvent(
     settleStreamThinking(assistantIdRef, streamThreadIdRef, callbacks);
   }
 
+  if (event.type === STREAM_EVENTS.ASYNC_WAKEUP) {
+    const wakeupId = String(event.wakeup_id || "");
+    if (!wakeupId) return;
+    if (assistantIdRef.id !== null && !streamedRef.received) {
+      callbacks.removeItem?.(assistantIdRef.id, streamThreadIdRef.id);
+    }
+    callbacks.appendItem({ type: "async_wakeup", wakeup_id: wakeupId,
+      agentNames: Array.from(new Set(Array.isArray(event.agent_names)
+        ? event.agent_names.filter((name): name is string => typeof name === "string" && Boolean(name.trim())) : [])),
+    }, "bottom", streamThreadIdRef.id);
+    assistantIdRef.id = null;
+    streamedRef.received = false;
+    return;
+  }
+
   if (event.type === STREAM_EVENTS.THINKING) {
     const content = String(event.content || "");
     if (!content) {
@@ -167,7 +186,7 @@ export function applyApplicationEvent(
         assistantIdRef.id = null;
       }
       assistantIdRef.thinkingId = callbacks.appendItem(
-        { type: "thinking", text: "" },
+        { type: "thinking", text: "", ...(event.message_id ? { messageId: String(event.message_id) } : {}) },
         "bottom",
         streamThreadIdRef.id,
       );
@@ -239,7 +258,7 @@ export function applyApplicationEvent(
     }
     if (assistantIdRef.id === null) {
       assistantIdRef.id = callbacks.appendItem(
-        { type: "message", role: "assistant", text: "" },
+        { type: "message", role: "assistant", text: "", ...(event.message_id ? { messageId: String(event.message_id) } : {}) },
         "bottom",
         streamThreadIdRef.id,
       );
@@ -433,7 +452,7 @@ export function applyApplicationEvent(
     }
     if (assistantIdRef.id === null) {
       assistantIdRef.id = callbacks.appendItem(
-        { type: "message", role: "assistant", text: "" },
+        { type: "message", role: "assistant", text: "", ...(event.message_id ? { messageId: String(event.message_id) } : {}) },
         "bottom",
         streamThreadIdRef.id,
       );

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { compileFunction } from 'node:vm';
 import test from 'node:test';
 import * as solid from 'solid-js';
+import * as solidStore from 'solid-js/store';
 import ts from 'typescript';
 
 function load(path, dependencies = {}) {
@@ -141,12 +142,13 @@ function historyFixture(t, initial) {
   const conversions = [];
   const { useSubagentHistory } = load('../src/lib/useSubagentHistory.ts', {
     'solid-js': solid,
+    'solid-js/store': solidStore,
     '@/lib/api': { apiFetch: (path, init) => new Promise((resolve, reject) => {
       requests.push({ path, signal: init.signal, resolve, reject });
     }) },
     '@/lib/chatThreads': { toThreadTranscript: (messages, threadId) => {
       conversions.push(threadId);
-      return messages.map(message => ({ type: 'message', role: message.role, text: message.content }));
+      return messages.map((message, index) => ({ key: message.id || `message-${index}`, type: 'message', role: message.role, text: message.content }));
     } },
   });
   let setActivity;
@@ -174,6 +176,37 @@ test('saved history loads without expansion and subsequent reads reuse it', asyn
   assert.deepEqual(conversions, ['child-thread']);
   await history.retry();
   assert.equal(requests.length, 1);
+});
+
+test('task revisions keep the visible history and row identity while the next snapshot loads', async t => {
+  const f = historyFixture(t, activity({ execution_mode: 'async', run_id: 'run', version: 1 }));
+  f.requests[0].resolve({ messages: [{ id: 'answer', role: 'assistant', content: 'Saved answer' }] });
+  await tick();
+  const row = f.history.items()[0];
+  f.setActivity(activity({ execution_mode: 'async', run_id: 'run', version: 2, status: 'completed' }));
+  assert.equal(f.history.ready(), true);
+  assert.equal(f.history.items()[0], row);
+  assert.equal(f.history.items()[0].text, 'Saved answer');
+  assert.equal(f.requests.length, 2);
+  f.requests[1].resolve({ messages: [{ id: 'answer', role: 'assistant', content: 'Completed answer' }] });
+  await tick();
+  assert.equal(f.history.items()[0], row);
+  assert.equal(row.text, 'Completed answer');
+});
+
+test('late running snapshots cannot erase history when completion is already being loaded', async t => {
+  const f = historyFixture(t, activity({ run_id: 'run', version: 1 }));
+  f.requests[0].resolve({ messages: [{ role: 'assistant', content: 'Visible answer' }] });
+  await tick();
+  f.setActivity(activity({ run_id: 'run', version: 2 }));
+  f.setActivity(activity({ run_id: 'run', version: 3, status: 'completed' }));
+  assert.equal(f.requests[1].signal.aborted, true);
+  f.requests[1].resolve({ messages: [] });
+  await tick();
+  assert.equal(f.history.items()[0].text, 'Visible answer');
+  f.requests[2].resolve({ messages: [{ role: 'assistant', content: 'Completed answer' }] });
+  await tick();
+  assert.equal(f.history.items()[0].text, 'Completed answer');
 });
 
 test('an explicit empty live snapshot is known zero tools and does not fetch history', t => {

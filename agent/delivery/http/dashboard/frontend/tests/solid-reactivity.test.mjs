@@ -683,6 +683,21 @@ test('direct transcript writes preserve history and maintain the ID index after 
   });
 });
 
+test('replay text replacements update reasoning without replacing its row', t => {
+  const { createTranscriptItems } = loadModule('../src/lib/chatStreamStore.ts', {
+    '@/lib/utils': loadModule('../src/lib/utils.ts'),
+  });
+  mount(t, () => {
+    const [items, , , , replaceMessage] = createTranscriptItems([
+      { id: 1, type: 'thinking', text: 'Saved reasoning' },
+    ]);
+    const row = items()[0];
+    replaceMessage(1, 'Saved reasoning with more context');
+    assert.equal(items()[0], row);
+    assert.equal(row.text, 'Saved reasoning with more context');
+  });
+});
+
 test('streaming selection notifies only the active rows in a long transcript', t => {
   const utils = loadModule('../src/lib/utils.ts');
   const { createTranscriptItems } = loadModule('../src/lib/chatStreamStore.ts', { '@/lib/utils': utils });

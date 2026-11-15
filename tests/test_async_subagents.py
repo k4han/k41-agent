@@ -50,6 +50,37 @@ async def test_admission_is_idempotent_and_scoped(repository):
 
 
 @pytest.mark.asyncio
+async def test_launch_recovery_is_scoped_to_parent_message_and_retains_completed_tasks(repository):
+    task = await admit(repository)
+    job = await repository.claim(task["run_id"], "worker")
+    await repository.finish(job, "completed", result="Done")
+    found = await repository.find_task_by_call("api_parent", "launch", "message")
+    assert found["task_id"] == task["task_id"]
+    assert found["status"] == "completed"
+    assert await repository.find_task_by_call("another_parent", "launch", "message") is None
+    assert await repository.find_task_by_call("api_parent", "launch", "another_message") is None
+    await repository.cancel_scope("api_parent", delete=True)
+    assert await repository.find_task_by_call("api_parent", "launch", "message") is None
+
+
+@pytest.mark.asyncio
+async def test_history_restores_async_launches_without_a_committed_tool_result(repository, monkeypatch):
+    import agent.modules.agent_runtime.async_subagents as async_subagents
+    from agent.modules.agent_runtime.delegation import enrich_delegated_calls
+
+    task = await admit(repository)
+    monkeypatch.setattr(async_subagents, "active_async_subagent_service", lambda: SimpleNamespace(repository=repository))
+    messages = [{"id": "message", "role": "assistant", "tool_calls": [
+        {"id": "launch", "name": "start_async_task"},
+        {"id": "never-created", "name": "start_async_task"},
+    ]}]
+    restored = await enrich_delegated_calls(messages, "api_parent")
+    assert restored[0]["tool_calls"][0]["subagent"]["task_id"] == task["task_id"]
+    assert restored[0]["tool_calls"][0]["subagent"]["execution_mode"] == "async"
+    assert "subagent" not in restored[0]["tool_calls"][1]
+
+
+@pytest.mark.asyncio
 async def test_updates_are_fifo_and_waiting_requests_are_preserved(repository):
     task = await admit(repository)
     initial = (await repository.candidates())[0]
@@ -231,6 +262,91 @@ async def test_real_runtime_completes_child_and_automatically_wakes_parent(runti
     notices = [message for message in snapshot.values["messages"] if message.additional_kwargs.get("source") == "async_subagent"]
     assert len(notices) == 1
     assert snapshot.values["async_event_cursors"][task["task_id"]] > 0
+    from agent.modules.agent_runtime.protocol import application_event
+    from agent.modules.conversations.history import _serialize_thread_messages
+
+    session = await env.container.chat_stream_manager.get_session("api_parent")
+    events = [application_event(event) async for event in session.subscribe()]
+    projected = [event for event in events if event]
+    wakeups = [event for event in projected if event["type"] == "async_wakeup"]
+    assert len(wakeups) == 1
+    assert wakeups[0]["agent_names"] == ["worker"]
+    assert notices[0].additional_kwargs["async_wakeup_id"] == wakeups[0]["wakeup_id"]
+    assert projected.index(wakeups[0]) < next(index for index, event in enumerate(projected) if event["type"] == "final")
+    saved = next(entry for entry in _serialize_thread_messages(snapshot.values["messages"])
+                 if entry.get("source") == "async_subagent")
+    assert saved["async_wakeup"] == {key: wakeups[0][key] for key in ("wakeup_id", "agent_names")}
+
+
+def test_wakeup_history_groups_parallel_results_and_preserves_names_across_pages():
+    from langchain_core.messages import AIMessage, HumanMessage
+    from agent.modules.conversations.history import _serialize_thread_messages
+
+    def notice(name, wakeup_id, event_id):
+        return HumanMessage(id=event_id, content="Internal result", additional_kwargs={
+            "source": "async_subagent", "async_agent_name": name, "async_wakeup_id": wakeup_id,
+            "async_status": "completed",
+        })
+
+    messages = [HumanMessage(content="Delegate work"), AIMessage(content="Waiting"),
+                notice("Browser", "first-wakeup", "browser-1"), notice("Researcher", "first-wakeup", "research-1"),
+                AIMessage(content="Combined answer"), notice("Browser", "second-wakeup", "browser-2"),
+                AIMessage(content="Follow-up answer")]
+    rows = _serialize_thread_messages(messages)
+    assert rows[2]["async_wakeup"] == rows[3]["async_wakeup"] == {
+        "wakeup_id": "first-wakeup", "agent_names": ["Browser", "Researcher"],
+    }
+    assert rows[5]["async_wakeup"] == {"wakeup_id": "second-wakeup", "agent_names": ["Browser"]}
+    page = _serialize_thread_messages(messages, start=3, end=4)
+    assert page[0]["async_wakeup"] == rows[2]["async_wakeup"]
+
+
+@pytest.mark.asyncio
+async def test_results_delivered_to_an_active_graph_emit_a_boundary_before_its_answer(runtime_environment):
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+    from agent.modules.agent_runtime.protocol import application_event, stream_graph
+    from agent.modules.workflows.state.base import BaseState
+
+    env = runtime_environment
+    task = await admit(env.repository)
+    job = await env.repository.claim(task["run_id"], "worker")
+    await env.repository.finish(job, "completed", result="Child result")
+
+    async def receive(state, config):
+        updates = await env.service.model_updates(state, config)
+        return {**updates, "messages": [*updates["messages"], AIMessage(id="parent-answer", content="Combined answer")]}
+
+    builder = StateGraph(BaseState)
+    builder.add_node("receive", receive)
+    builder.add_edge(START, "receive")
+    builder.add_edge("receive", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "api_parent", "async_subagents_supported": True}}
+    events = [event async for mode, event in stream_graph(graph, {"messages": [HumanMessage(content="Wait for work")]},
+        config=config, stream_mode=["values", "custom"], protocol_events=True) if mode == "protocol"]
+    marker = next(index for index, event in enumerate(events)
+                  if (application_event(event) or {}).get("type") == "async_wakeup")
+    answer = next(index for index, event in enumerate(events) if event["method"] == "messages")
+    assert marker < answer
+    snapshot = await graph.aget_state(config)
+    notice = next(message for message in snapshot.values["messages"] if message.additional_kwargs.get("source") == "async_subagent")
+    assert application_event(events[marker])["wakeup_id"] == notice.additional_kwargs["async_wakeup_id"]
+
+
+def test_legacy_notification_batches_receive_stable_history_boundaries():
+    from langchain_core.messages import AIMessage, HumanMessage
+    from agent.shared.async_subagents import async_wakeup_references
+
+    first = HumanMessage(id="old-first", content="Result", additional_kwargs={"source": "async_subagent", "async_agent_name": "Browser"})
+    second = HumanMessage(id="old-second", content="Result", additional_kwargs={"source": "async_subagent", "async_agent_name": "Researcher"})
+    third = first.model_copy(update={"id": "old-third"})
+    references = async_wakeup_references([first, second, AIMessage(content="Answer"), third])
+    assert references[0] == references[1]
+    assert references[0]["agent_names"] == ["Browser", "Researcher"]
+    assert references[0]["wakeup_id"] == "async-event:old-first"
+    assert references[3]["wakeup_id"] == "async-event:old-third"
 
 
 @pytest.mark.asyncio

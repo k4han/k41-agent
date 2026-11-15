@@ -17,7 +17,7 @@ from langgraph.runtime import RunControl
 from langgraph.types import Command
 
 from agent.modules.agent_runtime.async_subagents.repository import AsyncSubagentRepository
-from agent.shared.async_subagents import is_subagent_run, request_key, task_reference
+from agent.shared.async_subagents import async_wakeup_references, is_subagent_run, request_key, task_reference
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +229,11 @@ class AsyncSubagentService:
         parent = str(config["configurable"]["thread_id"])
         cursors = dict(state.get("async_event_cursors", {}))
         messages, references = [], {}
-        for event in await self.repository.pending_notifications(parent):
+        events = [event for event in await self.repository.pending_notifications(parent)
+                  if event["version"] > cursors.get(event["task_id"], 0)]
+        wakeup_id = (config.get("metadata", {}).get("k41_execution_id")
+                     or (f"async-event:{events[0]['event_id']}" if events else ""))
+        for event in events:
             task_id, version = event["task_id"], event["version"]
             if version <= cursors.get(task_id, 0):
                 continue
@@ -243,9 +247,19 @@ class AsyncSubagentService:
                         f"event={status}; current_status={payload['status']}]\n{detail[:20000]}",
                 additional_kwargs={"source": "async_subagent", "async_task_id": task_id,
                                    "async_event_id": event["event_id"], "async_agent_name": payload["agent_name"],
-                                   "async_status": status}))
+                                   "async_status": status, "async_wakeup_id": wakeup_id}))
             cursors[task_id] = version
             references[task_id] = task_reference(payload)
+        if messages:
+            from langgraph.config import get_stream_writer
+
+            try:
+                writer = get_stream_writer()
+            except RuntimeError:
+                writer = None
+            if writer is not None:
+                reference = next(iter(async_wakeup_references(messages).values()))
+                writer({"type": "async_wakeup", **reference})
         return {"messages": messages, "async_tasks": references, "async_event_cursors": cursors} if messages else {}
 
     async def reconcile(self, thread_id: str, graph=None, config=None):
@@ -405,7 +419,8 @@ class AsyncSubagentService:
             input_data = None
         elif job["kind"] == "wakeup":
             updates = await self.model_updates(snapshot.values or {}, {
-                "configurable": {"thread_id": job["thread_id"], "async_subagents_supported": True}})
+                "configurable": {"thread_id": job["thread_id"], "async_subagents_supported": True},
+                "metadata": {"k41_execution_id": job["job_id"]}})
             if not updates and not snapshot.next:
                 await self.repository.finish(job, "completed")
                 return
@@ -414,6 +429,13 @@ class AsyncSubagentService:
                 input_data = Command(update=updates) if updates else None
         else:
             input_data = {"messages": [HumanMessage(content=job["input"]["text"], id=f"async-input:{job['job_id']}")]}
+        wakeup = None
+        if job["kind"] == "wakeup":
+            incoming = input_data.update if isinstance(input_data, Command) else input_data
+            messages = [*(snapshot.values or {}).get("messages", []),
+                        *(incoming.get("messages", []) if isinstance(incoming, dict) else [])]
+            wakeup = next((value for value in async_wakeup_references(messages).values()
+                           if value["wakeup_id"] == job["job_id"]), None)
         execution = ManagedExecution(input_data, job["job_id"], job["kind"], context["agent_name"],
                                      context["workflow"], interrupt_id=interrupt_id)
         self._controls[job["job_id"]] = execution.control
@@ -431,6 +453,7 @@ class AsyncSubagentService:
                 **context, user_input=job["input"].get("text", ""), thread_id=job["thread_id"], resume=same_job,
                 resume_payload=resume_payload, _checkpoint_metadata=checkpoint_metadata,
                 _execution=execution, _run_id=stream_run_id,
+                _async_wakeup=wakeup,
                 _async_notification_agent=job["context"].get("routed_agent_name") if job["kind"] == "wakeup" else None,
             )) as events:
                 async for event in events:

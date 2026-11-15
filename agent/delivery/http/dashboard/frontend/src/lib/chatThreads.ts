@@ -71,6 +71,8 @@ export type ThreadMessage = {
   id: string | null;
   role: "user" | "assistant" | "tool" | "system";
   content: string;
+  source?: string;
+  async_wakeup?: { wakeup_id: string; agent_names: string[] };
   /** Model reasoning that preceded this assistant message. */
   thinking?: string;
   message_index?: number;
@@ -236,8 +238,19 @@ export function toThreadTranscript(
   threadId?: string | null,
 ): ThreadTranscriptItem[] {
   const items: ThreadTranscriptItem[] = [];
+  const wakeups = new Set<string>();
 
   messages.forEach((msg, messageIndex) => {
+    if (msg.source === "async_subagent") {
+      const wakeup = msg.async_wakeup;
+      if (wakeup?.wakeup_id && !wakeups.has(wakeup.wakeup_id)) {
+        wakeups.add(wakeup.wakeup_id);
+        items.push({ key: `async-wakeup-${wakeup.wakeup_id}`, type: "async_wakeup",
+          wakeup_id: wakeup.wakeup_id, agentNames: Array.from(new Set(wakeup.agent_names)),
+        });
+      }
+      return;
+    }
     if (msg.role === "tool") {
       if (msg.name === GENERATE_IMAGE_TOOL_NAME) {
         const attachment = generatedImageAttachmentFromToolResult(msg.content, threadId);
@@ -327,6 +340,7 @@ export function toThreadTranscript(
       items.push({
         key: `thinking-${messageIndex}-${msg.id || "unknown"}`,
         type: "thinking",
+        messageId: msg.id || undefined,
         text: msg.thinking,
         durationMs: thinkingDurationFor(threadId, msg.thinking),
       });
@@ -342,6 +356,7 @@ export function toThreadTranscript(
       items.push({
         key: `message-${messageIndex}-${msg.id || "unknown"}`,
         type: "message",
+        messageId: msg.id || undefined,
         role: msg.role,
         text: msg.content,
         messageIndex: msg.message_index,

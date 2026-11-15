@@ -83,7 +83,7 @@ export function createTranscriptItems(initialItems: ChatTranscriptItem[] = []): 
       const index = indices.get(id);
       if (index === undefined) return;
       setState("items", index, produce((item) => {
-        if (item.type === "message") item.text = text;
+        if (item.type === "message" || item.type === "thinking") item.text = text;
       }));
     }),
     (toolCallId, name, result) => untrack(() => {

@@ -64,7 +64,7 @@ export function isTranscriptWaitingForModel(
  * Interactive requests and rich results also remain separate rows.
  */
 export function isTranscriptActivityBoundary(item: TranscriptItem): boolean {
-  if (item.type === "plan_review" || item.type === "user_input_request") {
+  if (item.type === "plan_review" || item.type === "user_input_request" || item.type === "async_wakeup") {
     return true;
   }
   if (item.type === "tool") {
@@ -105,7 +105,7 @@ export function findTranscriptCompletedAnswerIds<T extends TranscriptActivitySou
   let candidate: number | null = null;
   for (const item of items) {
     if (isEmptyTranscriptRow(item)) continue;
-    if (item.type === "message" && item.role === "user") {
+    if (item.type === "async_wakeup" || (item.type === "message" && item.role === "user")) {
       if (candidate !== null) answers.add(candidate);
       candidate = null;
     } else if (item.type === "message" && item.role === "assistant") {

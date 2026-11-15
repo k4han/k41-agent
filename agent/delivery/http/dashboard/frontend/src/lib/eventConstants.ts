@@ -1,4 +1,5 @@
 export const STREAM_EVENTS = {
+  ASYNC_WAKEUP: "async_wakeup",
   THREAD_CREATED: "thread_created",
   THREAD_TITLE: "thread_title",
   CONTEXT_USAGE: "context_usage",
