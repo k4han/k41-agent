@@ -1317,6 +1317,8 @@ async def run_agent_stream(
     emit_thinking: bool = False,
     _protocol_events: bool = False,
     _checkpoint_metadata: dict[str, Any] | None = None,
+    _execution: Any = None,
+    _async_notification_agent: str | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run a workflow graph and stream UI events (tool calls and text chunks).
 
@@ -1377,7 +1379,8 @@ async def run_agent_stream(
     thread_id = resolve_thread_id(thread_id)
     await _assert_thread_graph_family(thread_id, resolved_workflow, agent_config)
     approval_supported = resolve_approval_supported(usage_context, thread_id, surfaces_interrupts=True)
-    if _checkpoint_metadata and _checkpoint_metadata.get("k41_parent_thread_id"):
+    if (_checkpoint_metadata and _checkpoint_metadata.get("k41_parent_thread_id")
+            and not _checkpoint_metadata.get("k41_async_task_id")):
         approval_supported = False
     usage_context = (await load_usage_context(thread_id, usage_context)).to_dict()
     graph = get_workflow_graph(resolved_workflow)
@@ -1403,12 +1406,22 @@ async def run_agent_stream(
         browser_owner_id=browser_owner_id,
         acp_config_options=acp_config_options,
     )
+    config["configurable"]["async_subagents_supported"] = approval_supported and resolved_workflow != ACP_AGENT_GRAPH_TYPE
+    if _async_notification_agent:
+        config["configurable"]["async_notification_agent"] = _async_notification_agent
+    config["metadata"] = {**config.get("metadata", {}), "k41_run_workflow": resolved_workflow,
+                          "k41_run_agent_name": agent_name}
+    if config["configurable"]["async_subagents_supported"]:
+        from agent.modules.agent_runtime.async_subagents.service import _run_context
+        config["metadata"]["k41_run_context"] = {**_run_context(context), "usage_context": usage_context}
+    if _execution is not None:
+        _execution.agent_name, _execution.workflow = agent_name, resolved_workflow
     if _checkpoint_metadata:
         config["metadata"] = {**config.get("metadata", {}), **_checkpoint_metadata}
     conversation_title_task: asyncio.Task[dict[str, Any] | None] | None = None
     if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
         await _update_thread_agent(thread_id, agent_name, graph_family_for(resolved_workflow))
-    elif not resume and not checkpoint_id:
+    elif not resume and not checkpoint_id and (_execution is None or _execution.source == "start"):
         conversation_title_task = await _record_conversation_thread(
             thread_id=thread_id,
             agent_name=agent_name,
@@ -1421,7 +1434,7 @@ async def run_agent_stream(
         )
 
     seen_ids: set[str] = set()
-    if resume:
+    if resume or _execution is not None:
         try:
             state = await graph.aget_state(config)
             if state and state.values and "messages" in state.values:
@@ -1439,10 +1452,17 @@ async def run_agent_stream(
     if _graph_accepts_context(graph):
         stream_kwargs["context"] = context
 
+    if _execution is not None:
+        stream_kwargs.update(durability="sync", control=_execution.control)
+
     registry = get_active_session_registry()
     if not resume and normalized_resume_payload is None and attachments and workspace is not None:
         await _ingest_attachments_to_sandbox(attachments, workspace, thread_id=thread_id)
-    if resume:
+    if _execution is not None:
+        input_data = _execution.input
+        user_message_id = None
+        current_user_seen = True
+    elif resume:
         input_data = None
         user_message_id = None
         current_user_seen = True
@@ -1638,6 +1658,13 @@ async def run_agent_stream(
     finally:
         if not title_watcher.done():
             title_watcher.cancel()
+        from agent.modules.agent_runtime.async_subagents import active_async_subagent_service
+        subagents = active_async_subagent_service()
+        if subagents is not None and _execution is None:
+            try:
+                await subagents.reconcile(thread_id, graph)
+            except Exception:
+                logger.warning("Async notifications remain pending for thread %s.", thread_id, exc_info=True)
 
 
 @guard_workspace_run

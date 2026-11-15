@@ -37,6 +37,16 @@ logger = logging.getLogger(__name__)
 async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowContext]):
     """Dynamic node: reads agent_name from context, resolves full config at runtime."""
     from agent.modules.agents import get_catalog_service
+    from agent.modules.agent_runtime.async_subagents import active_async_subagent_service
+    from agent.modules.tools.policy import tools_for_run
+
+    notification_updates = {}
+    subagents = active_async_subagent_service()
+    if subagents is not None:
+        notification_updates = await subagents.model_updates(state, config)
+        if notification_updates:
+            state = {**state, **notification_updates,
+                     "messages": [*state["messages"], *notification_updates["messages"]]}
 
     ctx = runtime.context
     agent_name = ctx.get_agent_name()
@@ -69,6 +79,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         override_tool_names=ctx_tool_names,
     )
     tools = ToolResolver().for_workspace(tools, workspace)
+    tools = tools_for_run(tools, config)
 
     thread_id = get_thread_id(config)
     from agent.modules.skills import get_repository_skill_dir
@@ -184,7 +195,10 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
             ),
         )
         emit_reported_context_usage(response, resolved=resolved, config=config, context_breakdown=context_breakdown)
-        updates = {"messages": [*history_updates, response]}
+        updates = {"messages": [*(history_updates or notification_updates.get("messages", [])), response]}
+        if notification_updates:
+            updates.update(async_tasks=notification_updates["async_tasks"],
+                           async_event_cursors=notification_updates["async_event_cursors"])
         if active_skills or state.get("active_skills") or processed_skill_messages:
             updates.update(active_skills=active_skills, processed_skill_messages=processed_skill_messages)
         return updates

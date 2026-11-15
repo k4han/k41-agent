@@ -6,6 +6,7 @@ import { toThreadTranscript, type ThreadMessage } from "@/lib/chatThreads";
 export function useSubagentHistory(activity: Accessor<SubagentActivity>) {
   const identity = createMemo(() => JSON.stringify([
     activity().parent_thread_id, activity().delegation_id, activity().thread_id,
+    activity().run_id, activity().version,
   ]));
   const hasLiveItems = createMemo(() => activity().items !== undefined);
   const [history, setHistory] = createSignal<{ key: string; items: TranscriptItem[] } | null>(null);

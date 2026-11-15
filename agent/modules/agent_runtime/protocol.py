@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langchain_protocol.protocol import MessagesData
 from langgraph.prebuilt import ToolCallTransformer
 from langgraph.stream import CustomTransformer, ProtocolEvent
+from langgraph.errors import GraphDrained
 
 from agent.shared.infrastructure.parsing import extract_message_thinking
 
@@ -450,6 +451,8 @@ async def run_agent_protocol_stream(*, edit=False, **params) -> AsyncIterator[di
                 },
             )
         )
+    except GraphDrained:
+        raise
     except Exception as exc:
         error = classify_agent_error(exc)
         yield sequence.stamp(

@@ -125,6 +125,12 @@ export type TranscriptMessage = {
 };
 
 export type SubagentActivity = {
+  task_id?: string;
+  root_thread_id?: string;
+  run_id?: string;
+  version?: number;
+  execution_mode?: "async";
+  read_only?: boolean;
   delegation_id: string;
   agent_name: string;
   parent_thread_id: string;

@@ -44,7 +44,7 @@ def build_tool_catalogs(
         skills = _compact_skill_catalog(skills_catalog_xml)
         if skills:
             sections["skills"] = skills
-    if "delegate_task" in names:
+    if names.intersection({"delegate_task", "start_async_task"}):
         get_callable = getattr(catalog, "get_callable_agents", None)
         agents = get_callable(agent_name) if callable(get_callable) else []
         lines = []
@@ -61,7 +61,7 @@ def bind_tool_catalogs(tools: Sequence[Any], sections: dict[str, str], *, keep_s
     """Copy tools before adding catalogs; never mutate the shared registry."""
     result = []
     for tool in tools:
-        key = {"skill": "skills", "delegate_task": "subagents"}.get(tool.name)
+        key = {"skill": "skills", "delegate_task": "subagents", "start_async_task": "subagents"}.get(tool.name)
         section = sections.get(key, "") if key else ""
         if key and not section and not (tool.name == "skill" and keep_skill):
             continue

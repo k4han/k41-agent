@@ -152,6 +152,9 @@ class AppRuntime:
             logger.info("Restoring background task history...")
             await self.container.task_manager.restore_from_persistence()
 
+            logger.info("Starting durable async subagents...")
+            await self.container.async_subagents.start()
+
             self._register_channels()
             await self._start_enabled_channels()
 
@@ -190,6 +193,8 @@ class AppRuntime:
             await self._attempt(errors, "stop startup maintenance", self._stop_startup_maintenance_step)
             await self._attempt(errors, "stop managed channels", self._stop_channels_step)
             await self._attempt(errors, "stop background scheduler", self._stop_scheduler_step)
+            if self.container._async_subagents is not None:
+                await self._attempt(errors, "stop async subagents", self.container.async_subagents.shutdown)
             await self._attempt(errors, "stop chat streams", self._stop_chat_streams_step)
             await self._attempt(
                 errors, "stop workspace background services", self._stop_workspace_services_step

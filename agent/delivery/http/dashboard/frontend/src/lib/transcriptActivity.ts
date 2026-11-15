@@ -68,7 +68,8 @@ export function isTranscriptActivityBoundary(item: TranscriptItem): boolean {
     return true;
   }
   if (item.type === "tool") {
-    return item.name === HTML_PREVIEW_TOOL_NAME || item.name === "delegate_task";
+    return item.name === HTML_PREVIEW_TOOL_NAME || item.name === "delegate_task"
+      || item.name === "start_async_task" || Boolean(item.subagent);
   }
   if (item.type === "thinking") {
     return !isEmptyThinking(item);

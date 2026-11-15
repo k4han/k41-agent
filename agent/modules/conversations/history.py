@@ -645,10 +645,17 @@ def _serialize_thread_messages(
         if isinstance(msg, HumanMessage):
             attachments = _serialize_message_attachments(msg)
             entry["role"] = "user"
+            if msg.additional_kwargs.get("source") == "async_subagent":
+                entry["role"] = "system"
+                entry["source"] = "async_subagent"
             entry["content"] = _human_content_text(
                 msg.content,
                 has_attachments=bool(attachments),
             )
+            if msg.additional_kwargs.get("source") == "async_subagent":
+                name = msg.additional_kwargs.get("async_agent_name", "subagent")
+                status = msg.additional_kwargs.get("async_status", "updated")
+                entry["content"] = f"Background task {status}: {name}"
             if attachments:
                 entry["attachments"] = attachments
             source_checkpoint_id, parent_checkpoint_id = sources.get(

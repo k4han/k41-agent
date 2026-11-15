@@ -270,6 +270,8 @@ async def _fork_reserved(thread_id: str, checkpoint_id: str, message_index: int)
         try:
             state = copy.deepcopy(snapshot.values)
             state["messages"] = copy.deepcopy(messages)
+            state["async_tasks"] = {}
+            state["async_event_cursors"] = {}
             replacements = [(f"thread_id={quote(thread_id, safe='')}", f"thread_id={new_id}")]
             if binding is None or is_temp_workspace(binding.execution):
                 temp = await create_temp_workspace(new_id)

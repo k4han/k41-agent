@@ -55,6 +55,10 @@ async def delegate_task(
     from agent.modules.agent_runtime import run_agent_full
     from agent.modules.agents import get_catalog_service
     from agent.modules.browser import release_delegated_browser
+    from agent.shared.async_subagents import is_subagent_run
+
+    if is_subagent_run(runtime.config):
+        raise ToolError(ToolErrorCode.PERMISSION_DENIED, "Subagents cannot delegate to other agents.")
 
     caller_agent_name = get_context_value(runtime.context, "agent_name", "default")
     inherited_workspace = get_context_value(runtime.context, "workspace", None)

@@ -119,3 +119,10 @@ security:
 # Dashboard display settings (e.g. IANA timezone) are runtime configuration
 # stored in the database and managed from the dashboard at Settings > General.
 
+# Durable dashboard subagents run independently of the parent chat response.
+subagents:
+  max_concurrency: 8
+  max_concurrency_per_thread: 4
+  # Zero leaves execution time unlimited. Waiting for user input consumes no slot.
+  run_timeout_seconds: 0
+

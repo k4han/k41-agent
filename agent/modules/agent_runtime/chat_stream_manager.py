@@ -16,7 +16,7 @@ from contextlib import aclosing, asynccontextmanager
 from typing import Any, AsyncGenerator
 from uuid import uuid4
 
-from langgraph.errors import GraphRecursionError
+from langgraph.errors import GraphDrained, GraphRecursionError
 
 from agent.modules.agent_runtime.protocol import application_event, protocol_event, run_agent_protocol_stream
 from agent.shared.infrastructure.errors import (
@@ -193,6 +193,8 @@ class ChatStreamSession:
                         await self._push_error_event(update)
                     else:
                         await self.push_event(event)
+        except GraphDrained:
+            logger.info("Graph drained for thread %s", self.thread_id)
         except asyncio.CancelledError:
             logger.info("Background chat stream task cancelled for thread %s", self.thread_id)
             await self._push_error_event({"type": "error", "content": "Chat execution stopped."})
@@ -377,6 +379,27 @@ class ChatStreamManager:
             self._sessions[thread_id] = session
             session.start(on_done=self._session_finished)
             return session
+
+    async def start_if_idle(self, thread_id: str, params: dict[str, Any], run_fn: Any = None) -> ChatStreamSession | None:
+        """Admit a system run without superseding a user's execution."""
+        from agent.modules.agent_runtime import get_active_session_registry, ThreadMutationConflictError
+
+        self._ensure_open()
+        async with self._lock_thread(thread_id):
+            self._ensure_open()
+            existing = self._sessions.get(thread_id)
+            if existing and existing.task and not existing.task.done():
+                return None
+            try:
+                with get_active_session_registry().reserve_thread_mutation(thread_id, require_idle=True):
+                    if existing:
+                        self._remove_session(thread_id, existing)
+                    session = ChatStreamSession(thread_id, params, run_fn)
+                    self._sessions[thread_id] = session
+                    session.start(on_done=self._session_finished)
+                    return session
+            except ThreadMutationConflictError:
+                return None
 
     async def get_session(self, thread_id: str) -> ChatStreamSession | None:
         """Retrieve an active stream session for a thread, if any exists."""

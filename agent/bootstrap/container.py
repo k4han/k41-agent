@@ -194,6 +194,7 @@ class AppContainer:
     _workspace_backend_registry: Any = field(default=None, repr=False)
     _workspace_backends_registered: bool = field(default=False, repr=False)
     _background_task_repository: Any = field(default=None, repr=False)
+    _async_subagents: Any = field(default=None, repr=False)
     _chat_stream_manager: Any = field(default=None, repr=False)
     _active_session_registry: Any = field(default=None, repr=False)
     _usage_service: Any = field(default=None, repr=False)
@@ -426,6 +427,16 @@ class AppContainer:
 
             self._background_task_repository = BackgroundTaskRepository()
         return self._background_task_repository
+
+    @property
+    @_locked_lazy
+    def async_subagents(self) -> Any:
+        """Lazily own durable subagents for this application lifetime."""
+        if self._async_subagents is None:
+            from agent.modules.agent_runtime.async_subagents.service import AsyncSubagentService
+
+            self._async_subagents = AsyncSubagentService(self)
+        return self._async_subagents
 
     @property
     @_locked_lazy
@@ -723,6 +734,9 @@ class AppContainer:
         from agent.modules.workflows import close_checkpointer
         from agent.shared.config.service import detach_database_config_source
         from agent.shared.infrastructure.db.engine import close_async_engine
+
+        if self._async_subagents is not None:
+            await self._async_subagents.shutdown()
 
         if self._chat_stream_manager is not None:
             await self._chat_stream_manager.shutdown()

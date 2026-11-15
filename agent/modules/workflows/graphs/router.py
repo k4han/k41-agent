@@ -754,6 +754,7 @@ def _build_target_context(runtime_context: WorkflowContext, target_agent: AgentC
         model=runtime_context.get_model(),
         reasoning_effort=runtime_context.reasoning_effort,
         permission_mode=runtime_context.permission_mode,
+        browser_owner_id=runtime_context.browser_owner_id,
     )
     target_context.channel_trim_applied = runtime_context.channel_trim_applied
     return target_context
@@ -776,6 +777,13 @@ async def llm_call_router(
 
     catalog = get_catalog_service()
     ctx = runtime.context
+
+    notification_agent = config.get("configurable", {}).get("async_notification_agent")
+    if notification_agent:
+        target = catalog.get_agent(notification_agent)
+        if target is None or target.graph_type in {ROUTER_GRAPH_TYPE, ACP_AGENT_GRAPH_TYPE}:
+            raise ValueError("The async notification agent is no longer available.")
+        return {"target_agent": target, "routing_telemetry": {"source": "async_subagent"}}
 
     caller_agent_name = ctx.get_agent_name()
 
@@ -851,11 +859,17 @@ async def llm_call(
     if _graph_accepts_context(target_graph):
         invoke_kwargs["context"] = _build_target_context(runtime.context, target_agent)
 
+    target_input = {"messages": state["messages"]}
+    for key in ("async_tasks", "async_event_cursors"):
+        if key in state:
+            target_input[key] = state[key]
     result = await target_graph.ainvoke(
-        {"messages": state["messages"]},
+        target_input,
         **invoke_kwargs,
     )
-    return {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *result["messages"]]}
+    return {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *result["messages"]],
+            "async_tasks": result.get("async_tasks", {}),
+            "async_event_cursors": result.get("async_event_cursors", {})}
 
 
 def build_router_graph() -> None:

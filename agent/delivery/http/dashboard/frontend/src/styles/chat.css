@@ -1040,3 +1040,9 @@
 
 
 
+.async-task-controls { display: grid; gap: 12px; padding: 12px; border-top: 1px solid var(--border-color, #8884); }
+.async-task-controls label { display: grid; gap: 6px; }
+.async-task-controls textarea { width: 100%; min-width: 0; resize: vertical; font: inherit; }
+.async-task-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.async-task-count { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary, #888); }
+.async-task-list { display: grid; gap: 8px; max-height: 40vh; flex-shrink: 0; overflow: auto; padding: 12px 18px; }

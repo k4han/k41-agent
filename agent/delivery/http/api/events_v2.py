@@ -6,6 +6,7 @@ import json
 from contextlib import aclosing
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from agent.delivery.http.common.streaming import ChatStreamingResponse, stream_chat_chunks
 
@@ -27,6 +28,9 @@ from agent.modules.agent_runtime import (
     run_agent_protocol_stream,
 )
 from agent.shared.thread_ids import resolve_thread_id
+from agent.modules.agent_runtime.async_subagents import get_async_subagent_service, active_async_subagent_service
+from agent.shared.async_subagents import request_key
+from agent.modules.tools import HumanResumePayload
 
 router = APIRouter(
     prefix="/v2/api", tags=["agent-events"], dependencies=[Depends(get_current_admin)]
@@ -60,6 +64,9 @@ def stream_response(request: Request, session=None, *, after_seq=0):
 async def chat_events(request: ChatRequest, http_request: Request, admin: str = Depends(get_current_admin)):
     params = await prepare_run_params(request, browser_owner_id=f"admin:{admin}")
     thread_id = str(params["thread_id"])
+    subagents = active_async_subagent_service()
+    if request.checkpoint_id and subagents and await subagents.repository.has_work(thread_id):
+        raise HTTPException(409, detail="Stop async tasks before rewinding this conversation.")
     session = await get_chat_stream_manager().get_or_create_session(
         thread_id, params, run_fn=run_agent_protocol_stream
     )
@@ -82,6 +89,9 @@ async def chat_events_edit(
     request: EditChatRequest, http_request: Request, admin: str = Depends(get_current_admin)
 ):
     params = await prepare_edit_params(request, admin)
+    subagents = active_async_subagent_service()
+    if subagents and await subagents.repository.has_work(str(params["thread_id"])):
+        raise HTTPException(409, detail="Stop async tasks before editing this conversation.")
     session = await get_chat_stream_manager().get_or_create_session(
         str(params["thread_id"]),
         params,
@@ -118,3 +128,58 @@ async def subagent_history(thread_id: str, delegation_id: str):
     if result is None:
         raise HTTPException(404, detail="Subagent history not found.")
     return result
+
+
+class AsyncTaskUpdateRequest(BaseModel):
+    instructions: str = Field(min_length=1, max_length=100_000)
+    request_id: str = Field(min_length=1, max_length=128)
+
+
+class AsyncTaskResumeRequest(BaseModel):
+    run_id: str = Field(min_length=1, max_length=64)
+    interrupt_id: str = Field(min_length=1, max_length=128)
+    payload: HumanResumePayload
+
+
+async def _task_operation(operation):
+    try:
+        return await operation
+    except LookupError as exc:
+        raise HTTPException(404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+
+
+@router.get("/chat/{thread_id}/async-tasks")
+async def list_async_tasks(thread_id: str, status: str | None = None, limit: int = 50, offset: int = 0):
+    from agent.shared.async_subagents import LIVE_STATUSES, TERMINAL_STATUSES
+
+    if not 1 <= limit <= 100 or offset < 0 or (status and status not in LIVE_STATUSES | TERMINAL_STATUSES | {"active"}):
+        raise HTTPException(422, detail="Invalid status or pagination.")
+    return await get_async_subagent_service().repository.list_tasks(resolve_thread_id(thread_id),
+        status=status, limit=limit, offset=offset)
+
+
+@router.get("/chat/{thread_id}/async-tasks/{task_id}")
+async def get_async_task(thread_id: str, task_id: str):
+    return await _task_operation(get_async_subagent_service().get(resolve_thread_id(thread_id), task_id))
+
+
+@router.post("/chat/{thread_id}/async-tasks/{task_id}/updates", status_code=202)
+async def update_async_task(thread_id: str, task_id: str, body: AsyncTaskUpdateRequest):
+    parent = resolve_thread_id(thread_id)
+    return await _task_operation(get_async_subagent_service().update(parent, task_id, body.instructions,
+        request_key("http-update", parent, task_id, body.request_id)))
+
+
+@router.post("/chat/{thread_id}/async-tasks/{task_id}/cancel", status_code=202)
+async def cancel_async_task(thread_id: str, task_id: str):
+    return await _task_operation(get_async_subagent_service().cancel(resolve_thread_id(thread_id), task_id))
+
+
+@router.post("/chat/{thread_id}/async-tasks/{task_id}/resume", status_code=202)
+async def resume_async_task(thread_id: str, task_id: str, body: AsyncTaskResumeRequest):
+    return await _task_operation(get_async_subagent_service().resume(resolve_thread_id(thread_id), task_id,
+        body.run_id, body.interrupt_id, body.payload.model_dump(exclude_none=True)))

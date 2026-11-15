@@ -21,6 +21,7 @@ from typing import Iterable
 
 from agent.modules.tools.domain import ToolDescriptor, ToolSource
 from agent.modules.tools.sources.mcp import _extract_server_name
+from agent.shared.async_subagents import ASYNC_TOOL_NAMES, DELEGATION_TOOL_NAMES, is_subagent_run
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 # person, or their result updates graph state the agent never reads. browser_handoff
 # is absent because it can also wait on the ACP turn.
 ACP_UNAVAILABLE_TOOL_NAMES = frozenset({
+    *ASYNC_TOOL_NAMES,
     "ask_user",
     "call_agent",
     "delegate_task",
@@ -57,7 +59,7 @@ class ToolPolicy:
             tools = canonical_tool_names(list(tools))
         sub_agents = getattr(config, "sub_agents", None)
         if tools is not None and sub_agents:
-            tools = list(dict.fromkeys([*tools, "delegate_task"]))
+            tools = list(dict.fromkeys([*tools, "delegate_task", *sorted(ASYNC_TOOL_NAMES)]))
         name = getattr(config, "name", "default")
         mcp_servers: list[str]
         try:
@@ -89,7 +91,7 @@ class ToolPolicy:
         name = descriptor.name
         if name in self.deny_tool_names:
             return False
-        if not self.allow_delegate_task and name == "delegate_task":
+        if not self.allow_delegate_task and name in {"delegate_task", *ASYNC_TOOL_NAMES}:
             return False
         if self.allowed_tool_names is not None and name not in self.allowed_tool_names:
             return False
@@ -105,6 +107,14 @@ class ToolPolicy:
 
 COMPUTER_TOOL_TAG = "computer"
 DEFAULT_COMPUTER_TOOLS = frozenset({"computer_action", "computer_screenshot"})
+
+
+def tools_for_run(tools: list, config: dict) -> list:
+    """Treat delegated agents as leaves, regardless of their saved targets."""
+    excluded = DELEGATION_TOOL_NAMES if is_subagent_run(config) else (
+        ASYNC_TOOL_NAMES if not config.get("configurable", {}).get("async_subagents_supported") else frozenset()
+    )
+    return [tool for tool in tools if tool.name not in excluded]
 
 
 def computer_tool_names() -> frozenset[str]:
@@ -144,4 +154,4 @@ def browser_batch_error(calls: Sequence[Mapping[str, object]]) -> str | None:
 
 
 __all__ = ["ACP_UNAVAILABLE_TOOL_NAMES", "COMPUTER_TOOL_TAG", "ToolPolicy", "browser_batch_error",
-           "computer_tool_names", "is_browser_tool"]
+           "computer_tool_names", "is_browser_tool", "tools_for_run"]

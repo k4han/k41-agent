@@ -24,7 +24,7 @@ function latestActivityDetail(items: readonly TranscriptItem[]): string | undefi
 }
 
 export function summarizeSubagent(activity: SubagentActivity, items: readonly TranscriptItem[]) {
-  const live = activity.status === "started" || activity.status === "running";
+  const live = ["started", "pending", "running"].includes(activity.status);
   const tools: TranscriptTool[] = [];
   const callIndices = new Map<string, number>();
   for (const item of items) {
@@ -47,6 +47,10 @@ export function summarizeSubagent(activity: SubagentActivity, items: readonly Tr
   const statusLabels: Record<string, string> = {
     started: tools.length ? "Working..." : "Starting...",
     running: "Working...",
+    pending: "Queued",
+    waiting: "Waiting for your response",
+    cancelled: "Cancelled",
+    timed_out: "Timed out",
     completed: "Completed",
     interrupted: "Interrupted",
     stopped: "Stopped",

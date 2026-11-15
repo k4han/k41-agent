@@ -118,8 +118,9 @@ def test_explicit_deny_still_overrides_automatic_delegation(delegation_catalog):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("override,enabled", [(None, True), ([], False), (["read"], False)])
+@pytest.mark.parametrize("delegated", [False, True])
 async def test_llm_binding_and_tool_execution_share_delegation_policy(
-    isolated_container, delegation_catalog, monkeypatch, tmp_path, override, enabled,
+    isolated_container, delegation_catalog, monkeypatch, tmp_path, override, enabled, delegated,
 ):
     import agent.modules.workflows.nodes.llm as llm_module
     import agent.modules.workflows.nodes.tool as tool_module
@@ -148,7 +149,8 @@ async def test_llm_binding_and_tool_execution_share_delegation_policy(
     runtime = Runtime(context=WorkflowContext(
         agent_name="parent", working_dir=str(tmp_path), allowed_tool_names=override,
     ))
-    config = {"configurable": {"thread_id": "parent-thread"}}
+    config = {"configurable": {"thread_id": "parent-thread:sub:child" if delegated else "parent-thread"}}
+    enabled = enabled and not delegated
     await llm_module.llm_node({"messages": [HumanMessage(content="Delegate research.")]}, config, runtime)
 
     assert ("delegate_task" in captured["bound"]) is enabled
@@ -175,3 +177,30 @@ async def test_llm_binding_and_tool_execution_share_delegation_policy(
     else:
         assert message.status == "error"
         assert "child" not in captured
+
+
+@pytest.mark.parametrize("config", [
+    {"configurable": {"thread_id": "api_parent:sub:child", "async_subagents_supported": True}},
+    {"configurable": {"thread_id": "sub_child_123", "async_subagents_supported": True}},
+    {"configurable": {"thread_id": "child", "async_subagents_supported": True},
+     "metadata": {"k41_parent_thread_id": "api_parent"}},
+])
+def test_subagent_run_excludes_all_delegation_tools_without_mutating_the_catalog(config):
+    from agent.modules.tools.policy import tools_for_run
+    from agent.shared.async_subagents import DELEGATION_TOOL_NAMES
+
+    tools = [SimpleNamespace(name=name) for name in ["read", "ask_user", *DELEGATION_TOOL_NAMES]]
+    assert [item.name for item in tools_for_run(tools, config)] == ["read", "ask_user"]
+    assert {item.name for item in tools} == {"read", "ask_user", *DELEGATION_TOOL_NAMES}
+
+
+@pytest.mark.asyncio
+async def test_direct_synchronous_delegation_from_a_subagent_is_denied(delegation_catalog):
+    from langgraph.prebuilt import ToolRuntime
+
+    runtime = ToolRuntime(state={}, context=None, config={"metadata": {"k41_parent_thread_id": "root"}},
+                          stream_writer=lambda event: None, tool_call_id="nested", store=None)
+    result = await delegate_task.ainvoke({"type": "tool_call", "id": "nested", "name": "delegate_task",
+        "args": {"task": "Nested work", "sub_agent": "child", "runtime": runtime}})
+    assert result.status == "error"
+    assert "Subagents cannot delegate" in result.content

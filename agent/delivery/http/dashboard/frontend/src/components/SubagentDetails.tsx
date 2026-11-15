@@ -4,17 +4,21 @@ import { TranscriptItemView, type SubagentActivity } from "@/components/Transcri
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { summarizeSubagent } from "@/lib/subagentSummary";
 import { useSubagentHistory } from "@/lib/useSubagentHistory";
+import { useAsyncSubagent } from "@/lib/useAsyncSubagent";
+import { AsyncTaskControls } from "@/components/AsyncTaskControls";
 
 export function SubagentDetails(props: { activity: SubagentActivity; itemId?: number }) {
   const [opened, setOpened] = createSignal(false);
-  const history = useSubagentHistory(() => props.activity);
-  const activity = createMemo(() => summarizeSubagent(props.activity, history.items()));
+  const background = useAsyncSubagent(() => props.activity, opened);
+  const history = useSubagentHistory(background.activity);
+  const items = () => background.liveItems().length ? background.liveItems() : history.items();
+  const activity = createMemo(() => summarizeSubagent(background.activity(), items()));
   const summaryLabel = () => history.ready()
     ? activity().summary.fullLabel
     : history.error() ? "Tools unavailable" : "Loading tools...";
-  const failed = () => props.activity.status === "failed";
-  const paused = () => ["interrupted", "stopped"].includes(props.activity.status);
-  createEffect(on(history.identity, () => setOpened(false)));
+  const failed = () => ["failed", "timed_out"].includes(background.activity().status);
+  const paused = () => ["interrupted", "stopped", "waiting", "cancelled"].includes(background.activity().status);
+  createEffect(on(() => props.activity.delegation_id, () => setOpened(false)));
 
   return (
     <details class="subagent-details" open={opened()} data-transcript-item-id={props.itemId} onToggle={(event) => {
@@ -26,7 +30,7 @@ export function SubagentDetails(props: { activity: SubagentActivity; itemId?: nu
     }}>
       <summary class="subagent-summary">
         <ChevronRight size={16} class="subagent-chevron" aria-hidden="true" />
-        <span class="subagent-status-icon" classList={{ "is-failed": failed(), "is-completed": props.activity.status === "completed" }}
+        <span class="subagent-status-icon" classList={{ "is-failed": failed(), "is-completed": background.activity().status === "completed" }}
           title={activity().statusText}>
           <Show when={activity().live} fallback={
             <Show when={failed()} fallback={
@@ -35,8 +39,8 @@ export function SubagentDetails(props: { activity: SubagentActivity; itemId?: nu
           }><Loader2 size={14} class="spin-icon" /></Show>
         </span>
         <span class="subagent-summary-text">
-          <span class="subagent-heading" title={`${props.activity.agent_name} · ${summaryLabel()}`}>
-            <strong class="subagent-name">{props.activity.agent_name}</strong>
+          <span class="subagent-heading" title={`${background.activity().agent_name} · ${summaryLabel()}`}>
+            <strong class="subagent-name">{background.activity().agent_name}</strong>
             <span class="subagent-tool-summary">· {summaryLabel()}</span>
           </span>
           <span class="subagent-current-tool" title={activity().detail}>{activity().detail}</span>
@@ -47,8 +51,10 @@ export function SubagentDetails(props: { activity: SubagentActivity; itemId?: nu
           <Show when={history.loading()}><p>Loading subagent history...</p></Show>
           <Show when={history.error()}><p role="alert">{history.error()} <button type="button" onClick={() => void history.retry()}>Retry</button></p></Show>
           <Show when={props.activity.error}><p role="alert">{props.activity.error}</p></Show>
-          <For each={history.items()}>{(item) => <TranscriptItemView item={item}
+          <For each={items()}>{(item) => <TranscriptItemView item={item}
             streaming={activity().live} threadId={props.activity.thread_id} />}</For>
+          <Show when={background.enabled()}><AsyncTaskControls task={background.task()} busy={background.busy()}
+            error={background.error()} perform={background.perform} /></Show>
         </div>
       </Show>
     </details>

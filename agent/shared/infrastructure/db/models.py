@@ -8,6 +8,9 @@ def load_orm_models() -> tuple[type[object], ...]:
     from agent.modules.admin_auth import AdminCredential
     from agent.modules.browser import BrowserAccountProfile, BrowserArtifact, BrowserBinding, BrowserInvocation, BrowserProfile, BrowserProjectProfile
     from agent.modules.agent_runtime import BackgroundTaskRecord
+    from agent.modules.agent_runtime.async_subagents import (
+        SubagentExecutionRecord, SubagentNotificationRecord, SubagentTaskRecord,
+    )
     from agent.modules.channels import BotSettings
     from agent.modules.conversations import ConversationRunError, ConversationThread
     from agent.modules.github import (
@@ -41,6 +44,9 @@ def load_orm_models() -> tuple[type[object], ...]:
         BrowserInvocation,
         BrowserArtifact,
         BackgroundTaskRecord,
+        SubagentTaskRecord,
+        SubagentExecutionRecord,
+        SubagentNotificationRecord,
         ConversationThread,
         ConversationRunError,
         User,

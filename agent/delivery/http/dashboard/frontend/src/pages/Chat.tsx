@@ -21,6 +21,7 @@ import { RenameChatDialog } from "@/components/RenameChatDialog";
 import { Markdown } from "@/components/Markdown";
 import { ChatThreadBadges } from "@/components/ChatThreadBadges";
 import { ChatTranscript } from "@/components/ChatTranscript";
+import { SubagentDetails } from "@/components/SubagentDetails";
 import { PLAN_MODE_TOOL_NAME, createTranscriptUserInputRequest, type ForkMessagePayload, type TranscriptAttachment, type TranscriptRole, type TranscriptUserInputRequest } from "@/components/Transcript";
 import type { UserInputRequestSubmitPayload } from "@/components/UserInputRequestCard";
 import type { WorkspaceSelectionDraft } from "@/components/WorkspaceSelector";
@@ -94,6 +95,8 @@ import { ACTIVE_TASK_STATUSES, DRAWER_MEDIA_QUERY, MOBILE_MEDIA_QUERY } from "@/
 import { createMediaQuery } from "@/lib/useMediaQuery";
 import { useChatScroll } from "@/lib/useChatScroll";
 import { useChatStreams } from "@/lib/useChatStreams";
+import { useAsyncTasks } from "@/lib/useAsyncSubagent";
+import { missingAsyncTasks } from "@/lib/asyncSubagents";
 import { useWorkspaceExplorer } from "@/lib/useWorkspaceExplorer";
 import { useBrowserSession } from "@/lib/useBrowserSession";
 import { useWorkspaceRuntime } from "@/lib/useWorkspaceRuntime";
@@ -210,6 +213,7 @@ export function ChatPage() {
   const [threadLoading, setThreadLoading] = createSignal(false);
   const [earlierMessagesLoading, setEarlierMessagesLoading] = createSignal(false);
   const [currentThreadId, setCurrentThreadId] = createSignal("");
+  const asyncTasks = useAsyncTasks(currentThreadId);
   const [browserHandoffThreads, setBrowserHandoffThreads] = createSignal(new Set<string>());
   const updateBrowserHandoff = (pending: boolean, threadId: string) => {
     setBrowserHandoffThreads((current) => {
@@ -2238,6 +2242,9 @@ export function ChatPage() {
                         activeSession={activeSession()}
                       />
                     </Show>
+                    <Show when={asyncTasks.count() > 0}><span class="async-task-count">{asyncTasks.count()} background task(s)
+                      <button type="button" aria-label="Stop background tasks" onClick={() => void stopChat()}>Stop</button>
+                    </span></Show>
                   </div>
                 </div>
                 <div class="chat-header-right">
@@ -2327,6 +2334,16 @@ export function ChatPage() {
                     {earlierMessagesLoading() ? "Loading earlier messages..." : "Load earlier messages"}
                   </button>
                 </div>
+              </Show>
+              <Show when={asyncTasks.error()}>
+                <div class="thread-banner thread-banner-error" role="alert">{asyncTasks.error()}
+                  <button type="button" onClick={() => void asyncTasks.refresh()}>Retry</button>
+                </div>
+              </Show>
+              <Show when={missingAsyncTasks(asyncTasks.tasks(), items()).length > 0}>
+                <section class="async-task-list" aria-label="Background tasks">
+                  <For each={missingAsyncTasks(asyncTasks.tasks(), items())}>{(task) => <SubagentDetails activity={task} />}</For>
+                </section>
               </Show>
               <ChatTranscript
                 setTranscriptRef={(el) => {

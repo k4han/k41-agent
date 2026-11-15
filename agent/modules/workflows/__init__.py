@@ -155,6 +155,13 @@ async def _delete_workflow_thread_tree_reserved(thread_id: str) -> None:
     from agent.modules.browser import delete_thread_browsers
     from agent.modules.tools import clear_conversation_storage
     from agent.modules.workflows.checkpoint.store import get_checkpointer
+    from agent.modules.agent_runtime.async_subagents import active_async_subagent_service
+
+    subagents = active_async_subagent_service()
+    async_child_ids = []
+    if subagents is not None:
+        async_child_ids = await subagents.repository.child_thread_ids(thread_id)
+        await subagents.cancel_tree(thread_id, delete=True)
 
     acp_service = peek_acp_service()
     if acp_service is not None:
@@ -163,7 +170,7 @@ async def _delete_workflow_thread_tree_reserved(thread_id: str) -> None:
     await _release_thread_machines(thread_id)
     await clear_conversation_storage(thread_id)
     checkpointer = get_checkpointer()
-    thread_ids = {thread_id}
+    thread_ids = {thread_id, *async_child_ids}
     try:
         thread_ids.update(await _list_workflow_child_thread_ids(checkpointer, thread_id))
     except Exception as exc:

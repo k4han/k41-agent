@@ -47,7 +47,8 @@ export function isAgentTab(value: string | undefined): value is AgentTab {
 export const DEFAULT_CONTEXT_COMPACT_THRESHOLD = 75;
 
 export function manualToolNames(tools: readonly string[]): string[] {
-  return tools.filter((name) => name !== "delegate_task" && name !== "call_agent");
+  return tools.filter((name) => !["delegate_task", "call_agent", "start_async_task", "check_async_task", "list_async_tasks",
+    "update_async_task", "cancel_async_task"].includes(name));
 }
 
 export function buildToolGroups(payload: AgentsPayload, initialTools: string[], isAcp = false): AgentToolGroup[] {

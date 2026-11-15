@@ -56,6 +56,16 @@ async def annotate_delegation_results(value, parent_thread_id: str):
 
 async def get_subagent_history(parent_thread_id: str, delegation_id: str):
     from agent.modules.conversations import get_thread_messages_payload
+    from agent.modules.agent_runtime.async_subagents import active_async_subagent_service
+    from agent.shared.async_subagents import task_reference
+
+    subagents = active_async_subagent_service()
+    if subagents is not None:
+        task = await subagents.repository.get_task(parent_thread_id, delegation_id)
+        if task is not None:
+            messages, checkpoint_id = await get_thread_messages_payload(task["thread_id"],
+                checkpoint_id=task.get("checkpoint_id"))
+            return {**task_reference(task), "messages": messages, "active_checkpoint_id": checkpoint_id}
     checkpoint = await find_delegation(parent_thread_id, delegation_id=delegation_id)
     if checkpoint is None:
         return None
@@ -77,6 +87,16 @@ async def get_subagent_history(parent_thread_id: str, delegation_id: str):
 
 async def enrich_delegated_calls(messages: list[dict], parent_thread_id: str):
     """Recover links for interrupted calls that did not commit a ToolMessage."""
+    from agent.modules.agent_runtime.async_subagents import active_async_subagent_service
+    from agent.shared.async_subagents import task_reference
+
+    subagents = active_async_subagent_service()
+    for message in messages:
+        reference = message.get("subagent")
+        if reference and reference.get("execution_mode") == "async" and not reference.get("read_only") and subagents:
+            task = await subagents.repository.get_task(parent_thread_id, reference["task_id"])
+            if task:
+                message["subagent"] = task_reference(task)
     completed = {message.get("tool_call_id") for message in messages if message.get("role") == "tool"}
     for message in messages:
         for call in message.get("tool_calls", []):
@@ -136,3 +156,5 @@ async def copy_delegated_history(state: dict, source_thread_id: str, target_thre
         await saver.aput(parent_config, saved.checkpoint, metadata, {})
         artifact["subagent"] = {**reference, "thread_id": copied_id,
             "parent_thread_id": target_thread_id, "checkpoint_id": config["configurable"]["checkpoint_id"]}
+        if reference.get("execution_mode") == "async":
+            artifact["subagent"].update(read_only=True, status="stopped")

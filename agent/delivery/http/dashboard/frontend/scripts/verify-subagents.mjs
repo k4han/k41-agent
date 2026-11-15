@@ -19,6 +19,10 @@ const descriptor = (id, name, status = 'completed', parent = 'subagents') => ({
   delegation_id: id, agent_name: name, parent_thread_id: parent,
   thread_id: `${parent}:sub:${id}`, tool_call_id: `delegate-${id}`, status,
 });
+const asyncTask = { ...descriptor('async', 'Background worker', 'waiting'), task_id: 'async', run_id: 'async-run',
+  root_thread_id: 'subagents', execution_mode: 'async', version: 1, queued_updates: 0, result: '',
+  interrupts: [{ id: 'permission-interrupt', value: { type: 'permission_request', request_id: 'permission-request',
+    tool_call_id: 'write-report', action: 'write', resource: '/workspace/report.txt' } }] };
 const delegatedMessages = (id, name) => [
   { id: `call-${id}`, role: 'assistant', content: '', tool_calls: [
     { id: `delegate-${id}`, name: 'delegate_task', args: { sub_agent: name } },
@@ -53,6 +57,8 @@ const fixtures = {
 const historyRequests = new Map();
 let savedResponse;
 let stream;
+let sessionsStream;
+let backgroundVisible = false;
 let sequence = 0;
 const send = (method, data, namespace = []) => {
   stream.write(JSON.stringify({ type: 'event', method, params: { namespace, data, timestamp: Date.now() },
@@ -60,6 +66,43 @@ const send = (method, data, namespace = []) => {
 };
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/dashboard-api/sessions/events') {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write('event: snapshot\ndata: {"sessions":[]}\n\n');
+    sessionsStream = res;
+    req.on('close', () => { if (sessionsStream === res) sessionsStream = undefined; });
+    return;
+  }
+  if (url.pathname.startsWith('/v2/api/chat/subagents/async-tasks')) {
+    const action = url.pathname.split('/')[7];
+    if (req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const payload = body ? JSON.parse(body) : {};
+      if (action === 'updates') {
+        assert.ok(payload.request_id);
+        assert.equal(payload.instructions, 'Include references');
+        asyncTask.queued_updates += 1;
+      } else if (action === 'resume') {
+        assert.equal(payload.interrupt_id, 'permission-interrupt');
+        assert.equal(payload.run_id, 'async-run');
+        assert.equal(payload.payload.action, 'permission');
+        assert.equal(payload.payload.decision, 'allow_once');
+        asyncTask.status = 'pending';
+        asyncTask.interrupts = [];
+      } else if (action === 'cancel') {
+        asyncTask.status = 'cancelled';
+      }
+      asyncTask.version += 1;
+      sessionsStream?.write(`event: subagent_task_updated\ndata: ${JSON.stringify(asyncTask)}\n\n`);
+    }
+    res.setHeader('Content-Type', 'application/json');
+    const active = backgroundVisible && ['pending', 'running', 'waiting'].includes(asyncTask.status);
+    res.end(JSON.stringify(url.pathname.endsWith('/async-tasks')
+      ? { tasks: active ? [asyncTask] : [], total: active ? 1 : 0, active_count: active ? 1 : 0 }
+      : asyncTask));
+    return;
+  }
   if (url.pathname === '/v2/api/chat/events') {
     for await (const chunk of req) { /* Consume the chat request body. */ }
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
@@ -205,8 +248,8 @@ try {
       })()`);
       await until(() => js(`!!document.querySelector('.chat-shell.workspace-${workspaceOpen ? 'open' : 'closed'}')`), 'workspace layout');
       const bounds = await js(`(() => {
-        const reference = document.querySelector('.transcript > .message').getBoundingClientRect();
-        return Array.from(document.querySelectorAll('.transcript > .subagent-details')).map(el => {
+        const reference = document.querySelector('.transcript-virtual-row').getBoundingClientRect();
+        return Array.from(document.querySelectorAll('.transcript .subagent-details')).map(el => {
           const card = el.getBoundingClientRect();
           return { left: card.left, right: card.right, columnLeft: reference.left, columnRight: reference.right };
         });
@@ -228,6 +271,46 @@ try {
     `Nested subagent exceeds its parent: ${JSON.stringify(nestedBounds)}`);
   await toggle('Saved agent');
   console.log('PASS: collapsed saved agents load summaries, preserve lazy nested views, retry errors and reuse history.');
+
+  backgroundVisible = true;
+  history.messages.push(
+    { id: 'async-call', role: 'assistant', content: '', tool_calls: [
+      { id: 'delegate-async', name: 'start_async_task', args: { task: 'Write a report', sub_agent: 'worker' } },
+    ] },
+    { id: 'async-result', role: 'tool', name: 'start_async_task', tool_call_id: 'delegate-async',
+      content: 'Task accepted', subagent: { ...asyncTask } },
+  );
+  await call('Page.reload');
+
+  await until(() => js(`!!(${card('Background worker')}) && ${detail('Background worker')} === 'Waiting for your response'`), 'waiting background task');
+  assert.equal(await js('document.querySelectorAll(".subagent-name").length === new Set(Array.from(document.querySelectorAll(".subagent-name"), el => el.textContent)).size'), true,
+    'durable task recovery does not duplicate transcript cards');
+  history.messages = history.messages.filter(message => !['async-call', 'async-result'].includes(message.id));
+  await call('Page.reload');
+  await until(() => js(`!!document.querySelector('.async-task-list') && !!(${card('Background worker')})
+    && ${detail('Background worker')} === 'Waiting for your response'`), 'task controls recovered without the compacted launch');
+  assert.equal(await js(`!!document.querySelector('button[aria-label="Send message"]')`), true,
+    'the parent stays available for new messages while a child waits');
+  await toggle('Background worker');
+  await until(() => js(`!!(${card('Background worker')}).querySelector('.user-input-request-card')`), 'child permission card');
+  await js(`(() => {
+    const root = (${card('Background worker')});
+    const input = root.querySelector('.async-task-controls textarea');
+    input.value = 'Include references';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    Array.from(root.querySelectorAll('button')).find(el => el.textContent === 'Queue instructions').click();
+  })()`);
+  await until(() => js(`(${card('Background worker')}).textContent.includes('1 follow-up(s) queued')`), 'durable queued update');
+  assert.equal(asyncTask.status, 'waiting', 'updating a child preserves its permission request');
+  await until(() => js(`Array.from((${card('Background worker')}).querySelectorAll('button')).some(el => el.textContent.includes('Allow once') && !el.disabled)`), 'permission controls settle after update');
+  await js(`Array.from((${card('Background worker')}).querySelectorAll('button')).find(el => el.textContent.includes('Allow once')).click()`);
+  await until(() => js(`Array.from((${card('Background worker')}).querySelectorAll('button')).some(el => el.textContent.includes('Apply decision') && !el.disabled)`), 'permission decision selected');
+  await js(`Array.from((${card('Background worker')}).querySelectorAll('button')).find(el => el.textContent.includes('Apply decision')).click()`);
+  await until(() => js(`${detail('Background worker')} === 'Queued'`), 'resume targets exact child interrupt');
+  await until(() => js(`Array.from((${card('Background worker')}).querySelectorAll('button')).some(el => el.textContent === 'Cancel task' && !el.disabled)`), 'task controls settle after resume');
+  await js(`Array.from((${card('Background worker')}).querySelectorAll('button')).find(el => el.textContent === 'Cancel task').click()`);
+  await until(() => js(`!(${card('Background worker')})`), 'cancelled recovered task leaves the active list');
+  console.log('PASS: compacted background task recovers controls, queues instructions, preserves approval, resumes its exact interrupt and cancels independently.');
 
   await until(() => js('document.querySelector(".chat-prompt-input")?.disabled === false'), 'chat composer');
   await js(`(() => {

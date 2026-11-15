@@ -466,6 +466,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "google_calendar.enabled": True,
     "security.jwt_secret": "",
     "recursion_limit": 100,
+    "subagents.max_concurrency": 8,
+    "subagents.max_concurrency_per_thread": 4,
+    "subagents.run_timeout_seconds": 0,
     "tray.enabled": True,
     "tray.autostart": False,
     # Decision model configuration
