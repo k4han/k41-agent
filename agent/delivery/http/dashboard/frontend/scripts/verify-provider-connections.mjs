@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { verifyProviderDesk } from '../tests/provider-desk-scenarios.mjs';
 
 const staticRoot = fileURLToPath(new URL('../../static', import.meta.url));
 const executable = process.env.BROWSER_EXECUTABLE || [
@@ -33,6 +34,7 @@ let chatgptManualMode = false;
 const decisionConnections = [];
 const decisionSecrets = new Map();
 let decisionDefault = '';
+let failedSource = '';
 const decisionServices = [{ type: 'cloudflare', label: 'Cloudflare', fields: [
   { name: 'account_id', label: 'Account ID', input_type: 'text', required: true },
   { name: 'api_token', label: 'API Token', input_type: 'password', required: true },
@@ -48,12 +50,13 @@ const decisionServices = [{ type: 'cloudflare', label: 'Cloudflare', fields: [
 ] }];
 const fieldOrder = ['type', 'api_key', 'default_model', 'models', 'enabled'];
 const fieldLabels = { type: 'Type', api_key: 'API Key', default_model: 'Default Model', models: 'Models', enabled: 'Enabled' };
-const aiPayload = () => ({ settings: {}, by_category: {}, settings_sources: {}, default_provider: aiDefault.split('/')[0], default_model: aiDefault,
+const aiPayload = () => ({ settings: { 'llm.default_model': { value: aiDefault, input_type: 'text' } }, by_category: {}, settings_sources: {}, default_provider: aiDefault.split('/')[0], default_model: aiDefault.split('/').slice(1).join('/'),
   provider_names: aiConnections.map(item => item.name), provider_field_order: fieldOrder,
   provider_type_options: [{ value: 'google', label: 'Google', requires_base_url: false }],
   providers_catalog: {
     google: { id: 'google', name: 'Google', provider_type: 'google', models: [{ id: 'gemini-test', name: 'Gemini Test' }] },
     chatgpt: { id: 'chatgpt', name: 'ChatGPT', provider_type: 'chatgpt', models: [] },
+    ...Object.fromEntries(Array.from({ length: 25 }, (_, index) => [`extra-${index}`, { id: `extra-${index}`, name: `Zeta ${index}`, provider_type: 'google', models: [] }])),
   },
   provider_rows: aiConnections.map(item => ({
     name: item.name, type: item.type, type_label: item.type === 'chatgpt' ? 'ChatGPT' : 'Google', catalog_id: item.catalog_id,
@@ -68,14 +71,24 @@ const aiPayload = () => ({ settings: {}, by_category: {}, settings_sources: {}, 
 const writes = [];
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/providers/models') {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ providers: aiConnections.map(item => ({ provider: item.name, models: [{ id: 'discovered-model' }] })) })); return;
+  }
   if (url.pathname.startsWith('/dashboard-api') || url.pathname.startsWith('/settings/') && req.method === 'PUT' || url.pathname === '/settings') {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'test-csrf');
     const body = req.method === 'GET' ? '' : await new Promise(resolve => {
       let value = ''; req.on('data', chunk => value += chunk); req.on('end', () => resolve(value));
     });
-    if (req.method !== 'GET') writes.push({ path: url.pathname, body: JSON.parse(body || '{}') });
+    if (req.method !== 'GET') writes.push({ method: req.method, path: url.pathname, body: JSON.parse(body || '{}') });
     const submitted = JSON.parse(body || '{}');
+    if (req.method === 'GET' && failedSource === 'decision' && url.pathname === '/dashboard-api/decision-providers') {
+      res.statusCode = 500; res.end(JSON.stringify({ detail: 'Decision source unavailable' })); return;
+    }
+    if (url.pathname === '/dashboard-api/model-pools') {
+      res.end(JSON.stringify({ pools: [{ name: 'balanced', members: [{ provider: 'google-2', model: 'gemini-test' }] }] })); return;
+    }
     if (url.pathname === '/dashboard-api/providers/verify' && submitted.type === 'chatgpt') {
       res.end(JSON.stringify({ ok: true, models: ['account-model', 'second-model'], message: 'Connected' })); return;
     }
@@ -114,6 +127,12 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ status: 'created', name: submitted.name }));
       } else res.end(JSON.stringify(aiPayload()));
       return;
+    }
+    if (url.pathname === '/dashboard-api/providers/verify') {
+      res.end(JSON.stringify({ ok: true, latency_ms: 10, models: ['gemini-test'], message: 'Connected' })); return;
+    }
+    if (url.pathname === '/dashboard-api/web-connections/verify') {
+      res.end(JSON.stringify({ ok: true, latency_ms: 11, message: 'Connected' })); return;
     }
     if (url.pathname === '/settings' && req.method === 'PUT') {
       for (const [key, value] of Object.entries(submitted.values)) {
@@ -176,6 +195,18 @@ const server = http.createServer(async (req, res) => {
       const kind = url.pathname.split('/').pop();
       defaults[kind] = JSON.parse(body).name;
       for (const entry of connections) if (entry.type === kind) entry.is_default = entry.name === defaults[kind];
+      res.end('{"status":"updated"}'); return;
+    }
+    if (req.method === 'DELETE') {
+      const collection = url.pathname.startsWith('/dashboard-api/web-connections/') ? connections
+        : url.pathname.startsWith('/dashboard-api/decision-providers/') ? decisionConnections : aiConnections;
+      const index = collection.findIndex(item => item.name === decodeURIComponent(url.pathname.split('/').pop()));
+      if (index >= 0) collection.splice(index, 1);
+      res.end('{"status":"deleted"}'); return;
+    }
+    if (url.pathname.startsWith('/dashboard-api/web-connections/') && req.method === 'PUT') {
+      const entry = connections.find(item => item.name === decodeURIComponent(url.pathname.split('/').pop()));
+      if (Object.hasOwn(submitted, 'api_key')) entry.has_api_key = !!submitted.api_key;
       res.end('{"status":"updated"}'); return;
     }
     res.end(JSON.stringify({ settings: {}, by_category: {}, provider_rows: [], providers_catalog: {},
@@ -242,115 +273,29 @@ try {
     if (message.method === 'Runtime.exceptionThrown') exceptions.push(message.params.exceptionDetails.text);
   });
   await call('Page.enable'); await call('Runtime.enable');
+  await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await call('Page.addScriptToEvaluateOnNewDocument', { source: 'localStorage.setItem("k41-dashboard-theme", "light")' });
   const js = async expression => {
     const result = await call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-    if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
+    if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
     return result.result.value;
   };
   const navigate = async suffix => {
     await call('Page.navigate', { url: base + suffix });
-    await until(() => js('document.querySelectorAll("[role=tab]").length === 5'), 'provider tabs');
+    await until(() => js('document.querySelectorAll(".settings-tabs [role=tab]").length === 5'), 'provider tabs');
   };
-  await navigate('/settings/providers?tab=web');
-  await until(() => js('document.body.textContent.includes("team")'), 'web connections');
-  assert.equal(await js('document.querySelectorAll("aside.sidebar").length'), 1);
-  await js(`document.querySelector('[data-provider-id="tavily"]').click()`);
-  await until(() => js('!!document.querySelector("form input[type=password]")'), 'create form');
-  await js('const name = document.querySelector("form input.input"); name.value = "review"; name.dispatchEvent(new Event("input", { bubbles: true })); const key = document.querySelector("form input[type=password]"); key.value = "fake-key"; key.dispatchEvent(new Event("input", { bubbles: true }));');
-  await js('Array.from(document.querySelectorAll("[role=tab]")).find(t => t.textContent.includes("Models")).click()');
-  assert.equal(dialogs, 1);
-  assert.equal(await js('document.querySelector("form input.input").value'), 'review');
-  await js('document.querySelector("form").requestSubmit()');
-  await until(() => js('!document.querySelector("form") && document.body.textContent.includes("review")'), 'saved connection');
-  assert.equal(writes.find(write => write.path === '/dashboard-api/web-connections').body.name, 'review');
-  await js(`document.querySelector('button[aria-label="Edit review"]').click()`);
-  await until(() => js('document.querySelector("form input.input")?.value === "review"'), 'connection detail');
-  assert.equal(await js('!!document.querySelector("form input[type=password]")'), false);
-  await js('const input = document.querySelector("form input[type=checkbox]"); input.click();');
-  await js('const replacementKey = document.querySelector("form input[type=password]"); replacementKey.value = "replacement"; replacementKey.dispatchEvent(new Event("input", { bubbles: true }));');
-  acceptDialog = true;
-  await js('Array.from(document.querySelectorAll("[role=tab]")).find(t => t.textContent.includes("Models")).click()');
-  await until(() => js('new URLSearchParams(location.search).get("tab") === "llm"'), 'confirmed tab change');
-  assert.equal(dialogs, 2);
-  for (const [group, provider] of [['llm', 'google'], ['web', 'tavily'], ['decision', 'cloudflare'], ['decision', 'google']]) {
-    await navigate(`/settings/providers?tab=${group}`);
-    await until(() => js(`!!document.querySelector('[data-provider-id="${provider}"]')`), `${group} provider picker`);
-    for (const expected of [provider, `${provider}-2`]) {
-      await js(`document.querySelector('[data-provider-id="${provider}"]').click()`);
-      await until(() => js(`document.querySelector('form input.input')?.value === '${expected}'`), `${group} suggested name ${expected}`);
-      await js(`(() => { const key = document.querySelector('form input[type=password]'); key.value = 'fake-secret'; key.dispatchEvent(new Event('input', { bubbles: true }));
-        const account = Array.from(document.querySelectorAll('form label')).find(label => label.textContent.includes('Account ID'))?.querySelector('input');
-        if (account) { account.value = 'account'; account.dispatchEvent(new Event('input', { bubbles: true })); }
-        document.querySelector('form').requestSubmit(); })()`);
-      await until(() => js(`!!document.querySelector('[data-connection-name="${expected}"]') && !document.querySelector('form')`), `${group} saved configuration`);
-      assert.equal(await js(`!!document.querySelector('[data-provider-id="${provider}"]')`), true);
-      assert.equal(await js('document.querySelector("[data-provider-connections]").compareDocumentPosition(document.querySelector("[data-provider-picker]")) & Node.DOCUMENT_POSITION_FOLLOWING'), 4);
-      assert.equal(await js(`document.querySelector('button[aria-label="Set ${expected} as default"]').getAttribute('aria-pressed')`), 'false');
-    }
-    await navigate(`/settings/providers?tab=${group}`);
-    await until(() => js(`!!document.querySelector('[data-connection-name="${provider}-2"]')`), `${group} reload saved configurations`);
-    await js(`document.querySelector('[data-provider-id="${provider}"]').click()`);
-    await until(() => js(`document.querySelector('form input.input')?.value === '${provider}-3'`), `${group} third suggested name`);
-    await js(`(() => { const name = document.querySelector('form input.input'); name.value = '${provider}'; name.dispatchEvent(new Event('input', { bubbles: true }));
-      const key = document.querySelector('form input[type=password]'); key.value = 'duplicate-secret'; key.dispatchEvent(new Event('input', { bubbles: true }));
-      const account = Array.from(document.querySelectorAll('form label')).find(label => label.textContent.includes('Account ID'))?.querySelector('input');
-      if (account) { account.value = 'account'; account.dispatchEvent(new Event('input', { bubbles: true })); } })()`);
-    if (group !== 'web') {
-      await js('document.querySelector("form").requestSubmit()');
-      await until(() => js('document.body.textContent.includes("Provider already exists.")'), `${group} duplicate error`);
-      assert.equal(await js('document.querySelector("form input[type=password]").value'), 'duplicate-secret');
-    }
-    await js('Array.from(document.querySelectorAll("form button")).find(button => button.textContent.includes("Cancel")).click()');
-    await until(() => js('!document.querySelector("form")'), `${group} cancel form`);
-  }
-  assert.equal(aiDefault, '');
-  assert.equal(decisionDefault, '');
-  assert.equal(defaults.tavily, 'team');
-  await navigate('/settings/providers?tab=decision');
-  await until(() => js('!!document.querySelector("[data-connection-name=cloudflare]")'), 'decision default action');
-  await js(`document.querySelector('button[aria-label="Set cloudflare as default"]').click()`);
-  await until(() => js(`document.querySelector('button[aria-label="Set cloudflare as default"]')?.getAttribute('aria-pressed') === 'true'`), 'decision selected default');
-  assert.equal(decisionDefault, 'cloudflare');
-  assert.equal(await js(`document.querySelector('button[aria-label="Delete cloudflare"]').disabled`), true);
-  await js(`document.querySelector('button[aria-label="Edit cloudflare-2"]').click()`);
-  await until(() => js('!!document.querySelector("form")'), 'decision edit');
-  assert.equal(await js('document.querySelector("form input.input").disabled'), true);
-  assert.equal(await js('!!document.querySelector("form input[type=password]")'), false);
-  await js('document.querySelector("form input[type=checkbox]").click()');
-  await js(`(() => { const key = document.querySelector('form input[type=password]'); key.value = 'new-token'; key.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('form').requestSubmit(); })()`);
-  await until(() => js('!document.querySelector("form")'), 'decision edit saved');
-  assert.equal(writes.findLast(write => write.path.endsWith('/cloudflare-2')).body.fields.api_token, 'new-token');
-  await navigate('/settings/providers?tab=decision');
-  await until(() => js('!!document.querySelector("[data-connection-name=google]")'), 'Google decision saved');
-  await js(`document.querySelector('button[aria-label="Edit google"]').click()`);
-  await until(() => js('!!document.querySelector("form")'), 'Google decision edit');
-  assert.equal(await js('!!document.querySelector("form input[type=password]")'), false);
-  await js('Array.from(document.querySelectorAll("form button")).find(button => button.textContent.trim() === "Test Connection").click()');
-  await until(() => js('!!document.querySelector("form .connection-latency-badge")'), 'Google stored key verified');
-  assert.equal(Object.hasOwn(writes.findLast(write => write.path.endsWith('/verify')).body.fields, 'api_key'), false);
-  await js('document.querySelector("form input[type=checkbox]").click()');
-  await until(() => js('!!document.querySelector("form input[type=password]")'), 'Google key replacement');
-  await js(`(() => { const key = document.querySelector('form input[type=password]'); key.value = 'new-google-key'; key.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('form').requestSubmit(); })()`);
-  await until(() => js('!document.querySelector("form")'), 'Google decision key saved');
-  assert.equal(decisionSecrets.get('google'), 'new-google-key');
-  await js(`document.querySelector('button[aria-label="Set google as default"]').click()`);
-  await until(() => js(`document.querySelector('button[aria-label="Set google as default"]')?.getAttribute('aria-pressed') === 'true'`), 'Google decision selected default');
-  assert.equal(decisionDefault, 'google');
-  await navigate('/settings/providers?tab=llm');
-  await until(() => js('!!document.querySelector("[data-connection-name=google-2]")'), 'AI edit action');
-  await js(`document.querySelector('button[aria-label="Edit google-2"]').click()`);
-  await until(() => js('!!Array.from(document.querySelectorAll(".setting-row")).find(row => row.textContent.includes("Default Model"))'), 'AI model field');
-  await js(`(() => { const input = Array.from(document.querySelectorAll('.setting-row')).find(row => row.textContent.includes('Default Model')).querySelector('input'); input.value = 'gemini-test'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await js('Array.from(document.querySelectorAll("button")).find(button => button.textContent.includes("Save changes")).click()');
-  await until(() => js('!!document.querySelector(".dialog-footer")'), 'AI save confirmation');
-  await js('Array.from(document.querySelectorAll(".dialog-footer button")).find(button => button.textContent.includes("Save")).click()');
-  await until(() => js('!document.querySelector(".dialog-footer")'), 'AI settings saved');
-  await navigate('/settings/providers?tab=llm');
-  await until(() => js('!!document.querySelector("[data-connection-name=google-2]")'), 'AI list refreshed');
-  await js(`document.querySelector('button[aria-label="Set google-2 as default"]').click()`);
-  await until(() => js(`document.querySelector('button[aria-label="Set google-2 as default"]')?.getAttribute('aria-pressed') === 'true'`), 'AI default selected');
-  assert.equal(aiDefault, 'google-2/gemini-test');
-  await navigate('/settings/providers?tab=llm');
+  const snapshot = async name => {
+    await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    await delay(250);
+    const screenshot = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+    fs.writeFileSync(path.join(scratchRoot, name + '.png'), Buffer.from(screenshot.data, 'base64'));
+  };
+  await verifyProviderDesk({ js, navigate, until, call, snapshot,
+    setAcceptDialog: value => { acceptDialog = value; }, getDialogs: () => dialogs,
+    setSourceFailure: value => { failedSource = value; }, aiConnections, decisionSecrets, writes,
+    getDefaults: () => ({ aiDefault, decisionDefault, defaults }),
+  });
+  await navigate('/settings/providers?tab=catalog&kind=llm');
   await until(() => js('!!document.querySelector("[data-provider-id=chatgpt]")'), 'ChatGPT picker');
   await js('document.querySelector("[data-provider-id=chatgpt]").click()');
   await until(() => js('document.querySelector("form input.input")?.value === "chatgpt"'), 'ChatGPT create form');
@@ -372,6 +317,8 @@ try {
   chatgptManualMode = true;
   await js('Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Continue with ChatGPT").click()');
   await until(() => js(`!!document.querySelector('textarea[aria-label="ChatGPT callback URL"]')`), 'remote ChatGPT callback input');
+  await js('document.getElementById("provider-editor-tab-models").click(); document.getElementById("provider-editor-tab-connection").click()');
+  assert.equal(await js(`!!document.querySelector('textarea[aria-label="ChatGPT callback URL"]')`), true);
   assert.equal(await js('document.body.textContent.includes("copy the entire URL")'), true);
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   assert.equal(await js('document.documentElement.scrollWidth <= window.innerWidth'), true);
@@ -415,7 +362,8 @@ try {
     assert.equal(await js('document.documentElement.scrollWidth <= window.innerWidth'), true);
   }
   assert.deepEqual(exceptions, []);
-  console.log('PASS: provider creation, defaults, token editing, ChatGPT local/remote sign-in/models/sign-out/cancellation, errors, drafts, legacy redirects, mobile width.');
+  console.log('PASS: unified connections/catalog/defaults, namespaced actions, pagination/search, partial errors/retry, model/secret drafts, ChatGPT local/remote sign-in/models/sign-out/cancellation, legacy links and mobile width.');
+  console.log('Provider previews: ' + scratchRoot);
 } finally {
   await closeBrowser?.();
   ws?.close(); browser.kill();

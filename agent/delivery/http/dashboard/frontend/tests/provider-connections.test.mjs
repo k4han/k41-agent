@@ -45,6 +45,16 @@ test("connection detours keep independent drafts without sharing mutable objects
 
 const connections = await loadModule("../src/lib/providerConnections.ts");
 
+test("Decision adapters follow the model adapter and Cloudflare catalog identity", () => {
+  assert.equal(connections.decisionProviderType("google", "google"), "google");
+  assert.equal(connections.decisionProviderType("google", "custom"), "google");
+  assert.equal(connections.decisionProviderType("openai_compatible", "cloudflare-workers-ai"), "cloudflare");
+  assert.equal(connections.decisionProviderType("openai_compatible", "Cloudflare"), "cloudflare");
+  for (const [type, id] of [["chatgpt", "google"], ["anthropic", "cloudflare"], ["openai_compatible", "google"], ["openai_compatible", "custom"]]) {
+    assert.equal(connections.decisionProviderType(type, id), undefined);
+  }
+});
+
 test("decision forms retain stored secrets unless explicitly replaced or cleared", () => {
   const definitions = [{ name: "api_key", input_type: "password" }, { name: "model", input_type: "text" }];
   const fields = { api_key: "", model: "gemini-decision-1" };
@@ -228,7 +238,8 @@ test("ProvidersPage.tsx contains zero embedded style blocks or inline styles", a
   const pageSource = await readFile(new URL("../src/pages/settings/ProvidersPage.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(pageSource, /<style/);
   assert.doesNotMatch(pageSource, /style=\{\{/);
-  assert.match(pageSource, /title="AI Model Providers"/);
+  const deskSource = await readFile(new URL("../src/pages/settings/ProviderDeskPage.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(deskSource, /<style|style=\{\{/);
 });
 
 test("bidirectional contextual signposting between decisions and providers is present", async () => {
@@ -279,24 +290,12 @@ test("pages/settings files contain zero window.confirm calls", async () => {
   assert.match(unsavedChangesSource, /window\.confirm/);
 });
 
-test("WebConnectionsPage and DecisionProvidersPage use ConfirmDialog for deletion and clear-default actions", async () => {
-  const webPage = await readFile(new URL("../src/pages/settings/WebConnectionsPage.tsx", import.meta.url), "utf8");
-  assert.match(webPage, /import \{ ConfirmDialog \} from ["']@\/components\/ConfirmDialog["'];/);
-  assert.match(webPage, /title="Delete Connection"/);
-  assert.match(webPage, /title="Clear Default Connection"/);
-  assert.match(webPage, /confirmVariant="danger"/);
-  assert.match(webPage, /confirmVariant="warning"/);
-  assert.match(webPage, /onDelete=\{\(name\) => setDeleteTarget\(name\)\}/);
-  assert.match(webPage, /setClearDefaultTarget\(\{ type: item\.type, label: item\.label \}\)/);
-
-  const decisionProviders = await readFile(new URL("../src/pages/settings/DecisionProvidersPage.tsx", import.meta.url), "utf8");
-  assert.match(decisionProviders, /import \{ ConfirmDialog \} from ["']@\/components\/ConfirmDialog["'];/);
-  assert.match(decisionProviders, /title="Delete Decision Provider"/);
-  assert.match(decisionProviders, /title="Clear Default Decision Provider"/);
-  assert.match(decisionProviders, /confirmVariant="danger"/);
-  assert.match(decisionProviders, /confirmVariant="warning"/);
-  assert.match(decisionProviders, /onDelete=\{\(name\) => setDeleteTarget\(name\)\}/);
-  assert.match(decisionProviders, /onClick=\{\(\) => setClearDefaultOpen\(true\)\}/);
+test("the unified provider desk confirms deletion and clearing defaults", async () => {
+  const desk = await readFile(new URL("../src/pages/settings/ProviderDeskPage.tsx", import.meta.url), "utf8");
+  assert.match(desk, /title="Delete Connection"/);
+  assert.match(desk, /title="Clear Default Connection"/);
+  assert.match(desk, /confirmVariant="danger"/);
+  assert.match(desk, /confirmVariant="warning"/);
 });
 
 test("ProvidersPage Model Specifications catalog features interactive controls and state tracking", async () => {
@@ -377,14 +376,12 @@ test("WebConnectionsPage and DecisionProvidersPage include interactive connectio
   const webPage = await readFile(new URL("../src/pages/settings/WebConnectionsPage.tsx", import.meta.url), "utf8");
   assert.match(webPage, /`\$\{API\}\/verify`/);
   assert.match(webPage, /title="Test web connection"/);
-  assert.match(webPage, /onTest=\{testConnectionByName\}/);
   assert.match(webPage, /⚡ \{formTestResult\(\)!\.latency_ms\}ms/);
   assert.match(webPage, /connection-error-alert/);
 
   const decisionPage = await readFile(new URL("../src/pages/settings/DecisionProvidersPage.tsx", import.meta.url), "utf8");
   assert.match(decisionPage, /`\$\{API\}\/verify`/);
   assert.match(decisionPage, /title="Test decision provider connection"/);
-  assert.match(decisionPage, /onTest=\{testConnectionByName\}/);
   assert.match(decisionPage, /⚡ \{formTestResult\(\)!\.latency_ms\}ms/);
   assert.match(decisionPage, /connection-error-alert/);
 });
@@ -440,3 +437,65 @@ test("verification response handler correctly parses latency, models, and sugges
   assert.equal(sampleError.error_code, "AUTH_FAILED");
 });
 
+
+const desk = await loadModule("../src/lib/providerDesk.ts");
+
+function deskFixtures() {
+  const field = value => ({ info: { value } });
+  return {
+    llm: { providers_catalog: { google: { id: "google", name: "Google", provider_type: "google", models: [{ id: "catalog-model" }] } },
+      provider_rows: [{ name: "team", type: "google", catalog_id: "google", type_label: "Google", fields: { default_model: field("manual/model"), models: field(["manual/model", "other-model"]) }, ready: true, enabled: true, is_default: false, can_set_default: true, can_delete: false, delete_block_reason: "Referenced by pool" }] },
+    decision: { services: [{ type: "google", label: "Google Decisions" }], providers: [{ name: "team", type: "google", fields: { model: "decision-model" }, configured: true, is_default: true }] },
+    web: { services: [{ type: "google", label: "Google Search" }], connections: [{ name: "team", type: "google", capabilities: ["search"], configured: false, is_default: false }] },
+  };
+}
+
+test("provider sections and connection kinds are independent and preserve legacy links", () => {
+  assert.equal(routes.currentProviderSection("/settings/providers", ""), "connections");
+  assert.equal(routes.currentConnectionKind("/settings/providers", ""), undefined);
+  for (const kind of ["llm", "decision", "web"]) {
+    assert.equal(routes.currentProviderSection("/settings/providers", `?tab=${kind}`), "connections");
+    assert.equal(routes.currentConnectionKind("/settings/providers", `?tab=${kind}`), kind);
+    assert.equal(routes.currentProviderSection("/settings/providers", `?tab=${kind}&new=google`), "catalog");
+    assert.equal(routes.currentConnectionKind(`/settings/providers/${kind}/team`, "?kind=wrong&tab=catalog"), kind);
+    assert.equal(routes.currentProviderSection(`/settings/providers/${kind}/team`, "?new=wrong"), "connections");
+  }
+  for (const section of ["catalog", "defaults", "pools", "workspace"]) assert.equal(routes.currentProviderSection("/settings/providers", `?tab=${section}`), section);
+  assert.equal(routes.currentProviderSection("/settings/providers", "?tab=unknown"), "connections");
+  assert.equal(routes.currentProviderSection("/settings/providers/workspace/local", "?tab=catalog"), "workspace");
+});
+
+test("same-named model, decision and web connections retain distinct identities and actions", () => {
+  const connections = desk.buildDeskConnections(deskFixtures());
+  assert.equal(connections.length, 3);
+  assert.equal(new Set(connections.map(item => item.id)).size, 3);
+  assert.deepEqual(connections.map(item => desk.connectionEndpoint(item)).sort(), ["/dashboard-api/decision-providers/team", "/dashboard-api/providers/team", "/dashboard-api/web-connections/team"]);
+  assert.equal(connections.find(item => item.kind === "llm").deleteReason, "Referenced by pool");
+  assert.equal(connections.find(item => item.kind === "decision").canDelete, false);
+  assert.equal(connections.find(item => item.kind === "web").canSetDefault, false);
+});
+
+test("connection search includes manual models, capabilities and providers with separate status filtering", () => {
+  const connections = desk.buildDeskConnections(deskFixtures());
+  assert.deepEqual(desk.filterDeskConnections(connections, "OTHER-MODEL").map(item => item.kind), ["llm"]);
+  assert.deepEqual(desk.filterDeskConnections(connections, "search").map(item => item.kind), ["web"]);
+  assert.equal(desk.filterDeskConnections(connections, "google").length, 3);
+  assert.equal(desk.filterDeskConnections(connections, "", "web", "incomplete").length, 1);
+  assert.equal(desk.filterDeskConnections(connections, "", "all", "configured").length, 2);
+  connections.find(item => item.kind === "llm").enabled = false;
+  assert.equal(desk.filterDeskConnections(connections, "", "all", "disabled").length, 1);
+  assert.equal(desk.filterDeskConnections(connections, "", "llm", "configured").length, 0);
+});
+
+test("catalog counts stay in their own connection kind and tolerate a missing source", () => {
+  const sources = deskFixtures();
+  const items = desk.buildDeskCatalog(sources, desk.buildDeskConnections(sources));
+  assert.equal(items.length, 4);
+  assert.equal(new Set(items.map(item => item.id)).size, 4);
+  assert.deepEqual(items.filter(item => item.providerId === "google").map(item => item.count), [1, 1, 1]);
+  delete sources.llm;
+  assert.equal(desk.buildDeskConnections(sources).length, 2);
+  assert.equal(desk.buildDeskCatalog(sources, desk.buildDeskConnections(sources)).length, 2);
+  assert.deepEqual(desk.buildDeskConnections({}), []);
+  assert.deepEqual(desk.configuredModelIds("manual/model, second\nmanual/model\n "), ["manual/model", "second"]);
+});

@@ -4,7 +4,6 @@ import { ArrowLeft, Check, Copy, Plus, RefreshCw, Save, Search, Star, Trash2, Sp
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CopyButton } from "@/components/CopyButton";
-import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
@@ -13,9 +12,10 @@ import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
 import { parseModelList } from "@/lib/utils";
 import type { ChatGPTSession, ProviderRow, ProviderTypeOption, SettingInfo } from "@/types";
 import { ChatGPTConnectionPanel } from "./ChatGPTConnectionPanel";
+import { ProviderDecisionSettings } from "./ProviderDecisionSettings";
 
 import { ProviderSettingsLayout as SettingsLayout } from "./ProviderSettingsLayout";
-import { ProviderConnectionList, ProviderPicker, ProviderFormPanel } from "./ProviderConnections";
+import { ProviderFormPanel, ProviderEditorTabs } from "./ProviderConnections";
 import { suggestProviderName } from "@/lib/providerConnections";
 import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
 import {
@@ -53,7 +53,6 @@ type ProviderView = {
   canSetDefault: boolean;
   defaultBlockReason: string;
   dirtyCount: number;
-  matchesSearch: boolean;
 };
 
 type ProviderCreateForm = {
@@ -130,7 +129,6 @@ function buildProviderView(
   fieldOrder: string[],
   drafts: Record<string, unknown>,
   dirtyKeys: Set<string>,
-  searchNeedle: string,
 ): ProviderView {
   const fieldMap = Object.fromEntries(
     Object.entries(provider.fields).filter(([, entry]) => Boolean(entry)),
@@ -138,7 +136,7 @@ function buildProviderView(
   const orderedFields = (fieldOrder.length ? fieldOrder : Object.keys(provider.fields))
     .map((field) => fieldMap[field])
     .filter((entry): entry is ProviderFieldEntry => Boolean(entry));
-  const detailFields = fieldOrder
+  const detailFields = (fieldOrder.length ? fieldOrder : Object.keys(provider.fields))
     .map((field) => fieldMap[field])
     .filter((entry): entry is ProviderFieldEntry => {
       if (!entry) {
@@ -155,7 +153,6 @@ function buildProviderView(
   const enabledField = fieldMap.enabled;
   const defaultModelField = fieldMap.default_model;
   const modelsField = fieldMap.models;
-  const searchable = provider.name.toLowerCase();
 
   return {
     chatgptSession: provider.chatgpt_session,
@@ -177,7 +174,6 @@ function buildProviderView(
     canSetDefault: provider.can_set_default,
     defaultBlockReason: provider.default_block_reason,
     dirtyCount: detailFields.filter((entry) => dirtyKeys.has(entry.key)).length,
-    matchesSearch: !searchNeedle || searchable.includes(searchNeedle),
   };
 }
 
@@ -189,17 +185,14 @@ export function ProvidersPage() {
   const navigate = useNavigate();
   const [query] = useSearchParams<{ new?: string }>();
 
-  const [search, setSearch] = createSignal("");
   const [savingDefaultProvider, setSavingDefaultProvider] = createSignal(false);
   const [savingProvider, setSavingProvider] = createSignal(false);
-  const [updatingCatalog, setUpdatingCatalog] = createSignal(false);
   const [confirmOpen, setConfirmOpen] = createSignal(false);
   const [changesToConfirm, setChangesToConfirm] = createSignal<PendingChange[]>([]);
   const [deleteTarget, setDeleteTarget] = createSignal<ProviderView | null>(null);
   const [logoErrors, setLogoErrors] = createSignal<Record<string, boolean>>({});
   const { showToast } = useToast();
 
-  const searchNeedle = createMemo(() => search().trim().toLowerCase());
   const dirtyKeys = createMemo<Set<string>>(() => new Set(pendingChanges().map((change: PendingChange) => change.key)));
 
   const typeOptions = createMemo(() => providerTypeOptions(data()?.provider_type_options));
@@ -218,25 +211,9 @@ export function ProvidersPage() {
         payload.provider_field_order || [],
         drafts(),
         dirtyKeys(),
-        searchNeedle(),
       ),
     );
   });
-
-  const catalogEntryFor = (row: ProviderView) =>
-    Object.values(providersCatalog()).find((entry: any) =>
-      entry.id.toLowerCase() === (row.catalogId || row.name).toLowerCase()) as any;
-  const pickerItems = createMemo(() => Object.values(providersCatalog())
-    .filter((entry: any) => !searchNeedle() || `${entry.id} ${entry.name}`.toLowerCase().includes(searchNeedle()))
-    .map((entry: any) => ({ id: entry.id, label: entry.name, logoUrl: entry.logo_url,
-      count: providerRows().filter((row) => catalogEntryFor(row)?.id === entry.id).length }))
-    .sort((a, b) => a.label.localeCompare(b.label)));
-  const connectionItems = createMemo(() => providerRows()
-    .filter((row) => !searchNeedle() || `${row.name} ${catalogEntryFor(row)?.name || row.typeLabel} ${row.defaultModel}`.toLowerCase().includes(searchNeedle()))
-    .map((row) => ({ name: row.name, label: catalogEntryFor(row)?.name || row.typeLabel,
-      model: row.defaultModel, configured: row.ready, enabled: row.enabled, isDefault: row.isDefault,
-      canSetDefault: row.canSetDefault, canDelete: row.canDelete,
-      defaultReason: row.defaultBlockReason, deleteReason: row.deleteBlockReason })));
 
   const currentProviderName = () =>
     params.providerName ? decodeURIComponent(params.providerName) : null;
@@ -261,23 +238,10 @@ export function ProvidersPage() {
       showToast(count ? `Loaded ${count} model(s).` : "No models returned.", count ? "success" : "warning");
       const key = `llm.providers.${providerName}.models`;
       if (catalog) {
-        setDraft(key, catalog.models.map((model) => model.id).join("\n"));
+        setDraft(key, [...new Set([...parseModelList(textValue(drafts()[key])), ...catalog.models.map((model) => model.id)])].join("\n"));
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to load models", "error");
-    }
-  };
-
-  const syncCatalog = async () => {
-    setUpdatingCatalog(true);
-    try {
-      const res = await postJson<{ status: string; message: string }>("/dashboard-api/providers/update-catalog", {});
-      showToast(res.message, "success");
-      await load();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to sync catalog", "error");
-    } finally {
-      setUpdatingCatalog(false);
     }
   };
 
@@ -354,52 +318,7 @@ export function ProvidersPage() {
     <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
           <>
-            <Show when={query.new} fallback={
-            <Show
-              when={params.providerName}
-              fallback={
-                <SettingsLayout
-                  title="AI Model Providers"
-                  breadcrumbLabel="Providers"
-                  contentWidth="wide"
-                  actions={
-                    <button
-                      class="btn"
-                      type="button"
-                      disabled={updatingCatalog()}
-                      onClick={syncCatalog}
-                      title="Sync provider catalog and models list from models.dev"
-                    >
-                      <RefreshCw size={14} class={updatingCatalog() ? "animate-spin" : ""} />
-                      {updatingCatalog() ? "Syncing..." : "Sync Catalog"}
-                    </button>
-                  }
-                >
-                  <div class="stack">
-                    <SettingsResourceToolbar
-                      searchValue={search()}
-                      searchPlaceholder="Search providers and models..."
-                      onSearchInput={setSearch}
-                      actions={
-                        <button class="btn btn-primary" type="button" onClick={() => navigate("/settings/providers?tab=llm&new=custom")}>
-                          <Plus size={15} />
-                          Custom Provider
-                        </button>
-                      }
-                    />
-
-                    <ProviderConnectionList
-                      items={connectionItems()} busy={savingDefaultProvider()}
-                      onEdit={(name) => navigate(`/settings/providers/llm/${encodeURIComponent(name)}`)}
-                      onSetDefault={(name) => { const row = providerRows().find((item) => item.name === name); if (row) void setDefaultProvider(row); }}
-                      onDelete={(name) => setDeleteTarget(providerRows().find((item) => item.name === name) || null)}
-                    />
-                    <ProviderPicker items={pickerItems()} onSelect={(id) => navigate(`/settings/providers?tab=llm&new=${encodeURIComponent(id)}`)} />
-
-                  </div>
-                </SettingsLayout>
-              }
-            >
+            <Show when={query.new && !params.providerName} fallback={
               <Show
                 when={currentProvider()}
                 fallback={
@@ -440,12 +359,11 @@ export function ProvidersPage() {
                     onSave={() => saveProviderChanges(provider().name)}
                     onChange={(key, value) => setDraft(key, value)}
                     onRestore={(key) => restoreDraft(key)}
+                    onDiscard={discardAll}
                     onDelete={() => setDeleteTarget(provider())}
                   />
                 )}
               </Show>
-            </Show>
-
             }>
               <AIProviderCreatePage providerId={String(query.new || "")} catalog={providersCatalog()}
                 names={providerRows().map((row) => row.name)} typeOptions={typeOptions()} onCreated={load} />
@@ -492,7 +410,19 @@ function ProviderDetailPage(props: {
   onChange: (key: string, value: unknown) => void;
   onRestore: (key: string) => void;
   onDelete: () => void;
+  onDiscard: () => void;
 }) {
+  const editorTabs = [{ value: "models", label: "Models" }, { value: "decision", label: "Decision" }, { value: "connection", label: "Connection" }, { value: "advanced", label: "Advanced" }] as const;
+  type EditorTab = typeof editorTabs[number]["value"];
+  const [editorTab, setEditorTab] = createSignal<EditorTab>("models");
+  const [decisionOpened, setDecisionOpened] = createSignal(false);
+  const editorIdentity = createMemo(() => `${props.provider.name}:${props.provider.providerType}`);
+  createEffect(() => { setEditorTab(editorIdentity().endsWith(":chatgpt") ? "connection" : "models"); setDecisionOpened(false); });
+  createEffect(() => { if (editorTab() === "decision") setDecisionOpened(true); });
+  const fieldTab = (entry: ProviderFieldEntry): EditorTab => {
+    const name = fieldName(entry);
+    return ["models", "default_model"].includes(name) ? "models" : ["api_key", "base_url", "enabled"].includes(name) ? "connection" : "advanced";
+  };
   // Try to find matching catalog item for models metadata
   const catalogEntry = createMemo<any>(() => {
     const id = (props.provider.catalogId || props.provider.name).toLowerCase();
@@ -681,24 +611,11 @@ function ProviderDetailPage(props: {
             <Star size={13} />
             Set Default
           </button>
-          <button
-            class="btn btn-primary"
-            type="button"
-            disabled={props.provider.dirtyCount === 0 || props.savingProvider}
-            onClick={props.onSave}
-          >
-            <Save size={13} />
-            Save changes{props.provider.dirtyCount ? ` (${props.provider.dirtyCount})` : ""}
-          </button>
+
         </div>
       }
     >
       <div class="stack provider-detail-stack">
-        <Show when={props.provider.providerType === "chatgpt"}>
-          <ChatGPTConnectionPanel name={props.provider.name} session={props.provider.chatgptSession}
-            configuredModels={parseModelList(textValue(draftValue(props.drafts, props.provider.fieldMap.models)))}
-            defaultModel={props.provider.defaultModel} onReload={props.onReload} />
-        </Show>
         <div class="panel provider-detail-panel">
           <div class="row-wrap provider-header-row">
             <div class="row-wrap provider-identity-row">
@@ -758,139 +675,159 @@ function ProviderDetailPage(props: {
           </div>
         </div>
 
-        <div class="panel provider-detail-panel">
-          <h3 class="provider-section-heading">Provider Settings</h3>
-          <div class="settings-list">
-            <For each={props.provider.detailFields} fallback={<div class="empty">No settings found.</div>}>
-              {(entry) => (
-                <SettingRow
-                  settingKey={entry.key}
-                  info={entry.info}
-                  draft={props.drafts[entry.key]}
-                  dirty={props.dirtyKeys.has(entry.key)}
-                  trimProviderPrefix
-                  actions={
-                    entry.key.endsWith(".models") ? (
-                      <button class="btn btn-sm" type="button" onClick={props.onLoadModels}>
-                        <RefreshCw size={13} />
-                        Fetch Active Models
-                      </button>
-                    ) : undefined
-                  }
-                  onChange={(value) => props.onChange(entry.key, value)}
-                  onRestore={() => props.onRestore(entry.key)}
-                />
-              )}
-            </For>
-          </div>
-        </div>
-
-        {/* Detailed Model Metadata Section from models.dev */}
-        <Show when={catalogEntry()?.models?.length > 0}>
-          <div class="panel provider-detail-panel">
-            <div class="model-spec-toolbar">
-              <div class="model-spec-title">
-                <Sparkles size={14} class="model-spec-sparkles" />
-                Model Specifications & Capabilities
+        <ProviderEditorTabs id="provider-editor" items={editorTabs} value={editorTab()} onChange={setEditorTab} />
+        <For each={editorTabs}>{(tab) => (
+          <div class="stack provider-editor-panel" id={`provider-editor-panel-${tab.value}`} role="tabpanel" aria-labelledby={`provider-editor-tab-${tab.value}`} hidden={editorTab() !== tab.value}>
+            <Show when={tab.value === "decision" && decisionOpened()}>
+              <ProviderDecisionSettings name={props.provider.name} providerType={props.provider.providerType} catalogId={props.provider.catalogId} />
+            </Show>
+            <Show when={tab.value === "connection"}>
+              <Show when={props.provider.providerType === "chatgpt"}>
+                <ChatGPTConnectionPanel name={props.provider.name} session={props.provider.chatgptSession}
+                  configuredModels={parseModelList(textValue(draftValue(props.drafts, props.provider.fieldMap.models)))}
+                  defaultModel={props.provider.defaultModel} onReload={props.onReload} />
+              </Show>
+            </Show>
+            <Show when={tab.value !== "decision"}><div class="panel provider-detail-panel">
+              <h3 class="provider-section-heading">{tab.label}</h3>
+              <div class="settings-list">
+                <For each={props.provider.detailFields.filter((entry) => fieldTab(entry) === tab.value)} fallback={<div class="empty">No settings found.</div>}>
+                  {(entry) => (
+                    <SettingRow
+                      settingKey={entry.key}
+                      info={entry.info}
+                      draft={props.drafts[entry.key]}
+                      dirty={props.dirtyKeys.has(entry.key)}
+                      trimProviderPrefix
+                      actions={
+                        entry.key.endsWith(".models") ? (
+                          <button class="btn btn-sm" type="button" onClick={props.onLoadModels}>
+                            <RefreshCw size={13} />
+                            Fetch Active Models
+                          </button>
+                        ) : undefined
+                      }
+                      onChange={(value) => props.onChange(entry.key, value)}
+                      onRestore={() => props.onRestore(entry.key)}
+                    />
+                  )}
+                </For>
               </div>
-              <label class="model-spec-search">
-                <Search size={14} />
-                <input
-                  class="input"
-                  type="search"
-                  aria-label="Search models"
-                  value={modelSearch()}
-                  placeholder="Search models..."
-                  onInput={(event) => setModelSearch(event.currentTarget.value)}
-                />
-              </label>
-            </div>
-            <div class="model-spec-grid">
-              <For each={filteredModels()} fallback={<div class="model-spec-empty">No models match your search.</div>}>
-                {(model) => {
-                  const isDefault = () => currentDefaultModel() === model.id;
-                  const isConfigured = () => currentConfiguredModels().includes(model.id);
-                  const capabilities = () => [
-                    model.context_window
-                      ? `${model.context_window >= 1048576 ? `${(model.context_window / 1048576).toFixed(0)}M` : `${(model.context_window / 1024).toFixed(0)}k`} context`
-                      : "",
-                    model.reasoning ? "Reasoning" : "",
-                    model.tool_call ? "Tools" : "",
-                    ...(model.input_types || []),
-                  ].filter(Boolean).join(" · ");
+            </div></Show>
 
-                  return (
-                    <div
-                      class="model-spec-card"
-                      classList={{
-                        "is-default": isDefault(),
-                        "is-configured": isConfigured(),
-                      }}
-                    >
-                      <div class="model-spec-header">
-                        <div class="model-spec-title-wrap">
-                          <span class="model-spec-name" title={model.name}>{model.name}</span>
-                          <span class="model-spec-id mono" title={model.id}>{model.id}</span>
-                        </div>
-                        <CopyButton
-                          value={String(model.id || model.name || "")}
-                          class="btn btn-icon btn-sm model-spec-copy-btn"
-                          ariaLabel={`Copy model ID ${model.id || model.name}`}
-                          title={`Copy ${model.id || model.name}`}
-                          successMessage="Model ID copied."
-                        >
-                          {(state) => (
-                            <Show when={state.copied()} fallback={<Copy size={13} aria-hidden="true" />}>
-                              <Check size={13} aria-hidden="true" />
-                            </Show>
-                          )}
-                        </CopyButton>
-                      </div>
-
-                      <Show when={capabilities()}>
-                        <div class="model-spec-capabilities hint" title={capabilities()}>
-                          {capabilities()}
-                        </div>
-                      </Show>
-
-                      <Show when={model.cost_input !== null && model.cost_input !== undefined}>
-                        <div class="model-spec-cost">
-                          Cost/1M tokens: <span class="cost-number">${model.cost_input}</span> In / <span class="cost-number">${model.cost_output}</span> Out
-                        </div>
-                      </Show>
-
-                      <div class="model-spec-actions">
-                        <button
-                          class="btn btn-sm"
-                          classList={{ "btn-primary": !isDefault() }}
-                          type="button"
-                          disabled={isDefault()}
-                          title={isDefault() ? "Current default model" : "Set as provider default model"}
-                          onClick={() => handleSetDefaultModel(model.id, model.name)}
-                        >
-                          <Star size={12} fill={isDefault() ? "currentColor" : "none"} />
-                          {isDefault() ? "Default" : "Set Default"}
-                        </button>
-
-                        <button
-                          class="btn btn-sm"
-                          type="button"
-                          disabled={isConfigured()}
-                          title={isConfigured() ? "Model already in configured list" : "Add model to configured list"}
-                          onClick={() => handleAddModel(model.id, model.name)}
-                        >
-                          <Show when={isConfigured()} fallback={<Plus size={12} />}>
-                            <Check size={12} />
-                          </Show>
-                          {isConfigured() ? "Added" : "Add to Models"}
-                        </button>
-                      </div>
+            <Show when={tab.value === "models"}>
+              {/* Detailed Model Metadata Section from models.dev */}
+              <Show when={catalogEntry()?.models?.length > 0}>
+                <div class="panel provider-detail-panel">
+                  <div class="model-spec-toolbar">
+                    <div class="model-spec-title">
+                      <Sparkles size={14} class="model-spec-sparkles" />
+                      Model Specifications & Capabilities
                     </div>
-                  );
-                }}
-              </For>
-            </div>
+                    <label class="model-spec-search">
+                      <Search size={14} />
+                      <input
+                        class="input"
+                        type="search"
+                        aria-label="Search models"
+                        value={modelSearch()}
+                        placeholder="Search models..."
+                        onInput={(event) => setModelSearch(event.currentTarget.value)}
+                      />
+                    </label>
+                  </div>
+                  <div class="model-spec-grid">
+                    <For each={filteredModels()} fallback={<div class="model-spec-empty">No models match your search.</div>}>
+                      {(model) => {
+                        const isDefault = () => currentDefaultModel() === model.id;
+                        const isConfigured = () => currentConfiguredModels().includes(model.id);
+                        const capabilities = () => [
+                          model.context_window
+                            ? `${model.context_window >= 1048576 ? `${(model.context_window / 1048576).toFixed(0)}M` : `${(model.context_window / 1024).toFixed(0)}k`} context`
+                            : "",
+                          model.reasoning ? "Reasoning" : "",
+                          model.tool_call ? "Tools" : "",
+                          ...(model.input_types || []),
+                        ].filter(Boolean).join(" · ");
+
+                        return (
+                          <div
+                            class="model-spec-card"
+                            classList={{
+                              "is-default": isDefault(),
+                              "is-configured": isConfigured(),
+                            }}
+                          >
+                            <div class="model-spec-header">
+                              <div class="model-spec-title-wrap">
+                                <span class="model-spec-name" title={model.name}>{model.name}</span>
+                                <span class="model-spec-id mono" title={model.id}>{model.id}</span>
+                              </div>
+                              <CopyButton
+                                value={String(model.id || model.name || "")}
+                                class="btn btn-icon btn-sm model-spec-copy-btn"
+                                ariaLabel={`Copy model ID ${model.id || model.name}`}
+                                title={`Copy ${model.id || model.name}`}
+                                successMessage="Model ID copied."
+                              >
+                                {(state) => (
+                                  <Show when={state.copied()} fallback={<Copy size={13} aria-hidden="true" />}>
+                                    <Check size={13} aria-hidden="true" />
+                                  </Show>
+                                )}
+                              </CopyButton>
+                            </div>
+
+                            <Show when={capabilities()}>
+                              <div class="model-spec-capabilities hint" title={capabilities()}>
+                                {capabilities()}
+                              </div>
+                            </Show>
+
+                            <Show when={model.cost_input !== null && model.cost_input !== undefined}>
+                              <div class="model-spec-cost">
+                                Cost/1M tokens: <span class="cost-number">${model.cost_input}</span> In / <span class="cost-number">${model.cost_output}</span> Out
+                              </div>
+                            </Show>
+
+                            <div class="model-spec-actions">
+                              <button
+                                class="btn btn-sm"
+                                classList={{ "btn-primary": !isDefault() }}
+                                type="button"
+                                disabled={isDefault()}
+                                title={isDefault() ? "Current default model" : "Set as provider default model"}
+                                onClick={() => handleSetDefaultModel(model.id, model.name)}
+                              >
+                                <Star size={12} fill={isDefault() ? "currentColor" : "none"} />
+                                {isDefault() ? "Default" : "Set Default"}
+                              </button>
+
+                              <button
+                                class="btn btn-sm"
+                                type="button"
+                                disabled={isConfigured()}
+                                title={isConfigured() ? "Model already in configured list" : "Add model to configured list"}
+                                onClick={() => handleAddModel(model.id, model.name)}
+                              >
+                                <Show when={isConfigured()} fallback={<Plus size={12} />}>
+                                  <Check size={12} />
+                                </Show>
+                                {isConfigured() ? "Added" : "Add to Models"}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      }}
+                    </For>
+                  </div>
+                </div>
+              </Show>
+            </Show>
           </div>
+        )}</For>
+        <Show when={props.provider.dirtyCount > 0}>
+          <div class="provider-save-bar"><span class="hint">{props.provider.dirtyCount} unsaved change(s)</span><button class="btn" type="button" disabled={props.savingProvider} onClick={props.onDiscard}>Discard draft</button><button class="btn btn-primary" type="button" disabled={props.savingProvider} onClick={props.onSave}><Save size={14} />{props.savingProvider ? "Saving..." : "Save changes"}</button></div>
         </Show>
       </div>
     </SettingsLayout>
@@ -920,13 +857,14 @@ function AIProviderCreatePage(props: {
   } | null>(null);
   const [discoveredModels, setDiscoveredModels] = createSignal<string[]>([]);
   const [selectedDefaultModel, setSelectedDefaultModel] = createSignal("");
+  const [saved, setSaved] = createSignal(false);
 
   createEffect(() => {
     const item = entry();
     const next = { name: suggestProviderName(isCustom() ? "custom" : props.providerId, props.names, true),
       type: item?.provider_type || "google", api_key: "", base_url: item?.base_url || "",
       catalog_id: item?.id, isCustom: isCustom() };
-    setForm(next); setInitial(next);
+    setForm(next); setInitial(next); setSaved(false);
     setVerificationResult(null);
     setDiscoveredModels([]);
     setSelectedDefaultModel("");
@@ -934,7 +872,7 @@ function AIProviderCreatePage(props: {
 
   const patch = (values: Partial<ProviderCreateForm>) => setForm((current) => ({ ...current, ...values }));
   useUnsavedChanges(
-    () => JSON.stringify(form()) !== JSON.stringify(initial()),
+    () => !saved() && (JSON.stringify(form()) !== JSON.stringify(initial()) || Boolean(selectedDefaultModel()) || discoveredModels().length > 0),
     () => { setForm(initial()); setVerificationResult(null); setDiscoveredModels([]); setSelectedDefaultModel(""); }
   );
 
@@ -1005,10 +943,10 @@ function AIProviderCreatePage(props: {
         default_model: selectedDefaultModel(),
         models: discoveredModels(),
       });
-      setInitial(form());
+      setInitial(form()); setSaved(true);
       await props.onCreated();
       showToast("Provider configuration saved.");
-      navigate(type === "chatgpt" ? `/settings/providers/llm/${encodeURIComponent(name)}` : "/settings/providers?tab=llm");
+      navigate(`/settings/providers/llm/${encodeURIComponent(name)}`);
     } catch (err) { showToast(err instanceof Error ? err.message : "Failed to save provider.", "error"); }
     finally { setBusy(false); }
   };
@@ -1021,8 +959,8 @@ function AIProviderCreatePage(props: {
       ]}
       contentWidth="wide"
     >
-      <Show when={isCustom() || entry()} fallback={<div class="panel panel-body stack"><h3>Provider not found</h3><button class="btn" type="button" onClick={() => navigate("/settings/providers?tab=llm")}>Back to Providers</button></div>}>
-        <ProviderFormPanel title={`Add ${entry()?.name || "Custom Provider"}`} busy={busy()} onSubmit={save} onBack={() => navigate("/settings/providers?tab=llm")}>
+      <Show when={isCustom() || entry()} fallback={<div class="panel panel-body stack"><h3>Provider not found</h3><button class="btn" type="button" onClick={() => navigate("/settings/providers?tab=catalog&kind=llm")}>Back to Providers</button></div>}>
+        <ProviderFormPanel title={`Add ${entry()?.name || "Custom Provider"}`} busy={busy()} onSubmit={save} onBack={() => navigate("/settings/providers?tab=catalog&kind=llm")}>
           <label class="stack">Configuration name<input class="input" required pattern="[A-Za-z0-9_-]+" value={form().name} onInput={(event) => patch({ name: event.currentTarget.value })} /></label>
           <Show when={isCustom()}>
             <label class="stack">Provider type<select class="input" value={form().type} onChange={(event) => patch({ type: event.currentTarget.value, base_url: "" })}><For each={props.typeOptions}>{(option) => <option value={option.value}>{option.label}</option>}</For></select></label>

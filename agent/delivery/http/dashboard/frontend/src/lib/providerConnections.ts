@@ -9,6 +9,12 @@ export function suggestProviderName(providerId: string, existingNames: string[],
   return candidate;
 }
 
+export function decisionProviderType(providerType: string, catalogId: string): string | undefined {
+  if (providerType === "google") return "google";
+  if (providerType === "openai_compatible" && ["cloudflare", "cloudflare-workers-ai"].includes(catalogId.toLowerCase())) return "cloudflare";
+  return undefined;
+}
+
 export function decisionProviderFields(
   fields: Record<string, string | number>,
   definitions: Array<{ name: string; input_type: string }>,

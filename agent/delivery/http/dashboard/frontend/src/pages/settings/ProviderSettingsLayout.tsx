@@ -1,33 +1,44 @@
 import "@/styles/routes/providers.css";
 
 import { useLocation, useNavigate } from "@solidjs/router";
-import { BrainCircuit, Globe, Layers, ServerCog, Workflow } from "lucide-solid";
+import { BookOpen, Layers, Plug, ServerCog, Star } from "lucide-solid";
+import { Show } from "solid-js";
+import { Dialog } from "@/components/Dialog";
 import { SettingsLayout } from "./SettingsLayout";
 import { SettingsTabBar, type SettingsTabItem } from "./shared";
 
-import { currentProviderTab, type ProviderTab } from "@/lib/providerRoutes";
+import { connectionReturnTo, currentConnectionKind, currentProviderSection, type ProviderSection } from "@/lib/providerRoutes";
 export { currentProviderTab } from "@/lib/providerRoutes";
 
-const TABS: ReadonlyArray<SettingsTabItem<ProviderTab>> = [
-  { value: "llm", label: "Models", icon: () => <Workflow size={13} /> },
+const TABS: ReadonlyArray<SettingsTabItem<ProviderSection>> = [
+  { value: "connections", label: "Connections", icon: () => <Plug size={13} /> },
+  { value: "catalog", label: "Provider catalog", icon: () => <BookOpen size={13} /> },
   { value: "pools", label: "Model Pools", icon: () => <Layers size={13} /> },
-  { value: "web", label: "Search & Web", icon: () => <Globe size={13} /> },
+  { value: "defaults", label: "Defaults", icon: () => <Star size={13} /> },
   { value: "workspace", label: "Execution Environments", icon: () => <ServerCog size={13} /> },
-  { value: "decision", label: "Decision Model", icon: () => <BrainCircuit size={13} /> },
 ];
 
-export function ProviderSettingsLayout(props: Parameters<typeof SettingsLayout>[0]) {
+export function ProviderSettingsLayout(props: Parameters<typeof SettingsLayout>[0] & { createDialog?: boolean }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const isCreate = () => props.createDialog !== false && location.pathname === "/settings/providers" && new URLSearchParams(location.search).has("new");
+  const closeCreate = () => {
+    const query = new URLSearchParams(location.search);
+    const returnTo = query.get("returnTo") || "";
+    navigate(returnTo && connectionReturnTo(returnTo) === returnTo ? returnTo
+      : `/settings/providers?tab=catalog&kind=${currentConnectionKind(location.pathname, location.search) || "llm"}`);
+  };
   return (
-    <SettingsLayout {...props} breadcrumbLabel="Providers" contentWidth="wide">
+    <Show when={!isCreate()} fallback={<Dialog open title={props.title} size="lg" onClose={closeCreate}><div class="provider-create-dialog">{props.children}</div></Dialog>}>
+    <SettingsLayout {...props} hideHeading={props.hideHeading ?? location.pathname === "/settings/providers"} breadcrumbLabel="Providers" contentWidth="wide">
       <SettingsTabBar
         items={TABS}
-        value={currentProviderTab(location.pathname, location.search)}
+        value={currentProviderSection(location.pathname, location.search)}
         ariaLabel="Provider category"
         onChange={(tab) => navigate(`/settings/providers?tab=${tab}`)}
       />
       {props.children}
     </SettingsLayout>
+    </Show>
   );
 }
