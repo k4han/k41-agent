@@ -49,12 +49,15 @@ try {
           import { createTranscriptItems } from '@/lib/chatStreamStore';
           import { highlightCode } from '@/lib/codeHighlight';
           import tokenStyles from '@/styles/tokens.css?inline';
+          import baseStyles from '@/styles/base.css?inline';
           import chatStyles from '@/styles/chat.css?inline';
           import transcriptStyles from '@/styles/transcript.css?inline';
           import markdownStyles from '@/styles/markdown.css?inline';
+          import responsiveStyles from '@/styles/responsive.css?inline';
           const style = document.createElement('style');
-          style.textContent = tokenStyles + chatStyles + transcriptStyles + markdownStyles
-            + '#app { height: 600px; display: flex; } body { margin: 0; }';
+          style.textContent = tokenStyles + baseStyles + chatStyles + transcriptStyles + markdownStyles + responsiveStyles
+            + '.chat-shell { height: 600px; --workspace-explorer-width: 320px; transition: none; }'
+            + '#app { min-height: 0; display: flex; flex: 1; }';
           document.head.appendChild(style);
           window.workerCount = 0;
           const NativeWorker = window.Worker;
@@ -96,7 +99,7 @@ try {
   server = http.createServer((req, res) => {
     if (req.url === '/') {
       res.setHeader('Content-Type', 'text/html');
-      res.end('<div id="app"></div><script type="module" src="/harness.js"></script>');
+      res.end('<main class="chat-shell chat-shell-resizable workspace-closed"><section class="chat-panel"><div class="chat-column" id="layout-reference"></div><div id="app"></div></section><aside class="workspace-drawer"></aside></main><script type="module" src="/harness.js"></script>');
       return;
     }
     const target = path.resolve(output, '.' + new URL(req.url, 'http://localhost').pathname);
@@ -172,6 +175,72 @@ try {
   await until(() => js('document.querySelectorAll(".transcript-virtual-row").length === 1 && transcript.scrollHeight <= transcript.clientHeight'), 'thread switch resets measurements');
   await js('setItems([{ id: 3000, type: "message", role: "error", text: "Replaced history", resumable: true }])');
   await until(() => js('document.querySelector(".message.error")?.textContent.includes("Replaced history")'), 'history replacement with the same row count');
+
+  await js(`(() => {
+    const row = document.querySelector('.transcript-virtual-row');
+    const added = document.createElement('section');
+    added.dataset.layoutCase = 'new';
+    added.textContent = 'A component without a registered chat class';
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = '<div class="message assistant" data-layout-case="wrapped">An existing component inside another wrapper</div>';
+    row.append(added, wrapper);
+    const status = document.createElement('section');
+    status.dataset.layoutCase = 'status';
+    status.textContent = 'A new component outside the virtual list';
+    transcript.append(status);
+  })()`);
+  for (const width of [360, 768, 1280, 1920]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height: 820, deviceScaleFactor: 1, mobile: false });
+    for (const workspaceOpen of [false, true]) {
+      await js(`(() => {
+        const shell = document.querySelector('.chat-shell');
+        shell.classList.toggle('workspace-open', ${workspaceOpen});
+        shell.classList.toggle('workspace-closed', ${!workspaceOpen});
+        return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      })()`);
+      const dimensions = await js(`(() => {
+        const row = document.querySelector('.transcript-virtual-row').getBoundingClientRect();
+        const reference = document.querySelector('#layout-reference').getBoundingClientRect();
+        const container = transcript.getBoundingClientRect();
+        return {
+          row: { left: row.left, right: row.right, width: row.width },
+          referenceWidth: reference.width,
+          containerWidth: transcript.clientWidth,
+          leftInset: row.left - container.left,
+          gutter: parseFloat(getComputedStyle(document.querySelector('.chat-shell')).getPropertyValue('--chat-column-gutter')),
+          pageWidth: document.documentElement.scrollWidth,
+          elements: Array.from(document.querySelectorAll('[data-layout-case]')).map(element => {
+            const bounds = element.getBoundingClientRect();
+            return { kind: element.dataset.layoutCase, left: bounds.left, right: bounds.right };
+          }),
+        };
+      })()`);
+      const label = `${width}px with workspace ${workspaceOpen ? 'open' : 'closed'}`;
+      assert.ok(Math.abs(dimensions.row.width - Math.min(960, dimensions.containerWidth - 2 * dimensions.gutter)) < 1, `Shared column width at ${label}: ${JSON.stringify(dimensions)}`);
+      assert.ok(Math.abs(dimensions.leftInset - (dimensions.containerWidth - dimensions.row.width) / 2) < 1, `Shared column centering at ${label}`);
+      assert.ok(Math.abs(dimensions.referenceWidth - dimensions.row.width) <= 10, `Panel content follows the same column at ${label}`);
+      assert.equal(dimensions.elements.length, 3);
+      for (const element of dimensions.elements) {
+        assert.ok(Math.abs(element.left - dimensions.row.left) < 1 && Math.abs(element.right - dimensions.row.right) < 1,
+          `${element.kind} must follow the shared column at ${label}: ${JSON.stringify(dimensions)}`);
+      }
+      assert.ok(dimensions.pageWidth <= width, `No document overflow at ${label}`);
+    }
+  }
+  await call('Emulation.setDeviceMetricsOverride', { width: 1920, height: 820, deviceScaleFactor: 1, mobile: false });
+  await js(`(() => {
+    const row = document.querySelector('.transcript-virtual-row');
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = '<section class="tool-html-preview">HTML preview</section>';
+    row.append(wrapper);
+    document.querySelector('.tool-html-preview').classList.add('is-fullwidth');
+  })()`);
+  await until(() => js('Math.abs(document.querySelector(".tool-html-preview").getBoundingClientRect().width - transcript.clientWidth) < 1'), 'full-width HTML preview inside a wrapper');
+  await js('document.querySelector(".tool-html-preview").classList.remove("is-fullwidth")');
+  await until(() => js('Math.abs(document.querySelector(".transcript-virtual-row").getBoundingClientRect().width - 960) < 1'), 'HTML preview restores the shared column');
+  await js('document.querySelectorAll("[data-layout-case], .tool-html-preview").forEach(element => element.remove())');
+  console.log('PASS: New components, extra wrappers and standalone status rows share one centered column across four widths and both workspace states; HTML previews can expand and restore.');
+
   await js('setItems([])');
   await until(() => js('document.querySelectorAll(".transcript-virtual-row").length === 0'), 'empty history');
   console.log('PASS: 2000 variable-height messages mount fewer than 40 rows; scrolling, offscreen turn anchors, streaming, paused reading and thread changes work.');

@@ -15,6 +15,7 @@
 }
 
 .chat-shell-resizable {
+  --chat-column-gutter: 16px;
   grid-template-columns: minmax(0, 1fr) minmax(0, 0);
   column-gap: 0;
   row-gap: 0;
@@ -349,6 +350,7 @@
   position: absolute;
   top: 0;
   left: 0;
+  right: 0;
   width: 100%;
   display: flow-root;
 }
@@ -358,36 +360,16 @@
   padding-inline: 0;
 }
 
-.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .message,
-.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .thinking-block,
-.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .activity-group,
-.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .tool-call,
-.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .subagent-details,
-.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .plan-review,
-.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .tool-html-preview:not(.is-fullwidth),
-.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .empty,
-.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .chat-workspace-empty,
-.chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .transcript-compacting-indicator,
-.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .message,
-.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .thinking-block,
-.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .activity-group,
-.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .tool-call,
-.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .subagent-details,
-.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .plan-review,
-.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .tool-html-preview:not(.is-fullwidth),
-.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .empty,
-.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .chat-workspace-empty,
-.chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .transcript-compacting-indicator {
-  width: min(960px, calc(100% - 32px));
+/* Rows own the column so new content and extra wrappers inherit its bounds. */
+.chat-shell-resizable .chat-column,
+.chat-shell-resizable .transcript > :not(.transcript-virtual-list):not(.transcript-anchor-spacer) {
+  min-width: 0;
+  width: min(960px, calc(100% - 2 * var(--chat-column-gutter)));
   margin-inline: auto;
 }
 
-.chat-shell-resizable.workspace-open .thread-banner,
-.chat-shell-resizable.workspace-open .chat-composer,
-.chat-shell-resizable.workspace-closed .thread-banner,
-.chat-shell-resizable.workspace-closed .chat-composer {
-  align-self: center;
-  width: min(960px, calc(100% - 32px));
+.chat-shell-resizable .transcript-virtual-row:has(.tool-html-preview.is-fullwidth) {
+  width: 100%;
 }
 
 .chat-workspace-empty {
@@ -653,9 +635,8 @@
 .scroll-to-bottom-btn {
   position: absolute;
   bottom: 16px;
-  /* Align with the right edge of the centered message column
-     (width: min(960px, calc(100% - 32px)) with margin-inline: auto). */
-  right: max(16px, calc((100% - 960px) / 2));
+  /* Align with the right edge of the shared chat column. */
+  right: max(var(--chat-column-gutter, 16px), calc((100% - 960px) / 2));
   transform: scale(0.9);
   z-index: var(--z-scroll-button);
   display: flex;
@@ -759,6 +740,10 @@
 }
 
 @media (max-width: 640px) {
+  .chat-shell-resizable {
+    --chat-column-gutter: 8px;
+  }
+
   .chat-header {
     padding-inline: 8px;
   }
@@ -821,13 +806,6 @@
     padding: 0 16px;
   }
 
-  .chat-shell-resizable.workspace-open .chat-composer,
-  .chat-shell-resizable.workspace-open :is(.transcript, .transcript-virtual-row) > .transcript-compacting-indicator,
-  .chat-shell-resizable.workspace-closed .chat-composer,
-  .chat-shell-resizable.workspace-closed :is(.transcript, .transcript-virtual-row) > .transcript-compacting-indicator {
-    width: calc(100% - 16px);
-    margin-inline: auto;
-  }
 }
 
 /* Bottom compaction indicator - clean, card-less, centered with composer */
@@ -836,8 +814,7 @@
   align-items: center;
   justify-content: center;
   padding: 16px 0 10px;
-  margin: 4px auto;
-  width: min(960px, calc(100% - 32px));
+  margin-block: 4px;
 }
 
 .transcript-compacting-indicator-inner {
@@ -1045,4 +1022,4 @@
 .async-task-controls textarea { width: 100%; min-width: 0; resize: vertical; font: inherit; }
 .async-task-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .async-task-count { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary, #888); }
-.async-task-list { display: grid; gap: 8px; max-height: 40vh; flex-shrink: 0; overflow: auto; padding: 12px 18px; }
+.async-task-list { display: grid; gap: 8px; max-height: 40vh; flex-shrink: 0; overflow: auto; padding-block: 12px; }

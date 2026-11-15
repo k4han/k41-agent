@@ -229,7 +229,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 };
                 return (
                   <div
-                    class="transcript-virtual-row"
+                    class="transcript-virtual-row chat-column"
                     data-index={virtualRow().index}
                     ref={(element) => {
                       createEffect(() => {

@@ -216,7 +216,7 @@ export function ChatComposer(props: ChatComposerProps) {
   return (
     <div
       ref={composerRef}
-      class={`composer chat-composer ${isDragging() ? "is-drag-over" : ""}`}
+      class={`composer chat-composer chat-column ${isDragging() ? "is-drag-over" : ""}`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}

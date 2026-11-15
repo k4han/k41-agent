@@ -2293,7 +2293,7 @@ export function ChatPage() {
                 </div>
               </div>
               <Show when={threadError() || backgroundStreamError()}>
-                <div class="thread-banner thread-banner-error">
+                <div class="thread-banner thread-banner-error chat-column">
                   <Show when={threadError()}>
                     <span>{threadError()}</span>
                   </Show>
@@ -2303,7 +2303,7 @@ export function ChatPage() {
                 </div>
               </Show>
               <Show when={runtimeDecision()}>
-                <div class="thread-banner" role="alert">
+                <div class="thread-banner chat-column" role="alert">
                   <span>{runtimeRecoverMessage()}</span>
                   <div class="thread-banner-actions">
                     <Show when={decisionBackendEnabled()}>
@@ -2328,7 +2328,7 @@ export function ChatPage() {
                 </div>
               </Show>
               <Show when={threadData()?.has_more && threadData()?.thread_id === currentThreadId()}>
-                <div class="row-wrap" style={{ "justify-content": "center", padding: "8px" }}>
+                <div class="row-wrap chat-column" style={{ "justify-content": "center", padding: "8px" }}>
                   <button class="btn" type="button" disabled={conversationBusy() || compacting()}
                     onClick={() => void loadEarlierMessages()}>
                     {earlierMessagesLoading() ? "Loading earlier messages..." : "Load earlier messages"}
@@ -2336,12 +2336,12 @@ export function ChatPage() {
                 </div>
               </Show>
               <Show when={asyncTasks.error()}>
-                <div class="thread-banner thread-banner-error" role="alert">{asyncTasks.error()}
+                <div class="thread-banner thread-banner-error chat-column" role="alert">{asyncTasks.error()}
                   <button type="button" onClick={() => void asyncTasks.refresh()}>Retry</button>
                 </div>
               </Show>
               <Show when={missingAsyncTasks(asyncTasks.tasks(), items()).length > 0}>
-                <section class="async-task-list" aria-label="Background tasks">
+                <section class="async-task-list chat-column" aria-label="Background tasks">
                   <For each={missingAsyncTasks(asyncTasks.tasks(), items())}>{(task) => <SubagentDetails activity={task} />}</For>
                 </section>
               </Show>

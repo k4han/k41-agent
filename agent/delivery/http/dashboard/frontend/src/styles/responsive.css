@@ -269,8 +269,7 @@
     min-height: 0;
   }
 
-  .chat-shell-flat .transcript,
-  .chat-shell-resizable .transcript {
+  .chat-shell-flat .transcript {
     padding-inline: 14px;
   }
 
