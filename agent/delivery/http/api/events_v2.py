@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from contextlib import aclosing
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -12,6 +13,7 @@ from agent.delivery.http.common.streaming import ChatStreamingResponse, stream_c
 
 from agent.delivery.http.api.router import (
     STREAM_RESPONSE_HEADERS,
+    check_scheduled_chat,
     prepare_edit_params,
     prepare_run_params,
 )
@@ -64,6 +66,31 @@ def stream_response(request: Request, session=None, *, after_seq=0):
 async def chat_events(request: ChatRequest, http_request: Request, admin: str = Depends(get_current_admin)):
     params = await prepare_run_params(request, browser_owner_id=f"admin:{admin}")
     thread_id = str(params["thread_id"])
+    from agent.modules.scheduler.executions import resume_run
+    managed = active_async_subagent_service()
+    scheduled = await check_scheduled_chat(thread_id, f"admin:{admin}", allow_managed_resume=True)
+    if scheduled:
+        if scheduled["status"] != "waiting" or request.resume_payload is None:
+            raise HTTPException(409, detail="This scheduled run is active. Resume its pending request or cancel it before starting another run.")
+        payload = request.resume_payload.model_dump(exclude_none=True)
+        interrupts = scheduled.get("interrupts", [])
+        if payload.get("action") == "browser_handoff":
+            interrupts = [item for item in interrupts if isinstance(item["value"], dict)
+                and item["value"].get("handoff_id") == payload.get("handoff_id")]
+        if len(interrupts) != 1:
+            raise HTTPException(409, detail="The scheduled run requires an exact pending interrupt.")
+        manager = get_chat_stream_manager()
+        previous = await manager.get_session(thread_id)
+        try:
+            await resume_run(managed, scheduled["run_id"], interrupts[0]["id"], payload, f"admin:{admin}")
+        except ValueError as exc:
+            raise HTTPException(409, detail=str(exc)) from None
+        for _ in range(100):
+            session = await manager.get_session(thread_id)
+            if session is not None and session is not previous:
+                return stream_response(http_request, session)
+            await asyncio.sleep(0.05)
+        raise HTTPException(503, detail="The scheduled response was saved and is queued. Reconnect to follow its execution.")
     subagents = active_async_subagent_service()
     if request.checkpoint_id and subagents and await subagents.repository.has_work(thread_id):
         raise HTTPException(409, detail="Stop async tasks before rewinding this conversation.")

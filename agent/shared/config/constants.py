@@ -133,7 +133,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^web\.defaults\.(google|tavily|firecrawl|brave|bing)$",
     r"^tools\.(permission_mode|permissions|shell|storage_root)$",
     r"^(host|port|enable_web|enable_api|enable_dashboard|tray\.enabled|tray\.autostart)$",
-    r"^browser\.(executable_path|storage_root|idle_ttl_seconds|operation_timeout_seconds|stream_quality|stream_max_width|stream_max_height)$",
+    r"^browser\.(executable_path|storage_root|idle_ttl_seconds|handoff_timeout_seconds|max_sessions_per_owner|max_tabs_per_session|operation_timeout_seconds|stream_quality|stream_max_width|stream_max_height)$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
@@ -171,7 +171,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^web\.connections\.[A-Za-z0-9_-]+\.(type|api_key|cse_id|base_url)$",
     r"^web\.defaults\.(google|tavily|firecrawl|brave|bing)$",
     r"^tools\.(permission_mode|permissions|shell|storage_root)$",
-    r"^browser\.(executable_path|storage_root|idle_ttl_seconds|operation_timeout_seconds|stream_quality|stream_max_width|stream_max_height)$",
+    r"^browser\.(executable_path|storage_root|idle_ttl_seconds|handoff_timeout_seconds|max_sessions_per_owner|max_tabs_per_session|operation_timeout_seconds|stream_quality|stream_max_width|stream_max_height)$",
     r"^channels\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
     r"^channels\.telegram\.(enabled|bot_token|default_agent|code_agent|research_agent|update_mode|webhook_url|webhook_secret)$",
     r"^channels\.discord\.(enabled|bot_token|default_agent|code_agent|research_agent)$",
@@ -342,6 +342,7 @@ def _expand_runtime_keys() -> set[str]:
     keys.add("recursion_limit")
     keys.update({"tools.permission_mode", "tools.permissions", "tools.shell", "tools.storage_root"})
     keys.update({"browser.executable_path", "browser.storage_root", "browser.idle_ttl_seconds", "browser.operation_timeout_seconds"})
+    keys.update({"browser.handoff_timeout_seconds", "browser.max_sessions_per_owner", "browser.max_tabs_per_session"})
     keys.update({"browser.stream_quality", "browser.stream_max_width", "browser.stream_max_height"})
     keys.add("google_calendar.enabled")
     keys.add("decision.router.mode")
@@ -363,6 +364,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "browser.executable_path": "",
     "browser.storage_root": "",
     "browser.idle_ttl_seconds": 600,
+    "browser.handoff_timeout_seconds": 1800,
+    "browser.max_sessions_per_owner": 16,
+    "browser.max_tabs_per_session": 16,
     "browser.operation_timeout_seconds": 75,
     "browser.stream_quality": 50,
     "browser.stream_max_width": 1280,
@@ -520,6 +524,21 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "type": "number", "category": "browser", "label": "Browser operation timeout (seconds)",
         "description": "Close a browser if an operation exceeds this limit. Lower values are raised to 75, because a single run already stops at 60 seconds without closing the browser. Inspect the page before retrying an interrupted action.",
         "min": 75, "max": 300, "step": 1,
+    },
+    "browser.handoff_timeout_seconds": {
+        "type": "number", "category": "browser", "label": "Human handoff timeout (seconds)",
+        "description": "Maximum time to wait for human browser interaction, independently of idle retention.",
+        "min": 1, "step": 1,
+    },
+    "browser.max_sessions_per_owner": {
+        "type": "number", "category": "browser", "label": "Maximum browser sessions per account",
+        "description": "Evict the oldest idle session when full. Active tasks and pending human handoffs are protected.",
+        "min": 1, "step": 1,
+    },
+    "browser.max_tabs_per_session": {
+        "type": "number", "category": "browser", "label": "Maximum tabs per browser session",
+        "description": "Applies to new sessions. Extra popups are closed; opening additional tabs reports a capacity error.",
+        "min": 1, "step": 1,
     },
     "channels.zalo.context_trim_threshold": {
         "type": "number", "category": "channels", "label": "Context Trim Threshold (tokens)",

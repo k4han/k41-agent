@@ -58,7 +58,24 @@ export function BrowserPanel(props: {
   const canControl = createMemo(() => connected() && controlAllowed() && frameFresh() && connectionState() !== "paused");
   const childHandoff = createMemo(() => rootSession.handoffs().find(item => item.thread_id === selection.threadId()
     && item.handoff_id === status()?.handoff?.handoff_id));
-  const resumeDisabled = () => working() || (selection.isMain() ? props.busy : !childHandoff());
+  const scheduledHandoff = createMemo(() => status()?.scheduled_run?.interrupts?.find(item =>
+    item.value.handoff_id === status()?.handoff?.handoff_id));
+  const resumeDisabled = () => working() || (status()?.scheduled_run ? !scheduledHandoff()
+    : selection.isMain() ? props.busy : !childHandoff());
+  const [now, setNow] = createSignal(Date.now());
+  createEffect(() => {
+    if (!props.open || !status()?.expires_at) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    onCleanup(() => window.clearInterval(timer));
+  });
+  const lifecycleLabel = () => {
+    const value = status();
+    if (!value?.open) return "Session closed";
+    const remaining = value.expires_at ? Math.max(0, Math.ceil(value.expires_at - now() / 1000)) : null;
+    const duration = remaining === null ? "" : ` · ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")} remaining`;
+    return `${value.state === "waiting_for_human" ? "Waiting for you" : value.state === "active" ? "Task running" : "Kept for review"}${duration}`;
+  };
   const [followAgent, setFollowAgent] = createSignal(true);
   const [attempt, setAttempt] = createSignal(0);
   const [selectedTab, setSelectedTab] = createSignal("");
@@ -83,6 +100,7 @@ export function BrowserPanel(props: {
   let height = 720;
   let viewerSession = "";
   const endpoint = () => `/dashboard-api/browser/threads/${encodeURIComponent(props.threadId || "")}`;
+  const selectedEndpoint = () => `/dashboard-api/browser/threads/${encodeURIComponent(selection.threadId() || "")}`;
   const renderer = createBrowserFrameRenderer(() => screen);
   const input = createBrowserInputSender((event) => {
     if (canControl()) connection?.sendInput(event);
@@ -242,6 +260,20 @@ export function BrowserPanel(props: {
     const pending = status()?.handoff;
     if (!pending || resumeDisabled()) return;
     const payload: BrowserHandoffResume = { action: "browser_handoff", handoff_id: pending.handoff_id, decision };
+    const scheduled = status()?.scheduled_run;
+    if (scheduled && scheduledHandoff()) {
+      setWorking(true);
+      setError("");
+      try {
+        await apiFetch(`/dashboard-api/scheduler/runs/${encodeURIComponent(scheduled.run_id)}/resume`, {
+          method: "POST", json: { interrupt_id: scheduledHandoff()!.id, payload },
+        });
+        await session().refresh(true);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Scheduled browser task could not be resumed.");
+      } finally { setWorking(false); }
+      return;
+    }
     if (selection.isMain()) { props.onResume(payload); return; }
     const target = childHandoff()!;
     setWorking(true);
@@ -271,6 +303,9 @@ export function BrowserPanel(props: {
         </label>
       </Show>
       <header class="browser-session-header">
+        <Show when={status()?.open}><span class="hint browser-lifecycle" role="status">
+          {status()?.source === "scheduler" ? "Scheduled task" : selection.isMain() ? "Conversation" : "Subagent"} · {lifecycleLabel()}
+        </span></Show>
         <Show when={status()?.tabs.length}><div class="browser-page-tabs" role="tablist" aria-label="Browser pages">
           <For each={status()?.tabs}>{(tab) => <button type="button" class="browser-page-tab" role="tab"
             aria-selected={selectedTab() === tab.id} title={tab.url} disabled={!connected()}
@@ -294,8 +329,8 @@ export function BrowserPanel(props: {
           </Show>
           <button class="workspace-icon-btn" type="button" title="Reconnect viewer" aria-label="Reconnect viewer" disabled={!status()?.open}
             onClick={() => { setError(""); setAttempt((value) => value + 1); }}><RefreshCw size={15} /></button>
-          <Show when={selection.isMain()}><button class="btn btn-sm" disabled={props.busy || working() || !props.threadId}
-            onClick={() => void action(() => apiFetch(endpoint(), { method: status()?.open ? "DELETE" : "POST" }))}>
+          <Show when={selection.isMain() || status()?.open}><button class="btn btn-sm" disabled={working() || !selection.threadId() || (props.busy && !status()?.open)}
+            onClick={() => void action(() => apiFetch(selectedEndpoint(), { method: status()?.open ? "DELETE" : "POST" }))}>
             <Power size={14} />{status()?.open ? "Close browser" : "Open browser"}
           </button></Show>
         </div>

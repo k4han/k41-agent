@@ -59,6 +59,7 @@ const fixtures = {
 };
 const inputs = [], resumes = [], viewers = new Set();
 const childResumes = [];
+const scheduledResumes = [];
 const childStatuses = new Map();
 const profiles = [], checkpointLoads = [], invalidThreadRequests = [];
 let profileLoads = 0, rejectProfileSelection = false;
@@ -100,6 +101,13 @@ function sendStatus(socket, reset = false) {
 }
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/dashboard-api/scheduler/runs/scheduled-run/resume' && req.method === 'POST') {
+    let raw = ''; for await (const data of req) raw += data;
+    scheduledResumes.push(JSON.parse(raw));
+    Object.assign(status, { handoff: null, mode: 'agent', state: 'idle', scheduled_run: null, expires_at: Date.now() / 1000 + 600 });
+    for (const socket of viewers) sendStatus(socket);
+    res.writeHead(202, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ status: 'pending' })); return;
+  }
   if (url.pathname === '/v2/api/chat/events/reconnect') {
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
     protocolFixture(res, history.thread_id);
@@ -201,6 +209,16 @@ const server = http.createServer(async (req, res) => {
       sessionMutations.push(req.method);
       status.open = req.method === 'POST';
       status.generation = status.open ? 'session' : null;
+    }
+    if (req.method === 'DELETE' && url.pathname.startsWith('/dashboard-api/browser/threads/')
+        && decodeURIComponent(url.pathname).includes(':sub:')) {
+      const thread = decodeURIComponent(url.pathname).split('/').at(-1);
+      sessionMutations.push({ thread_id: thread, method: req.method });
+      const current = fixtures[url.pathname];
+      Object.assign(current, { open: false, generation: null });
+      status.sessions = status.sessions.filter(item => item.thread_id !== thread);
+      for (const socket of viewers) if (childStatuses.get(viewerOptions.get(socket)?.ticket) === current) send(socket, { type: 'session_closed' });
+      res.end(JSON.stringify(current)); return;
     }
     if (holdBrowserStatus && url.pathname === '/dashboard-api/browser/threads/browser-test') {
       holdBrowserStatus = false;
@@ -555,6 +573,7 @@ try {
     const thread_id = `browser-test:sub:helper:${id}`;
     const ticket = `child-${id}`;
     const current = { ...status, open: true, generation: `generation-${id}`, mode: 'agent', handoff: null,
+      state: 'idle', source: 'subagent', expires_at: Date.now() / 1000 + 600,
       tabs: [{ id: `tab-${id}`, title: `Child ${id}`, url: `http://fixture.test/${id}` }], sessions: [] };
     fixtures[`/dashboard-api/browser/threads/${encodeURIComponent(thread_id)}`] = current;
     fixtures[`/dashboard-api/browser/threads/${encodeURIComponent(thread_id)}/viewer-ticket`] = { ticket };
@@ -571,7 +590,7 @@ try {
   assert.equal(await js(`document.querySelector('[aria-label="Browser session"]').value`), children[0].thread_id);
   assert.equal(await js('document.querySelector(".browser-keyboard").disabled'), true, 'subagent viewing preserves input restrictions');
   assert.equal(await js(`!!document.querySelector('[aria-label="Login profiles"]')`), false, 'subagents inherit login profiles');
-  assert.equal(await js('[...document.querySelectorAll(".browser-panel button")].some(button => /^(Open|Close) browser$/.test(button.textContent))'), false);
+  assert.equal(await js('[...document.querySelectorAll(".browser-panel button")].some(button => /^Close browser$/.test(button.textContent))'), true, 'retained child sessions can be closed explicitly');
   status.sessions.push(children[1]);
   await announce(children[1].thread_id);
   await until(() => js(`document.querySelector('[aria-label="Browser session"]').options.length === 3`), 'new child is added to the selector');
@@ -658,10 +677,31 @@ try {
   Object.assign(childStatuses.get('child-second'), { open: false, generation: null });
   for (const socket of viewers) if (viewerOptions.get(socket)?.ticket === 'child-second') send(socket, { type: 'session_closed' });
   await until(() => js(`document.querySelector('[aria-label="Browser session"]')?.value === 'browser-test'`), 'a finished child falls back to the active main browser');
+  await chooseSession(children[0].thread_id);
+  await until(() => viewingChild('first'), 'select a retained child for explicit close');
+  const parentBeforeChildClose = status.generation;
+  await js('[...document.querySelectorAll(".browser-panel button")].find(button => button.textContent === "Close browser").click()');
+  await until(() => status.sessions.length === 0 && js(`!document.querySelector('[aria-label="Browser session"]')`), 'closing the selected child removes only its own session');
+  assert.equal(status.generation, parentBeforeChildClose, 'closing a retained child preserves the main browser');
   Object.assign(status, { open: false, generation: null, sessions: [] });
   await announce(history.thread_id);
   await until(() => js(`!document.querySelector('[aria-label="Browser session"]') && !document.querySelector('.browser-screen:not([hidden])')`), 'ending every session clears the viewer and selector');
   assert.equal(await browserShortcut(), false);
+  const scheduledHandoff = { type: 'browser_handoff_request', handoff_id: 'scheduled-handoff',
+    thread_id: history.thread_id, reason: 'Sign in for the scheduled task' };
+  const resumesBeforeScheduled = resumes.length;
+  Object.assign(status, { open: true, generation: 'scheduled-generation', mode: 'human', source: 'scheduler',
+    state: 'waiting_for_human', expires_at: Date.now() / 1000 + 1800, handoff: scheduledHandoff,
+    scheduled_run: { run_id: 'scheduled-run', status: 'waiting', interrupts: [{ id: 'scheduled-interrupt', value: scheduledHandoff }] } });
+  await announce(history.thread_id);
+  await until(() => js('!!document.querySelector(".browser-handoff button:not(:disabled)")'), 'scheduled handoff exposes its durable resume action');
+  assert.match(await js('document.querySelector(".browser-lifecycle").textContent'), /Scheduled task.*Waiting for you.*remaining/);
+  await js('[...document.querySelectorAll(".browser-handoff button")].find(button => button.textContent.includes("Return control to agent")).click()');
+  await until(() => scheduledResumes.length === 1 && js('!document.querySelector(".browser-handoff")'), 'scheduled handoff resumes through the scheduler endpoint');
+  assert.deepEqual(scheduledResumes[0], { interrupt_id: 'scheduled-interrupt',
+    payload: { action: 'browser_handoff', handoff_id: 'scheduled-handoff', decision: 'return' } });
+  assert.equal(resumes.length, resumesBeforeScheduled, 'scheduled resume does not create an unmanaged chat run');
+  await until(() => js('document.querySelector(".browser-lifecycle").textContent.includes("Kept for review")'), 'completed scheduled browser remains available with an idle countdown');
   await js(`document.querySelector('[aria-label="Login profiles"][aria-expanded="false"]')?.click()`);
   await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
   const loadsBeforeThreadChange = profileLoads;

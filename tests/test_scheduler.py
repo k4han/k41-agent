@@ -482,12 +482,12 @@ async def test_browser_cleanup_failure_does_not_replace_scheduled_result(isolate
     from agent.modules.scheduler import service as scheduler
 
     release = AsyncMock(side_effect=RuntimeError("cleanup failed"))
-    isolated_container._browser_service = SimpleNamespace(release_thread=release)
+    isolated_container._browser_service = SimpleNamespace(finish_run=release)
     run = await _run_scheduled_task(monkeypatch, tmp_path, "telegram")
-    release.assert_awaited_once_with(run["thread_id"])
+    release.assert_awaited_once_with(run["thread_id"], "completed")
     scheduler._send_notification.assert_awaited_once_with(
         "telegram", "123", "**Scheduled task:** open a page\n\ndone", mode="markdown")
-    assert "Browser cleanup failed for finished thread" in caplog.text
+    assert "Browser lifecycle update failed for thread" in caplog.text
 
 
 @pytest.mark.asyncio

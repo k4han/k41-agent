@@ -1,6 +1,9 @@
 """Container-owned local browser automation."""
 
+import asyncio
 import logging
+from functools import wraps
+from contextlib import aclosing
 
 from agent.modules.browser.driver import CDPViewer, StagehandDriver
 from agent.modules.browser.migrations import migrate_browser_tables
@@ -42,6 +45,47 @@ async def release_thread_browser(thread_id: str) -> None:
         logger.warning("Browser cleanup failed for finished thread %s.", thread_id, exc_info=True)
 
 
+async def finish_thread_browser(thread_id: str, outcome: str = "completed") -> None:
+    """Apply the shared lifecycle policy without initializing an unused service."""
+    from agent.bootstrap.container import get_active_container
+
+    container = get_active_container()
+    service = container._browser_service if container is not None else None
+    if service is None:
+        return
+    try:
+        await service.finish_run(thread_id, outcome)
+    except Exception:
+        logger.warning("Browser lifecycle update failed for thread %s.", thread_id, exc_info=True)
+
+
+def browser_run_lifecycle(function):
+    """Retain ordinary runs; managed executions settle their own durable outcomes."""
+    @wraps(function)
+    async def wrapped(*args, **kwargs):
+        from langgraph.errors import GraphDrained
+
+        thread_id = kwargs.get("thread_id") or (args[1] if len(args) > 1 else None)
+        outcome = "completed"
+        try:
+            async with aclosing(function(*args, **kwargs)) as events:
+                async for event in events:
+                    yield event
+        except (asyncio.CancelledError, GeneratorExit):
+            outcome = "cancelled"
+            raise
+        except GraphDrained:
+            outcome = "interrupted"
+            raise
+        except Exception:
+            outcome = "failed"
+            raise
+        finally:
+            if thread_id and kwargs.get("_execution") is None:
+                await finish_thread_browser(thread_id, outcome)
+    return wrapped
+
+
 async def release_delegated_browser(thread_id: str) -> None:
     """Release a finished sub-agent's browser tabs; delegation succeeds regardless."""
     from agent.bootstrap.container import get_active_container
@@ -70,4 +114,4 @@ async def abandon_thread_handoffs(thread_id: str, *, expired_only: bool = False)
 
 __all__ = ["BROWSER_HANDOFF_WAIT_KEY", "BrowserAccessDenied", "BrowserAccountProfile", "BrowserArtifact", "BrowserBinding", "BrowserError", "BrowserHandoffResume",
            "BrowserInvocation", "BrowserProfile", "BrowserProjectProfile", "BrowserService", "CDPViewer", "StagehandDriver",
-           "abandon_thread_handoffs", "get_browser_service", "delete_thread_browsers", "migrate_browser_tables", "release_delegated_browser", "release_thread_browser"]
+           "abandon_thread_handoffs", "browser_run_lifecycle", "finish_thread_browser", "get_browser_service", "delete_thread_browsers", "migrate_browser_tables", "release_delegated_browser", "release_thread_browser"]

@@ -65,6 +65,16 @@ class BrowserRepository:
                 ConversationThread.thread_id.in_(thread_ids), ConversationThread.deleted_at.is_(None)))
             return dict(rows.all())
 
+    async def thread_source(self, thread_id: str) -> str:
+        from agent.modules.conversations.models import ConversationThread
+
+        if ":sub:" in thread_id:
+            return "subagent"
+        async with self.session() as session:
+            platform = await session.scalar(select(ConversationThread.platform).where(
+                ConversationThread.thread_id == thread_id, ConversationThread.deleted_at.is_(None)))
+        return "scheduler" if platform == "bg" else "conversation"
+
     async def _project_default(self, session, thread_id: str, owner_id: str) -> str:
         from agent.modules.workspaces import ThreadWorkspace
 

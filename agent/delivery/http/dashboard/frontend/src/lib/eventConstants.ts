@@ -18,6 +18,7 @@ export const STREAM_ERROR_CODES = {
 } as const;
 
 export const SESSION_EVENTS = {
+  SCHEDULER_RUN_UPDATED: "scheduler_run_updated",
   SUBAGENT_TASK_UPDATED: "subagent_task_updated",
   BROWSER_SESSION_CHANGED: "browser_session_changed",
   COMPUTER_SESSION_CHANGED: "computer_session_changed",
@@ -36,6 +37,7 @@ export const BACKGROUND_TASK_EVENTS = {
 } as const;
 
 export const CUSTOM_DOM_EVENTS = {
+  SCHEDULER_RUN_UPDATED: "k41:scheduler-run-updated",
   SUBAGENT_TASK_UPDATED: "k41:subagent-task-updated",
   BROWSER_SESSION_CHANGED: "k41:browser-session-changed",
   COMPUTER_SESSION_CHANGED: "k41:computer-session-changed",

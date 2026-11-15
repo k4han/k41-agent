@@ -142,6 +142,12 @@ async def test_job_project_changes_apply_only_to_future_runs(scheduled_projects,
 
     container, _, projects = scheduled_projects
     _patch_execution(monkeypatch)
+    container._agent_catalog_service = SimpleNamespace(get_agent=lambda _: SimpleNamespace(graph_type="react_agent"))
+    monkeypatch.setattr(container.async_subagents, "start", AsyncMock())
+
+    async def finish_queued(run):
+        execution = await container.async_subagents.repository.claim(run["run_id"], "project-test")
+        await container.async_subagents.repository.finish(execution, "completed", result="done")
     scheduler = AsyncIOScheduler()
     container._scheduler = scheduler
     scheduler.start(paused=True)
@@ -157,15 +163,18 @@ async def test_job_project_changes_apply_only_to_future_runs(scheduled_projects,
         assert manual.tasks[0].kwargs["project_id"] == projects[0]["id"]
         await manual()
         first = (await list_runs(job_id=job.id))["runs"][0]
+        await finish_queued(first)
         await update_scheduler_job(job.id, UpdateJobBody(task="updated task"), admin="1")
         assert job.kwargs["project_id"] == projects[0]["id"]
         await update_scheduler_job(job.id, UpdateJobBody(project_id=projects[1]["id"]), admin="1")
         await job.func(**job.kwargs)
         second = (await list_runs(job_id=job.id))["runs"][0]
+        await finish_queued(second)
         await update_scheduler_job(job.id, UpdateJobBody(project_id=None), admin="1")
         assert job.kwargs["project_id"] is None
         await job.func(**job.kwargs)
         third = (await list_runs(job_id=job.id))["runs"][0]
+        await finish_queued(third)
         assert (await get_thread_workspace_ref(first["thread_id"])).locator == projects[0]["workspace"]["execution"]["locator"]
         assert (await get_thread_workspace_ref(second["thread_id"])).locator == projects[1]["workspace"]["execution"]["locator"]
         assert (await get_thread_workspace_ref(third["thread_id"])).metadata["no_workspace"] is True

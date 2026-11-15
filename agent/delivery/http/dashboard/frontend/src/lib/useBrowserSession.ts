@@ -4,7 +4,9 @@ import { apiFetch } from "@/lib/api";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { createRefreshQueue, WORKSPACE_IDLE_POLL_MS, WORKSPACE_REFRESH_DELAY_MS } from "@/lib/workspaceRefresh";
 
-export type BrowserSessionSummary = { thread_id: string; agent_name: string | null; generation: string };
+export type BrowserLifecycle = { state?: "active" | "waiting_for_human" | "idle" | "closed";
+  expires_at?: number | null; source?: "conversation" | "scheduler" | "subagent" };
+export type BrowserSessionSummary = BrowserLifecycle & { thread_id: string; agent_name: string | null; generation: string };
 
 export type AsyncBrowserHandoff = {
   thread_id: string;
@@ -18,7 +20,8 @@ export type AsyncBrowserHandoff = {
   reason: string;
 };
 
-export type BrowserStatus = {
+export type BrowserStatus = BrowserLifecycle & {
+  scheduled_run?: { run_id: string; status: string; interrupts?: { id: string; value: Record<string, unknown> }[] } | null;
   sessions?: BrowserSessionSummary[];
   pending_handoffs?: AsyncBrowserHandoff[];
   open: boolean;
@@ -190,7 +193,7 @@ export function useBrowserSession(options: {
       else if (dirty || options.visible()) invalidate();
     };
     const events = [CUSTOM_DOM_EVENTS.BROWSER_SESSION_CHANGED, CUSTOM_DOM_EVENTS.SUBAGENT_TASK_UPDATED, CUSTOM_DOM_EVENTS.SESSIONS_RECONNECTED,
-      CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, "k41-browser-handoff"];
+      CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, CUSTOM_DOM_EVENTS.SCHEDULER_RUN_UPDATED, "k41-browser-handoff"];
     for (const event of events) window.addEventListener(event, changed);
     document.addEventListener("visibilitychange", visibilityChanged);
     onCleanup(() => {

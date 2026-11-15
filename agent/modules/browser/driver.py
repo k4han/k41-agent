@@ -334,6 +334,9 @@ class ThreadedSessionDriver(ThreadedDriver):
         if not self.loop.is_closed():
             await self.submit(self.inner.close())
 
+    async def set_tab_limit(self, maximum):
+        await self.submit(self.inner.set_tab_limit(maximum))
+
 
 class CDPViewer:
     """One viewer connection; input contains no arbitrary CDP method names."""

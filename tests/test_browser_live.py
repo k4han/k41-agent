@@ -219,6 +219,10 @@ async def test_shared_profile_scopes_tabs_and_logins(isolated_container, tmp_pat
         assert "Second conversation" in second_snapshot and "First conversation" not in second_snapshot
         await first.driver.facade.run(code=f"const other = await context.newPage(); await other.goto('{fixture_url}/first-extra');")
         assert len(await first.driver.tabs()) == 2
+        await first.driver.set_tab_limit(2)
+        with pytest.raises(Exception, match="tab limit"):
+            await first.driver.facade.run(code="await context.newPage();")
+        assert len(await first.driver.tabs()) == 2
         assert len(await second.driver.tabs()) == 1
         assert await second.driver.facade.run(code="return context.pages().length;") == 1
         await first.driver.facade.run(code=f"""await page.evaluate(() => {{
@@ -226,10 +230,8 @@ async def test_shared_profile_scopes_tabs_and_logins(isolated_container, tmp_pat
             button.textContent = 'Open popup'; button.onclick = () => window.open('{fixture_url}/popup');
             document.body.append(button);
         }}); await page.locator('#popup').click();""")
-        deadline = time.monotonic() + 10
-        while len(await first.driver.tabs()) != 3:
-            assert time.monotonic() < deadline, await first.driver.tabs()
-            await asyncio.sleep(0.1)
+        await asyncio.sleep(0.3)
+        assert len(await first.driver.tabs()) == 2
         assert len(await second.driver.tabs()) == 1
         await first.driver.facade.run(code="await browser.close();")
         assert len(await first.driver.tabs()) == 1

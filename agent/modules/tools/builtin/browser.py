@@ -170,7 +170,8 @@ async def _handoff(runtime: Runtime, reason: str):
     if not reason.strip() or len(reason) > 2000:
         raise ToolError(ToolErrorCode.INVALID_INPUT, "Provide a short reason for handing the browser to the user.")
     thread_id, owner_id = identity(runtime)
-    if usage_context_from_config(runtime.config).platform in UNATTENDED_PLATFORMS:
+    if (usage_context_from_config(runtime.config).platform in UNATTENDED_PLATFORMS
+            and not (runtime.config.get("metadata") or {}).get("k41_scheduled_run_id")):
         raise ToolError(ToolErrorCode.EXECUTION_ERROR,
                         "approval_unavailable: Nobody can take over the browser in a scheduled run. "
                         "Report what needs human interaction in your final answer instead.")

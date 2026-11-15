@@ -76,6 +76,11 @@ function connect() {
   };
 
   connection.addEventListener(SESSION_EVENTS.SESSION_STARTED, (event) => upsert(event, CUSTOM_DOM_EVENTS.SESSION_STARTED));
+  connection.addEventListener(SESSION_EVENTS.SCHEDULER_RUN_UPDATED, (event) => {
+    if (source !== connection) return;
+    try { notify(CUSTOM_DOM_EVENTS.SCHEDULER_RUN_UPDATED, JSON.parse(event.data)); }
+    catch (error) { console.error("Failed to parse scheduler run event", error); }
+  });
   connection.addEventListener(SESSION_EVENTS.SUBAGENT_TASK_UPDATED, (event) => {
     if (source !== connection) return;
     try { notify(CUSTOM_DOM_EVENTS.SUBAGENT_TASK_UPDATED, JSON.parse(event.data)); }

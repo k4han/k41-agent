@@ -8,6 +8,8 @@ export type BrowserViewerMessage =
   | { type: "status"; tabs: { id: string; title: string; url: string }[]; tab_id?: string;
       mode: "agent" | "human"; can_control: boolean; follow_agent?: boolean; reset?: boolean;
       generation?: string; revision?: number; sequence?: number; open?: boolean;
+      state?: "active" | "waiting_for_human" | "idle" | "closed"; expires_at?: number | null;
+      source?: "conversation" | "scheduler" | "subagent";
       controller?: "agent" | "available" | "you" | "other"; paused?: boolean;
       visibility_revision?: number;
       handoff?: { handoff_id: string; reason: string } | null; handoff_expired?: boolean;

@@ -21,6 +21,7 @@ const PAGE_SIZE = 25;
 const POLL_INTERVAL_MS = 5000;
 const IDLE_POLL_EVERY_TICKS = 6;
 const ALL_JOBS = "";
+const activeRun = (run: SchedulerRun) => ["pending", "running", "waiting"].includes(run.status);
 
 export function formatRunTime(value: string | null): string {
   if (!value) return "-";
@@ -105,7 +106,7 @@ export function RunHistoryPanel(props: {
   let tick = 0;
   useVisibleInterval((immediate) => {
     tick = immediate ? 0 : tick + 1;
-    const hasRunning = runs().some((run) => run.status === "running");
+    const hasRunning = runs().some(activeRun);
     if ((immediate || hasRunning || tick % IDLE_POLL_EVERY_TICKS === 0) && !loading()) {
       void load("refresh");
     }
@@ -143,6 +144,15 @@ export function RunHistoryPanel(props: {
       showToast(err instanceof Error ? err.message : "Failed to delete run", "error");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const cancelRun = async (run: SchedulerRun) => {
+    try {
+      await apiFetch(`/dashboard-api/scheduler/runs/${encodeURIComponent(run.run_id)}/cancel`, { method: "POST" });
+      await load("refresh");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to cancel run", "error");
     }
   };
 
@@ -230,12 +240,13 @@ export function RunHistoryPanel(props: {
                   <button class="btn btn-sm" type="button" onClick={() => setSelected(run)}>
                     <Eye size={13} /> View
                   </button>
+                  <Show when={activeRun(run)}><button class="btn btn-sm" type="button" onClick={() => void cancelRun(run)}>Cancel task</button></Show>
                   <button
                     class="btn btn-sm btn-danger"
                     type="button"
-                    title={run.status === "running" ? "Running executions cannot be deleted" : "Delete run"}
+                    title={activeRun(run) ? "Active executions cannot be deleted" : "Delete run"}
                     aria-label="Delete run"
-                    disabled={run.status === "running" || deleting()}
+                    disabled={activeRun(run) || deleting()}
                     onClick={() => setDeleteTarget(run)}
                   >
                     <Trash2 size={13} /> Delete

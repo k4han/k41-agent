@@ -72,8 +72,10 @@ session also exposes a shortcut in the chat header.
 When a sub-agent browses, use the **Session** selector in **Browser** to choose the
 main agent or an active sub-agent. New sessions keep your current selection;
 when the selected session ends, the viewer switches to another active session.
-Sub-agent sessions support live viewing and tab selection and close when their
-work finishes. A browser handoff selects the requesting agent's session for you.
+Sub-agent sessions support live viewing and tab selection. Healthy sessions stay
+open for the idle timeout after work finishes, including ordinary failures.
+The viewer shows the session's state and remaining time. Use **Close browser**
+to close the selected session. A browser handoff selects the requesting agent's session for you.
 Asynchronous sub-agents can hand over their browser and wait while the main agent
 continues working. Return control in Browser to resume that sub-agent. Its task
 card also has an **Open browser** shortcut. Synchronous sub-agents report manual
@@ -135,9 +137,16 @@ and releases only its own tabs when it finishes. Closing one conversation leaves
 the others open. A fatal browser failure or operation timeout ends all sessions
 sharing that physical browser.
 
-Scheduled runs release their browser tabs as soon as execution ends, including
-when a run fails or is cancelled. Saved logins and screenshots remain available
-after the browser closes.
+Scheduled runs retain healthy browser tabs after completion or ordinary failure,
+using the same idle timeout as dashboard chats and sub-agents (10 minutes by default).
+Cancelling a task closes its tabs immediately. Saved logins and screenshots remain
+available after the browser closes. Human handoffs have a separate timeout
+(30 minutes by default), which is not extended by viewing or typing.
+
+Browser settings limit sessions per account and tabs per session (16 each by
+default). When the session limit is reached, the oldest idle session closes first.
+Running tasks and pending human handoffs are protected; opening another session
+reports a capacity error if every slot is protected.
 
 Any agent with Browser tools in a conversation using a profile can act with its
 sign-ins, and a malicious page could try to direct that agent. Keep important
@@ -145,8 +154,12 @@ accounts in profiles that only the projects needing them can use.
 
 Profiles belong to the authenticated dashboard account. Scheduled tasks created
 by a dashboard admin use that account's browser profiles. Channel runs without
-a dashboard account cannot use browser tools. Scheduled runs cannot pause for
-a human browser handoff; they report any required interaction in their result.
+a dashboard account cannot use browser tools. Scheduled runs can pause for a
+human handoff. Open the run's conversation to interact, then return control to
+resume the same execution. Waiting survives application restart; if the browser
+was lost, continuing reports the lost session rather than repeating the task.
+Further ticks of the same job are recorded as skipped while a run is active or
+waiting. Cancel an active task from scheduler run history when it is no longer needed.
 
 ## Sign in to sites that reject automated browsers
 

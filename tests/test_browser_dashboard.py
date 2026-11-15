@@ -190,8 +190,11 @@ def test_browser_status_discovers_owned_children_without_opening_parent(browser_
     status = client.get("/dashboard-api/browser/threads/chat").json()
     assert status["open"] is False
     assert status["generation"] is None
-    assert status["sessions"] == [{"thread_id": child, "agent_name": "researcher",
-                                   "generation": browser.sessions[child].generation}]
+    assert len(status["sessions"]) == 1
+    session = status["sessions"][0]
+    assert session.items() >= {"thread_id": child, "agent_name": "researcher",
+        "generation": browser.sessions[child].generation, "source": "subagent", "state": "idle"}.items()
+    assert session["expires_at"] is not None
     assert client.portal.call(browser.repository.binding, "chat") is None
     ticket = client.post(f"/dashboard-api/browser/threads/{child}/viewer-ticket").json()["ticket"]
     assert browser.consume_ticket(ticket).thread_id == child

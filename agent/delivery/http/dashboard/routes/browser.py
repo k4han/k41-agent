@@ -199,6 +199,8 @@ async def status(thread_id: str, admin: str = Depends(get_current_admin), browse
     result = await checked(browser.status(thread_id, owner(admin)))
     result["pending_handoffs"] = await get_async_subagent_service(browser.container).repository.browser_handoffs(
         browser.canonical(thread_id), owner(admin))
+    from agent.modules.scheduler.executions import waiting_run
+    result["scheduled_run"] = await waiting_run(get_async_subagent_service(browser.container), browser.canonical(thread_id), owner(admin))
     return result
 
 

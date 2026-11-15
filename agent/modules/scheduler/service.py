@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import pickle
 import uuid
 from html import escape as escape_html
@@ -182,7 +183,8 @@ async def execute_scheduled_task(
     browser_owner_id: str | None = None,
 ):
     """Execute a scheduled task in its own conversation and notify its owner."""
-    from agent.modules.browser import release_thread_browser
+    from agent.modules.browser import finish_thread_browser
+    from agent.bootstrap.container import require_active_container
     from agent.modules.scheduler.history import RUN_STATUS_COMPLETED, RUN_STATUS_FAILED
 
     run_id = str(uuid.uuid4())
@@ -191,7 +193,10 @@ async def execute_scheduled_task(
     logger.info("Executing scheduled task in %s: %s", background_thread_id, task)
 
     executor = describe_executor_model()
-    recorded = await _record_run_start(
+    owner_id = await _resolve_browser_owner(platform, browser_owner_id)
+    container = require_active_container()
+    managed = container._persistence_ready and bool(owner_id)
+    recorded = False if managed else await _record_run_start(
         run_id=run_id,
         job_id=scheduler_job_id,
         task=task,
@@ -224,17 +229,29 @@ async def execute_scheduled_task(
         if workspace is None:
             workspace = await create_no_workspace(background_thread_id)
         await remember_thread_workspace_ref(background_thread_id, workspace)
+        if managed:
+            from agent.modules.scheduler.executions import admit_run
+            return await admit_run(container.async_subagents, run_id=run_id, thread_id=background_thread_id,
+                job_id=scheduler_job_id, task=task, platform=platform, user_id=user_id,
+                trigger_source=trigger_source, workspace=workspace, browser_owner_id=owner_id, executor=executor)
+        outcome = "completed"
         try:
             response_text = await run_agent_full(
                 user_input=task,
                 thread_id=background_thread_id,
                 agent_name=AGENT_NAME,
                 workspace=workspace,
-                browser_owner_id=await _resolve_browser_owner(platform, browser_owner_id),
+                browser_owner_id=owner_id,
                 usage_context={"platform": BACKGROUND_THREAD_PREFIX, "user_id": user_id, "channel_id": run_id},
             )
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
+        except Exception:
+            outcome = "failed"
+            raise
         finally:
-            await release_thread_browser(background_thread_id)
+            await finish_thread_browser(background_thread_id, outcome)
         agent_finished = True
         if recorded:
             await _record_run_finish(run_id, status=RUN_STATUS_COMPLETED, response=response_text)
@@ -245,6 +262,10 @@ async def execute_scheduled_task(
 
     except Exception as e:
         logger.error("Failed to execute scheduled task '%s' in %s: %s", task, background_thread_id, e, exc_info=True)
+        if managed and not recorded:
+            recorded = await _record_run_start(run_id=run_id, job_id=scheduler_job_id, task=task,
+                platform=platform, user_id=user_id, trigger_source=trigger_source, thread_id=background_thread_id,
+                agent_name=AGENT_NAME, provider=executor["provider"], model=executor["model"])
         if recorded and not agent_finished:
             await _record_run_finish(run_id, status=RUN_STATUS_FAILED, error=str(e) or type(e).__name__)
         error_msg = (

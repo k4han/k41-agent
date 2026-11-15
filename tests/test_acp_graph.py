@@ -1133,7 +1133,7 @@ async def test_resume_for_something_else_does_not_end_a_handoff(env, browser, fo
 
 @pytest.mark.asyncio
 async def test_expired_handoff_ends_the_tool_call_without_waiting_for_an_answer(env, browser, monkeypatch):
-    monkeypatch.setattr(BrowserService, "idle_ttl", 1)
+    monkeypatch.setattr(BrowserService, "handoff_ttl", 1)
     first = await start_handoff(env)
 
     async def turn_ended():

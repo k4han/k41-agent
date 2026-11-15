@@ -33,6 +33,37 @@ from agent.delivery.http.dashboard.routes.helpers.workspace import workspace_htt
 router = APIRouter()
 
 
+class ScheduledResumeBody(BaseModel):
+    interrupt_id: str = Field(min_length=1, max_length=128)
+    payload: dict[str, Any]
+
+
+@router.post("/scheduler/runs/{run_id}/resume", status_code=202)
+async def resume_scheduler_run(run_id: str, body: ScheduledResumeBody, admin: str = Depends(get_current_admin)):
+    from agent.modules.agent_runtime.async_subagents import get_async_subagent_service
+    from agent.modules.scheduler.executions import resume_run
+
+    try:
+        return await resume_run(get_async_subagent_service(), run_id, body.interrupt_id, body.payload, f"admin:{admin}")
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@router.post("/scheduler/runs/{run_id}/cancel", status_code=202)
+async def cancel_scheduler_run(run_id: str, admin: str = Depends(get_current_admin)):
+    from agent.modules.agent_runtime.async_subagents import get_async_subagent_service
+    from agent.modules.scheduler.executions import cancel_run
+
+    try:
+        return await cancel_run(get_async_subagent_service(), run_id, f"admin:{admin}")
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
 @router.get("/scheduler/jobs")
 async def list_scheduler_jobs() -> dict[str, list[dict[str, Any]]]:
     """List all scheduled jobs with their triggers and status."""

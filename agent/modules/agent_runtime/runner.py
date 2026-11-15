@@ -36,6 +36,7 @@ from agent.modules.agent_runtime.active_sessions import (
 )
 from agent.shared.infrastructure.errors import ThreadGraphConflictError
 from agent.shared.thread_ids import SessionManager, resolve_thread_id
+from agent.modules.browser import browser_run_lifecycle
 from agent.modules.acp import (
     ACP_LIVE_EVENT,
     ACP_LIVE_KWARG,
@@ -1132,6 +1133,7 @@ def track_active_session(
         registry.release(session_id)
 
 
+@browser_run_lifecycle
 @guard_workspace_run
 async def run_agent(
     user_input: str,
@@ -1290,6 +1292,7 @@ async def run_agent(
                 break
 
 
+@browser_run_lifecycle
 @guard_workspace_run
 async def run_agent_stream(
     user_input: str,
@@ -1379,6 +1382,8 @@ async def run_agent_stream(
     thread_id = resolve_thread_id(thread_id)
     await _assert_thread_graph_family(thread_id, resolved_workflow, agent_config)
     approval_supported = resolve_approval_supported(usage_context, thread_id, surfaces_interrupts=True)
+    if _execution is not None and _execution.source == "scheduled" and browser_owner_id:
+        approval_supported = True
     if (_checkpoint_metadata and _checkpoint_metadata.get("k41_parent_thread_id")
             and not _checkpoint_metadata.get("k41_async_task_id")):
         approval_supported = False
@@ -1406,7 +1411,8 @@ async def run_agent_stream(
         browser_owner_id=browser_owner_id,
         acp_config_options=acp_config_options,
     )
-    config["configurable"]["async_subagents_supported"] = approval_supported and resolved_workflow != ACP_AGENT_GRAPH_TYPE
+    config["configurable"]["async_subagents_supported"] = (approval_supported and resolved_workflow != ACP_AGENT_GRAPH_TYPE
+        and (_execution is None or _execution.source != "scheduled"))
     if _async_notification_agent:
         config["configurable"]["async_notification_agent"] = _async_notification_agent
     config["metadata"] = {**config.get("metadata", {}), "k41_run_workflow": resolved_workflow,
@@ -1667,6 +1673,7 @@ async def run_agent_stream(
                 logger.warning("Async notifications remain pending for thread %s.", thread_id, exc_info=True)
 
 
+@browser_run_lifecycle
 @guard_workspace_run
 async def run_agent_edit_stream(
     user_input: str,

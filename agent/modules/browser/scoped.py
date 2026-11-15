@@ -54,6 +54,7 @@ SCOPED_BATCH = """async function scopedBatch(batchStagehand, input) {
     const target = raw;
     if (key === 'pages') return ownedPages;
     if (key === 'newPage') return async (...args) => {
+      if ((await ownedPages()).length >= input.maxPages) throw new Error('Browser tab limit reached. Close an existing tab before opening another.');
       const page = await target.newPage(...args);
       allowed.add(page.pageId);
       await page.goto('about:blank');
@@ -126,7 +127,7 @@ class ScopedFacade(StagehandFacadeTools):
         result = await self.driver.root.stagehand.experimental_batch(
             SCOPED_BATCH.replace("__CALLBACK__", source),
             {"pageIds": list(self.driver.page_ids), "values": values,
-             "browserEndpoint": self.driver.root.browser_ws_url},
+             "browserEndpoint": self.driver.root.browser_ws_url, "maxPages": self.driver.max_tabs},
             timeout=RUN_BATCH_TIMEOUT_MS, page=page,
         )
         for page_id in result["pageIds"]:
@@ -142,6 +143,8 @@ class ScopedDriver:
         self.artifacts = artifacts
         self.scope_id = uuid4().hex
         self.page_ids: set[str] = set()
+        self.max_tabs = 16
+        self.replacing = False
         self.selected_page_id = None
         self.closed = False
         self.facade = ScopedFacade(self, artifacts)
@@ -175,13 +178,18 @@ class ScopedDriver:
             raise PermissionError("Browser tab belongs to another conversation.")
         self.page_ids.add(page_id)
 
-    async def new_page(self):
+    async def new_page(self, *, replacing=False):
+        if not replacing and len(self.page_ids) >= self.max_tabs:
+            raise ValueError("Browser tab limit reached. Close an existing tab before opening another.")
         page = await self.root.browser.context.new_page()
         self.claim(page.page_id)
         self.selected_page_id = page.page_id
         await page.goto("about:blank")
         await page.set_viewport_size(1280, 720)
         return page
+
+    async def set_tab_limit(self, maximum):
+        self.max_tabs = max(1, maximum)
 
     async def reconcile(self):
         self.assert_open()
@@ -203,6 +211,18 @@ class ScopedDriver:
                     changed = True
             if not changed:
                 break
+        for scope in list(self.root.scopes.values()):
+            if scope.replacing or len(scope.page_ids) <= scope.max_tabs:
+                continue
+            # Ownership insertion order keeps existing pages and discards new popups.
+            extras = [page_id for page_id, owner in self.root.page_owners.items()
+                      if owner == scope.scope_id and page_id in scope.page_ids][scope.max_tabs:]
+            pages = {page.page_id: page for page in await self.root.browser.context.pages()}
+            for page_id in extras:
+                if page_id in pages:
+                    await pages[page_id].close()
+                scope.page_ids.discard(page_id)
+                self.root.page_owners.pop(page_id, None)
 
     async def page(self):
         self.assert_open()
@@ -260,12 +280,16 @@ class ScopedDriver:
         # Called inside the facade's shared lock; browser.close() only resets
         # this conversation, never the Chrome process or another session's tabs.
         previous = set(self.page_ids)
-        await self.new_page()
-        replacement = self.selected_page_id
-        self.page_ids = previous
-        await self._close_pages()
-        self.page_ids = {replacement}
-        self.facade = ScopedFacade(self, self.artifacts)
+        self.replacing = True
+        try:
+            await self.new_page(replacing=True)
+            replacement = self.selected_page_id
+            self.page_ids = previous
+            await self._close_pages()
+            self.page_ids = {replacement}
+            self.facade = ScopedFacade(self, self.artifacts)
+        finally:
+            self.replacing = False
 
     async def close(self):
         async with self.root.scope_lock:

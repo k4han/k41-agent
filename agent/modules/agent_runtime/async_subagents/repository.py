@@ -244,6 +244,10 @@ class AsyncSubagentRepository:
             if task is not None:
                 task.status, task.active_job_id, task.updated_at = "running", job_id, now
                 task.version += 1
+            if row.kind == "scheduled":
+                from agent.modules.scheduler.models import SchedulerJobRun
+                await session.execute(update(SchedulerJobRun).where(SchedulerJobRun.run_id == job_id)
+                    .values(status="running"))
             return job_dict(row)
 
     async def heartbeat(self, job: dict, *, release=False) -> bool:
@@ -271,6 +275,9 @@ class AsyncSubagentRepository:
             if row is None:
                 return None
             row.status, row.error, row.lease_until, row.updated_at = status, error, 0, time.time()
+            if row.kind == "scheduled":
+                from agent.modules.scheduler.executions import settle_run
+                return await settle_run(session, row, status, result=result, error=error, context=context)
             if not row.task_id:
                 return None
             if task.status == "cancelled" or task.deleted_at:
@@ -371,6 +378,13 @@ class AsyncSubagentRepository:
                     task.deleted_at = now
             job_scope = or_(Execution.task_id.in_(ids), Execution.thread_id == thread_id,
                             Execution.thread_id.startswith(thread_id + ":sub:", autoescape=True))
+            scheduled = list((await session.scalars(select(Execution.job_id).where(job_scope,
+                Execution.kind == "scheduled", Execution.status.in_(LIVE_STATUSES)))).all())
+            if scheduled:
+                from agent.modules.scheduler.models import SchedulerJobRun
+                from agent.shared.infrastructure.db import utcnow
+                await session.execute(update(SchedulerJobRun).where(SchedulerJobRun.run_id.in_(scheduled))
+                    .values(status="cancelled", error="Task was cancelled.", finished_at=utcnow()))
             await session.execute(update(Execution).where(job_scope, Execution.status.in_(LIVE_STATUSES))
                 .values(status="cancelled", lease_until=0))
             await session.execute(update(Notification).where(or_(Notification.task_id.in_(ids),
@@ -385,7 +399,9 @@ class AsyncSubagentRepository:
                 Task.status.in_(LIVE_STATUSES), Task.deleted_at.is_(None)).limit(1))
             pending = await session.scalar(select(Notification.id).where(Notification.parent_thread_id == thread_id,
                 Notification.status == "pending").limit(1))
-            return live is not None or pending is not None
+            scheduled = await session.scalar(select(Execution.id).where(Execution.thread_id == thread_id,
+                Execution.kind == "scheduled", Execution.status.in_(LIVE_STATUSES)).limit(1))
+            return live is not None or pending is not None or scheduled is not None
 
     async def child_thread_ids(self, thread_id: str) -> list[str]:
         async with await self._session_factory() as session:

@@ -206,6 +206,7 @@ class AsyncSubagentService:
         self._blocked_threads.add(thread_id)
         try:
             async with self._lock:
+                had_work = await self.repository.has_work(thread_id)
                 for session in self.container.active_session_registry.list_active():
                     if session["thread_id"] == thread_id or session["thread_id"].startswith(thread_id + ":sub:"):
                         self._cancelled_sessions.add(session["session_id"])
@@ -225,12 +226,24 @@ class AsyncSubagentService:
 
             for child in children:
                 await release_delegated_browser(child)
-            return bool(tasks)
+            from agent.modules.browser import finish_thread_browser
+            await finish_thread_browser(thread_id, "cancelled")
+            return bool(tasks) or had_work
         finally:
             self._blocked_threads.discard(thread_id)
 
     def _publish(self, task: dict):
+        if task.get("execution_kind") == "scheduled":
+            self.container.active_session_registry.publish("scheduler_run_updated", task)
+            return
         self.container.active_session_registry.publish("subagent_task_updated", task_reference(task))
+
+    async def _finish_job(self, job, status, **values):
+        result = await self.repository.finish(job, status, **values)
+        if result and result.get("execution_kind") == "scheduled":
+            from agent.modules.scheduler.executions import notify_run
+            await notify_run(result)
+        return result
 
     async def model_updates(self, state: dict, config: dict) -> dict:
         if self._stopping or not config.get("configurable", {}).get("async_subagents_supported"):
@@ -291,14 +304,15 @@ class AsyncSubagentService:
                     else:
                         await self.repository.heartbeat(job)
                 await self.repository.prepare_wakeups()
-                active = Counter(job["root_thread_id"] for job, _ in self._running.values() if job["task_id"])
+                active = Counter(job["root_thread_id"] for job, _ in self._running.values()
+                    if job["task_id"] or job["kind"] == "scheduled")
                 maximum = max(1, self.container.config_service.get_int("subagents.max_concurrency", 8))
                 per_root = max(1, self.container.config_service.get_int("subagents.max_concurrency_per_thread", 4))
                 children = sum(active.values())
                 for candidate in await self.repository.candidates():
                     if candidate["job_id"] in self._running:
                         continue
-                    if candidate["task_id"] and (children >= maximum or active[candidate["root_thread_id"]] >= per_root):
+                    if (candidate["task_id"] or candidate["kind"] == "scheduled") and (children >= maximum or active[candidate["root_thread_id"]] >= per_root):
                         continue
                     if candidate["kind"] == "wakeup" and not await self._parent_ready(candidate):
                         continue
@@ -308,7 +322,7 @@ class AsyncSubagentService:
                             self._publish(await self.repository.get_task_for_execution(job["task_id"]))
                         running = asyncio.create_task(self._execute(job), name=f"async-job-{job['job_id']}")
                         self._running[job["job_id"]] = (job, running)
-                        if job["task_id"]:
+                        if job["task_id"] or job["kind"] == "scheduled":
                             children += 1
                             active[job["root_thread_id"]] += 1
                 self._signal.clear()
@@ -356,7 +370,7 @@ class AsyncSubagentService:
                 except (asyncio.CancelledError, GraphDrained):
                     raise
                 except Exception as exc:
-                    result = await self.repository.finish(job, "failed", error=str(exc))
+                    result = await self._finish_job(job, "failed", error=str(exc))
                     if result:
                         self._publish(result)
                     raise
@@ -375,7 +389,7 @@ class AsyncSubagentService:
             await self.repository.heartbeat(job, release=True)
             raise
         except Exception as exc:
-            result = await self.repository.finish(job, "failed", error=str(exc))
+            result = await self._finish_job(job, "failed", error=str(exc))
             if result:
                 self._publish(result)
             raise
@@ -384,11 +398,11 @@ class AsyncSubagentService:
 
     async def _job_stream(self, job: dict, stream_run_id: str | None):
         from agent.modules.agent_runtime.protocol import application_event, run_agent_protocol_stream
-        from agent.modules.browser import release_delegated_browser, release_thread_browser
+        from agent.modules.browser import finish_thread_browser
         from agent.modules.workflows import get_workflow_graph
 
         context = {key: value for key, value in job["context"].items()
-                   if key not in {"routed_agent_name", "delegated_agent_name"}}
+                   if key not in {"routed_agent_name", "delegated_agent_name", "_scheduled"}}
         graph = get_workflow_graph(context["workflow"])
         config = {"configurable": {"thread_id": job["thread_id"]}}
         snapshot = await graph.aget_state(config)
@@ -407,7 +421,7 @@ class AsyncSubagentService:
         resume_payload, interrupt_id = None, ""
         if same_job and not snapshot.next and not pending:
             text = self._saved_result(snapshot)
-            result = await self.repository.finish(job, "completed", result=text,
+            result = await self._finish_job(job, "completed", result=text,
                 checkpoint_id=snapshot.config.get("configurable", {}).get("checkpoint_id"))
             if result:
                 self._publish(result)
@@ -419,7 +433,7 @@ class AsyncSubagentService:
                 interrupt_id, resume_payload = resume["interrupt_id"], resume["payload"]
                 input_data = Command(resume={interrupt_id: resume_payload})
             else:
-                result = await self.repository.finish(job, "waiting", interrupts=self._interrupts(snapshot),
+                result = await self._finish_job(job, "waiting", interrupts=self._interrupts(snapshot),
                     checkpoint_id=snapshot.config.get("configurable", {}).get("checkpoint_id"))
                 if result:
                     self._publish(result)
@@ -431,7 +445,7 @@ class AsyncSubagentService:
                 "configurable": {"thread_id": job["thread_id"], "async_subagents_supported": True},
                 "metadata": {"k41_execution_id": job["job_id"]}})
             if not updates and not snapshot.next:
-                await self.repository.finish(job, "completed")
+                await self._finish_job(job, "completed")
                 return
             input_data = updates
             if snapshot.next:
@@ -449,6 +463,8 @@ class AsyncSubagentService:
                                      context["workflow"], interrupt_id=interrupt_id)
         self._controls[job["job_id"]] = execution.control
         checkpoint_metadata = {"k41_execution_id": job["job_id"]}
+        if job["kind"] == "scheduled":
+            checkpoint_metadata["k41_scheduled_run_id"] = job["job_id"]
         if job["task_id"]:
             task = await self.repository.get_task_for_execution(job["task_id"])
             checkpoint_metadata.update(k41_parent_thread_id=task["parent_thread_id"],
@@ -475,7 +491,7 @@ class AsyncSubagentService:
             interrupts = self._interrupts(snapshot)
             status = "waiting" if interrupts else "completed"
             context.update(agent_name=execution.agent_name, workflow=execution.workflow)
-            result = await self.repository.finish(job, status, result=final or self._saved_result(snapshot),
+            result = await self._finish_job(job, status, result=final or self._saved_result(snapshot),
                 interrupts=interrupts, checkpoint_id=snapshot.config.get("configurable", {}).get("checkpoint_id"),
                 context=context)
             if result:
@@ -488,22 +504,20 @@ class AsyncSubagentService:
             raise
         except TimeoutError:
             status = "timed_out"
-            result = await self.repository.finish(job, status, error="Async task execution timed out.")
+            result = await self._finish_job(job, status, error="Async task execution timed out.")
             if result:
                 self._publish(result)
             raise
         except Exception as exc:
             status = "failed"
-            result = await self.repository.finish(job, status, error=str(exc))
+            result = await self._finish_job(job, status, error=str(exc))
             if result:
                 self._publish(result)
             raise
         finally:
             self._controls.pop(job["job_id"], None)
-            if job["task_id"] and status != "waiting":
-                # Retryable interruptions release tabs but preserve durable handoffs.
-                release_browser = release_thread_browser if status == "running" else release_delegated_browser
-                await release_browser(job["thread_id"])
+            if status != "waiting":
+                await finish_thread_browser(job["thread_id"], "interrupted" if status == "running" else status)
 
     @staticmethod
     def _saved_result(snapshot) -> str:

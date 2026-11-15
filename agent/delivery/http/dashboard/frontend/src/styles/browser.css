@@ -6,6 +6,7 @@
 .browser-actions { flex-wrap: wrap; }
 .browser-session-select { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; min-width: 0; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px; }
 .browser-session-select select { flex: 1; min-width: 0; max-width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--fg); font: inherit; }
+.browser-lifecycle { flex: 1 1 100%; min-width: 0; font-size: 11px; }
 .browser-panel > .thread-banner { flex: 0 0 auto; margin: 10px 12px 0; overflow-wrap: anywhere; }
 .browser-handoff { display: grid; flex: 0 0 auto; gap: 8px; margin: 8px; padding: 10px; border: 1px solid color-mix(in srgb, var(--info) 25%, var(--border)); border-radius: var(--radius-md); background: color-mix(in srgb, var(--info) 6%, var(--surface)); font-size: 12px; }
 .browser-handoff-heading > svg { flex-shrink: 0; color: var(--info); }

@@ -211,6 +211,23 @@ def _ensure_chat_agent_available(agent_name: str | None) -> None:
         raise HTTPException(status_code=403, detail="Internal agents can only be used by the system.")
 
 
+async def check_scheduled_chat(thread_id: str | None, owner_id: str, *, allow_managed_resume=False):
+    """Keep chat requests from bypassing the scheduled execution queue."""
+    from agent.modules.agent_runtime.async_subagents import active_async_subagent_service
+    from agent.modules.scheduler.executions import waiting_run
+
+    managed = active_async_subagent_service()
+    if not thread_id or managed is None or not managed.container._persistence_ready:
+        return None
+    try:
+        scheduled = await waiting_run(managed, resolve_thread_id(thread_id), owner_id, strict=True)
+    except LookupError as exc:
+        raise HTTPException(404, detail=str(exc)) from None
+    if scheduled and not allow_managed_resume:
+        raise HTTPException(409, detail="This scheduled run is managed by the execution queue. Use the scheduler API to resume or cancel it.")
+    return scheduled
+
+
 async def prepare_run_params(request: ChatRequest, browser_owner_id: str | None = None) -> dict[str, object]:
     _ensure_chat_agent_available(request.agent_name)
     _validate_pool_request(request)
@@ -251,6 +268,7 @@ def _validate_pool_request(request: ChatRequest | EditChatRequest) -> None:
 @router.post("/chat", response_model=ChatResponse)
 async def chat_sync(request: ChatRequest, admin: str = Depends(get_current_admin)):
     """Send a chat message and return the full agent response synchronously."""
+    await check_scheduled_chat(request.thread_id, f"admin:{admin}")
     params = await prepare_run_params(request, browser_owner_id=f"admin:{admin}")
     from agent.modules.providers import ModelPoolExhausted
 
@@ -269,6 +287,7 @@ async def chat_sync(request: ChatRequest, admin: str = Depends(get_current_admin
 @router.post("/chat/stream")
 async def chat_stream(request: ChatRequest, http_request: Request, admin: str = Depends(get_current_admin)):
     """Stream the agent response as plain text chunks."""
+    await check_scheduled_chat(request.thread_id, f"admin:{admin}")
     params = await prepare_run_params(request, browser_owner_id=f"admin:{admin}")
 
     return ChatStreamingResponse(

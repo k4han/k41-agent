@@ -162,7 +162,7 @@ async def test_async_browser_handoff_resumes_its_exact_child_and_preserves_paren
         assert "Signed in" in str(result["snapshot"])
     assert await f.env.repository.browser_handoffs("api_parent", "admin:1") == []
     assert await f.browser.repository.pending_handoff(f.task["thread_id"], include_expired=True) is None
-    assert f.task["thread_id"] not in f.browser.sessions
+    assert (f.task["thread_id"] in f.browser.sessions) is (outcome == "returned")
     assert f.browser.sessions["api_parent"] is f.parent
     assert not f.parent.closed
     assert f.parent.handoff_id is None

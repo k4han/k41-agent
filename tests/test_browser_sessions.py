@@ -80,11 +80,12 @@ def make_browser_metadata():
         SubagentExecutionRecord, SubagentNotificationRecord, SubagentTaskRecord,
     )
     from agent.modules.conversations.models import ConversationThread
+    from agent.modules.scheduler.models import SchedulerJobRun
 
     metadata = MetaData()
     for model in (BrowserAccountProfile, BrowserArtifact, BrowserBinding, BrowserInvocation, BrowserProfile, BrowserProjectProfile,
                   Project, ThreadWorkspace, AdminCredential, ConversationThread,
-                  SubagentTaskRecord, SubagentExecutionRecord, SubagentNotificationRecord):
+                  SubagentTaskRecord, SubagentExecutionRecord, SubagentNotificationRecord, SchedulerJobRun):
         model.__table__.to_metadata(metadata)
     return metadata
 
@@ -404,7 +405,7 @@ async def test_sub_agent_borrows_parent_profile_until_delegation_ends(browser):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fails", [False, True])
-async def test_delegation_returns_borrowed_profile_when_it_ends(browser, monkeypatch, fails):
+async def test_delegation_retains_borrowed_profile_until_idle(browser, monkeypatch, fails):
     from agent.modules.tools.builtin.delegation.delegate_task import delegate_task
     from agent.modules.tools.result import ToolError
 
@@ -428,7 +429,10 @@ async def test_delegation_returns_borrowed_profile_when_it_ends(browser, monkeyp
             await delegate_task.coroutine(task="work", sub_agent="helper", runtime=runtime)
     else:
         assert await delegate_task.coroutine(task="work", sub_agent="helper", runtime=runtime) == "done"
-    assert borrowed[0].profile_key == profile["profile_id"] and borrowed[0].driver.closed
+    assert borrowed[0].profile_key == profile["profile_id"] and not borrowed[0].driver.closed
+    borrowed[0].last_activity -= browser.idle_ttl + 1
+    await browser.reap_idle()
+    assert borrowed[0].driver.closed
     assert (await browser.ensure("chat", "admin:1")).profile_key == profile["profile_id"]
 
 
@@ -446,7 +450,7 @@ async def test_failed_release_does_not_fail_delegation(browser, monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["completed", "failed", "cancelled"])
 @pytest.mark.parametrize("shared", [False, True])
-async def test_scheduled_run_releases_browser_before_reporting(browser, monkeypatch, outcome, shared):
+async def test_scheduled_run_retains_browser_unless_cancelled(browser, monkeypatch, outcome, shared):
     from unittest.mock import AsyncMock
 
     import agent.modules.conversations as conversations
@@ -471,12 +475,12 @@ async def test_scheduled_run_releases_browser_before_reporting(browser, monkeypa
             await asyncio.Event().wait()
         return "done"
 
-    async def assert_released(*args, **kwargs):
-        assert opened[0].closed and opened[0].driver.closed
-        assert opened[0].thread_id not in browser.sessions
+    async def assert_retained(*args, **kwargs):
+        assert not opened[0].closed and not opened[0].driver.closed
+        assert browser.sessions[opened[0].thread_id] is opened[0]
 
-    finish = AsyncMock(side_effect=assert_released)
-    notify = AsyncMock(side_effect=assert_released)
+    finish = AsyncMock(side_effect=assert_retained)
+    notify = AsyncMock(side_effect=assert_retained)
     workspace = workspaces.WorkspaceRef(locator=str(browser.root.parent), metadata={"no_workspace": True})
     monkeypatch.setattr(scheduler, "run_agent_full", run)
     monkeypatch.setattr(scheduler, "_record_run_start", AsyncMock(return_value=True))
@@ -507,6 +511,11 @@ async def test_scheduled_run_releases_browser_before_reporting(browser, monkeypa
         notify.assert_awaited_once()
 
     current = opened[0]
+    if outcome != "cancelled":
+        assert (await browser.status(current.thread_id, "admin:1"))["state"] == "idle"
+        assert browser.tickets
+        current.last_activity -= browser.idle_ttl + 1
+        await browser.reap_idle()
     assert current.closed and current.driver.closed
     assert not (await browser.status(current.thread_id, "admin:1"))["open"]
     assert not browser.tickets

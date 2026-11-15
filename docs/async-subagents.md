@@ -60,6 +60,12 @@ while its parent is running. Expired or lost sessions remain discoverable after
 reload until the user continues or cancels. Cancelling a waiting task releases
 its browser. Synchronous delegation and existing ACP restrictions remain in force.
 
+Completed executions and ordinary failures retain healthy child browsers for
+`browser.idle_ttl_seconds` (600 by default). The browser remains selectable under
+its original child thread and can be closed directly. Task cancellation still
+closes its browser immediately. Human handoffs use the independent
+`browser.handoff_timeout_seconds` deadline (1800 by default).
+
 Active tasks are also loaded independently of transcript artifacts. Their controls
 remain available after history compaction, pagination, or an interrupted launch.
 

@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import delete, func, select, update
 
 from agent.modules.scheduler.models import SchedulerJobRun
+from agent.shared.async_subagents import LIVE_STATUSES
 from agent.shared.infrastructure.db import utcnow
 from agent.shared.infrastructure.db.session import get_async_session
 from agent.shared.timezone import ensure_aware_utc, resolve_display_timezone
@@ -27,6 +28,13 @@ DEFAULT_RUN_LIST_LIMIT = 50
 MAX_RUN_LIST_LIMIT = 200
 
 logger = logging.getLogger(__name__)
+
+
+async def _delete_executions(session, run_ids):
+    from agent.modules.agent_runtime.async_subagents.models import SubagentExecutionRecord
+    await session.execute(delete(SubagentExecutionRecord).where(
+        SubagentExecutionRecord.kind == "scheduled", SubagentExecutionRecord.job_id.in_(run_ids),
+        SubagentExecutionRecord.status.not_in(LIVE_STATUSES)))
 
 
 def _trim(value: object, max_length: int) -> str:
@@ -137,10 +145,12 @@ async def prune_runs(max_kept: int = MAX_RUNS_KEPT) -> int:
         ).scalar_one_or_none()
         if cutoff is None:
             return 0
+        await _delete_executions(session, select(SchedulerJobRun.run_id).where(
+            SchedulerJobRun.id <= cutoff, SchedulerJobRun.status.not_in(LIVE_STATUSES)))
         result = await session.execute(
             delete(SchedulerJobRun).where(
                 SchedulerJobRun.id <= cutoff,
-                SchedulerJobRun.status != RUN_STATUS_RUNNING,
+                SchedulerJobRun.status.not_in(LIVE_STATUSES),
             )
         )
         await session.commit()
@@ -151,9 +161,12 @@ async def mark_interrupted_runs() -> int:
     """Close runs left in ``running`` state by a previous process."""
     session = await get_async_session()
     async with session:
+        from agent.modules.agent_runtime.async_subagents.models import SubagentExecutionRecord
+        recoverable = select(SubagentExecutionRecord.job_id).where(
+            SubagentExecutionRecord.kind == "scheduled", SubagentExecutionRecord.status.in_(LIVE_STATUSES))
         result = await session.execute(
             update(SchedulerJobRun)
-            .where(SchedulerJobRun.status == RUN_STATUS_RUNNING)
+            .where(SchedulerJobRun.status == RUN_STATUS_RUNNING, SchedulerJobRun.run_id.not_in(recoverable))
             .values(
                 status=RUN_STATUS_INTERRUPTED,
                 error="The application stopped before this run finished.",
@@ -217,10 +230,11 @@ async def delete_run(run_id: str) -> bool:
         result = await session.execute(
             delete(SchedulerJobRun).where(
                 SchedulerJobRun.run_id == run_id,
-                SchedulerJobRun.status != RUN_STATUS_RUNNING,
+                SchedulerJobRun.status.not_in(LIVE_STATUSES),
             )
         )
         if result.rowcount:
+            await _delete_executions(session, [run_id])
             await session.commit()
             return True
         status = (
@@ -228,17 +242,18 @@ async def delete_run(run_id: str) -> bool:
                 select(SchedulerJobRun.status).where(SchedulerJobRun.run_id == run_id)
             )
         ).scalar_one_or_none()
-        if status == RUN_STATUS_RUNNING:
-            raise ValueError("Cannot delete a run while it is running.")
+        if status in LIVE_STATUSES:
+            raise ValueError("Cannot delete a run while it is running or waiting.")
         return False
 
 
 async def delete_runs(*, job_id: str | None = None) -> int:
-    filters = [SchedulerJobRun.status != RUN_STATUS_RUNNING]
+    filters = [SchedulerJobRun.status.not_in(LIVE_STATUSES)]
     if job_id:
         filters.append(SchedulerJobRun.job_id == job_id)
     session = await get_async_session()
     async with session:
+        await _delete_executions(session, select(SchedulerJobRun.run_id).where(*filters))
         result = await session.execute(delete(SchedulerJobRun).where(*filters))
         await session.commit()
         return int(result.rowcount or 0)

@@ -131,6 +131,7 @@ class BrowserSession:
     observer: asyncio.Task | None = None
     inherited_profile: bool = False
     snapshot_tree: str | None = None
+    source: str = "conversation"
 
     def notify(self):
         self.revision += 1
@@ -168,6 +169,8 @@ class BrowserService:
         self.sweeper = None
         self.closing = False
         self.undeleted: set[str] = set()
+        self.admission_lock = asyncio.Lock()
+        self.reservations: dict[str, str] = {}
 
     async def initialize_profiles(self, owner_ids=None):
         """Provision saved defaults without launching Chrome."""
@@ -193,6 +196,46 @@ class BrowserService:
     @property
     def idle_ttl(self):
         return max(1, self.container.config_service.get_int("browser.idle_ttl_seconds", 600))
+
+    @property
+    def handoff_ttl(self):
+        return max(1, self.container.config_service.get_int("browser.handoff_timeout_seconds", 1800))
+
+    def _is_active(self, current):
+        return current.lock.locked() or any(item["thread_id"] == current.thread_id
+            for item in self.container.active_session_registry.list_active())
+
+    def _lifecycle(self, current):
+        if current.handoff_id:
+            return "waiting_for_human"
+        return "active" if self._is_active(current) else "idle"
+
+    def _session_metadata(self, current):
+        state = self._lifecycle(current)
+        expires_at = current.handoff_expires_at if state == "waiting_for_human" else (
+            time.time() + max(0, self.idle_ttl - (time.monotonic() - current.last_activity))
+            if state == "idle" else None)
+        return {"state": state, "expires_at": expires_at, "source": current.source}
+
+    async def _reserve_session(self, thread_id, owner_id):
+        async with self.admission_lock:
+            maximum = max(1, self.container.config_service.get_int("browser.max_sessions_per_owner", 16))
+            def count():
+                return sum(item.owner_id == owner_id for item in self.sessions.values()) + sum(
+                    owner == owner_id for owner in self.reservations.values())
+            candidates = sorted((item for item in self.sessions.values() if item.owner_id == owner_id
+                and not item.handoff_id and not self._is_active(item)), key=lambda item: item.last_activity)
+            while count() >= maximum and candidates:
+                candidate = candidates.pop(0)
+                lock = self.operation_locks.get(f"thread:{candidate.thread_id}")
+                if lock and lock.locked():
+                    continue
+                async with self.thread_scope(candidate.thread_id):
+                    if self.sessions.get(candidate.thread_id) is candidate and not candidate.handoff_id and not self._is_active(candidate):
+                        await self._close_session(candidate)
+            if count() >= maximum:
+                raise BrowserError("capacity_exceeded", "Browser session capacity is full. Close an idle session or wait for an active task to finish.")
+            self.reservations[thread_id] = owner_id
 
     @staticmethod
     def canonical(thread_id):
@@ -222,6 +265,14 @@ class BrowserService:
             return current
         if await self.repository.pending_handoff(thread_id):
             raise BrowserError("handoff_expired", "Continue or cancel the expired handoff before opening another browser session.")
+        await self._reserve_session(thread_id, owner_id)
+        try:
+            return await self._create_session(thread_id, owner_id, binding)
+        finally:
+            self.reservations.pop(thread_id, None)
+
+    async def _create_session(self, thread_id, owner_id, binding):
+        source = await self.repository.thread_source(thread_id)
         profile_id, inherited = await self._session_profile(thread_id, owner_id, binding)
         profile_key = profile_id
         # Reserve only this profile during launch; unrelated conversations stay usable.
@@ -238,6 +289,8 @@ class BrowserService:
                     shared = ProfileBrowser(owner_id, profile_id, await self._launch(profile, artifact_root))
                     self.browsers[shared_key] = shared
                 driver = await asyncio.wait_for(shared.driver.create_session(artifact_root), self.timeout)
+                if hasattr(driver, "set_tab_limit"):
+                    await driver.set_tab_limit(max(1, self.container.config_service.get_int("browser.max_tabs_per_session", 16)))
             except BaseException as exc:
                 if shared is not None and not shared.threads:
                     self.browsers.pop(shared_key, None)
@@ -247,7 +300,8 @@ class BrowserService:
                     raise
                 logger.exception("Could not start the local browser")
                 raise BrowserError("browser_unavailable", "Could not start Chrome. Run 'k41 browser install' on the agent host to install and check Chrome, or 'k41 browser check' to diagnose an existing installation. Check browser.executable_path, profile locks, and server logs for the original error.") from exc
-            current = BrowserSession(thread_id, owner_id, profile_key, driver, inherited_profile=inherited)
+            current = BrowserSession(thread_id, owner_id, profile_key, driver, inherited_profile=inherited, source=source)
+            self.reservations.pop(thread_id, None)
             self.sessions[thread_id] = current
             shared.threads.add(thread_id)
             if hasattr(driver, "watch_tabs"):
@@ -306,7 +360,7 @@ class BrowserService:
         names = await self.repository.agent_names([current.thread_id for current in active])
         status["sessions"] = [{"thread_id": current.thread_id,
                                "agent_name": names.get(current.thread_id) or None,
-                               "generation": current.generation}
+                               "generation": current.generation, **self._session_metadata(current)}
                               for current in active if not current.closed]
         return status
 
@@ -350,6 +404,7 @@ class BrowserService:
         pending = await self.repository.pending_handoff(thread_id, include_expired=True)
         effective = current.profile_key if current else (await self._session_profile(thread_id, owner_id, binding))[0]
         return {**binding, "selected_profile_id": binding["profile_id"], "profile_id": effective,
+                **(self._session_metadata(current) if current else {"state": "closed", "expires_at": None}),
                 "open": current is not None,
                 "generation": current.generation if current else None,
                 "revision": current.revision if current else 0,
@@ -425,6 +480,27 @@ class BrowserService:
             current = self.sessions.get(thread_id)
             if current:
                 await self._close_session(current)
+
+    async def finish_run(self, thread_id, outcome="completed"):
+        """Release execution control while retaining healthy pages for inspection."""
+        thread_id = self.canonical(thread_id)
+        if outcome == "cancelled":
+            await self.abandon_handoffs(thread_id)
+            await self.release_thread(thread_id)
+            return
+        if outcome == "interrupted":
+            await self.release_thread(thread_id)
+            return
+        if outcome in {"failed", "timed_out"}:
+            await self.abandon_handoffs(thread_id)
+        if thread_id not in self.sessions:
+            return
+        async with self.thread_scope(thread_id):
+            current = self.sessions.get(thread_id)
+            if current and not current.closed and not current.handoff_id and outcome != "waiting":
+                current.last_activity = time.monotonic()
+                current.notify()
+                self._notify_session(thread_id)
 
     async def release_inherited_profile(self, thread_id):
         """Release a finished helper's tabs while preserving its parent's session."""
@@ -829,7 +905,7 @@ class BrowserService:
         async with current.lock:
             self.assert_agent(current)
             current.handoff_id = uuid4().hex
-            current.handoff_expires_at = time.time() + self.idle_ttl
+            current.handoff_expires_at = time.time() + self.handoff_ttl
             current.active_tab_id = None
             current.last_activity = time.monotonic()
             payload = {"type": "browser_handoff_request", "handoff_id": current.handoff_id,
@@ -981,7 +1057,7 @@ class BrowserService:
                 async with self.thread_scope(thread_id):
                     await self._expire_handoffs(thread_id)
                     current = self.sessions.get(thread_id)
-                    if current and not current.lock.locked() and time.monotonic() - current.last_activity >= self.idle_ttl:
+                    if current and not current.handoff_id and not self._is_active(current) and time.monotonic() - current.last_activity >= self.idle_ttl:
                         await self._close_session(current)
             except BrowserError as exc:
                 if exc.code != "session_lost":

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import uuid
 from typing import Annotated, Any
 
@@ -54,7 +55,7 @@ async def delegate_task(
     from agent.modules.tools.coding.adapter import invocation_context
     from agent.modules.agent_runtime import run_agent_full
     from agent.modules.agents import get_catalog_service
-    from agent.modules.browser import release_delegated_browser
+    from agent.modules.browser import finish_thread_browser
     from agent.shared.async_subagents import is_subagent_run
 
     if is_subagent_run(runtime.config):
@@ -104,6 +105,7 @@ async def delegate_task(
             writer({"type": "subagent_event", "event": event, "agent_name": sub_agent,
                 "delegation_id": delegation_id, "thread_id": sub_thread_id,
                 "tool_call_id": metadata["k41_parent_tool_call_id"]})
+    outcome = "completed"
     try:
         result = await run_agent_full(
             user_input=task,
@@ -120,7 +122,11 @@ async def delegate_task(
             _event_writer=forward,
         )
         return result or "(empty response)"
+    except asyncio.CancelledError:
+        outcome = "cancelled"
+        raise
     except Exception as e:
+        outcome = "failed"
         logger.exception(
             "Sub-agent '%s' failed for caller '%s' and task: %s",
             sub_agent,
@@ -132,4 +138,4 @@ async def delegate_task(
             f"sub-agent '{sub_agent}' failed: {e}",
         ) from e
     finally:
-        await release_delegated_browser(sub_thread_id)
+        await finish_thread_browser(sub_thread_id, outcome)
