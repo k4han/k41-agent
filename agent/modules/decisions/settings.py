@@ -42,8 +42,8 @@ class DecisionSettings(BaseModel):
 def load_decision_settings(config: ConfigService | None = None) -> DecisionSettings:
     """Load DecisionSettings from ConfigService with environment variable fallback.
 
-    Falls back to CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN environment variables
-    if configuration values are blank or unset.
+    Provider-specific environment credentials are used when stored fields are blank.
+    Google uses GEMINI_API_KEY, then GOOGLE_API_KEY; Cloudflare retains its legacy keys.
     """
     if config is None:
         from agent.shared.config import get_config_service

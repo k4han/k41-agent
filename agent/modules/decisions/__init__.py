@@ -7,6 +7,7 @@ not from internal implementation files.
 from __future__ import annotations
 
 from agent.modules.decisions.cloudflare import CloudflareClefClient
+from agent.modules.decisions.google import GoogleDecisionClient
 from agent.modules.decisions.instructions import (
     ROUTING_INSTRUCTIONS, FILE_SELECTION_INSTRUCTIONS, FILE_INCLUSION_INSTRUCTIONS,
 )
@@ -64,6 +65,7 @@ __all__ = [
     # Port, Clients & Service
     "DecisionClient",
     "CloudflareClefClient",
+    "GoogleDecisionClient",
     "MockDecisionClient",
     "DecisionService",
     "create_decision_client",

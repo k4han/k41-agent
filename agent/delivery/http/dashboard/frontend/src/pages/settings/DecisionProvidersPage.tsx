@@ -2,7 +2,7 @@ import { A, useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import { ArrowRight, BrainCircuit, RefreshCw, Sparkles } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
-import { suggestProviderName } from "@/lib/providerConnections";
+import { decisionProviderFields, suggestProviderName } from "@/lib/providerConnections";
 import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataGate } from "@/components/State";
@@ -68,7 +68,7 @@ export function DecisionProvidersPage() {
     try {
       const body: Record<string, unknown> = {
         type: form().type,
-        fields: { ...form().fields },
+        fields: decisionProviderFields(form().fields, service()?.fields || [], editing(), replacedSecrets()),
       };
       if (editing()) {
         body.name = form().name;
@@ -133,9 +133,7 @@ export function DecisionProvidersPage() {
     if (busy() || !service()) return;
     setBusy(true);
     try {
-      const fields = Object.fromEntries(service()!.fields
-        .filter((field) => field.input_type !== "password" || !editing() || replacedSecrets().includes(field.name))
-        .map((field) => [field.name, form().fields[field.name]]));
+      const fields = decisionProviderFields(form().fields, service()!.fields, editing(), replacedSecrets());
       if (editing()) await putJson(`${API}/${encodeURIComponent(form().name)}`, { fields });
       else await postJson(API, { name: form().name, type: form().type, fields });
       setInitial(form()); setReplacedSecrets([]);

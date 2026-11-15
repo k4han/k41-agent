@@ -103,6 +103,7 @@ agent/modules/decisions/
 ├── ports.py              # DecisionClient abstract base class
 ├── models.py             # Pydantic v2 question/answer schemas, result, and exceptions
 ├── cloudflare.py         # CloudflareClefClient native asynchronous REST client
+├── google.py             # GoogleDecisionClient for Gemini Decisions
 └── mock.py               # MockDecisionClient for deterministic test isolation
 ```
 
@@ -155,3 +156,28 @@ agent/modules/decisions/
    All public types and clients are exported at `agent.modules.decisions.__init__.py` to satisfy `tests/test_module_public_import_boundaries.py`.
 2. **Deterministic Offline Testing**:
    Unit tests utilize `MockDecisionClient` or `httpx.MockTransport`, ensuring CI environments run reliably without requiring Cloudflare API tokens or incurring network latency.
+
+## 6. Google Decisions Provider
+
+`GoogleDecisionClient` implements the same public `DecisionClient` interface with
+the existing `httpx` dependency. It sends `model`, `input`, and `questions` to
+`POST https://generativelanguage.googleapis.com/v1beta/decisions`, authenticating
+with `x-goog-api-key`. Unlike Cloudflare, answers and usage are at the response
+root. Dictionary states are serialized into JSON text; `noul` thresholds remain
+local. Raw responses retain token usage and score legends.
+
+The named provider registry exposes type `google` with model `gemini-decision-1`,
+a configurable base URL, timeout, retry count, and an encrypted `api_key`. Blank
+keys resolve through `GEMINI_API_KEY`, then `GOOGLE_API_KEY`. Selecting a named
+default activates Google for subsequent decisions while in-flight clients remain
+available. Existing Cloudflare defaults and migration behavior are preserved.
+
+Google-specific request limits and typed response validation live in the adapter.
+Only transient network, timeout, rate-limit, and server failures are retried.
+Verification uses one real inference request through the adapter without retries.
+The existing router mode names and `clef_*` telemetry fields remain compatible;
+`decision_provider` identifies the actual provider and Google fast paths report
+`source="google"`.
+
+See [provider setup](./guide/providers#google-decisions) and the
+[Google API documentation](https://aistudio.google.com/docs/decisions-api).

@@ -434,6 +434,41 @@ async def test_decision_graph_full_flow(tmp_path: Path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_decision_node_with_google_adapter(tmp_path: Path):
+    import httpx
+    from agent.modules.decisions import GoogleDecisionClient
+
+    (tmp_path / "service.py").write_text("class MyService:\n    pass\n", encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("random note\n", encoding="utf-8")
+    requests = []
+
+    def handler(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        key, question = next(iter(payload["questions"].items()))
+        if question["type"] == "choice":
+            answer = {"type": "choice", "choice": "service.py", "confidence": 0.88,
+                      "probabilities": {"none": 0.02, "service.py": 0.88, "notes.txt": 0.1}}
+        else:
+            answer = {"type": "noul", "noul": 0.9 if "service.py" in payload["input"] else 0.1, "confidence": 0.9}
+        return httpx.Response(200, json={"answers": {key: answer}})
+
+    context = make_context(working_dir=str(tmp_path), agent_name="default")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as transport:
+        config = make_config("google-thread")
+        config["configurable"]["decision_client"] = GoogleDecisionClient("google-key", client=transport, max_retries=0)
+        result = await decision_node(
+            {"messages": [HumanMessage(content="Explain MyService", id="google-message")]},
+            config, runtime=SimpleNamespace(context=context),
+        )
+    assert result["decision_source"] == "google"
+    assert result["candidate_files"] == ["service.py", "notes.txt"]
+    assert [item["path"] for item in result["included_files"]] == ["service.py"]
+    assert "Decision model evaluation" in result["included_files"][0]["reasoning"]
+    assert len(requests) == 3
+
+
+@pytest.mark.asyncio
 async def test_decision_node_with_cloudflare_clef_client(tmp_path: Path):
     """Verify decision_node uses Cloudflare Clef DecisionClient when configured."""
     (tmp_path / "service.py").write_text("class MyService:\n    pass\n", encoding="utf-8")
@@ -487,6 +522,6 @@ async def test_decision_node_with_cloudflare_clef_client(tmp_path: Path):
         assert result["included_files"][0]["path"] == "service.py"
         assert result["messages"][0].content == initial_msg.content
         assert "class MyService" in await build_decision_context(result, str(tmp_path))
-        assert "Cloudflare Clef decision" in result["included_files"][0]["reasoning"]
+        assert "Decision model evaluation" in result["included_files"][0]["reasoning"]
     finally:
         set_default_decision_client(None)

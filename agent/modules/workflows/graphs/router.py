@@ -17,7 +17,6 @@ from agent.modules.agents import AgentConfig, get_catalog_service
 from agent.modules.decisions import (
     ChoiceAnswer,
     ChoiceQuestion,
-    CloudflareClefClient,
     DecisionClient,
     DecisionError,
     MockDecisionClient,
@@ -76,7 +75,8 @@ class RouterTelemetry(BaseModel):
 
     mode: str
     selected_agent: str
-    source: Literal["llm", "clef", "fallback"]
+    source: Literal["llm", "clef", "google", "fallback"]
+    decision_provider: str | None = None
     clef_latency_ms: float | None = None
     llm_latency_ms: float | None = None
     latency_delta_ms: float | None = None
@@ -326,7 +326,7 @@ def _resolve_decision_client(
     except Exception:
         pass
 
-    # Check runtime config / env for Cloudflare credentials or mock mode
+    # Check the selected provider credentials or mock mode
     try:
         from agent.shared.config import get_config_service
         config_service = get_config_service()
@@ -377,13 +377,13 @@ async def _route_with_clef(
     decision_client: DecisionClient | None = None,
     config: RunnableConfig | None = None,
 ) -> ChoiceAnswer:
-    """Evaluate candidate agents via Clef-flash decision engine."""
+    """Evaluate candidate agents via the selected decision provider."""
     if not candidates:
         raise RuntimeError("No candidate agents are available for routing.")
 
     client = _resolve_decision_client(decision_client, config)
     if client is None:
-        raise DecisionError("No decision client configured or available for Clef routing.")
+        raise DecisionError("No decision client configured or available for decision routing.")
 
     criteria = {name: _agent_description(cfg) for name, cfg in candidates.items()}
     instructions = ROUTING_INSTRUCTIONS
@@ -452,6 +452,7 @@ async def _route_agent_decision(
         latency = (time.perf_counter() - t0) * 1000.0
         telemetry = {
             "mode": "llm_only",
+            "decision_provider": None,
             "source": "llm",
             "selected_agent": llm_selected,
             "llm_latency_ms": latency,
@@ -465,6 +466,10 @@ async def _route_agent_decision(
             "error": None,
         }
         return llm_selected, telemetry
+
+    decision_client = _resolve_decision_client(decision_client, config)
+    decision_provider = getattr(decision_client, "provider_type", "cloudflare") if decision_client is not None else None
+    decision_source = "google" if decision_provider == "google" else "clef"
 
     # 2. Mode: clef_only
     if mode == "clef_only":
@@ -485,7 +490,8 @@ async def _route_agent_decision(
             if selected in candidates:
                 telemetry = {
                     "mode": "clef_only",
-                    "source": "clef",
+                    "decision_provider": decision_provider,
+                    "source": decision_source,
                     "selected_agent": selected,
                     "clef_confidence": confidence,
                     "confidence_threshold": confidence_threshold,
@@ -499,10 +505,11 @@ async def _route_agent_decision(
                 }
                 return selected, telemetry
 
-            # Clef selected invalid candidate
+            # The decision provider selected an invalid candidate
             logger.warning("clef_only selected invalid candidate '%s', falling back", selected)
             telemetry = {
                 "mode": "clef_only",
+                "decision_provider": decision_provider,
                 "source": "fallback",
                 "selected_agent": "",
                 "clef_confidence": confidence,
@@ -513,7 +520,7 @@ async def _route_agent_decision(
                 "agreement": None,
                 "cascade_triggered": False,
                 "cascade_reason": f"invalid_candidate ({selected})",
-                "error": f"Invalid candidate '{selected}' selected by Clef",
+                "error": f"Invalid candidate '{selected}' selected by decision provider",
             }
             return "", telemetry
         except Exception as exc:
@@ -521,6 +528,7 @@ async def _route_agent_decision(
             logger.warning("clef_only routing failed: %s", exc)
             telemetry = {
                 "mode": "clef_only",
+                "decision_provider": decision_provider,
                 "source": "fallback",
                 "selected_agent": "",
                 "clef_confidence": None,
@@ -586,6 +594,7 @@ async def _route_agent_decision(
 
         telemetry = {
             "mode": "shadow",
+            "decision_provider": decision_provider,
             "source": "llm",
             "selected_agent": llm_agent,
             "llm_agent": llm_agent,
@@ -603,12 +612,13 @@ async def _route_agent_decision(
             "error": str(llm_err) if llm_err else (str(clef_err) if clef_err else None),
         }
         logger.info(
-            "Router shadow telemetry: llm=%s, clef=%s (conf=%s), agreement=%s, delta=%.1fms",
+            "Router shadow telemetry: llm=%s, decision=%s (conf=%s), agreement=%s, delta=%.1fms, provider=%s",
             llm_agent,
             clef_agent,
             clef_conf,
             agreement,
             latency_delta,
+            decision_provider,
         )
         return llm_agent, telemetry
 
@@ -634,7 +644,7 @@ async def _route_agent_decision(
     clef_confidence = _extract_clef_confidence(clef_decision) if clef_decision is not None else 0.0
 
     # Fast-path condition:
-    # 1. Clef succeeded without error
+    # 1. The decision provider succeeded without error
     # 2. confidence >= confidence_threshold
     # 3. selected agent is an eligible candidate
     if (
@@ -650,7 +660,8 @@ async def _route_agent_decision(
         )
         telemetry = {
             "mode": "cascade",
-            "source": "clef",
+            "decision_provider": decision_provider,
+            "source": decision_source,
             "selected_agent": clef_agent,
             "clef_confidence": clef_confidence,
             "confidence_threshold": confidence_threshold,
@@ -691,6 +702,7 @@ async def _route_agent_decision(
 
     telemetry = {
         "mode": "cascade",
+        "decision_provider": decision_provider,
         "source": "llm",
         "selected_agent": llm_selected,
         "clef_confidence": clef_confidence if clef_decision is not None else None,

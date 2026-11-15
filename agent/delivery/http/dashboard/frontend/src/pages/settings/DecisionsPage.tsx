@@ -137,7 +137,7 @@ export function DecisionsPage() {
                 <div style={{ display: "flex", "flex-direction": "column", gap: "4px" }}>
                   <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
                     <span style={{ "font-weight": "650", "font-size": "var(--font-size-base)" }}>
-                      Cloudflare Clef-flash Decision Engine
+                      Decision Model Engine
                     </span>
                     <span
                       style={{
@@ -149,16 +149,16 @@ export function DecisionsPage() {
                         "font-weight": "600",
                       }}
                     >
-                      Fast-path (~100-200ms)
+                      Fast-path routing
                     </span>
                   </div>
                   <div class="hint" style={{ "font-size": "0.75rem", "line-height": "1.5" }}>
-                    Clef-flash evaluates system state against typed schemas (choice, noul, score) returning calibrated
+                    The selected decision provider evaluates system state against typed schemas (choice, noul, score), returning calibrated
                     probabilities. In <strong>Cascade mode</strong>, queries with confidence above threshold are routed
-                    immediately with ultra-low latency and minimal cost ($0.09/M tokens), cascading to standard LLM only when ambiguous.
+                    immediately, cascading to the standard LLM when confidence is low or the decision provider fails.
                     <div class="mt-2">
                       <A href="/settings/providers?tab=decision" class="text-primary hover:underline text-xs inline-flex items-center gap-1 font-semibold">
-                        Configure Cloudflare Credentials in Decision Model Providers <ArrowRight size={12} />
+                        Configure Google or Cloudflare in Decision Model Providers <ArrowRight size={12} />
                       </A>
                     </div>
                   </div>

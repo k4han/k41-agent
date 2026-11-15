@@ -68,6 +68,7 @@ def _serialize_question_for_cf(q: BaseQuestion) -> dict[str, Any]:
 class CloudflareClefClient(DecisionClient):
     """Resilient asynchronous client for Cloudflare Workers AI Clef / Clef-flash models."""
 
+    provider_type = "cloudflare"
     DEFAULT_MODEL = "@cf/cloudflare/clef-flash"
     DEFAULT_BASE_URL = "https://api.cloudflare.com/client/v4"
 

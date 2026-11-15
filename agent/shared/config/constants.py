@@ -1126,7 +1126,7 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
     "decision.router.mode": {
         "type": "select",
         "options": ["llm_only", "clef_only", "shadow", "cascade"],
-        "description": "Agent routing strategy mode using Clef-flash and LLM.",
+        "description": "Agent routing strategy using the selected decision provider and LLM. clef_only uses the selected decision provider directly.",
         "category": "decision",
         "label": "Router Decision Strategy",
     },
@@ -1135,7 +1135,7 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "min": 0.0,
         "max": 1.0,
         "step": 0.05,
-        "description": "Confidence threshold to accept Clef fast-path routing.",
+        "description": "Confidence threshold to accept decision model fast-path routing.",
         "category": "decision",
         "label": "Cascade Confidence Threshold",
     },

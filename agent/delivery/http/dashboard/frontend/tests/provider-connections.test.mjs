@@ -45,6 +45,17 @@ test("connection detours keep independent drafts without sharing mutable objects
 
 const connections = await loadModule("../src/lib/providerConnections.ts");
 
+test("decision forms retain stored secrets unless explicitly replaced or cleared", () => {
+  const definitions = [{ name: "api_key", input_type: "password" }, { name: "model", input_type: "text" }];
+  const fields = { api_key: "", model: "gemini-decision-1" };
+  assert.deepEqual(connections.decisionProviderFields(fields, definitions, true, []), { model: "gemini-decision-1" });
+  assert.deepEqual(connections.decisionProviderFields(fields, definitions, true, ["api_key"]), fields);
+  assert.deepEqual(connections.decisionProviderFields(fields, definitions, false, []), fields);
+  assert.deepEqual(connections.decisionProviderFields({ ...fields, api_key: "new-key" }, definitions, true, ["api_key"]), {
+    api_key: "new-key", model: "gemini-decision-1",
+  });
+});
+
 test("provider names use the first free suffix without case collisions", () => {
   assert.equal(connections.suggestProviderName("google", []), "google");
   assert.equal(connections.suggestProviderName("google", ["Google", "GOOGLE-2"]), "google-3");
@@ -227,7 +238,7 @@ test("bidirectional contextual signposting between decisions and providers is pr
 
   const decisionsPage = await readFile(new URL("../src/pages/settings/DecisionsPage.tsx", import.meta.url), "utf8");
   assert.match(decisionsPage, /href="\/settings\/providers\?tab=decision"/);
-  assert.match(decisionsPage, /Configure Cloudflare Credentials in Decision Model Providers/);
+  assert.match(decisionsPage, /Configure Google or Cloudflare in Decision Model Providers/);
 });
 
 test("provider subpages harmonize page titles and breadcrumb roots", async () => {

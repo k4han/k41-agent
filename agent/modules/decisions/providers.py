@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, TYPE_CHECKING
 
 from agent.modules.decisions.cloudflare import CloudflareClefClient
+from agent.modules.decisions.google import GoogleDecisionClient
 from agent.modules.decisions.ports import DecisionClient
 
 if TYPE_CHECKING:
@@ -23,7 +24,18 @@ def _cloudflare_client(settings: DecisionSettings) -> DecisionClient | None:
     )
 
 
-CLIENT_FACTORIES: dict[str, ClientFactory] = {"cloudflare": _cloudflare_client}
+def _google_client(settings: DecisionSettings) -> DecisionClient | None:
+    api_key = str(settings.provider_fields.get("api_key", "")).strip()
+    if not api_key:
+        return None
+    return GoogleDecisionClient(
+        api_key=api_key, default_model=settings.model,
+        base_url=settings.provider_fields.get("base_url", GoogleDecisionClient.DEFAULT_BASE_URL),
+        timeout=settings.timeout, max_retries=settings.max_retries,
+    )
+
+
+CLIENT_FACTORIES: dict[str, ClientFactory] = {"cloudflare": _cloudflare_client, "google": _google_client}
 
 
 def register_decision_provider(kind: str, definition: dict[str, Any], factory: ClientFactory) -> None:

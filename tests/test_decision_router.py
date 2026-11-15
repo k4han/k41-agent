@@ -138,6 +138,50 @@ class _FakeGraph:
         return {"messages": [AIMessage(content=self.result_text)]}
 
 
+@pytest.mark.parametrize("mode,confidence,status,expected_source,expected_llm_calls", [
+    ("llm_only", 0.92, 200, "llm", 1),
+    ("clef_only", 0.92, 200, "google", 0),
+    ("shadow", 0.92, 200, "llm", 1),
+    ("cascade", 0.92, 200, "google", 0),
+    ("cascade", 0.6, 200, "llm", 1),
+    ("cascade", 0.92, 503, "llm", 1),
+])
+@pytest.mark.asyncio
+async def test_google_adapter_routes_and_preserves_fallback(monkeypatch, mode, confidence, status, expected_source, expected_llm_calls):
+    import json
+    from unittest.mock import AsyncMock
+    import httpx
+    from agent.modules.decisions import GoogleDecisionClient
+
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        payload = json.loads(request.content)
+        assert set(payload["questions"]["choice_q"]["criteria"]) == {"researcher", "coder"}
+        return httpx.Response(status, json={"answers": {"choice_q": {
+            "type": "choice", "choice": "researcher", "confidence": confidence,
+            "probabilities": {"researcher": confidence, "coder": 1 - confidence},
+        }}})
+
+    llm = AsyncMock(return_value="coder")
+    monkeypatch.setattr(router_module, "_route_agent_name", llm)
+    candidates = {name: _make_agent(name=name, graph_type="default") for name in ("researcher", "coder")}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as transport:
+        client = GoogleDecisionClient("google-key", client=transport, max_retries=0)
+        selected, telemetry = await router_module._route_agent_decision(
+            user_input="Research this topic", candidates=candidates, router_prompt_template="Route",
+            caller_agent_name="orchestrator", mode=mode, decision_client=client,
+        )
+    assert telemetry["source"] == expected_source
+    assert router_module.RouterTelemetry.model_validate(telemetry).source == expected_source
+    assert telemetry["decision_provider"] == (None if mode == "llm_only" else "google")
+    assert selected == ("researcher" if expected_source == "google" else "coder")
+    assert llm.await_count == expected_llm_calls
+    assert len(requests) == (0 if mode == "llm_only" else 1)
+    assert "clef_confidence" in telemetry
+
+
 @pytest.fixture
 def isolated_router_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(GraphRegistry, "_graphs", {})

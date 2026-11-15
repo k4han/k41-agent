@@ -96,7 +96,7 @@ async def get_dashboard_decisions_settings(request: Request) -> dict[str, Any]:
     return {
         "active_nav": "decisions",
         "page_title": "Decisions & Routing",
-        "page_subtitle": "Configure Cloudflare Clef-flash decision model and agent routing strategies.",
+        "page_subtitle": "Configure decision models and agent routing strategies.",
         "settings": settings,
         "by_category": group_settings_by_category(settings),
         "settings_sources": settings_sources,

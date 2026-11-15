@@ -12,6 +12,10 @@ from fastapi import APIRouter, HTTPException, Request
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.modules.decisions import (
+    DecisionAPIError, DecisionAuthenticationError, DecisionClientError,
+    DecisionTimeoutError, GoogleDecisionClient, NoulQuestion,
+)
 from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
 from agent.delivery.http.dashboard.routes.helpers.settings import delete_config_tree, update_config_settings
 from agent.delivery.http.dashboard.routes.helpers.urls import base_url_error
@@ -86,6 +90,40 @@ def find_provider(service: Any, name: str) -> dict[str, Any]:
     return entry
 
 
+async def _verify_google(fields: dict[str, Any]) -> dict[str, Any]:
+    """Probe the same Google adapter used by runtime decisions, without retries."""
+    started = time.perf_counter()
+    status_code = None
+    try:
+        fields = effective_fields({"type": "google", **validated_fields("google", fields)})
+        async with GoogleDecisionClient(
+            api_key=fields["api_key"], base_url=fields["base_url"], default_model=fields["model"],
+            timeout=min(fields["timeout"], 30.0), max_retries=0,
+        ) as client:
+            await client.evaluate("Connection test.", {"ping": NoulQuestion(instructions="Is this a connection test?")})
+        return {
+            "ok": True, "message": "Google decision provider verified successfully.",
+            "latency_ms": max(1, int((time.perf_counter() - started) * 1000)),
+            "error_code": None, "details": {"model": fields["model"]},
+        }
+    except (HTTPException, DecisionClientError, ValueError) as exc:
+        message = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        error_code = "INVALID_CONFIG"
+    except DecisionAuthenticationError as exc:
+        message, error_code, status_code = str(exc), "AUTH_FAILED", exc.status_code
+    except (DecisionTimeoutError, asyncio.TimeoutError):
+        message, error_code = "Connection timed out.", "TIMEOUT"
+    except DecisionAPIError as exc:
+        message, error_code, status_code = str(exc), "CONNECTION_ERROR", exc.status_code
+    except Exception:
+        message, error_code = "Could not verify Google decision provider.", "CONNECTION_ERROR"
+    return {
+        "ok": False, "message": message,
+        "latency_ms": max(1, int((time.perf_counter() - started) * 1000)),
+        "error_code": error_code, "details": {"status_code": status_code} if status_code is not None else None,
+    }
+
+
 @router.get("/dashboard-api/decision-providers")
 async def list_providers(request: Request) -> dict[str, Any]:
     return provider_payload(get_request_config_service(request))
@@ -145,6 +183,8 @@ async def verify_decision_provider(body: VerifyDecisionBody, request: Request) -
         }
 
     definition = DECISION_PROVIDERS[prov_type]
+    if prov_type == "google":
+        return await _verify_google(fields)
     if prov_type != "cloudflare":
         missing = [
             field["label"]

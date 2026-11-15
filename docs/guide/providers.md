@@ -53,3 +53,34 @@ capabilities, tool support, and endpoint behavior depend on that service.
 The Providers area also contains settings for **Search & Web**, **Execution
 Environments**, and the **Decision Model**. These are separate from adding the
 LLM provider needed for your first conversation.
+
+## Google Decisions
+
+Google Decisions evaluates text or JSON using `gemini-decision-1`. It supports
+yes/no probabilities (`noul`), categorical choices (`choice`), and ordered rubric
+scores (`score`). See the [Google Decisions API documentation](https://aistudio.google.com/docs/decisions-api).
+
+1. Open **Settings > Providers > Decision Model** and add **Google Gemini Decisions**.
+2. Enter a configuration name and a Gemini API key. If the key is blank, the
+   runtime checks `GEMINI_API_KEY`, then `GOOGLE_API_KEY`.
+3. Keep the default model `gemini-decision-1` and base URL
+   `https://generativelanguage.googleapis.com/v1beta`, or supply a compatible endpoint.
+4. Use **Test Connection** to run a small inference request, then save.
+5. Choose the saved configuration as the default decision provider.
+
+Creating a configuration does not change the current default. Google decision
+credentials are managed separately from chat model credentials. Stored keys are
+encrypted and are not returned by the dashboard APIs.
+
+Configure routing mode and confidence thresholds under **Settings > Decisions &
+Routing**. The existing `clef_only` mode uses whichever decision provider is
+selected; `cascade` falls back to the chat model on low confidence or provider
+errors. Changing the default applies to subsequent decisions without interrupting
+requests already in flight. Existing Cloudflare configurations remain available.
+
+The adapter uses the existing `DecisionClient` interface. Dictionary states are
+serialized to JSON text in Google's `input` field. `noul` thresholds are applied
+locally; token usage and score legends remain available in `DecisionResult.raw_response`.
+Google-specific limits are validated before sending requests, including 2–255
+choice options or score levels. Images, PDFs, audio, and video are not supported
+by this integration yet.

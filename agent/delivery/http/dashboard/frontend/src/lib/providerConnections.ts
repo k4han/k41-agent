@@ -8,3 +8,14 @@ export function suggestProviderName(providerId: string, existingNames: string[],
   while (occupied.has(normalize(candidate))) candidate = `${base}-${suffix++}`;
   return candidate;
 }
+
+export function decisionProviderFields(
+  fields: Record<string, string | number>,
+  definitions: Array<{ name: string; input_type: string }>,
+  editing: boolean,
+  replacedSecrets: string[],
+): Record<string, string | number> {
+  return Object.fromEntries(definitions
+    .filter((field) => field.input_type !== "password" || !editing || replacedSecrets.includes(field.name))
+    .map((field) => [field.name, fields[field.name]]));
+}

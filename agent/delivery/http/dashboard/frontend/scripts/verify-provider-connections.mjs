@@ -31,11 +31,18 @@ const aiConnections = [];
 let aiDefault = '';
 let chatgptManualMode = false;
 const decisionConnections = [];
+const decisionSecrets = new Map();
 let decisionDefault = '';
 const decisionServices = [{ type: 'cloudflare', label: 'Cloudflare', fields: [
   { name: 'account_id', label: 'Account ID', input_type: 'text', required: true },
   { name: 'api_token', label: 'API Token', input_type: 'password', required: true },
   { name: 'model', label: 'Model', input_type: 'text', required: true, default: '@cf/cloudflare/clef-flash' },
+  { name: 'timeout', label: 'Timeout', input_type: 'number', min: 0.1, default: 5 },
+  { name: 'max_retries', label: 'Retries', input_type: 'number', min: 0, step: 1, default: 2 },
+] }, { type: 'google', label: 'Google Gemini Decisions', fields: [
+  { name: 'api_key', label: 'API Key', input_type: 'password', required: true },
+  { name: 'model', label: 'Model', input_type: 'text', required: true, default: 'gemini-decision-1' },
+  { name: 'base_url', label: 'Base URL', input_type: 'url', default: 'https://generativelanguage.googleapis.com/v1beta' },
   { name: 'timeout', label: 'Timeout', input_type: 'number', min: 0.1, default: 5 },
   { name: 'max_retries', label: 'Retries', input_type: 'number', min: 0, step: 1, default: 2 },
 ] }];
@@ -120,11 +127,21 @@ const server = http.createServer(async (req, res) => {
       aiDefault = submitted.value;
       res.end('{"status":"success"}'); return;
     }
+    if (url.pathname === '/dashboard-api/decision-providers/verify') {
+      const entry = decisionConnections.find(item => item.name === submitted.name);
+      const secretField = (submitted.type || entry?.type) === 'google' ? 'api_key' : 'api_token';
+      const key = Object.hasOwn(submitted.fields || {}, secretField) ? submitted.fields[secretField] : decisionSecrets.get(submitted.name);
+      res.end(JSON.stringify({ ok: !!key, message: key ? 'Connected' : 'API key required', latency_ms: 12 })); return;
+    }
     if (url.pathname === '/dashboard-api/decision-providers') {
       if (req.method === 'POST') {
         if (decisionConnections.some(item => item.name.toLowerCase() === submitted.name.toLowerCase())) { res.statusCode = 409; res.end('{"detail":"Provider already exists."}'); return; }
-        const { api_token, ...fields } = submitted.fields;
-        decisionConnections.push({ name: submitted.name, type: submitted.type, fields, has_api_token: !!api_token, configured: !!api_token && !!fields.account_id, is_default: false });
+        const { api_token, api_key, ...fields } = submitted.fields;
+        const secretField = submitted.type === 'google' ? 'api_key' : 'api_token';
+        const key = submitted.type === 'google' ? api_key : api_token;
+        decisionSecrets.set(submitted.name, key);
+        decisionConnections.push({ name: submitted.name, type: submitted.type, fields, has_api_token: !!api_token,
+          stored_secrets: { [secretField]: !!key }, configured: !!key && (submitted.type === 'google' || !!fields.account_id), is_default: false });
         res.end(JSON.stringify({ status: 'created', name: submitted.name }));
       } else res.end(JSON.stringify({ providers: decisionConnections, services: decisionServices, default_provider: decisionDefault }));
       return;
@@ -136,9 +153,14 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname.startsWith('/dashboard-api/decision-providers/') && req.method === 'PUT') {
       const entry = decisionConnections.find(item => item.name === decodeURIComponent(url.pathname.split('/').pop()));
-      const { api_token, ...fields } = submitted.fields;
+      const { api_token, api_key, ...fields } = submitted.fields;
       Object.assign(entry.fields, fields);
       if ('api_token' in submitted.fields) entry.has_api_token = !!api_token;
+      const secretField = entry.type === 'google' ? 'api_key' : 'api_token';
+      if (secretField in submitted.fields) {
+        decisionSecrets.set(entry.name, submitted.fields[secretField]);
+        entry.stored_secrets[secretField] = !!submitted.fields[secretField];
+      }
       res.end('{"status":"updated"}'); return;
     }
     if (url.pathname === '/dashboard-api/web-connections') {
@@ -250,7 +272,7 @@ try {
   await js('Array.from(document.querySelectorAll("[role=tab]")).find(t => t.textContent.includes("Models")).click()');
   await until(() => js('new URLSearchParams(location.search).get("tab") === "llm"'), 'confirmed tab change');
   assert.equal(dialogs, 2);
-  for (const [group, provider] of [['llm', 'google'], ['web', 'tavily'], ['decision', 'cloudflare']]) {
+  for (const [group, provider] of [['llm', 'google'], ['web', 'tavily'], ['decision', 'cloudflare'], ['decision', 'google']]) {
     await navigate(`/settings/providers?tab=${group}`);
     await until(() => js(`!!document.querySelector('[data-provider-id="${provider}"]')`), `${group} provider picker`);
     for (const expected of [provider, `${provider}-2`]) {
@@ -298,6 +320,22 @@ try {
   await js(`(() => { const key = document.querySelector('form input[type=password]'); key.value = 'new-token'; key.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('form').requestSubmit(); })()`);
   await until(() => js('!document.querySelector("form")'), 'decision edit saved');
   assert.equal(writes.findLast(write => write.path.endsWith('/cloudflare-2')).body.fields.api_token, 'new-token');
+  await navigate('/settings/providers?tab=decision');
+  await until(() => js('!!document.querySelector("[data-connection-name=google]")'), 'Google decision saved');
+  await js(`document.querySelector('button[aria-label="Edit google"]').click()`);
+  await until(() => js('!!document.querySelector("form")'), 'Google decision edit');
+  assert.equal(await js('!!document.querySelector("form input[type=password]")'), false);
+  await js('Array.from(document.querySelectorAll("form button")).find(button => button.textContent.trim() === "Test Connection").click()');
+  await until(() => js('!!document.querySelector("form .connection-latency-badge")'), 'Google stored key verified');
+  assert.equal(Object.hasOwn(writes.findLast(write => write.path.endsWith('/verify')).body.fields, 'api_key'), false);
+  await js('document.querySelector("form input[type=checkbox]").click()');
+  await until(() => js('!!document.querySelector("form input[type=password]")'), 'Google key replacement');
+  await js(`(() => { const key = document.querySelector('form input[type=password]'); key.value = 'new-google-key'; key.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('form').requestSubmit(); })()`);
+  await until(() => js('!document.querySelector("form")'), 'Google decision key saved');
+  assert.equal(decisionSecrets.get('google'), 'new-google-key');
+  await js(`document.querySelector('button[aria-label="Set google as default"]').click()`);
+  await until(() => js(`document.querySelector('button[aria-label="Set google as default"]')?.getAttribute('aria-pressed') === 'true'`), 'Google decision selected default');
+  assert.equal(decisionDefault, 'google');
   await navigate('/settings/providers?tab=llm');
   await until(() => js('!!document.querySelector("[data-connection-name=google-2]")'), 'AI edit action');
   await js(`document.querySelector('button[aria-label="Edit google-2"]').click()`);

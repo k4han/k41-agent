@@ -289,7 +289,7 @@ def _resolve_decision_client(
     except Exception as exc:
         logger.debug("Failed resolving decision client from container: %s", exc)
 
-    # 2. Check settings / ConfigService for Cloudflare provider
+    # 2. Check settings / ConfigService for the selected provider
     try:
         from agent.shared.config import get_config_service
         config_service = get_config_service()
@@ -346,7 +346,7 @@ async def _decide_candidate_files_clef(
     directory_tree: str,
     max_candidates: int = 8,
 ) -> list[str]:
-    """Use Cloudflare Clef evaluate_choice to rank candidate files."""
+    """Use the selected decision provider to rank candidate files."""
     if not file_paths:
         return []
 
@@ -388,7 +388,7 @@ async def _decide_file_inclusion_clef(
     file_path: str,
     file_content: str,
 ) -> FileInclusionDecision:
-    """Use Cloudflare Clef evaluate_noul to decide whether to include a file."""
+    """Use the selected decision provider to decide whether to include a file."""
     instructions = FILE_INCLUSION_INSTRUCTIONS
     state = (
         f"User Request: {user_input}\n"
@@ -402,7 +402,7 @@ async def _decide_file_inclusion_clef(
     )
     return FileInclusionDecision(
         should_include=noul_ans.decision,
-        reasoning=f"Cloudflare Clef decision (confidence: {noul_ans.confidence:.2f}, noul: {noul_ans.noul:.2f})",
+        reasoning=f"Decision model evaluation (confidence: {noul_ans.confidence:.2f}, noul: {noul_ans.noul:.2f})",
         use_full_content=True,
     )
 
@@ -585,14 +585,14 @@ async def decision_node(
         max_depth=max_tree_depth,
     )
 
-    # 1. Check for dedicated Cloudflare DecisionClient
+    # 1. Check for a dedicated decision provider
     decision_client = _resolve_decision_client(config=config)
-    decision_source = "cloudflare" if decision_client is not None else "llm"
+    decision_source = getattr(decision_client, "provider_type", "cloudflare") if decision_client is not None else "llm"
 
     candidate_files: list[str] = []
     if decision_client is not None:
         try:
-            logger.info("Using Cloudflare DecisionClient (%s) for file selection", type(decision_client).__name__)
+            logger.info("Using %s DecisionClient (%s) for file selection", decision_source, type(decision_client).__name__)
             all_files = extract_file_paths(workspace_dir, max_files=40)
             candidate_files = await _decide_candidate_files_clef(
                 client=decision_client,
@@ -602,7 +602,7 @@ async def decision_node(
                 max_candidates=max_candidates,
             )
         except Exception as exc:
-            logger.warning("Cloudflare Clef file selection failed, cascading to LLM fallback: %s", exc)
+            logger.warning("Decision model file selection failed, cascading to LLM fallback: %s", exc)
             decision_client = None
             decision_source = "llm_cascade"
 
@@ -652,7 +652,7 @@ async def decision_node(
             elif isinstance(result, BaseException) and not isinstance(result, Exception):
                 raise result
             else:
-                logger.debug("Cloudflare Clef inclusion failed for %s: %s", path, result)
+                logger.debug("Decision model inclusion failed for %s: %s", path, result)
     elif files and resolved is not None:
         async def evaluate(candidate):
             kwargs = get_workflow_reasoning_effort_kwargs(

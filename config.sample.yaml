@@ -93,6 +93,11 @@ security:
 # Existing channel values in config.yaml are copied into the database once when
 # the runtime database source is attached, but new edits should be made there.
 
+# Google and Cloudflare decision providers are configured in the dashboard at
+# Settings > Providers > Decision Model. Google defaults to gemini-decision-1;
+# an empty API key falls back to GEMINI_API_KEY, then GOOGLE_API_KEY.
+# Save and select a default provider to enable it for decision workflows.
+
 # Security (optional)
 # persistence:
 #   allow_any_path: false  # Set to true to allow database outside ~/.k41-agent/

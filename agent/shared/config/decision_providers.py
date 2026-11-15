@@ -8,6 +8,16 @@ from typing import Any
 
 MIGRATION_KEY = "decision.migration_version"
 DECISION_PROVIDERS: dict[str, dict[str, Any]] = {
+    "google": {
+        "label": "Google Gemini Decisions",
+        "fields": [
+            {"name": "api_key", "label": "API Key", "input_type": "password", "required": True},
+            {"name": "base_url", "label": "Base URL", "input_type": "url", "default": "https://generativelanguage.googleapis.com/v1beta"},
+            {"name": "model", "label": "Model", "input_type": "text", "required": True, "default": "gemini-decision-1"},
+            {"name": "timeout", "label": "Timeout (seconds)", "input_type": "number", "min": 0.1, "default": 5.0},
+            {"name": "max_retries", "label": "Maximum retries", "input_type": "number", "min": 0, "step": 1, "default": 2},
+        ],
+    },
     "cloudflare": {
         "label": "Cloudflare",
         "fields": [
@@ -53,6 +63,8 @@ def effective_fields(entry: dict[str, Any]) -> dict[str, Any]:
             value = field.get("default", "")
             if entry["type"] == "cloudflare" and name in ENV_FIELDS:
                 value = os.environ.get(ENV_FIELDS[name], "").strip()
+            elif entry["type"] == "google" and name == "api_key":
+                value = os.environ.get("GEMINI_API_KEY", "").strip() or os.environ.get("GOOGLE_API_KEY", "").strip()
         fields[name] = value
     return fields
 
