@@ -28,6 +28,7 @@ from agent.modules.workflows.checkpoint.queries import (
 )
 from agent.modules.workflows.prompt_builders import (
     build_llm_system_prompt,
+    estimate_thread_prompt_breakdown,
     get_system_default_variables,
     replace_known_prompt_placeholders,
     resolve_prompt_variables,
@@ -155,7 +156,7 @@ async def _delete_workflow_thread_tree_reserved(thread_id: str) -> None:
     from agent.modules.browser import delete_thread_browsers
     from agent.modules.tools import clear_conversation_storage
     from agent.modules.workflows.checkpoint.store import get_checkpointer
-    from agent.modules.agent_runtime.async_subagents import active_async_subagent_service
+    from agent.modules.agent_runtime import active_async_subagent_service
 
     subagents = active_async_subagent_service()
     async_child_ids = []
@@ -227,6 +228,7 @@ __all__ = [
     "REACT_AGENT_GRAPH_TYPE",
     "ROUTER_GRAPH_TYPE",
     "build_llm_system_prompt",
+    "estimate_thread_prompt_breakdown",
     "get_system_default_variables",
     "replace_known_prompt_placeholders",
     "resolve_prompt_variables",

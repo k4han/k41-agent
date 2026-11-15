@@ -535,7 +535,7 @@ async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
     # the chat stream session directly guarantees the LLM stream actually stops.
     target_thread_id = resolved_thread_id or (str(thread_id) if thread_id else None)
     if target_thread_id:
-        from agent.modules.agent_runtime.async_subagents import active_async_subagent_service
+        from agent.modules.agent_runtime import active_async_subagent_service
         subagents = active_async_subagent_service()
         if subagents is not None:
             success = await subagents.cancel_tree(target_thread_id) or success

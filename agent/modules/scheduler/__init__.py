@@ -7,6 +7,13 @@ from agent.modules.scheduler.history import (
     list_runs,
 )
 from agent.modules.scheduler.models import SchedulerJobRun
+from agent.modules.scheduler.executions import (
+    cancel_run,
+    notify_run,
+    resume_run,
+    settle_run,
+    waiting_run,
+)
 from agent.modules.scheduler.service import (
     initialize_scheduler,
     stop_scheduler,
@@ -25,6 +32,11 @@ from agent.modules.scheduler.triggers import (
 )
 
 __all__ = [
+    "cancel_run",
+    "notify_run",
+    "resume_run",
+    "settle_run",
+    "waiting_run",
     "DEFAULT_RUN_LIST_LIMIT",
     "MAX_RUN_LIST_LIMIT",
     "TRIGGER_SOURCE_MANUAL",

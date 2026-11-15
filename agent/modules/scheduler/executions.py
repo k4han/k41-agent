@@ -6,8 +6,7 @@ import time
 
 from sqlalchemy import select, update
 
-from agent.modules.agent_runtime.async_subagents.models import SubagentExecutionRecord as Execution
-from agent.modules.agent_runtime.async_subagents.repository import encode, job_dict
+from agent.modules.agent_runtime import SubagentExecutionRecord as Execution, encode, job_dict
 from agent.modules.scheduler.history import MAX_STORED_TEXT_LEN
 from agent.modules.scheduler.models import SchedulerJobRun
 from agent.shared.async_subagents import LIVE_STATUSES, request_key
@@ -115,7 +114,7 @@ async def waiting_run(service, thread_id, owner_id, *, strict=False):
 
 
 async def resume_run(service, run_id, interrupt_id, payload, owner_id):
-    from agent.modules.agent_runtime.runner import _normalize_human_resume_payload, _validate_human_resume_payload
+    from agent.modules.agent_runtime import _normalize_human_resume_payload, _validate_human_resume_payload
     from agent.modules.workflows import get_workflow_graph
 
     normalized = _normalize_human_resume_payload(payload)
@@ -149,7 +148,7 @@ async def resume_run(service, run_id, interrupt_id, payload, owner_id):
             raise ValueError("The response type does not match the pending request.")
         context = job["context"]
         if normalized.action == "approve":
-            from agent.modules.agent_runtime.runner import _resolve_agent_name_for_resume
+            from agent.modules.agent_runtime import _resolve_agent_name_for_resume
             selected = _resolve_agent_name_for_resume(service.container.agent_catalog_service,
                 context["agent_name"], normalized, source_agent_name=context["agent_name"])
             context = {**context, "agent_name": selected,

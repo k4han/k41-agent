@@ -104,7 +104,7 @@ async def prepare_model_context(
     threshold = override if override is not None else getattr(agent_config, "context_compact_threshold", DEFAULT_CONTEXT_COMPACT_THRESHOLD)
     target_budget = model_input_budget(resolved, threshold)
     hard_budget = model_input_budget(resolved)
-    from agent.modules.skills.context import model_skill_history
+    from agent.modules.skills import model_skill_history
 
     current = model_skill_history(history, active_skills) if active_skills is not None else history
 

@@ -213,8 +213,8 @@ def _ensure_chat_agent_available(agent_name: str | None) -> None:
 
 async def check_scheduled_chat(thread_id: str | None, owner_id: str, *, allow_managed_resume=False):
     """Keep chat requests from bypassing the scheduled execution queue."""
-    from agent.modules.agent_runtime.async_subagents import active_async_subagent_service
-    from agent.modules.scheduler.executions import waiting_run
+    from agent.modules.agent_runtime import active_async_subagent_service
+    from agent.modules.scheduler import waiting_run
 
     managed = active_async_subagent_service()
     if not thread_id or managed is None or not managed.container._persistence_ready:

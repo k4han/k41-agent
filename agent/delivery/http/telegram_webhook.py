@@ -11,7 +11,7 @@ from agent.shared.config import get_config_service
 if TYPE_CHECKING:
     from aiogram.types import Update
 
-    from agent.modules.channels.telegram.bot import TelegramWebhookRuntime
+    from agent.modules.channels import TelegramWebhookRuntime
 
 router = APIRouter(tags=["telegram"])
 logger = logging.getLogger(__name__)

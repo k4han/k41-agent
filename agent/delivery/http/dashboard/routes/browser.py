@@ -19,7 +19,7 @@ from agent.bootstrap.browser import find_browser, installation_unavailable_reaso
 from agent.bootstrap.browser_setup import BrowserSetupBusyError, BrowserSetupManager
 from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
 from agent.modules.admin_auth import get_current_admin
-from agent.modules.agent_runtime.async_subagents import get_async_subagent_service
+from agent.modules.agent_runtime import get_async_subagent_service
 from agent.modules.browser import BrowserAccessDenied, BrowserError, CDPViewer
 from agent.delivery.http.dashboard.routes.helpers.browser_stream import SEND_TIMEOUT, BrowserStreamState, stream_tab
 
@@ -199,7 +199,7 @@ async def status(thread_id: str, admin: str = Depends(get_current_admin), browse
     result = await checked(browser.status(thread_id, owner(admin)))
     result["pending_handoffs"] = await get_async_subagent_service(browser.container).repository.browser_handoffs(
         browser.canonical(thread_id), owner(admin))
-    from agent.modules.scheduler.executions import waiting_run
+    from agent.modules.scheduler import waiting_run
     result["scheduled_run"] = await waiting_run(get_async_subagent_service(browser.container), browser.canonical(thread_id), owner(admin))
     return result
 

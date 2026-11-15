@@ -433,7 +433,7 @@ class AppContainer:
     def async_subagents(self) -> Any:
         """Lazily own durable subagents for this application lifetime."""
         if self._async_subagents is None:
-            from agent.modules.agent_runtime.async_subagents.service import AsyncSubagentService
+            from agent.modules.agent_runtime import AsyncSubagentService
 
             self._async_subagents = AsyncSubagentService(self)
         return self._async_subagents

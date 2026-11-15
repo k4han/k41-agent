@@ -241,12 +241,14 @@ class TestToolResolver:
     def test_default_agent_respects_its_config(self) -> None:
         from agent.modules.agents import get_catalog_service
         from agent.modules.agents.repository import load_agents_from_dir
+        from agent.modules.tools.policy import ASYNC_TOOL_NAMES
         load_agents_from_dir()
         config = get_catalog_service().get_agent("default")
         tools = resolve_tools_for_agent("default")
         expected = set(config.tools) - {"delegate_task"}
         if get_catalog_service().get_callable_agents("default"):
             expected.add("delegate_task")
+            expected.update(ASYNC_TOOL_NAMES)
         assert {tool.name for tool in tools} == expected
 
     def test_resolver_uses_policy_for_filtering(self, monkeypatch) -> None:

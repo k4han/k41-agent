@@ -29,7 +29,7 @@ from agent.modules.tools.config import (
     serialize_tool_config_schemas,
     ToolConfigService,
 )
-from agent.modules.tools.policy import ACP_UNAVAILABLE_TOOL_NAMES, ToolPolicy, browser_batch_error, is_browser_tool
+from agent.modules.tools.policy import ACP_UNAVAILABLE_TOOL_NAMES, ToolPolicy, browser_batch_error, is_browser_tool, tools_for_run
 from agent.modules.tools.coding.names import TOOL_ALIASES, canonical_tool_names
 from agent.modules.tools.sources.builtin import BuiltinToolSource
 from agent.modules.tools.registry_service import (
@@ -221,6 +221,7 @@ __all__ = [
     "ToolError",
     "ToolErrorCode",
     "ToolPolicy",
+    "tools_for_run",
     "browser_batch_error",
     "is_browser_tool",
     "ToolRegistryService",

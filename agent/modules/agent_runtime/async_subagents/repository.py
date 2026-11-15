@@ -245,7 +245,7 @@ class AsyncSubagentRepository:
                 task.status, task.active_job_id, task.updated_at = "running", job_id, now
                 task.version += 1
             if row.kind == "scheduled":
-                from agent.modules.scheduler.models import SchedulerJobRun
+                from agent.modules.scheduler import SchedulerJobRun
                 await session.execute(update(SchedulerJobRun).where(SchedulerJobRun.run_id == job_id)
                     .values(status="running"))
             return job_dict(row)
@@ -276,7 +276,7 @@ class AsyncSubagentRepository:
                 return None
             row.status, row.error, row.lease_until, row.updated_at = status, error, 0, time.time()
             if row.kind == "scheduled":
-                from agent.modules.scheduler.executions import settle_run
+                from agent.modules.scheduler import settle_run
                 return await settle_run(session, row, status, result=result, error=error, context=context)
             if not row.task_id:
                 return None
@@ -381,7 +381,7 @@ class AsyncSubagentRepository:
             scheduled = list((await session.scalars(select(Execution.job_id).where(job_scope,
                 Execution.kind == "scheduled", Execution.status.in_(LIVE_STATUSES)))).all())
             if scheduled:
-                from agent.modules.scheduler.models import SchedulerJobRun
+                from agent.modules.scheduler import SchedulerJobRun
                 from agent.shared.infrastructure.db import utcnow
                 await session.execute(update(SchedulerJobRun).where(SchedulerJobRun.run_id.in_(scheduled))
                     .values(status="cancelled", error="Task was cancelled.", finished_at=utcnow()))

@@ -1,6 +1,7 @@
 """Public interface for the channels module."""
 
 from agent.modules.channels.diagnostics import TestResult, test_channel_connection
+from agent.modules.channels.telegram.bot import TelegramWebhookRuntime
 from agent.modules.channels.contracts import (
     ChannelSettingField,
     ChannelSettingSection,
@@ -52,6 +53,7 @@ from agent.modules.channels.models import BotSettings
 from agent.modules.channels.zalo import handle_zalo_update
 
 __all__ = [
+    "TelegramWebhookRuntime",
     "BUILTIN_CHANNEL_DESCRIPTORS",
     "BUILTIN_CHANNEL_SPECS",
     "BotSettings",

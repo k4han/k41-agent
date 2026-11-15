@@ -194,7 +194,7 @@ async def tool_node(
         agent_name,
         override_tool_names=allowed_tool_names,
     )
-    from agent.modules.tools.policy import tools_for_run
+    from agent.modules.tools import tools_for_run
     tools = tools_for_run(tools, config)
     workspace = get_runtime_context_value(runtime.context, "workspace", None)
     if workspace is None:

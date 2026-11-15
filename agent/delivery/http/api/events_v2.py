@@ -30,7 +30,7 @@ from agent.modules.agent_runtime import (
     run_agent_protocol_stream,
 )
 from agent.shared.thread_ids import resolve_thread_id
-from agent.modules.agent_runtime.async_subagents import get_async_subagent_service, active_async_subagent_service
+from agent.modules.agent_runtime import get_async_subagent_service, active_async_subagent_service
 from agent.shared.async_subagents import request_key
 from agent.modules.tools import HumanResumePayload
 
@@ -66,7 +66,7 @@ def stream_response(request: Request, session=None, *, after_seq=0):
 async def chat_events(request: ChatRequest, http_request: Request, admin: str = Depends(get_current_admin)):
     params = await prepare_run_params(request, browser_owner_id=f"admin:{admin}")
     thread_id = str(params["thread_id"])
-    from agent.modules.scheduler.executions import resume_run
+    from agent.modules.scheduler import resume_run
     managed = active_async_subagent_service()
     scheduled = await check_scheduled_chat(thread_id, f"admin:{admin}", allow_managed_resume=True)
     if scheduled:

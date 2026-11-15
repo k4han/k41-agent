@@ -38,8 +38,13 @@ def _run_context(context) -> dict:
     keys = ("agent_name", "provider", "model", "reasoning_effort", "permission_mode",
             "allowed_tool_names", "allowed_skill_names", "context_compact_threshold",
             "channel_context_trim_threshold", "browser_owner_id")
-    values = {key: getattr(context, key, None) for key in keys}
-    values["workspace"] = context.workspace.model_dump()
+    if isinstance(context, dict):
+        values = {key: context.get(key) for key in keys}
+        workspace = context.get("workspace")
+    else:
+        values = {key: getattr(context, key, None) for key in keys}
+        workspace = getattr(context, "workspace", None)
+    values["workspace"] = workspace.model_dump() if hasattr(workspace, "model_dump") else (workspace if isinstance(workspace, dict) else None)
     return values
 
 
@@ -93,7 +98,7 @@ class AsyncSubagentService:
             raise PermissionError(f"Agent '{caller}' is not allowed to call '{target}'.")
 
     async def submit(self, *, task: str, sub_agent: str, runtime) -> dict:
-        from agent.modules.tools.coding.adapter import invocation_context
+        from agent.modules.tools import invocation_context
         from agent.modules.usage import usage_context_from_config
 
         config = runtime.config
@@ -241,7 +246,7 @@ class AsyncSubagentService:
     async def _finish_job(self, job, status, **values):
         result = await self.repository.finish(job, status, **values)
         if result and result.get("execution_kind") == "scheduled":
-            from agent.modules.scheduler.executions import notify_run
+            from agent.modules.scheduler import notify_run
             await notify_run(result)
         return result
 

@@ -52,7 +52,7 @@ async def skill(
                     thread_id=get_thread_id(runtime.config) or "", agent_name=agent_name, allowed_names=allowed_names))
                 loaded["context_call_id"] = runtime.tool_call_id
             if not loaded.get("context_call_id"):
-                from agent.modules.skills.context import bind_skill_context
+                from agent.modules.skills import bind_skill_context
                 loaded = bind_skill_context({key: loaded}, getattr(runtime, "state", {}).get("messages", []))[key]
         except PermissionError as exc:
             raise ToolError(ToolErrorCode.PERMISSION_DENIED, str(exc)) from exc

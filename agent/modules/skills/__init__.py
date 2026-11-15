@@ -252,7 +252,7 @@ def __getattr__(name: str):
     if name == "WorkspacePackageIO":
         from agent.modules.skills.package_io import WorkspacePackageIO
         return WorkspacePackageIO
-    if name in {"activation_key", "active_context", "model_skill_history", "skill_commands", "skill_events"}:
+    if name in {"activation_key", "active_context", "model_skill_history", "skill_commands", "skill_events", "bind_skill_context", "is_skill_instruction"}:
         from agent.modules.skills import context
         return getattr(context, name)
     if name in {"SkillSource", "SkillPackageSummary", "SkillResource", "SkillDiagnostic", "ActivatedSkill"}:
@@ -269,7 +269,7 @@ def __getattr__(name: str):
 
 __all__ = [
     "skill_workspace_key",
-    "SkillPackages", "WorkspacePackageIO", "activation_key", "active_context", "model_skill_history", "skill_commands", "skill_events",
+    "SkillPackages", "WorkspacePackageIO", "activation_key", "active_context", "model_skill_history", "skill_commands", "skill_events", "bind_skill_context", "is_skill_instruction",
     "SkillSource", "SkillPackageSummary", "SkillResource", "SkillDiagnostic", "ActivatedSkill",
     "get_skill_packages", "validate_skill_document",
     "Skill",

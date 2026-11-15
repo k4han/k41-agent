@@ -12,6 +12,9 @@ from agent.modules.agent_runtime.active_sessions import (
 def get_active_session_registry(*args, **kwargs) -> ActiveSessionRegistry:
     return active_sessions.get_active_session_registry(*args, **kwargs)
 from agent.modules.agent_runtime.runner import (
+    _normalize_human_resume_payload,
+    _validate_human_resume_payload,
+    _resolve_agent_name_for_resume,
     resolve_approval_supported,
     build_run_params,
     clear_agent_session,
@@ -52,12 +55,34 @@ from agent.modules.agent_runtime.delegation import (
     enrich_delegated_calls,
     get_subagent_history,
 )
+
+from agent.modules.agent_runtime.async_subagents import (
+    SubagentExecutionRecord,
+    SubagentNotificationRecord,
+    SubagentTaskRecord,
+    get_async_subagent_service,
+    active_async_subagent_service,
+)
+from agent.modules.agent_runtime.async_subagents.service import AsyncSubagentService
+from agent.modules.agent_runtime.async_subagents.repository import encode, job_dict
+
 from agent.modules.agent_runtime.input_messages import (
     DEFAULT_IMAGE_PROMPT,
     MISSING_IMAGE_PROMPT,
 )
 
 __all__ = [
+    "SubagentExecutionRecord",
+    "SubagentNotificationRecord",
+    "SubagentTaskRecord",
+    "get_async_subagent_service",
+    "active_async_subagent_service",
+    "AsyncSubagentService",
+    "encode",
+    "job_dict",
+    "_normalize_human_resume_payload",
+    "_validate_human_resume_payload",
+    "_resolve_agent_name_for_resume",
     "ActiveSession",
     "ActiveSessionRegistry",
     "ThreadMutationConflictError",

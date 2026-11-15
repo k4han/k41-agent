@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowContext]):
     """Dynamic node: reads agent_name from context, resolves full config at runtime."""
     from agent.modules.agents import get_catalog_service
-    from agent.modules.agent_runtime.async_subagents import active_async_subagent_service
-    from agent.modules.tools.policy import tools_for_run
+    from agent.modules.agent_runtime import active_async_subagent_service
+    from agent.modules.tools import tools_for_run
 
     notification_updates = {}
     subagents = active_async_subagent_service()

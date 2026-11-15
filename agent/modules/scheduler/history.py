@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _delete_executions(session, run_ids):
-    from agent.modules.agent_runtime.async_subagents.models import SubagentExecutionRecord
+    from agent.modules.agent_runtime import SubagentExecutionRecord
     await session.execute(delete(SubagentExecutionRecord).where(
         SubagentExecutionRecord.kind == "scheduled", SubagentExecutionRecord.job_id.in_(run_ids),
         SubagentExecutionRecord.status.not_in(LIVE_STATUSES)))
@@ -161,7 +161,7 @@ async def mark_interrupted_runs() -> int:
     """Close runs left in ``running`` state by a previous process."""
     session = await get_async_session()
     async with session:
-        from agent.modules.agent_runtime.async_subagents.models import SubagentExecutionRecord
+        from agent.modules.agent_runtime import SubagentExecutionRecord
         recoverable = select(SubagentExecutionRecord.job_id).where(
             SubagentExecutionRecord.kind == "scheduled", SubagentExecutionRecord.status.in_(LIVE_STATUSES))
         result = await session.execute(

@@ -10,7 +10,7 @@ from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command
 
-from agent.modules.agent_runtime.async_subagents import get_async_subagent_service
+from agent.modules.agent_runtime import get_async_subagent_service
 from agent.shared.async_subagents import is_subagent_run, request_key, task_reference
 from agent.modules.tools.decorators import register_tool
 from agent.modules.tools.domain import ToolCapability, ToolCategory

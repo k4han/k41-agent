@@ -40,7 +40,7 @@ def estimate_context_breakdown(
         elif isinstance(message, HumanMessage):
             result["user_messages"] += count_tokens_approximately([message])
         elif isinstance(message, ToolMessage):
-            from agent.modules.skills.context import is_skill_instruction
+            from agent.modules.skills import is_skill_instruction
 
             result["skills" if is_skill_instruction(message) else "tool_calls"] += count_tokens_approximately([message])
         elif isinstance(message, AIMessage):

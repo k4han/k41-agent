@@ -56,7 +56,7 @@ class BrowserRepository:
             return self._binding(row) if row else None
 
     async def agent_names(self, thread_ids: list[str]) -> dict[str, str]:
-        from agent.modules.conversations.models import ConversationThread
+        from agent.modules.conversations import ConversationThread
 
         if not thread_ids:
             return {}
@@ -66,7 +66,7 @@ class BrowserRepository:
             return dict(rows.all())
 
     async def thread_source(self, thread_id: str) -> str:
-        from agent.modules.conversations.models import ConversationThread
+        from agent.modules.conversations import ConversationThread
 
         if ":sub:" in thread_id:
             return "subagent"
