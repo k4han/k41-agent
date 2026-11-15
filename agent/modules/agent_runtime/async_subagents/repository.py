@@ -137,6 +137,26 @@ class AsyncSubagentRepository:
                     task.pop(key, None)
             return {"tasks": tasks, "total": count, "active_count": active_count, "limit": limit, "offset": offset}
 
+    async def browser_handoffs(self, thread_id: str, owner_id: str) -> list[dict]:
+        """Discover resumable browser requests, including sessions lost while waiting."""
+        async with await self._session_factory() as session:
+            rows = (await session.scalars(select(Task).where(
+                or_(Task.parent_thread_id == thread_id, Task.thread_id == thread_id),
+                Task.status == "waiting", Task.deleted_at.is_(None)).order_by(Task.id))).all()
+            requests = []
+            for row in rows:
+                if json.loads(row.context_json).get("browser_owner_id") != owner_id:
+                    continue
+                for interrupt in json.loads(row.interrupts_json):
+                    value = interrupt.get("value", {})
+                    if (not isinstance(value, dict) or value.get("type") != "browser_handoff_request"
+                            or value.get("thread_id") != row.thread_id):
+                        continue
+                    requests.append({**value, "task_id": row.task_id, "parent_thread_id": row.parent_thread_id,
+                                     "agent_name": row.agent_name, "run_id": row.active_job_id,
+                                     "interrupt_id": interrupt["id"]})
+            return requests
+
     async def enqueue_update(self, parent_thread_id: str, task_id: str, instructions: str, key: str) -> dict:
         async with await self._session_factory() as session, session.begin():
             row = await session.scalar(select(Task).where(Task.task_id == task_id,
@@ -173,6 +193,14 @@ class AsyncSubagentRepository:
             if (row.status != "waiting" or row.active_job_id != run_id or job is None
                     or interrupt_id not in {item["id"] for item in json.loads(row.interrupts_json)}):
                 raise ValueError("The interrupt no longer belongs to the current waiting run.")
+            pending = next(item for item in json.loads(row.interrupts_json) if item["id"] == interrupt_id)
+            value = pending.get("value")
+            browser_request = isinstance(value, dict) and value.get("type") == "browser_handoff_request"
+            if browser_request:
+                if payload.get("action") != "browser_handoff" or payload.get("handoff_id") != value.get("handoff_id"):
+                    raise ValueError("The response does not match the waiting browser handoff.")
+            elif payload.get("action") == "browser_handoff":
+                raise ValueError("The interrupt is not a browser handoff.")
             job.resume_json, job.status, job.lease_until = encode(resume), "pending", 0
             row.status, row.updated_at = "pending", time.time()
             row.version += 1

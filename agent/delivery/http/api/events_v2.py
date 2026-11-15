@@ -180,6 +180,6 @@ async def cancel_async_task(thread_id: str, task_id: str):
 
 
 @router.post("/chat/{thread_id}/async-tasks/{task_id}/resume", status_code=202)
-async def resume_async_task(thread_id: str, task_id: str, body: AsyncTaskResumeRequest):
+async def resume_async_task(thread_id: str, task_id: str, body: AsyncTaskResumeRequest, admin: str = Depends(get_current_admin)):
     return await _task_operation(get_async_subagent_service().resume(resolve_thread_id(thread_id), task_id,
-        body.run_id, body.interrupt_id, body.payload.model_dump(exclude_none=True)))
+        body.run_id, body.interrupt_id, body.payload.model_dump(exclude_none=True), browser_owner_id=f"admin:{admin}"))

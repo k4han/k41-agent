@@ -55,6 +55,16 @@ class BrowserRepository:
             row = await session.scalar(select(BrowserBinding).where(BrowserBinding.thread_id == thread_id))
             return self._binding(row) if row else None
 
+    async def agent_names(self, thread_ids: list[str]) -> dict[str, str]:
+        from agent.modules.conversations.models import ConversationThread
+
+        if not thread_ids:
+            return {}
+        async with self.session() as session:
+            rows = await session.execute(select(ConversationThread.thread_id, ConversationThread.agent_name).where(
+                ConversationThread.thread_id.in_(thread_ids), ConversationThread.deleted_at.is_(None)))
+            return dict(rows.all())
+
     async def _project_default(self, session, thread_id: str, owner_id: str) -> str:
         from agent.modules.workspaces import ThreadWorkspace
 

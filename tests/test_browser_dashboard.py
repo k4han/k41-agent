@@ -168,6 +168,86 @@ def test_browser_profile_list_reports_open_conversation(browser_client):
     assert listed["open_thread_id"] == "first" and listed["open_thread_ids"] == ["first"]
 
 
+@pytest.mark.parametrize("child", ["chat:sub:researcher:12345678", "chat:sub:0123456789abcdef"])
+def test_browser_status_discovers_owned_children_without_opening_parent(browser_client, child):
+    from agent.modules.conversations.models import ConversationThread
+
+    client, browser = browser_client
+    client.post(f"/dashboard-api/browser/threads/{child}")
+    client.post("/dashboard-api/browser/threads/chat-other:sub:researcher:other")
+    client.headers["X-Test-Admin"] = "2"
+    foreign = "chat:sub:foreign:87654321"
+    client.post(f"/dashboard-api/browser/threads/{foreign}")
+    assert client.get(f"/dashboard-api/browser/threads/{child}").status_code == 403
+    client.headers["X-Test-Admin"] = "1"
+
+    async def save_name():
+        async with browser.repository.session() as session:
+            session.add(ConversationThread(thread_id=child, agent_name="researcher", kind="internal"))
+            await session.commit()
+
+    client.portal.call(save_name)
+    status = client.get("/dashboard-api/browser/threads/chat").json()
+    assert status["open"] is False
+    assert status["generation"] is None
+    assert status["sessions"] == [{"thread_id": child, "agent_name": "researcher",
+                                   "generation": browser.sessions[child].generation}]
+    assert client.portal.call(browser.repository.binding, "chat") is None
+    ticket = client.post(f"/dashboard-api/browser/threads/{child}/viewer-ticket").json()["ticket"]
+    assert browser.consume_ticket(ticket).thread_id == child
+    client.headers.pop("X-Test-Admin")
+    assert client.get("/dashboard-api/browser/threads/chat").status_code == 401
+
+
+def test_browser_status_lists_main_first_and_removes_finished_or_lost_children(browser_client):
+    client, browser = browser_client
+    endpoint = "/dashboard-api/browser/threads/"
+    child = "chat:sub:helper:12345678"
+    client.post(endpoint + child)
+    client.post(endpoint + "chat")
+    client.post(endpoint + "unrelated")
+    listed = client.get(endpoint + "chat").json()["sessions"]
+    assert [item["thread_id"] for item in listed] == ["chat", child]
+    assert all(item["agent_name"] is None for item in listed)
+    client.portal.call(browser.release_inherited_profile, child)
+    assert [item["thread_id"] for item in client.get(endpoint + "chat").json()["sessions"]] == ["chat"]
+    assert client.get(endpoint + "unrelated").json()["open"] is True
+    client.post(endpoint + child)
+    browser.sessions[child].driver.closed = True
+    assert client.get(endpoint + child).json()["open"] is False
+    assert client.get(endpoint + "chat").json()["sessions"] == []
+    client.headers["X-Test-Admin"] = "2"
+    assert client.get(endpoint + "chat").status_code == 403
+
+
+def test_browser_status_discovers_owned_async_handoffs_after_session_loss(browser_client):
+    client, browser = browser_client
+    repository = browser.container.async_subagents.repository
+
+    async def prepare():
+        task = await repository.create_task(key="browser-handoff", parent_thread_id="chat", tool_call_id="launch",
+            parent_message_id="message", agent_name="worker", task="Sign in.",
+            context={"browser_owner_id": "admin:1"}, parent_context={})
+        job = await repository.claim(task["run_id"], "worker")
+        _, payload, _ = await browser._open_handoff(task["thread_id"], "admin:1", "handoff", "Sign in to continue.")
+        await repository.finish(job, "waiting", interrupts=[{"id": "browser-interrupt", "value": payload}])
+        return task, payload
+
+    task, payload = client.portal.call(prepare)
+    expected = {**payload, "task_id": task["task_id"], "parent_thread_id": "chat", "agent_name": "worker",
+                "run_id": task["run_id"], "interrupt_id": "browser-interrupt"}
+    assert client.get("/dashboard-api/browser/threads/chat").json()["pending_handoffs"] == [expected]
+    assert client.get(f"/dashboard-api/browser/threads/{task['thread_id']}").json()["pending_handoffs"] == [expected]
+    client.portal.call(browser.close, task["thread_id"], "admin:1")
+    lost = client.get("/dashboard-api/browser/threads/chat").json()
+    assert lost["sessions"] == []
+    assert lost["pending_handoffs"] == [expected]
+    assert client.get("/dashboard-api/browser/threads/chat-other").json()["pending_handoffs"] == []
+    client.headers["X-Test-Admin"] = "2"
+    assert client.get("/dashboard-api/browser/threads/chat").json()["pending_handoffs"] == []
+    assert client.get(f"/dashboard-api/browser/threads/{task['thread_id']}").status_code == 403
+
+
 def test_browser_project_profile_api(browser_client):
     client, browser = browser_client
 

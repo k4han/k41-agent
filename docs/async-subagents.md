@@ -53,8 +53,12 @@ The dashboard shows task status independently of the launch tool's completion.
 Expanded cards reuse the v3 child replay stream and checkpoint history. Session SSE
 publishes `subagent_task_updated`; reconnects reload durable snapshots. User input,
 tool permissions, and plan reviews resume the child's exact interrupt. The parent
-cannot answer on the user's behalf. Existing ACP and browser handoff restrictions
-remain in force.
+cannot answer on the user's behalf. Browser handoffs select the child's browser
+in the workspace and keep its tabs open while the task waits. Returning control
+or cancelling the browser interaction resumes the child's exact interrupt, even
+while its parent is running. Expired or lost sessions remain discoverable after
+reload until the user continues or cancels. Cancelling a waiting task releases
+its browser. Synchronous delegation and existing ACP restrictions remain in force.
 
 Active tasks are also loaded independently of transcript artifacts. Their controls
 remain available after history compaction, pagination, or an interrupted launch.

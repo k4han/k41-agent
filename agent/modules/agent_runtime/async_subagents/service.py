@@ -167,7 +167,8 @@ class AsyncSubagentService:
             raise LookupError("Async task not found.")
         return result
 
-    async def resume(self, parent: str, task_id: str, run_id: str, interrupt_id: str, payload: dict) -> dict:
+    async def resume(self, parent: str, task_id: str, run_id: str, interrupt_id: str, payload: dict,
+                     *, browser_owner_id: str | None = None) -> dict:
         from agent.modules.agent_runtime.runner import (
             _normalize_human_resume_payload, _resolve_agent_name_for_resume, _validate_human_resume_payload,
         )
@@ -177,6 +178,10 @@ class AsyncSubagentService:
             raise ValueError("A human response is required.")
         _validate_human_resume_payload(normalized)
         context = None
+        if normalized.action == "browser_handoff":
+            task = await self.get(parent, task_id, private=True)
+            if not browser_owner_id or task["context"].get("browser_owner_id") != browser_owner_id:
+                raise PermissionError("This browser belongs to another authenticated account.")
         if normalized.action == "approve":
             task = await self.get(parent, task_id, private=True)
             if task["status"] == "waiting":
@@ -216,6 +221,10 @@ class AsyncSubagentService:
                     self.container.active_session_registry.cancel_by_thread(child)
                 for task in tasks:
                     self._publish(task)
+            from agent.modules.browser import release_delegated_browser
+
+            for child in children:
+                await release_delegated_browser(child)
             return bool(tasks)
         finally:
             self._blocked_threads.discard(thread_id)
@@ -375,7 +384,7 @@ class AsyncSubagentService:
 
     async def _job_stream(self, job: dict, stream_run_id: str | None):
         from agent.modules.agent_runtime.protocol import application_event, run_agent_protocol_stream
-        from agent.modules.browser import release_delegated_browser
+        from agent.modules.browser import release_delegated_browser, release_thread_browser
         from agent.modules.workflows import get_workflow_graph
 
         context = {key: value for key, value in job["context"].items()
@@ -446,7 +455,7 @@ class AsyncSubagentService:
                 k41_parent_tool_call_id=task["tool_call_id"], k41_parent_message_id=task["parent_message_id"],
                 k41_delegation_id=task["task_id"], k41_async_task_id=task["task_id"], k41_agent_name=task["agent_name"])
         final = ""
-        status = "failed"
+        status = "running"
         try:
             timeout = max(0, self.container.config_service.get_int("subagents.run_timeout_seconds", 0))
             async with asyncio.timeout(timeout or None), aclosing(run_agent_protocol_stream(
@@ -478,19 +487,23 @@ class AsyncSubagentService:
             await self.repository.heartbeat(job, release=True)
             raise
         except TimeoutError:
-            result = await self.repository.finish(job, "timed_out", error="Async task execution timed out.")
+            status = "timed_out"
+            result = await self.repository.finish(job, status, error="Async task execution timed out.")
             if result:
                 self._publish(result)
             raise
         except Exception as exc:
-            result = await self.repository.finish(job, "failed", error=str(exc))
+            status = "failed"
+            result = await self.repository.finish(job, status, error=str(exc))
             if result:
                 self._publish(result)
             raise
         finally:
             self._controls.pop(job["job_id"], None)
             if job["task_id"] and status != "waiting":
-                await release_delegated_browser(job["thread_id"])
+                # Retryable interruptions release tabs but preserve durable handoffs.
+                release_browser = release_thread_browser if status == "running" else release_delegated_browser
+                await release_browser(job["thread_id"])
 
     @staticmethod
     def _saved_result(snapshot) -> str:

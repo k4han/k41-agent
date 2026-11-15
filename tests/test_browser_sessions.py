@@ -76,10 +76,15 @@ class FakeDriver:
 
 def make_browser_metadata():
     from agent.modules.admin_auth.models import AdminCredential
+    from agent.modules.agent_runtime.async_subagents.models import (
+        SubagentExecutionRecord, SubagentNotificationRecord, SubagentTaskRecord,
+    )
+    from agent.modules.conversations.models import ConversationThread
 
     metadata = MetaData()
     for model in (BrowserAccountProfile, BrowserArtifact, BrowserBinding, BrowserInvocation, BrowserProfile, BrowserProjectProfile,
-                  Project, ThreadWorkspace, AdminCredential):
+                  Project, ThreadWorkspace, AdminCredential, ConversationThread,
+                  SubagentTaskRecord, SubagentExecutionRecord, SubagentNotificationRecord):
         model.__table__.to_metadata(metadata)
     return metadata
 

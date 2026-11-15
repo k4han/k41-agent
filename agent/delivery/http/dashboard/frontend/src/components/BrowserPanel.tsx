@@ -5,7 +5,10 @@ import { apiFetch } from "@/lib/api";
 import { browserModifiers, browserPointer, connectBrowserViewer, createBrowserFrameRenderer, createBrowserInputSender,
   type BrowserConnectionState, type BrowserHandoffResume, type BrowserViewerConnection } from "@/lib/browserViewer";
 import { API_PATHS } from "@/lib/endpoints";
+import { asyncTaskPath } from "@/lib/asyncSubagents";
+import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { useBrowserSession, type BrowserSession } from "@/lib/useBrowserSession";
+import { useBrowserSelection } from "@/lib/useBrowserSelection";
 import type { BrowserProfile } from "@/types";
 import "@/styles/browser.css";
 
@@ -19,11 +22,24 @@ export function BrowserPanel(props: {
   onSessionChange?: (active: boolean, threadId: string | null) => void;
   session?: BrowserSession;
 }) {
-  const session = props.session ?? useBrowserSession({ threadId: () => props.threadId, visible: () => props.open,
+  const rootSession = props.session ?? useBrowserSession({ threadId: () => props.threadId, visible: () => props.open,
     active: () => props.open, busy: () => props.busy, onOpen: () => props.onOpen(),
     onHandoffChange: (pending, thread) => props.onHandoffChange(pending, thread),
     onSessionChange: (active, thread) => props.onSessionChange?.(active, thread) });
-  const status = session.status;
+  const selection = useBrowserSelection(() => props.threadId, rootSession);
+  const childSession = useBrowserSession({
+    threadId: () => selection.isMain() ? null : selection.threadId(),
+    visible: () => props.open, active: () => props.open, busy: () => props.busy,
+    onOpen() {}, onHandoffChange() {},
+  });
+  const session = () => selection.isMain() ? rootSession : childSession;
+  const status = () => session().status();
+  const childSessions = createMemo(() => rootSession.sessions().filter(item => item.thread_id !== props.threadId));
+  const childLabel = (thread: string, name: string | null) => {
+    const label = name || "Subagent";
+    return childSessions().filter(item => (item.agent_name || "Subagent") === label).length > 1
+      ? `${label} · ${thread.split(":").at(-1)?.slice(0, 8)}` : label;
+  };
   const [profiles, setProfiles] = createSignal<BrowserProfile[]>([]);
   const [error, setError] = createSignal("");
   const [working, setWorking] = createSignal(false);
@@ -40,6 +56,9 @@ export function BrowserPanel(props: {
     return Math.max(0, Math.min(size.width, Math.max(0, size.height - 2) * frameAspect() + 2));
   });
   const canControl = createMemo(() => connected() && controlAllowed() && frameFresh() && connectionState() !== "paused");
+  const childHandoff = createMemo(() => rootSession.handoffs().find(item => item.thread_id === selection.threadId()
+    && item.handoff_id === status()?.handoff?.handoff_id));
+  const resumeDisabled = () => working() || (selection.isMain() ? props.busy : !childHandoff());
   const [followAgent, setFollowAgent] = createSignal(true);
   const [attempt, setAttempt] = createSignal(0);
   const [selectedTab, setSelectedTab] = createSignal("");
@@ -59,6 +78,7 @@ export function BrowserPanel(props: {
   let viewport: HTMLDivElement | undefined;
   let keyboard: HTMLTextAreaElement | undefined;
   let profileSelect: HTMLSelectElement | undefined;
+  let sessionSelect: HTMLSelectElement | undefined;
   let width = 1280;
   let height = 720;
   let viewerSession = "";
@@ -70,16 +90,19 @@ export function BrowserPanel(props: {
   const send = input.send;
   const resetFrame = () => { renderer.reset(); input.reset(); setHasFrame(false); setFrameFresh(false); };
   const staleFrame = () => { renderer.reset(); input.reset(); setFrameFresh(false); };
-  const applyStatus = session.applyStatus;
-  createEffect(() => { const message = session.error(); if (message) setError(message); });
-  createEffect(() => session.setConnected(connected()));
-  onCleanup(() => session.setConnected(false));
+  const applyStatus = (next: Parameters<BrowserSession["applyStatus"]>[0], thread: string) => session().applyStatus(next, thread);
+  createEffect(() => { const message = session().error() || rootSession.error(); if (message) setError(message); });
+  createEffect(() => {
+    rootSession.setConnected(connected());
+    childSession.setConnected(!selection.isMain() && connected());
+  });
+  onCleanup(() => { rootSession.setConnected(false); childSession.setConnected(false); });
   onCleanup(resetFrame);
   createEffect(() => { if (!canControl()) input.reset(); });
 
   createEffect(on(currentPageUrl, (value) => setUrl(value)));
 
-  createEffect(on(() => props.threadId, () => {
+  createEffect(on(selection.threadId, () => {
     resetFrame();
     setError("");
     setWorking(false);
@@ -90,7 +113,7 @@ export function BrowserPanel(props: {
   createEffect(() => {
     // Opening the settings shows which conversations hold each profile now.
     props.threadId;
-    if (!props.open || !profilesOpen()) return;
+    if (!props.open || !profilesOpen() || !selection.isMain()) return;
     let disposed = false;
     void apiFetch<{ profiles: BrowserProfile[] }>(API_PATHS.browserProfiles)
       .then((data) => { if (!disposed) setProfiles(data.profiles); })
@@ -101,10 +124,13 @@ export function BrowserPanel(props: {
   const showSelectedProfile = () => { if (profileSelect) profileSelect.value = selectedProfileId(); };
   // Replacing the options makes the select fall back to its first one, so apply the value afterwards.
   createEffect(on([profilesOpen, profiles, selectedProfileId], showSelectedProfile));
+  createEffect(on([childSessions, selection.threadId], () => {
+    if (sessionSelect) sessionSelect.value = selection.threadId() || "";
+  }));
 
   createEffect(() => {
     const visible = props.open;
-    const thread = props.threadId;
+    const thread = selection.threadId();
     const generation = sessionGeneration();
     attempt();
     setConnected(false);
@@ -115,17 +141,19 @@ export function BrowserPanel(props: {
       viewerSession = viewerKey;
     } else staleFrame();
     if (!visible || !thread || !generation) return;
+    let disposed = false;
+    const isCurrent = () => !disposed && selection.threadId() === thread && sessionGeneration() === generation;
     const activeConnection = connectBrowserViewer({
       requestTicket: (signal) => apiFetch<{ ticket: string }>(`/dashboard-api/browser/threads/${encodeURIComponent(thread)}/viewer-ticket`,
         { method: "POST", json: {}, signal }),
       selection: untrack(() => ({ tabId: selectedTab(), followAgent: followAgent() })),
-      onDisconnect: () => { setConnected(false); setControlAllowed(false); staleFrame(); },
-      onStateChange: (value) => { setConnectionState(value); setConnected(value === "connected" || value === "paused"); },
-      onPause: () => staleFrame(),
+      onDisconnect: () => { if (isCurrent()) { setConnected(false); setControlAllowed(false); staleFrame(); } },
+      onStateChange: (value) => { if (isCurrent()) { setConnectionState(value); setConnected(value === "connected" || value === "paused"); } },
+      onPause: () => { if (isCurrent()) staleFrame(); },
       frameTiming: () => renderer.timing,
-      onError: (cause) => setError(cause instanceof Error ? cause.message : String(cause)),
+      onError: (cause) => { if (isCurrent()) setError(cause instanceof Error ? cause.message : String(cause)); },
       onFrame: async (frame) => {
-        if (!await renderer.draw(frame)) return false;
+        if (!isCurrent() || !await renderer.draw(frame) || !isCurrent()) return false;
         width = frame.width;
         height = frame.height;
         setFrameAspect(frame.width / frame.height);
@@ -136,6 +164,7 @@ export function BrowserPanel(props: {
         return true;
       },
       onMessage: (data) => {
+        if (!isCurrent()) return;
         if (data.type === "status") {
           if (data.generation && data.generation !== generation) return;
           const nextTab = data.tab_id || data.tabs[0]?.id || "";
@@ -151,12 +180,13 @@ export function BrowserPanel(props: {
           resetFrame(); setControlAllowed(false);
           const previous = status();
           if (previous) applyStatus({ ...previous, open: false, generation: null }, thread);
-          session.invalidate();
+          session().invalidate();
+          rootSession.invalidate();
         } else if (data.type === "error") setError(data.message);
       },
     });
     connection = activeConnection;
-    onCleanup(() => { if (connection === activeConnection) connection = undefined; activeConnection.dispose(); });
+    onCleanup(() => { disposed = true; if (connection === activeConnection) connection = undefined; activeConnection.dispose(); });
   });
 
   createEffect(() => {
@@ -183,7 +213,7 @@ export function BrowserPanel(props: {
     try {
       await operation();
       if (refreshThread && thread && props.threadId === thread) {
-        await session.refresh(true);
+        await rootSession.refresh(true);
       }
     }
     catch (cause) { if (props.threadId === thread) setError(cause instanceof Error ? cause.message : "Browser operation failed."); }
@@ -208,8 +238,38 @@ export function BrowserPanel(props: {
     event.stopPropagation();
     send({ type, key: event.key, code: event.code, keyCode: event.keyCode, modifiers: browserModifiers(event) });
   };
+  const resumeHandoff = async (decision: BrowserHandoffResume["decision"]) => {
+    const pending = status()?.handoff;
+    if (!pending || resumeDisabled()) return;
+    const payload: BrowserHandoffResume = { action: "browser_handoff", handoff_id: pending.handoff_id, decision };
+    if (selection.isMain()) { props.onResume(payload); return; }
+    const target = childHandoff()!;
+    setWorking(true);
+    setError("");
+    try {
+      const task = await apiFetch(`${asyncTaskPath(target.parent_thread_id, target.task_id)}/resume`, {
+        method: "POST", json: { run_id: target.run_id, interrupt_id: target.interrupt_id, payload },
+      });
+      window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.SUBAGENT_TASK_UPDATED, { detail: task }));
+      await rootSession.refresh(true);
+      if (selection.threadId() === target.thread_id) await childSession.refresh(true);
+    } catch (cause) {
+      if (selection.threadId() === target.thread_id) setError(cause instanceof Error ? cause.message : "Browser handoff could not be resumed.");
+    } finally {
+      if (selection.threadId() === target.thread_id) setWorking(false);
+    }
+  };
 
   return <div class="browser-panel">
+      <Show when={childSessions().length}>
+        <label class="browser-session-select">Session
+          <select ref={sessionSelect} aria-label="Browser session" value={selection.threadId() || ""}
+            onChange={(event) => selection.select(event.currentTarget.value)}>
+            <option value={props.threadId || ""}>Main agent</option>
+            <For each={childSessions()}>{(item) => <option value={item.thread_id}>{childLabel(item.thread_id, item.agent_name)}</option>}</For>
+          </select>
+        </label>
+      </Show>
       <header class="browser-session-header">
         <Show when={status()?.tabs.length}><div class="browser-page-tabs" role="tablist" aria-label="Browser pages">
           <For each={status()?.tabs}>{(tab) => <button type="button" class="browser-page-tab" role="tab"
@@ -229,14 +289,15 @@ export function BrowserPanel(props: {
               title="Follow the agent's active browser tab" disabled={!connected() || followAgent()}
               onClick={() => connection?.followAgent()}>{followAgent() ? "Following agent" : "Follow agent"}</button>
           </Show>
-          <button class="workspace-icon-btn" type="button" title="Login profiles" aria-label="Login profiles"
+          <Show when={selection.isMain()}><button class="workspace-icon-btn" type="button" title="Login profiles" aria-label="Login profiles"
             aria-expanded={profilesOpen()} aria-controls="browser-profiles" onClick={() => setProfilesOpen((value) => !value)}><Settings2 size={16} /></button>
+          </Show>
           <button class="workspace-icon-btn" type="button" title="Reconnect viewer" aria-label="Reconnect viewer" disabled={!status()?.open}
             onClick={() => { setError(""); setAttempt((value) => value + 1); }}><RefreshCw size={15} /></button>
-          <button class="btn btn-sm" disabled={props.busy || working() || !props.threadId}
+          <Show when={selection.isMain()}><button class="btn btn-sm" disabled={props.busy || working() || !props.threadId}
             onClick={() => void action(() => apiFetch(endpoint(), { method: status()?.open ? "DELETE" : "POST" }))}>
             <Power size={14} />{status()?.open ? "Close browser" : "Open browser"}
-          </button>
+          </button></Show>
         </div>
       </header>
       <Show when={error()}><div class="thread-banner thread-banner-error" role="alert">{error()}</div></Show>
@@ -247,13 +308,13 @@ export function BrowserPanel(props: {
           : status()?.handoff_expired ? "The browser session ended before control was returned. Continue to notify the agent, or cancel this task."
           : pending().reason}</p>
         <div class="browser-actions">
-          <button class="btn btn-sm btn-primary" disabled={props.busy || working()} onClick={() => props.onResume({ action: "browser_handoff", handoff_id: pending().handoff_id, decision: "return" })}>
+          <button class="btn btn-sm btn-primary" disabled={resumeDisabled()} onClick={() => void resumeHandoff("return")}>
             {pending().expired ? "Continue after timeout" : status()?.handoff_expired ? "Continue after session loss" : "Return control to agent"}
           </button>
-          <button class="btn btn-sm" disabled={props.busy || working()} onClick={() => props.onResume({ action: "browser_handoff", handoff_id: pending().handoff_id, decision: "cancel" })}>Cancel browser task</button>
+          <button class="btn btn-sm" disabled={resumeDisabled()} onClick={() => void resumeHandoff("cancel")}>Cancel browser task</button>
         </div>
       </div>}</Show>
-      <Show when={profilesOpen()}><section class="browser-profiles" id="browser-profiles" aria-label="Login profile settings">
+      <Show when={profilesOpen() && selection.isMain()}><section class="browser-profiles" id="browser-profiles" aria-label="Login profile settings">
         <div class="browser-profiles-heading"><strong>Login profiles</strong><span>Reuse a saved login across conversations.</span></div>
         <div class="browser-actions">
         <label class="browser-profile-select">Login profile <select ref={profileSelect} aria-label="Login profile" disabled={!props.threadId || status()?.open || props.busy || working()}
@@ -308,7 +369,7 @@ export function BrowserPanel(props: {
             }} onPaste={(event) => { event.preventDefault(); const text = event.clipboardData?.getData("text/plain"); if (text) send({ type: "text", text }); }} />
         </div>
       </div>
-      <Show when={status()?.open && !status()?.handoff}>
+      <Show when={selection.isMain() && status()?.open && !status()?.handoff}>
         <footer class="browser-footer"><ShieldCheck size={14} /><span>{canControl() ? "Enter credentials directly in the browser, then return control to your agent." : "Ask your agent to hand over control when you need to sign in."}</span></footer>
       </Show>
       <Show when={status()?.images?.length}><details class="browser-captures"><summary><Camera size={14} />Screenshots <span>{status()?.images.length}</span><ChevronDown size={14} /></summary><div class="browser-images"><For each={status()?.images}>{(image) =>

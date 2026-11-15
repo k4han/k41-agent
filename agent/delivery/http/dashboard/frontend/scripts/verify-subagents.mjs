@@ -52,6 +52,8 @@ const fixtures = {
   '/dashboard-api/workspace/default': { workspace: null },
   '/dashboard-api/chat-history': { threads },
   '/dashboard-api/chat-history/subagents': history,
+  '/dashboard-api/browser/threads/subagents': { open: false, generation: null, profile_id: null,
+    mode: 'agent', tabs: [], handoff: null, handoff_expired: false, images: [], sessions: [] },
   '/dashboard-api/nav-projects': { projects: [{ key: 'no-workspace', label: 'No workspace', threads }], has_more: false, next_cursor: null },
 };
 const historyRequests = new Map();
@@ -626,6 +628,21 @@ try {
   await until(() => js(`!document.querySelector('.transcript-async-wait')`), 'all completed tasks remove the wait divider');
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: background wait dividers track queued agents, user responses and completion, and fit 360px, 768px and 1280px viewports.');
+  asyncTask.status = 'waiting';
+  asyncTask.version += 1;
+  asyncTask.interrupts = [{ id: 'browser-interrupt', value: { type: 'browser_handoff_request', handoff_id: 'browser-handoff',
+    thread_id: asyncTask.thread_id, reason: 'Sign in for the background worker.' } }];
+  backgroundVisible = true;
+  publishTask(asyncTask);
+  await until(() => js(`!!(${card('Background worker')}) && ${detail('Background worker')} === 'Waiting for your response'`), 'background browser request');
+  if (!await js(`(${card('Background worker')}).open`)) await toggle('Background worker');
+  await until(() => js(`[...(${card('Background worker')}).querySelectorAll('.async-task-controls button')].some(button => button.textContent === 'Open browser')`), 'browser request has an open-browser action');
+  assert.equal(await js(`!!(${card('Background worker')}).querySelector('.user-input-request-card')`), false, 'browser handoff must not render a question form');
+  await js(`window.browserHandoffRequests = []; window.addEventListener('k41-browser-handoff', event => browserHandoffRequests.push(event.detail));`);
+  await js(`[...(${card('Background worker')}).querySelectorAll('.async-task-controls button')].find(button => button.textContent === 'Open browser').click()`);
+  assert.deepEqual(await js('browserHandoffRequests'), [{ threadId: asyncTask.parent_thread_id, browserThreadId: asyncTask.thread_id }]);
+  assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
+  console.log('PASS: a waiting browser request opens its exact background session without a question form.');
 } finally {
   savedResponse?.end();
   stream?.end();

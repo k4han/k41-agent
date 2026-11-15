@@ -69,6 +69,16 @@ For example:
 Open the workspace's **Browser** tab to watch the session. An active browser
 session also exposes a shortcut in the chat header.
 
+When a sub-agent browses, use the **Session** selector in **Browser** to choose the
+main agent or an active sub-agent. New sessions keep your current selection;
+when the selected session ends, the viewer switches to another active session.
+Sub-agent sessions support live viewing and tab selection and close when their
+work finishes. A browser handoff selects the requesting agent's session for you.
+Asynchronous sub-agents can hand over their browser and wait while the main agent
+continues working. Return control in Browser to resume that sub-agent. Its task
+card also has an **Open browser** shortcut. Synchronous sub-agents report manual
+interaction requests to their parent instead.
+
 Screenshots taken with `browser_screenshot` are saved in the active workspace
 under `.k41-agent/browser/screenshots/`. The tool returns the image's path within
 that workspace, and the image remains visible in the conversation.

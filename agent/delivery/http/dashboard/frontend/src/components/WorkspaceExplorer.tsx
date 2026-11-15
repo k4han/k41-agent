@@ -487,10 +487,10 @@ export function WorkspaceExplorer(props: {
   let desktopDismissed = false;
   const addBackgroundTab = (tab: WorkspaceTab) => setOpenTabs(current => current.includes(tab) ? current : [...current, tab]);
   const syncBrowserTab = () => {
-    const current = browserSession.status();
-    if (current?.open && current.generation && dismissedBrowsers.get(props.threadId) !== current.generation) addBackgroundTab("browser");
+    const key = browserSession.sessionKey();
+    if (browserSession.hasOpenSession() && dismissedBrowsers.get(props.threadId) !== key) addBackgroundTab("browser");
   };
-  createEffect(on(() => [props.threadId, browserSession.status()?.open, browserSession.status()?.generation] as const, () => syncBrowserTab()));
+  createEffect(on(() => [props.threadId, browserSession.sessionKey()] as const, () => syncBrowserTab()));
   createEffect(on(() => changes().length > 0, (changed) => {
     if (!changed) changesDismissed = false;
     else if (!changesDismissed) addBackgroundTab("changes");
@@ -938,7 +938,7 @@ export function WorkspaceExplorer(props: {
 
   const closeTab = (tab: WorkspaceTab, event?: MouseEvent) => {
     event?.stopPropagation();
-    if (tab === "browser") dismissedBrowsers.set(props.threadId, browserSession.status()?.generation || "");
+    if (tab === "browser") dismissedBrowsers.set(props.threadId, browserSession.sessionKey());
     if (tab === "desktop") desktopDismissed = true;
     if (tab === "changes") changesDismissed = true;
     const current = openTabs();

@@ -19,6 +19,7 @@ from agent.bootstrap.browser import find_browser, installation_unavailable_reaso
 from agent.bootstrap.browser_setup import BrowserSetupBusyError, BrowserSetupManager
 from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
 from agent.modules.admin_auth import get_current_admin
+from agent.modules.agent_runtime.async_subagents import get_async_subagent_service
 from agent.modules.browser import BrowserAccessDenied, BrowserError, CDPViewer
 from agent.delivery.http.dashboard.routes.helpers.browser_stream import SEND_TIMEOUT, BrowserStreamState, stream_tab
 
@@ -195,7 +196,10 @@ async def set_temporary_profile(body: BindingBody, admin: str = Depends(get_curr
 
 @router.get("/threads/{thread_id}")
 async def status(thread_id: str, admin: str = Depends(get_current_admin), browser=Depends(service)):
-    return await checked(browser.status(thread_id, owner(admin)))
+    result = await checked(browser.status(thread_id, owner(admin)))
+    result["pending_handoffs"] = await get_async_subagent_service(browser.container).repository.browser_handoffs(
+        browser.canonical(thread_id), owner(admin))
+    return result
 
 
 @router.put("/threads/{thread_id}")

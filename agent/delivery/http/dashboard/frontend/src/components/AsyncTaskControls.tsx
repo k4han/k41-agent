@@ -34,14 +34,21 @@ export function AsyncTaskControls(props: {
     <Show when={props.task?.error}><p role="alert">{props.task!.error}</p></Show>
     <Show when={props.error}><p role="alert">{props.error}</p></Show>
     <Show when={props.task?.status === "waiting"}>
-      <For each={props.task?.interrupts}>{(interrupt) => <Show when={interrupt.value.type === "plan_review"} fallback={
-        <UserInputRequestCard request={inputRequest(interrupt)}
-          disabled={props.busy} onSubmit={(payload) => answer(interrupt.id, payload)} />
+      <For each={props.task?.interrupts}>{(interrupt) => <Show when={interrupt.value.type === "browser_handoff_request"} fallback={
+        <Show when={interrupt.value.type === "plan_review"} fallback={
+          <UserInputRequestCard request={inputRequest(interrupt)}
+            disabled={props.busy} onSubmit={(payload) => answer(interrupt.id, payload)} />
+        }>
+          <PlanReviewView plan={String(interrupt.value.plan || "")} status="pending" agents={cards() || []}
+            activeAgentName={props.task?.agent_name} actionsDisabled={props.busy}
+            onApprove={(payload) => void resume(interrupt.id, { action: "approve", target_agent: payload.targetAgent })}
+            onRevise={(payload) => void resume(interrupt.id, { action: "revise", feedback: payload.feedback })} />
+        </Show>
       }>
-        <PlanReviewView plan={String(interrupt.value.plan || "")} status="pending" agents={cards() || []}
-          activeAgentName={props.task?.agent_name} actionsDisabled={props.busy}
-          onApprove={(payload) => void resume(interrupt.id, { action: "approve", target_agent: payload.targetAgent })}
-          onRevise={(payload) => void resume(interrupt.id, { action: "revise", feedback: payload.feedback })} />
+        <p>{String(interrupt.value.reason || "Complete the manual step in the browser.")}</p>
+        <button type="button" disabled={props.busy} onClick={() => window.dispatchEvent(new CustomEvent("k41-browser-handoff", {
+          detail: { threadId: props.task?.parent_thread_id, browserThreadId: props.task?.thread_id },
+        }))}>Open browser</button>
       </Show>}</For>
     </Show>
     <Show when={props.task && props.task.status !== "cancelled"}>

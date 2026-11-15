@@ -58,6 +58,8 @@ const fixtures = {
   '/dashboard-api/browser/threads/browser-test/viewer-ticket': { ticket: 'ticket' },
 };
 const inputs = [], resumes = [], viewers = new Set();
+const childResumes = [];
+const childStatuses = new Map();
 const profiles = [], checkpointLoads = [], invalidThreadRequests = [];
 let profileLoads = 0, rejectProfileSelection = false;
 let holdProfileSelection = false, releaseProfileSelection;
@@ -69,6 +71,8 @@ let connections = 0;
 let ticketRequests = 0;
 let holdBrowserStatus = false;
 let releaseBrowserStatus;
+let parentReconnect;
+let rejectChildResume = false;
 function send(socket, value) {
   const binary = Buffer.isBuffer(value);
   const data = binary ? value : Buffer.from(JSON.stringify(value));
@@ -88,13 +92,45 @@ function sendFrame(socket) {
 }
 function sendStatus(socket, reset = false) {
   const options = viewerOptions.get(socket) || {};
-  send(socket, { ...status, type: 'status', tab_id: options.follow_agent === false ? options.tab_id : status.tabs[0]?.id,
+  const current = childStatuses.get(options.ticket) || status;
+  send(socket, { ...current, type: 'status', tab_id: options.follow_agent === false ? options.tab_id : current.tabs[0]?.id,
     follow_agent: options.follow_agent !== false, reset, paused: options.visible === false,
     visibility_revision: options.visibility_revision || 0,
-    controller: status.mode === 'human' ? 'available' : 'agent', can_control: status.mode === 'human' });
+    controller: current.mode === 'human' ? 'available' : 'agent', can_control: current.mode === 'human' });
 }
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/v2/api/chat/events/reconnect') {
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    protocolFixture(res, history.thread_id);
+    parentReconnect = res;
+    return;
+  }
+  if (url.pathname.startsWith('/v2/api/chat/browser-test/async-tasks')) {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.method === 'POST' && url.pathname.endsWith('/resume')) {
+      let raw = ''; for await (const data of req) raw += data;
+      const body = JSON.parse(raw), taskId = url.pathname.split('/').at(-2);
+      const target = status.pending_handoffs.find(item => item.task_id === taskId);
+      assert.ok(target, 'the resume must target a waiting child');
+      assert.equal(body.run_id, target.run_id);
+      assert.equal(body.interrupt_id, target.interrupt_id);
+      assert.equal(body.payload.handoff_id, target.handoff_id);
+      assert.equal(body.payload.action, 'browser_handoff');
+      if (rejectChildResume) {
+        rejectChildResume = false;
+        res.writeHead(409); res.end(JSON.stringify({ detail: 'The browser request changed. Please try again.' })); return;
+      }
+      childResumes.push({ taskId, ...body });
+      status.pending_handoffs = status.pending_handoffs.filter(item => item.task_id !== taskId);
+      const current = childStatuses.get('child-async');
+      Object.assign(current, { handoff: null, mode: 'agent', handoff_expired: false });
+      for (const socket of viewers) sendStatus(socket);
+      res.writeHead(202); res.end(JSON.stringify({ task_id: taskId, thread_id: target.thread_id,
+        parent_thread_id: target.parent_thread_id, root_thread_id: target.parent_thread_id, status: 'pending', version: childResumes.length }));
+    } else res.end(JSON.stringify({ tasks: [], total: 0, active_count: 0 }));
+    return;
+  }
   if (url.pathname === '/v2/api/chat/events') {
     let raw = ''; for await (const data of req) raw += data;
     const request = JSON.parse(raw);
@@ -202,7 +238,7 @@ server.on('upgrade', (req, socket) => {
       if (opcode !== 1) continue;
       const message = JSON.parse(payload.toString());
       if (message.ticket) {
-        assert.equal(message.ticket, 'ticket');
+        assert.ok(message.ticket === 'ticket' || childStatuses.has(message.ticket));
         assert.equal('width' in message, false, 'Authentication must leave capture width to settings');
         assert.equal('height' in message, false, 'Authentication must leave capture height to settings');
         viewerOptions.set(socket, { ...message });
@@ -515,6 +551,117 @@ try {
     await until(() => js('document.querySelector(".chat-prompt-input")?.disabled === false && !document.querySelector(".browser-handoff")'), 'timeout decision clears the handoff and unlocks chat');
     assert.equal(sessionMutations.length, previousMutations, 'settling a timeout does not reopen or close another browser');
   }
+  const children = ['first', 'second'].map(id => {
+    const thread_id = `browser-test:sub:helper:${id}`;
+    const ticket = `child-${id}`;
+    const current = { ...status, open: true, generation: `generation-${id}`, mode: 'agent', handoff: null,
+      tabs: [{ id: `tab-${id}`, title: `Child ${id}`, url: `http://fixture.test/${id}` }], sessions: [] };
+    fixtures[`/dashboard-api/browser/threads/${encodeURIComponent(thread_id)}`] = current;
+    fixtures[`/dashboard-api/browser/threads/${encodeURIComponent(thread_id)}/viewer-ticket`] = { ticket };
+    childStatuses.set(ticket, current);
+    return { thread_id, agent_name: 'helper', generation: current.generation };
+  });
+  const announce = thread => js(`window.dispatchEvent(new CustomEvent('k41:browser-session-changed', { detail: { thread_id: ${JSON.stringify(thread)} } }))`);
+  const chooseSession = thread => js(`{ const select = document.querySelector('[aria-label="Browser session"]'); select.value = ${JSON.stringify(thread)}; select.dispatchEvent(new Event('change', { bubbles: true })); }`);
+  const viewingChild = id => js(`document.querySelector('[aria-label="Browser address"]')?.value === 'http://fixture.test/${id}' && !!document.querySelector('.browser-screen:not(.browser-screen-stale):not([hidden])')`);
+  status.sessions = [children[0]];
+  await announce(children[0].thread_id);
+  await until(() => viewingChild('first'), 'child-only browser appears without opening the main session');
+  assert.equal(await browserShortcut(), true, 'child-only sessions expose the browser shortcut');
+  assert.equal(await js(`document.querySelector('[aria-label="Browser session"]').value`), children[0].thread_id);
+  assert.equal(await js('document.querySelector(".browser-keyboard").disabled'), true, 'subagent viewing preserves input restrictions');
+  assert.equal(await js(`!!document.querySelector('[aria-label="Login profiles"]')`), false, 'subagents inherit login profiles');
+  assert.equal(await js('[...document.querySelectorAll(".browser-panel button")].some(button => /^(Open|Close) browser$/.test(button.textContent))'), false);
+  status.sessions.push(children[1]);
+  await announce(children[1].thread_id);
+  await until(() => js(`document.querySelector('[aria-label="Browser session"]').options.length === 3`), 'new child is added to the selector');
+  assert.equal(await js(`document.querySelector('[aria-label="Browser session"]').value`), children[0].thread_id, 'new sessions preserve the current selection');
+  assert.deepEqual(await js(`[...document.querySelector('[aria-label="Browser session"]').options].slice(1).map(option => option.textContent)`), ['helper · first', 'helper · second']);
+  await chooseSession(children[1].thread_id);
+  await until(() => viewingChild('second'), 'selecting another child connects its exact viewer');
+  await chooseSession(children[0].thread_id);
+  await until(() => viewingChild('first'), 'switching back restores the correct child');
+  for (const [width, mobile] of [[420, true], [1280, false]]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile });
+    await delay(250);
+    assert.equal(await js('document.querySelector(".browser-panel").scrollWidth <= document.querySelector(".browser-panel").clientWidth'), true, 'session selector fits desktop and mobile');
+  }
+  await call('Page.reload');
+  await until(() => js('!!document.querySelector(".chat-actions-trigger")'), 'chat header after reload');
+  await until(() => browserShortcut(true), 'reload discovers active children');
+  await until(() => viewingChild('first'), 'child-only viewing survives page reload');
+  Object.assign(status, { open: true, generation: 'main-with-children', mode: 'human',
+    handoff: { handoff_id: 'main-with-children', reason: 'Sign in for the main agent' }, handoff_expired: false });
+  await announce(history.thread_id);
+  await until(() => js(`document.querySelector('[aria-label="Browser session"]')?.value === 'browser-test' && !!document.querySelector('.browser-handoff')`), 'a main-agent handoff selects the main browser');
+  await until(() => js('document.querySelector(".browser-keyboard")?.disabled === false'), 'main handoff keeps manual control');
+  await js('[...document.querySelectorAll(".browser-handoff button")].find(button => button.textContent.includes("Return control to agent")).click()');
+  await until(() => js('!document.querySelector(".browser-handoff")'), 'main handoff resumes independently of children');
+  const asyncThread = 'browser-test:sub:async-task';
+  const asyncStatus = { ...childStatuses.get('child-first'), sessions: [] };
+  childStatuses.set('child-async', asyncStatus);
+  fixtures[`/dashboard-api/browser/threads/${encodeURIComponent(asyncThread)}`] = asyncStatus;
+  fixtures[`/dashboard-api/browser/threads/${encodeURIComponent(asyncThread)}/viewer-ticket`] = { ticket: 'child-async' };
+  const mainGeneration = status.generation, mainResumes = resumes.length;
+  for (const [index, outcome] of ['returned', 'cancelled', 'expired-return', 'expired-cancel', 'session-lost'].entries()) {
+    const handoff = { type: 'browser_handoff_request', thread_id: asyncThread, parent_thread_id: history.thread_id,
+      task_id: 'async-task', agent_name: 'Background worker', run_id: `async-run-${index}`, interrupt_id: `async-interrupt-${index}`,
+      handoff_id: `async-handoff-${index}`, generation: `async-generation-${index}`, reason: 'Sign in for the background worker' };
+    Object.assign(asyncStatus, { open: true, generation: handoff.generation, mode: 'human', handoff, handoff_expired: false });
+    status.sessions = [...children, { thread_id: asyncThread, agent_name: 'Background worker', generation: handoff.generation }];
+    status.pending_handoffs = [handoff];
+    await announce(asyncThread);
+    await until(() => js(`document.querySelector('[aria-label="Browser session"]')?.value === '${asyncThread}' && document.querySelector('.browser-keyboard')?.disabled === false`), 'async handoff selects and enables its own browser');
+    assert.equal(await js('document.querySelector(".chat-prompt-input").disabled'), false, 'a child handoff leaves the parent composer unlocked');
+    if (outcome === 'returned') {
+      await js(`window.dispatchEvent(new CustomEvent('k41:session-started', { detail: { session_id: 'parent-running', thread_id: 'browser-test', platform: 'api', user_id: 'dashboard', agent_name: 'default', current_step: 'responding', tools_called: [] } }))`);
+      await until(() => parentReconnect, 'parent continues while the child waits');
+      await until(() => js(`!!document.querySelector('button[aria-label="Stop generating"]')`), 'the parent is busy');
+      assert.equal(await js('document.querySelector(".browser-handoff button").disabled'), false, 'a running parent must not disable the child handback');
+      await js(`document.querySelector('.browser-keyboard').focus()`);
+      await call('Input.insertText', { text: 'Background login' });
+      await until(() => inputs.some(input => input.type === 'text' && input.handoff_id === handoff.handoff_id), 'human input reaches the child handoff');
+      rejectChildResume = true;
+      await js(`document.querySelector('.browser-handoff button').click()`);
+      await until(() => js(`document.querySelector('.browser-panel [role=alert]')?.textContent.includes('The browser request changed') && !document.querySelector('.browser-handoff button').disabled`), 'failed child handback can be retried');
+    } else if (outcome.startsWith('expired') || outcome === 'session-lost') {
+      Object.assign(asyncStatus, { open: false, generation: null, mode: 'agent', handoff_expired: true,
+        handoff: { ...handoff, expired: outcome.startsWith('expired') } });
+      status.sessions = children;
+      for (const socket of viewers) if (viewerOptions.get(socket)?.ticket === 'child-async') send(socket, { type: 'session_closed' });
+      await announce(asyncThread);
+      await until(() => js(`document.querySelector('.browser-handoff')?.textContent.includes('${outcome === 'session-lost' ? 'Continue after session loss' : 'Continue after timeout'}')`), 'async handoff remains available after its browser closes');
+      await call('Page.reload');
+      await until(() => js(`document.querySelector('[aria-label="Browser session"]')?.value === '${asyncThread}' && !!document.querySelector('.browser-handoff button:not(:disabled)')`), 'lost async handoff survives page reload');
+    }
+    const decision = outcome.includes('cancel') ? 'cancel' : 'return';
+    const label = decision === 'cancel' ? 'Cancel browser task' : outcome.startsWith('expired') ? 'Continue after timeout'
+      : outcome === 'session-lost' ? 'Continue after session loss' : 'Return control to agent';
+    await js(`[...document.querySelectorAll('.browser-handoff button')].find(button => button.textContent.includes('${label}')).click()`);
+    await until(() => childResumes.length === index + 1, 'handback resumes the async task');
+    assert.deepEqual(childResumes.at(-1), { taskId: handoff.task_id, run_id: handoff.run_id, interrupt_id: handoff.interrupt_id,
+      payload: { action: 'browser_handoff', handoff_id: handoff.handoff_id, decision } });
+    await until(() => js('!document.querySelector(".browser-handoff")'), 'the child request settles');
+    assert.equal(status.generation, mainGeneration, 'child handback preserves the main browser');
+    assert.equal(resumes.length, mainResumes, 'child handback must not resume the parent');
+    if (outcome === 'returned') {
+      assert.equal(await js(`!!document.querySelector('button[aria-label="Stop generating"]')`), true, 'child handback leaves the parent running');
+      parentReconnect.end(JSON.stringify({ type: 'final', content: 'Parent work completed' }) + '\n');
+      parentReconnect = undefined;
+      await js(`window.dispatchEvent(new CustomEvent('k41:session-stopped', { detail: { session_id: 'parent-running', thread_id: 'browser-test' } }))`);
+      await until(() => js(`!document.querySelector('button[aria-label="Stop generating"]')`), 'parent finishes independently');
+    }
+  }
+  await chooseSession(children[1].thread_id);
+  await until(() => viewingChild('second'), 'view child before it finishes');
+  status.sessions = [children[0]];
+  Object.assign(childStatuses.get('child-second'), { open: false, generation: null });
+  for (const socket of viewers) if (viewerOptions.get(socket)?.ticket === 'child-second') send(socket, { type: 'session_closed' });
+  await until(() => js(`document.querySelector('[aria-label="Browser session"]')?.value === 'browser-test'`), 'a finished child falls back to the active main browser');
+  Object.assign(status, { open: false, generation: null, sessions: [] });
+  await announce(history.thread_id);
+  await until(() => js(`!document.querySelector('[aria-label="Browser session"]') && !document.querySelector('.browser-screen:not([hidden])')`), 'ending every session clears the viewer and selector');
+  assert.equal(await browserShortcut(), false);
   await js(`document.querySelector('[aria-label="Login profiles"][aria-expanded="false"]')?.click()`);
   await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
   const loadsBeforeThreadChange = profileLoads;
@@ -533,8 +680,9 @@ try {
   assert.deepEqual(invalidThreadRequests, [], 'profile operations must not fetch an empty thread endpoint');
   assert.equal(await js('document.querySelector(".browser-panel [role=alert]")?.textContent || ""'), '');
   assert.deepEqual(exceptions, []);
-  console.log('Browser dashboard: ticket retry, transport recovery, tab pinning, follow agent, workspace tabs, live view, Unicode input, checkpoint and timeout handoff recovery, fullscreen, mobile layout, handback and profile operations passed.');
+  console.log('Browser dashboard: viewing, input, recovery, profiles, session selection, async handoff while the parent runs, exact child resumption, retry, cancellation, timeout and session-loss recovery passed.');
 } finally {
+  parentReconnect?.end();
   if (ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
   ws?.close();
   if (chrome.exitCode === null) chrome.kill();

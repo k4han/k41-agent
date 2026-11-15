@@ -297,7 +297,18 @@ class BrowserService:
     async def status(self, thread_id, owner_id):
         thread_id = self.canonical(thread_id)
         async with self.thread_scope(thread_id):
-            return await self._status(thread_id, owner_id)
+            status = await self._status(thread_id, owner_id)
+        # Enumerate logical sessions, not every conversation sharing the login profile.
+        active = [current for current in list(self.sessions.values())
+                  if not current.closed and current.owner_id == owner_id
+                  and self.matches_thread(current.thread_id, thread_id)]
+        active.sort(key=lambda current: current.thread_id != thread_id)
+        names = await self.repository.agent_names([current.thread_id for current in active])
+        status["sessions"] = [{"thread_id": current.thread_id,
+                               "agent_name": names.get(current.thread_id) or None,
+                               "generation": current.generation}
+                              for current in active if not current.closed]
+        return status
 
     async def owned_handoff(self, thread_id, owner_id):
         thread_id = self.canonical(thread_id)
@@ -707,14 +718,15 @@ class BrowserService:
         return {"artifact_id": artifact_id, "image_url": f"/dashboard-api/browser/artifacts/{artifact_id}",
                 "mime_type": image["mimeType"]}
 
-    async def handoff(self, thread_id, owner_id, call_id, reason, *, authorize_snapshot=None, wait_for_human=None):
+    async def handoff(self, thread_id, owner_id, call_id, reason, *, authorize_snapshot=None, wait_for_human=None,
+                      async_task_id=None):
         """Hand the browser to the user.
 
         Inside a graph run this interrupts. A caller outside any run passes
         ``wait_for_human``, which receives the request and returns the decision.
         """
         thread_id = self.canonical(thread_id)
-        self.assert_handoff_supported(thread_id)
+        self.assert_handoff_supported(thread_id, async_task_id=async_task_id)
         if wait_for_human is not None:
             return await self._handoff_outside_graph(thread_id, owner_id, call_id, reason, wait_for_human, authorize_snapshot)
         key = self.repository.invocation_key(thread_id, call_id)
@@ -722,10 +734,11 @@ class BrowserService:
             return await self._handoff(thread_id, owner_id, call_id, reason, authorize_snapshot=authorize_snapshot)
 
     @staticmethod
-    def assert_handoff_supported(thread_id: str) -> None:
-        # Delegation consumes text output and cannot surface or resume child interrupts.
-        if ":sub:" in thread_id or thread_id.startswith("sub_"):
-            raise BrowserError("approval_unavailable", "Browser handoff is unavailable in delegated sub-agents. Report the need for user interaction to the parent agent so it can request a browser handoff.")
+    def assert_handoff_supported(thread_id: str, *, async_task_id: str | None = None) -> None:
+        # Only durable asynchronous delegation can resume a child's exact interrupt.
+        if ((":sub:" in thread_id or thread_id.startswith("sub_"))
+                and not (async_task_id and thread_id.endswith(f":sub:{async_task_id}"))):
+            raise BrowserError("approval_unavailable", "Browser handoff is unavailable in synchronous delegated sub-agents. Report the need for user interaction to the parent agent so it can request a browser handoff.")
 
     async def _handoff(self, thread_id, owner_id, call_id, reason, *, authorize_snapshot=None):
         from langgraph.types import interrupt

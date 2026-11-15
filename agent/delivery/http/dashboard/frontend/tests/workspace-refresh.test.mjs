@@ -207,6 +207,151 @@ test('a delayed browser read cannot replace a different conversation or newly st
   assert.equal(value.session.status().generation, 'streamed');
 });
 
+test('browser discovery includes child events, availability, and reconnect snapshots', async t => {
+  const f = environment(), changes = [];
+  const child = { thread_id: 'one:sub:helper:task', agent_name: 'helper', generation: 'child' };
+  let next = { ...browserStatus(), sessions: [] }, reads = 0;
+  const { useBrowserSession } = load('../src/lib/useBrowserSession.ts', {
+    '@/lib/api': { apiFetch: async () => { reads++; return structuredClone(next); } },
+    '@/lib/eventConstants': events, '@/lib/workspaceRefresh': refresh,
+  }, f.globals);
+  const { value } = mount(t, () => useBrowserSession({ threadId: () => 'one', active: () => false,
+    visible: () => false, busy: () => false, onOpen() {}, onHandoffChange() {},
+    onSessionChange: (active, thread) => changes.push({ active, thread }) }));
+  await tick();
+  next = { ...browserStatus(), sessions: [child] };
+  f.window.emit(events.CUSTOM_DOM_EVENTS.BROWSER_SESSION_CHANGED, { thread_id: 'one-other:sub:helper:task' });
+  await f.advance(300);
+  assert.equal(reads, 1);
+  f.window.emit(events.CUSTOM_DOM_EVENTS.BROWSER_SESSION_CHANGED, { thread_id: child.thread_id });
+  await f.advance(300);
+  assert.equal(reads, 2);
+  assert.equal(value.status().open, false);
+  assert.equal(value.hasOpenSession(), true);
+  assert.deepEqual(value.sessions(), [child]);
+  assert.deepEqual(changes.at(-1), { active: true, thread: 'one' });
+  next = { ...browserStatus(), sessions: [] };
+  f.window.emit(events.CUSTOM_DOM_EVENTS.SESSIONS_RECONNECTED);
+  await f.advance(300);
+  assert.equal(value.hasOpenSession(), false);
+  assert.deepEqual(changes.at(-1), { active: false, thread: 'one' });
+});
+
+test('streamed browser status cannot discard an in-flight child discovery response', async t => {
+  const f = environment(), pending = [];
+  const child = { thread_id: 'one:sub:helper:task', agent_name: 'helper', generation: 'child' };
+  const { useBrowserSession } = load('../src/lib/useBrowserSession.ts', {
+    '@/lib/api': { apiFetch: () => new Promise(resolve => pending.push(resolve)) },
+    '@/lib/eventConstants': events, '@/lib/workspaceRefresh': refresh,
+  }, f.globals);
+  const { value } = mount(t, () => useBrowserSession({ threadId: () => 'one', active: () => false,
+    visible: () => false, busy: () => false, onOpen() {}, onHandoffChange() {} }));
+  value.applyStatus(browserStatus('streamed'), 'one');
+  pending.shift()({ ...browserStatus('older'), sessions: [child] });
+  await tick();
+  assert.equal(value.status().generation, 'streamed');
+  assert.equal(value.sessions()[0].thread_id, 'one');
+  assert.deepEqual(value.sessions()[1], child);
+});
+
+test('browser selection preserves active sessions, falls back, and follows new main handoffs', async t => {
+  const { useBrowserSelection } = load('../src/lib/useBrowserSelection.ts');
+  const main = { thread_id: 'one', generation: 'main' };
+  const first = { thread_id: 'one:sub:helper:first', generation: 'first' };
+  const second = { thread_id: 'one:sub:helper:second', generation: 'second' };
+  const { value } = mount(t, () => {
+    const [root, setRoot] = solid.createSignal('one');
+    const [sessions, setSessions] = solid.createSignal([]);
+    const [handoff, setHandoff] = solid.createSignal(null);
+    const session = { sessions, sessionKey: () => sessions().map(item => item.generation).join('|'),
+      status: () => ({ open: sessions().some(item => item.thread_id === root()), handoff: handoff() }) };
+    return { setRoot, setSessions, setHandoff, selection: useBrowserSelection(root, session) };
+  });
+  assert.equal(value.selection.threadId(), 'one');
+  value.setSessions([first]);
+  assert.equal(value.selection.threadId(), first.thread_id);
+  value.setSessions([main, first, second]);
+  assert.equal(value.selection.threadId(), first.thread_id);
+  value.selection.select(second.thread_id);
+  value.setSessions([main, second]);
+  assert.equal(value.selection.threadId(), second.thread_id);
+  value.setHandoff({ handoff_id: 'login' });
+  assert.equal(value.selection.threadId(), 'one');
+  value.selection.select(second.thread_id);
+  value.setHandoff({ handoff_id: 'login' });
+  assert.equal(value.selection.threadId(), second.thread_id);
+  value.setSessions([main]);
+  assert.equal(value.selection.threadId(), 'one');
+  value.setSessions([]);
+  assert.equal(value.selection.threadId(), 'one');
+  value.setSessions([first]);
+  value.selection.select('one');
+  value.setSessions([first, second]);
+  assert.equal(value.selection.threadId(), 'one', 'the closed main session remains available for opening and profiles');
+  value.selection.select('unrelated');
+  assert.equal(value.selection.threadId(), 'one');
+  solid.batch(() => { value.setRoot('two'); value.setSessions([]); value.setHandoff(null); });
+  assert.equal(value.selection.threadId(), 'two');
+  value.setSessions([{ ...first, thread_id: 'two:sub:helper:first' }]);
+  assert.equal(value.selection.threadId(), 'two:sub:helper:first');
+  value.setHandoff({ handoff_id: 'expired-login', expired: true });
+  assert.equal(value.selection.threadId(), 'two');
+  value.setSessions([{ ...first, thread_id: 'two:sub:helper:first' }, { ...second, thread_id: 'two:sub:helper:second' }]);
+  assert.equal(value.selection.threadId(), 'two', 'an expired main handoff remains available when child sessions change');
+});
+
+test('async handoffs select their own browser, survive session loss, and leave the parent unlocked', async t => {
+  const f = environment(), parentHandoffs = [];
+  let next = { ...browserStatus('main'), sessions: [] }, opened = 0;
+  const first = { thread_id: 'one:sub:first', parent_thread_id: 'one', agent_name: 'worker', task_id: 'first',
+    run_id: 'first-run', interrupt_id: 'first-interrupt', handoff_id: 'first-handoff', generation: 'first-session', reason: 'Sign in' };
+  const second = { ...first, thread_id: 'one:sub:second', task_id: 'second', handoff_id: 'second-handoff', generation: 'second-session' };
+  const { useBrowserSession } = load('../src/lib/useBrowserSession.ts', {
+    '@/lib/api': { apiFetch: async () => structuredClone(next) },
+    '@/lib/eventConstants': events, '@/lib/workspaceRefresh': refresh,
+  }, f.globals);
+  const { useBrowserSelection } = load('../src/lib/useBrowserSelection.ts');
+  const { value } = mount(t, () => {
+    const [threadId, setThread] = solid.createSignal('one');
+    const session = useBrowserSession({ threadId, active: () => false, visible: () => false,
+      busy: () => true, onOpen() { opened++; }, onHandoffChange(pending) { parentHandoffs.push(pending); } });
+    return { session, selection: useBrowserSelection(threadId, session), setThread };
+  });
+  await tick();
+  assert.equal(value.selection.threadId(), 'one');
+  next = { ...next, pending_handoffs: [first] };
+  f.window.emit(events.CUSTOM_DOM_EVENTS.SUBAGENT_TASK_UPDATED, { thread_id: first.thread_id });
+  await f.advance(300);
+  assert.equal(opened, 1);
+  assert.equal(value.selection.threadId(), first.thread_id);
+  assert.deepEqual(parentHandoffs, [], 'a waiting child must not lock its parent');
+  next = { ...next, pending_handoffs: [first, second] };
+  f.window.emit(events.CUSTOM_DOM_EVENTS.SUBAGENT_TASK_UPDATED, { thread_id: second.thread_id });
+  await f.advance(300);
+  assert.equal(opened, 2);
+  assert.equal(value.selection.threadId(), second.thread_id);
+  value.selection.select(first.thread_id);
+  await value.session.refresh(true);
+  assert.equal(value.selection.threadId(), first.thread_id, 'refreshing the same requests preserves the selected browser');
+  assert.equal(opened, 2);
+  next = { ...browserStatus(), sessions: [], pending_handoffs: [first, second] };
+  await value.session.refresh(true);
+  assert.equal(value.session.sessions().length, 2, 'lost or expired browsers remain available for a decision');
+  assert.equal(value.selection.threadId(), first.thread_id);
+  f.window.emit('k41-browser-handoff', { threadId: 'one', browserThreadId: second.thread_id });
+  await tick();
+  assert.equal(value.selection.threadId(), second.thread_id, 'a task shortcut targets that exact child');
+  next = { ...browserStatus(), sessions: [], pending_handoffs: [] };
+  f.window.emit(events.CUSTOM_DOM_EVENTS.SUBAGENT_TASK_UPDATED, { thread_id: second.thread_id });
+  await f.advance(300);
+  assert.equal(value.selection.threadId(), 'one');
+  assert.equal(value.session.hasOpenSession(), false);
+  value.setThread('another');
+  await tick();
+  assert.equal(value.selection.threadId(), 'another');
+  assert.deepEqual(value.session.handoffs(), []);
+});
+
 test('computer discovery only reads status and pauses with the workspace', async t => {
   const f = environment();
   const reads = [];

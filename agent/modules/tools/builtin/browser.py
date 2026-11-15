@@ -175,11 +175,13 @@ async def _handoff(runtime: Runtime, reason: str):
                         "approval_unavailable: Nobody can take over the browser in a scheduled run. "
                         "Report what needs human interaction in your final answer instead.")
     try:
-        BrowserService.assert_handoff_supported(thread_id)
+        async_task_id = (runtime.config.get("metadata") or {}).get("k41_async_task_id")
+        BrowserService.assert_handoff_supported(thread_id, async_task_id=async_task_id)
         authorize(runtime, "browser_handoff", {"reason": reason})
         result = await get_browser_service().handoff(
             thread_id, owner_id, runtime.tool_call_id, reason, authorize_snapshot=snapshot_authorizer(runtime),
-            wait_for_human=(runtime.config.get("configurable") or {}).get(BROWSER_HANDOFF_WAIT_KEY))
+            wait_for_human=(runtime.config.get("configurable") or {}).get(BROWSER_HANDOFF_WAIT_KEY),
+            async_task_id=async_task_id)
     except BrowserError as exc:
         raise ToolError(ToolErrorCode.EXECUTION_ERROR, f"{exc.code}: {exc}") from None
     return message(runtime, "browser_handoff", result)
@@ -222,7 +224,7 @@ browser_handoff = registered("browser_handoff", _handoff,
     "- If handoff_status is 'expired': The browser closed automatically after the handoff deadline. Human interaction was not confirmed. Explain the timeout and ask whether to restart the browser task; do not automatically repeat the handoff or assume the manual step succeeded. "
     "- If handoff_status is 'session_lost': The browser session ended. Do not act on old snapshot IDs or claim to have observed the page. Explain the lost session before starting a new browser task. "
     "- If snapshot_status is 'failed': Call browser_snapshot before acting or describing the current page. "
-    "Unavailable in delegated sub-agents: report the need for user interaction to the parent agent instead. Call this tool alone. Never put credentials in chat or tool inputs.", True)
+    "Available in asynchronous sub-agents, which wait for the user and resume their own browser session. Unavailable in synchronous delegated sub-agents: report the need for user interaction to the parent agent instead. Call this tool alone. Never put credentials in chat or tool inputs.", True)
 browser_close = registered("browser_close", _close,
     "Close this conversation's browser and release its profile for another conversation. Login state is preserved.", True)
 

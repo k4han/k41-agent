@@ -51,7 +51,10 @@ async def release_delegated_browser(thread_id: str) -> None:
     if service is None:
         return
     try:
-        await service.release_inherited_profile(thread_id)
+        try:
+            await service.abandon_handoffs(thread_id)
+        finally:
+            await service.release_inherited_profile(thread_id)
     except Exception:
         logger.warning("A sub-agent's browser could not be released.", exc_info=True)
 

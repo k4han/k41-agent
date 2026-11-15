@@ -36,7 +36,7 @@ Chrome starts with `--restore-last-session` so session cookies survive a restart
 
 Browser tools require the authenticated account identity supplied by dashboard/API runs. Channel and scheduler runs do not supply this identity, so browser tools, including human handoff, fail before creating a browser session or ownership binding. Open the conversation in the dashboard to perform browser tasks.
 
-Delegated sub-agents inherit the parent run's authenticated browser owner and effective profile, with their own tabs in the same browser. Their sessions can be inspected and closed through the dashboard API using the sub-thread ID. Finishing delegation releases only the helper's tabs. Human handoff is unavailable inside delegated sub-agents because delegation does not relay workflow interrupts. A sub-agent must report any need for user interaction to its parent agent.
+Delegated sub-agents inherit the parent run's authenticated browser owner and effective profile, with their own tabs in the same browser. Their sessions can be inspected and closed through the dashboard API using the sub-thread ID. Finishing delegation releases only the helper's tabs. Asynchronous sub-agents can use human handoff: the task waits with its browser open, and the dashboard selects its session. Return and cancel decisions resume the exact child task, run, and interrupt independently of the parent. Expired and lost handoffs remain available after reload. Cancelling the task releases its pending handoff and tabs. Synchronous sub-agents must report any need for user interaction to their parent agent.
 
 ## Configuration and storage
 
