@@ -23,6 +23,9 @@ async def retain_message(message: ToolMessage, runtime) -> ToolMessage:
     if (message.name == "skill" and message.status != "error" and artifact.get("kind") == "skill_activation"
             and artifact.get("action") == "load"):
         return message
+    # Curator snapshots are already bounded and must replay byte-for-byte.
+    if message.name == "codebase_context" and artifact.get("kind") == "decision_context":
+        return message
     blocks = message.content if isinstance(message.content, list) else None
     text = message.content if blocks is None else "\n".join(
         block if isinstance(block, str) else block.get("text", "")

@@ -33,4 +33,12 @@ class GoogleChatModel(ChatGoogleGenerativeAI):
                                 # bytes would be base64-encoded by the Google SDK.
                                 part.thought_signature = cast("bytes", "skip_thought_signature_validator")
                             break
+        if model_name.startswith("gemini-"):
+            # Synthetic curator calls have no model signature. Keep their sentinel
+            # on older turns too, so appending a turn preserves the request prefix.
+            for content in request["contents"]:
+                for part in content.parts or []:
+                    if (part.function_call and part.function_call.name == "codebase_context"
+                            and not part.thought_signature):
+                        part.thought_signature = cast("bytes", "skip_thought_signature_validator")
         return request

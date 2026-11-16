@@ -201,6 +201,8 @@ async def tool_node(
         workspace = get_runtime_context_value(runtime.context, "working_dir", None)
     if workspace is not None:
         tools = ToolResolver().for_workspace(tools, workspace)
+    from agent.modules.workflows.decision_context import bind_decision_context_tool
+    tools = bind_decision_context_tool(tools, state)
     tools = _include_pending_control_tools(state, tools)
     tools = await _include_resumed_browser_handoff(state, tools, config)
     calls = getattr(state.get("messages", [])[-1], "tool_calls", []) if state.get("messages") else []

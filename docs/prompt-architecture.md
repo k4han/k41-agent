@@ -46,6 +46,21 @@ tool schemas, preventing manual compaction from reserving skill history twice.
 
 ## Internal agent cards
 
+The `decision_agent` graph supplies curated workspace data through one automatic
+`codebase_context({})` call/result pair per user turn. The unchanged user message
+is followed by the pair, which retains the bounded directory tree and selected
+file contents in checkpoint history. Later model calls replay that snapshot
+without rereading files or appending data to the system prompt. Each new turn
+appends its own snapshot. The internal tool schema stays fixed while the decision
+run or its tool history exists, including agents with no other tools. A repeated
+call returns the current turn's retained snapshot, or an error if none remains.
+
+Reference-only checkpoints are upgraded once when their active turn resumes.
+The state marker `decision_context_tool_call_id` prevents reconstruction after
+ordinary compaction. Context snapshots use the existing tool display and token
+accounting, and follow ordinary tool history compaction rather than skill
+instruction restoration. Their file contents remain reference data.
+
 The following internal cards own instructions for existing workflow steps:
 
 | Card | Consumer |

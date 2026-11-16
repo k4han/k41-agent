@@ -108,10 +108,10 @@ def cached_llm_node(monkeypatch):
     async def _run(
         *, agent_name: str = "cache-agent", thread_id: str = "thread-1",
         messages=None, model=None, reasoning_effort=None,
-        allowed_tool_names=None, working_dir="D:/repo",
+        allowed_tool_names=None, working_dir="D:/repo", state=None,
     ):
         return await llm_node_module.llm_node(
-            {"messages": messages if messages is not None else [HumanMessage(content="hi")]},
+            state if state is not None else {"messages": messages if messages is not None else [HumanMessage(content="hi")]},
             {"configurable": {"thread_id": thread_id}},
             SimpleNamespace(
                 context=WorkflowContext(
@@ -505,3 +505,83 @@ async def test_cached_catalogs_reach_tool_descriptions_once_and_refresh_after_re
     latest = next(tool.description for tool in cached_llm_node.captured["bound_tools"][-1] if tool.name == "skill")
     assert "- second:" in latest and "- first:" not in latest
     assert cached_llm_node.calls["builder"] == 2
+
+
+@pytest.mark.asyncio
+async def test_curator_changes_leave_system_prompt_and_internal_tool_schema_stable(cached_llm_node, monkeypatch):
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+    from agent.modules.workflows.decision_context import make_decision_context_messages
+
+    accounting = []
+
+    def track_usage(config, **kwargs):
+        accounting.append(kwargs)
+        return config
+
+    monkeypatch.setattr(llm_node_module, "with_usage_tracking", track_usage)
+    for message_id, content in (("first", "small snapshot"), ("second", "large snapshot " * 100)):
+        pair = make_decision_context_messages(message_id, content)
+        await cached_llm_node.run(allowed_tool_names=[], state={
+            "messages": [HumanMessage(content="Inspect", id=message_id), *pair],
+            "decision_message_id": message_id, "decision_context_tool_call_id": pair[1].tool_call_id,
+        })
+    assert cached_llm_node.calls["builder"] == 1
+    assert len(set(cached_llm_node.captured["system_prompts"])) == 1
+    schemas = [[convert_to_openai_tool(tool) for tool in tools] for tools in cached_llm_node.captured["bound_tools"]]
+    assert schemas[0] == schemas[1]
+    assert len(schemas[0]) == 1
+    assert schemas[0][0]["function"]["name"] == "codebase_context"
+    assert accounting[0]["context_prompt_breakdown"] == accounting[1]["context_prompt_breakdown"]
+    assert accounting[0]["context_breakdown"]["system_prompt"] == accounting[1]["context_breakdown"]["system_prompt"]
+    assert accounting[0]["context_breakdown"]["tool_calls"] < accounting[1]["context_breakdown"]["tool_calls"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_context_migrates_once_even_when_model_attempt_retries(cached_llm_node, tmp_path, monkeypatch):
+    from langgraph.graph.message import add_messages
+    from agent.modules.workflows.nodes import decision as decision_module
+
+    (tmp_path / "example.py").write_text("original file body", encoding="utf-8")
+    state = {"messages": [HumanMessage(content="Inspect", id="legacy-user")],
+             "decision_message_id": "legacy-user", "directory_tree": "example.py",
+             "included_files": [{"path": "example.py"}]}
+    reads = []
+    original_read = decision_module.read_file_safe
+
+    def read(*args, **kwargs):
+        reads.append(args[1])
+        return original_read(*args, **kwargs)
+
+    monkeypatch.setattr(decision_module, "read_file_safe", read)
+    invoke = _FakeChatModel.ainvoke
+    attempts = []
+
+    async def fail_first(self, messages, **kwargs):
+        response = await invoke(self, messages, **kwargs)
+        attempts.append(messages)
+        if len(attempts) == 1:
+            (tmp_path / "example.py").unlink()
+            raise OSError("Retry this provider")
+        return response
+
+    async def retry(resolved, operation):
+        try:
+            return await operation(resolved)
+        except OSError:
+            return await operation(resolved)
+
+    monkeypatch.setattr(_FakeChatModel, "ainvoke", fail_first)
+    monkeypatch.setattr(llm_node_module, "execute_model_call", retry)
+    updates = await cached_llm_node.run(state=state, working_dir=str(tmp_path), allowed_tool_names=[])
+    assert updates["decision_context_tool_call_id"]
+    assert reads == ["example.py"]
+    assert attempts[0] == attempts[1]
+    assert "original file body" in attempts[0][-1].content
+    migrated = {**state, **updates, "messages": add_messages(state["messages"], updates["messages"])}
+    await cached_llm_node.run(state=migrated, working_dir=str(tmp_path), allowed_tool_names=[])
+    assert reads == ["example.py"]
+    assert len([message for message in cached_llm_node.captured["messages"] if isinstance(message, ToolMessage)]) == 1
+    compacted = {**migrated, "messages": [state["messages"][0], AIMessage(content="Compacted")]}
+    await cached_llm_node.run(state=compacted, working_dir=str(tmp_path), allowed_tool_names=[])
+    assert reads == ["example.py"]
+    assert not any(isinstance(message, ToolMessage) for message in cached_llm_node.captured["messages"])

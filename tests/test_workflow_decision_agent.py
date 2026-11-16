@@ -1,6 +1,7 @@
 """Tests for decision-guided context curation workflow graph."""
 
 import json
+import re
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -27,6 +28,7 @@ from agent.modules.workflows.nodes.decision import (
 )
 from agent.modules.workflows.registry import GraphRegistry
 from agent.modules.workflows.run_config import WorkflowContext, make_config, make_context
+from agent.modules.workflows.decision_context import CONTEXT_TOOL_NAME
 
 
 class _FakeDecisionModel:
@@ -121,8 +123,8 @@ def test_read_file_safe(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_decision_node_keeps_file_bodies_out_of_state(tmp_path: Path, monkeypatch):
-    """Verify references hydrate context without persisting enriched messages."""
+async def test_decision_node_persists_context_as_a_tool_result(tmp_path: Path, monkeypatch):
+    """Keep the user unchanged and save a complete context snapshot in history."""
     # Setup test workspace
     (tmp_path / "agent.py").write_text("class Agent: pass", encoding="utf-8")
     (tmp_path / "ignored.txt").write_text("unrelated text", encoding="utf-8")
@@ -157,14 +159,20 @@ async def test_decision_node_keeps_file_bodies_out_of_state(tmp_path: Path, monk
     result = await decision_node(state, config, runtime=runtime)
 
     assert "messages" in result
-    assert len(result["messages"]) == 1
+    assert len(result["messages"]) == 3
     assert result["messages"][0] == initial_msg
-    hydrated = await build_decision_context({**state, **result}, str(tmp_path))
+    call, response = result["messages"][1:]
+    assert isinstance(call, AIMessage)
+    assert isinstance(response, ToolMessage)
+    assert call.tool_calls == [{"name": CONTEXT_TOOL_NAME, "args": {},
+                                "id": response.tool_call_id, "type": "tool_call"}]
+    assert result["decision_context_tool_call_id"] == response.tool_call_id
+    hydrated = response.content
     assert CONTEXT_MARKER in hydrated
     assert "<directory_tree>" in hydrated
     assert "agent.py" in hydrated
     assert "class Agent: pass" in hydrated
-    assert "class Agent: pass" not in str(result)
+    assert "class Agent: pass" not in str(result["included_files"])
     assert result["curated_context"] is None
     assert [call["schema"] for call in fake_model.invocations] == [FileCandidateSelection, FileInclusionBatch]
 
@@ -228,19 +236,25 @@ async def test_decision_batches_candidates_and_bounds_previews(tmp_path, monkeyp
     assert sum(len(item["preview"]) for item in previews) <= decision_module.MAX_INCLUSION_PREVIEW_CHARS
     assert [item["path"] for item in result["included_files"]] == [paths[0], *paths[2:]]
     assert len(result["included_files"][0]["excerpt"]) == decision_module.MAX_EXCERPT_CHARS
-    assert "raw-file-body-" not in str(result)
+    assert "raw-file-body-" not in str(result["included_files"])
     assert await decision_node(result, {}) == {}
 
-    hydrated = await build_decision_context(result, str(tmp_path))
+    hydrated = result["messages"][-1].content
     assert "focused excerpt" in hydrated
     assert f'<file path="{paths[1]}">' not in hydrated
     assert "not-a-candidate.txt" not in hydrated
-    # References read the current workspace and tolerate files removed after selection.
+    file_bodies = re.findall(r'<file path="[^"]*">\n(.*?)\n</file>', hydrated, flags=re.DOTALL)
+    assert sum(map(len, file_bodies)) == decision_module.MAX_CONTEXT_CHARS
+    # Snapshots keep the original file data even after workspace changes.
     (tmp_path / paths[2]).write_text("updated file contents", encoding="utf-8")
     (tmp_path / paths[3]).unlink()
-    hydrated = await build_decision_context(result, str(tmp_path))
-    assert "updated file contents" in hydrated
-    assert f'<file path="{paths[3]}">' not in hydrated
+    assert result["messages"][-1].content == hydrated
+    assert "updated file contents" not in hydrated
+    assert f'<file path="{paths[3]}">' in hydrated
+    # Reference-only checkpoints still hydrate current files during migration.
+    legacy = await build_decision_context(result, str(tmp_path))
+    assert "updated file contents" in legacy
+    assert f'<file path="{paths[3]}">' not in legacy
     assert await build_decision_context({**result, "messages": [HumanMessage(content="next", id="new-turn")]}, str(tmp_path)) == ""
 
 
@@ -302,7 +316,8 @@ def test_build_decision_agent_graph_registration(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_decision_graph_full_flow(tmp_path: Path, monkeypatch):
+@pytest.mark.parametrize("legacy_checkpoint", [False, True])
+async def test_decision_graph_full_flow(tmp_path: Path, monkeypatch, legacy_checkpoint):
     """End-to-end execution of decision graph from user input through decision and llm nodes."""
     (tmp_path / "math_utils.py").write_text("def add(a, b): return a + b\n", encoding="utf-8")
 
@@ -322,9 +337,22 @@ async def test_decision_graph_full_flow(tmp_path: Path, monkeypatch):
     # Fake LLM node model: calls a tool, then finishes
     call_count = 0
     model_inputs = []
+    bound_schemas = []
+    file_reads = []
+
+    from agent.modules.workflows.nodes import decision as decision_module
+    original_read = decision_module.read_file_safe
+
+    def record_read(*args, **kwargs):
+        file_reads.append(args[1])
+        return original_read(*args, **kwargs)
+
+    monkeypatch.setattr(decision_module, "read_file_safe", record_read)
 
     class _FakeMainLLM:
         def bind_tools(self, tools, **kwargs):
+            from langchain_core.utils.function_calling import convert_to_openai_tool
+            bound_schemas.append([convert_to_openai_tool(item) for item in tools])
             return self
 
         async def ainvoke(self, messages, **kwargs):
@@ -340,11 +368,16 @@ async def test_decision_graph_full_flow(tmp_path: Path, monkeypatch):
                         "id": "tool-call-1",
                     }],
                 )
+            if call_count == 2:
+                return AIMessage(content="", tool_calls=[{
+                    "name": CONTEXT_TOOL_NAME, "args": {}, "id": "repeat-context-call",
+                }])
             return AIMessage(content="Result is 42", tool_calls=[])
 
     @tool
     def mock_tool(query: str) -> str:
         """Mock test tool."""
+        (tmp_path / "math_utils.py").write_text("changed during the tool loop", encoding="utf-8")
         return f"Tool result for {query}"
 
     from agent.modules.agents.models import AgentConfig
@@ -413,24 +446,78 @@ async def test_decision_graph_full_flow(tmp_path: Path, monkeypatch):
 
     initial_input = {"messages": [HumanMessage(content="Calculate 20 + 22", id="msg-input")]}
 
+    if legacy_checkpoint:
+        await compiled.aupdate_state(config, {**initial_input, "decision_message_id": "msg-input",
+            "directory_tree": generate_directory_tree(tmp_path), "candidate_files": ["math_utils.py"],
+            "included_files": [{"path": "math_utils.py", "use_full_content": True, "max_bytes": 50_000}]},
+            as_node="decision")
+        initial_input = None
+
     # Pass context via ainvoke context argument
     result = await compiled.ainvoke(initial_input, config=config, context=context)
 
-    # Verify flow ran: decision enriched message -> llm called tool -> tool ran -> llm final
+    # Verify flow ran: context tool pair -> llm called tool -> tool ran -> llm final.
     messages = result["messages"]
     assert any(isinstance(m, ToolMessage) for m in messages)
     final_message = messages[-1]
     assert isinstance(final_message, AIMessage)
     assert final_message.content == "Result is 42"
 
-    # The main model sees context on each pass, while checkpoints keep references.
+    # The main model and checkpoints retain the same context tool result.
     first_human = next(m for m in messages if isinstance(m, HumanMessage))
     assert first_human.content == "Calculate 20 + 22"
-    assert len(model_inputs) == 2
-    assert all("def add(a, b)" in items[0].content for items in model_inputs)
+    assert len(model_inputs) == 3
+    assert all("def add(a, b)" not in items[0].content for items in model_inputs)
+    snapshots = [next(message for message in items if isinstance(message, ToolMessage)
+                      and message.name == CONTEXT_TOOL_NAME) for items in model_inputs]
+    assert "def add(a, b)" in snapshots[0].content
+    assert snapshots[0] == snapshots[1] == snapshots[2]
+    assert model_inputs[0][0].content == model_inputs[1][0].content
+    repeated = next(message for message in messages if isinstance(message, ToolMessage)
+                    and message.tool_call_id == "repeat-context-call")
+    assert repeated.content == snapshots[0].content
+    assert file_reads == ["math_utils.py"]
+    assert bound_schemas[0] == bound_schemas[1] == bound_schemas[2]
     assert "content" not in result["included_files"][0]
-    async for checkpoint in saver.alist(config):
-        assert "def add(a, b)" not in str(checkpoint.checkpoint)
+    saved = await saver.aget_tuple(config)
+    assert "def add(a, b)" in str(saved.checkpoint)
+    assert saved.checkpoint["channel_values"]["decision_context_tool_call_id"] == snapshots[0].tool_call_id
+
+    # A new turn appends a new snapshot without rewriting earlier context.
+    previous_messages = [message.model_dump() for message in messages]
+    (tmp_path / "math_utils.py").write_text("def add(a, b): return a + b + 1\n", encoding="utf-8")
+    result = await compiled.ainvoke({"messages": [HumanMessage(content="Check the updated add", id="next-input")]},
+                                    config=config, context=context)
+    assert [message.model_dump() for message in result["messages"][:len(messages)]] == previous_messages
+    assert "return a + b + 1" in result["messages"][-2].content
+    assert model_inputs[-1][0].content == model_inputs[0][0].content
+    assert all(schemas == bound_schemas[0] for schemas in bound_schemas)
+    assert file_reads == ["math_utils.py", "math_utils.py"]
+    assert len([message for message in result["messages"] if isinstance(message, ToolMessage)
+                and message.name == CONTEXT_TOOL_NAME]) == 3
+
+
+@pytest.mark.asyncio
+async def test_decision_node_returns_tree_only_snapshot_when_provider_fallback_fails(tmp_path, monkeypatch):
+    from agent.modules.workflows.nodes import decision as decision_module
+
+    (tmp_path / "example.py").write_text("unselected file", encoding="utf-8")
+    monkeypatch.setattr(decision_module, "_resolve_decision_client", lambda **kwargs: None)
+
+    def fail_resolution(*args, **kwargs):
+        raise OSError("Decision provider unavailable")
+
+    monkeypatch.setattr(decision_module, "_resolve_decision_model", fail_resolution)
+    result = await decision_node({"messages": [HumanMessage(content="Inspect the project")]},
+                                 {"configurable": {"working_dir": str(tmp_path)}})
+    assert result["candidate_files"] == result["included_files"] == []
+    user, call, response = result["messages"]
+    assert user.id == result["decision_message_id"]
+    assert response.artifact["decision_message_id"] == user.id
+    assert "example.py" in response.content
+    assert "unselected file" not in response.content
+    assert call.tool_calls[0]["id"] == response.tool_call_id == result["decision_context_tool_call_id"]
+    assert await decision_node(result, {}) == {}
 
 
 @pytest.mark.asyncio
@@ -521,7 +608,7 @@ async def test_decision_node_with_cloudflare_clef_client(tmp_path: Path):
         assert len(result["included_files"]) == 1
         assert result["included_files"][0]["path"] == "service.py"
         assert result["messages"][0].content == initial_msg.content
-        assert "class MyService" in await build_decision_context(result, str(tmp_path))
+        assert "class MyService" in result["messages"][-1].content
         assert "Decision model evaluation" in result["included_files"][0]["reasoning"]
     finally:
         set_default_decision_client(None)
