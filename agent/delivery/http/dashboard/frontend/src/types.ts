@@ -646,7 +646,7 @@ export type CatalogResponse = {
 export type SettingsPayload = {
   web_connections?: WebConnectionsPayload;
   tool_config_sources?: Record<string, Record<string, string>>;
-  active_nav: "config" | "providers" | "backends" | "tools";
+  active_nav: "config" | "providers" | "backends" | "tools" | "decisions";
   page_title: string;
   page_subtitle: string;
   settings: Record<string, SettingInfo>;
@@ -664,6 +664,11 @@ export type SettingsPayload = {
   default_model?: string;
   tool_config_schemas?: Record<string, ToolConfigSchema>;
   tool_config_effective?: Record<string, Record<string, unknown>>;
+};
+
+export type DecisionsPayload = SettingsPayload & {
+  decision_providers: DecisionProvidersPayload;
+  llm_model_options: Array<{ value: string; label: string }>;
 };
 
 export type UsageSummary = {

@@ -162,7 +162,7 @@ RUNTIME_KEY_PATTERNS = [
     r"^decision\.(model|timeout|max_retries|default_provider|migration_version)$",
     r"^decision\.providers\.[A-Za-z0-9_-]+\.[A-Za-z0-9_]+$",
     r"^decision\.cloudflare\.(account_id|api_token|base_url)$",
-    r"^decision\.router\.(mode|threshold|log_telemetry)$",
+    r"^decision\.router\.(mode|threshold|log_telemetry|llm_model)$",
 ]
 
 DATABASE_RUNTIME_KEY_PATTERNS = [
@@ -198,7 +198,7 @@ DATABASE_RUNTIME_KEY_PATTERNS = [
     r"^decision\.(model|timeout|max_retries|default_provider|migration_version)$",
     r"^decision\.providers\.[A-Za-z0-9_-]+\.[A-Za-z0-9_]+$",
     r"^decision\.cloudflare\.(account_id|api_token|base_url)$",
-    r"^decision\.router\.(mode|threshold|log_telemetry)$",
+    r"^decision\.router\.(mode|threshold|log_telemetry|llm_model)$",
 ]
 
 SENSITIVE_RUNTIME_KEY_PATTERNS = [
@@ -346,6 +346,7 @@ def _expand_runtime_keys() -> set[str]:
     keys.update({"browser.stream_quality", "browser.stream_max_width", "browser.stream_max_height"})
     keys.add("google_calendar.enabled")
     keys.add("decision.router.mode")
+    keys.add("decision.router.llm_model")
     keys.add("decision.router.threshold")
     keys.add("decision.router.log_telemetry")
     keys.add("decision.model")
@@ -477,6 +478,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "tray.autostart": False,
     # Decision model configuration
     "decision.router.mode": "cascade",
+    "decision.router.llm_model": "",
     "decision.router.threshold": 0.75,
     "decision.router.log_telemetry": True,
     "decision.default_provider": "",
@@ -1142,6 +1144,18 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
         "step": 1,
     },
     # Decision settings
+    "decision.default_provider": {
+        "type": "select",
+        "description": "Shared Decision connection selected in Providers. Leave empty to use legacy or environment configuration.",
+        "category": "decision",
+        "label": "Decision Model",
+    },
+    "decision.router.llm_model": {
+        "type": "select",
+        "description": "LLM used for routing in llm_only, shadow, and cascade fallback. Leave empty to use the current agent model selection.",
+        "category": "decision",
+        "label": "Router LLM Model",
+    },
     "decision.router.mode": {
         "type": "select",
         "options": ["llm_only", "clef_only", "shadow", "cascade"],

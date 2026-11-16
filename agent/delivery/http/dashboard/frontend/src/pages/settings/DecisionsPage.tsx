@@ -15,8 +15,10 @@ import {
 
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
-import type { SettingInfo } from "@/types";
+import { FormSelect } from "@/components/forms";
+import type { DecisionsPayload, SettingInfo } from "@/types";
 
+import { DecisionConnectionSelect } from "./DecisionConnectionSelect";
 import { SettingsLayout } from "./SettingsLayout";
 import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
 import {
@@ -67,7 +69,7 @@ export function DecisionsPage() {
     restoreDraft,
     discardAll,
     saveChanges,
-  } = useSettingsData("/dashboard-api/decisions");
+  } = useSettingsData<DecisionsPayload>("/dashboard-api/decisions", { saveEndpoint: "/dashboard-api/decisions" });
 
   const [search, setSearch] = createSignal("");
   const [confirmOpen, setConfirmOpen] = createSignal(false);
@@ -79,12 +81,28 @@ export function DecisionsPage() {
 
   useUnsavedChanges(() => pendingChanges().length > 0, discardAll);
 
+  const mode = () => String(drafts()["decision.router.mode"] || "cascade");
+  const decisionProviders = () => data()?.decision_providers.providers || [];
+  const llmOptions = createMemo(() => {
+    const options = data()?.llm_model_options || [];
+    const value = String(drafts()["decision.router.llm_model"] || "");
+    return [
+      { value: "", label: "Use current agent model selection" },
+      ...(value && !options.some((option) => option.value === value)
+        ? [{ value, label: `${value} (unavailable)`, disabled: true }] : []),
+      ...options,
+    ];
+  });
+
   const routingSettings = createMemo(() => {
     const payload = data();
     if (!payload?.settings) return [];
     const needle = search().trim().toLowerCase();
-    return Object.entries(payload.settings).filter(([key, info]) => {
-      if (!key.startsWith("decision.router")) return false;
+    const keys = ["decision.router.mode", "decision.default_provider", "decision.router.llm_model",
+      "decision.router.threshold", "decision.router.log_telemetry"];
+    return keys.filter((key) => payload.settings[key]).map((key): [string, SettingInfo] => [key, payload.settings[key]]).filter(([key, info]) => {
+      if (key === "decision.default_provider" && mode() === "llm_only") return false;
+      if (key === "decision.router.llm_model" && mode() === "clef_only") return false;
       const haystack = [key, info.label, info.description].join(" ").toLowerCase();
       return !needle || haystack.includes(needle);
     });
@@ -107,7 +125,7 @@ export function DecisionsPage() {
         <button
           class="btn btn-primary"
           type="button"
-          disabled={pendingChanges().length === 0}
+          disabled={saving() || pendingChanges().length === 0}
           onClick={() => setConfirmOpen(true)}
         >
           <Save size={14} />
@@ -157,7 +175,7 @@ export function DecisionsPage() {
                     probabilities. In <strong>Cascade mode</strong>, queries with confidence above threshold are routed
                     immediately, cascading to the standard LLM when confidence is low or the decision provider fails.
                     <div class="mt-2">
-                      <A href="/settings/providers?tab=decision" class="text-primary hover:underline text-xs inline-flex items-center gap-1 font-semibold">
+                      <A href="/settings/providers?kind=decision" class="text-primary hover:underline text-xs inline-flex items-center gap-1 font-semibold">
                         Configure Google or Cloudflare in Decision Model Providers <ArrowRight size={12} />
                       </A>
                     </div>
@@ -207,6 +225,32 @@ export function DecisionsPage() {
                             dirty={pendingChanges().some((change: PendingChange) => change.key === key)}
                             onChange={(value) => setDraft(key, value)}
                             onRestore={() => restoreDraft(key)}
+                            control={key === "decision.default_provider" ? (
+                              <div class="stack" data-decision-model-control>
+                                <DecisionConnectionSelect
+                                  providers={decisionProviders()} value={String(drafts()[key] || "")}
+                                  label="Decision Model" placeholder="Legacy / environment fallback"
+                                  configuredOnly allowFallback disabled={saving()}
+                                  onChange={(value) => setDraft(key, value)}
+                                />
+                                <p class="hint">Updates the shared Decision default in Providers.</p>
+                                <Show when={!decisionProviders().some((provider) => provider.configured)}>
+                                  <p class="hint">No configured Decision connections. <A href="/settings/providers?tab=catalog&kind=decision">Configure a Decision provider</A>.</p>
+                                </Show>
+                              </div>
+                            ) : key === "decision.router.llm_model" ? (
+                              <div class="stack" data-router-llm-control>
+                                <FormSelect
+                                  value={String(drafts()[key] || "")} options={llmOptions()}
+                                  ariaLabel="Router LLM Model" disabled={saving()}
+                                  onChange={(value) => setDraft(key, value)}
+                                />
+                                <p class="hint">Used for LLM-only routing, shadow, and cascade fallback.</p>
+                                <Show when={!data()?.llm_model_options.length}>
+                                  <p class="hint">No configured LLM models available. <A href="/settings/providers?kind=llm">Configure Models</A>.</p>
+                                </Show>
+                              </div>
+                            ) : undefined}
                           />
                         )}
                       </For>

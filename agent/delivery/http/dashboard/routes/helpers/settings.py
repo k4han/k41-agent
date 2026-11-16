@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -8,7 +9,7 @@ from fastapi import HTTPException, Request
 from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
 from agent.delivery.http.dashboard.routes.helpers.providers import (
     PROVIDER_TYPE_OPTIONS,
-    build_provider_rows,
+    build_provider_rows_with_sessions,
     normalize_provider_name,
     provider_entries_from_flat_config,
     provider_model_options,
@@ -294,6 +295,30 @@ def is_channel_context_trim_setting(key: str) -> bool:
 
 
 def normalize_setting_value(key: str, value: Any | None) -> Any | None:
+    if key in {"decision.default_provider", "decision.router.llm_model"}:
+        if value is not None and not isinstance(value, str):
+            raise HTTPException(400, f"{key} must be a string.")
+        return (value or "").strip()
+    if key == "decision.router.mode":
+        from agent.modules.decisions import RouterMode
+
+        if value is None:
+            return "cascade"
+        if not isinstance(value, str) or value not in {mode.value for mode in RouterMode}:
+            raise HTTPException(400, "Invalid router decision strategy.")
+        return value
+    if key == "decision.router.threshold":
+        if value is None:
+            return 0.75
+        if type(value) not in {int, float} or not math.isfinite(value) or not 0 <= value <= 1:
+            raise HTTPException(400, "Decision confidence threshold must be between 0 and 1.")
+        return value
+    if key == "decision.router.log_telemetry":
+        if value is None:
+            return True
+        if not isinstance(value, bool):
+            raise HTTPException(400, "Decision routing telemetry must be a boolean.")
+        return value
     if key in {"browser.stream_quality", "browser.stream_max_width", "browser.stream_max_height"}:
         if value is None:
             return None
@@ -429,26 +454,12 @@ async def settings_payload(request: Request, *, include_provider_settings: bool)
     # Also add it to flat settings dict for consistency
     settings["llm.default_provider"] = global_settings["llm.default_provider"]
 
-    provider_rows = build_provider_rows(
+    provider_rows = await build_provider_rows_with_sessions(
+        request,
         provider_settings,
         PROVIDER_SETTING_FIELD_ORDER,
         default_provider,
     )
-    for row in provider_rows:
-        if row["type"] == "chatgpt":
-            import asyncio
-            from agent.delivery.http.dashboard.routes.helpers.deps import get_app_container
-
-            session = await asyncio.to_thread(get_app_container(request).chatgpt_auth_manager.session, row["name"])
-            row["chatgpt_session"] = session
-            default_model_value = row["fields"]["default_model"]["info"]["value"]
-            row["ready"] = row["enabled"] and session["sharing"] and bool(default_model_value)
-            row["can_set_default"] = row["ready"] and not row["is_default"]
-            if not session["sharing"]:
-                row["default_block_reason"] = "Sign in with ChatGPT and enable ChatGPT plan usage first."
-            elif row["ready"] and not row["is_default"]:
-                row["default_block_reason"] = ""
-
     catalog = load_providers_catalog()
     catalog_serialized = {}
     for pid, entry in catalog.items():

@@ -17,10 +17,11 @@ from agent.modules.decisions import (
     DecisionTimeoutError, GoogleDecisionClient, NoulQuestion,
 )
 from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
+from agent.delivery.http.dashboard.routes.helpers.decisions import validated_default_decision_provider
 from agent.delivery.http.dashboard.routes.helpers.settings import delete_config_tree, update_config_settings
 from agent.delivery.http.dashboard.routes.helpers.urls import base_url_error
 from agent.shared.config.decision_providers import (
-    DECISION_PROVIDERS, effective_fields, is_configured, provider_entries, provider_payload, validate_provider_name,
+    DECISION_PROVIDERS, effective_fields, provider_entries, provider_payload, validate_provider_name,
 )
 
 router = APIRouter()
@@ -367,12 +368,7 @@ async def create_provider(body: CreateBody, request: Request) -> dict[str, Any]:
 @router.put("/dashboard-api/decision-providers/default")
 async def set_default(body: DefaultBody, request: Request) -> dict[str, Any]:
     service = get_request_config_service(request)
-    name = ""
-    if body.name:
-        entry = find_provider(service, body.name)
-        if not is_configured(entry):
-            raise HTTPException(400, "Decision provider configuration is incomplete.")
-        name = entry["name"]
+    name = validated_default_decision_provider(service, body.name)
     update_config_settings(service, {"decision.default_provider": name}, require_writable=True)
     return {"status": "updated", "name": name}
 

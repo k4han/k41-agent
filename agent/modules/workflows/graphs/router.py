@@ -41,7 +41,7 @@ from agent.modules.workflows.constants import (
     STRIP_PREFIXES,
     STRIP_QUOTES,
 )
-from agent.modules.providers import get_resolved_chat_model, execute_model_call
+from agent.modules.providers import get_resolved_chat_model, execute_model_call, get_reasoning_effort_kwargs
 from agent.modules.providers import should_propagate_pool_error
 from agent.modules.workflows.model_effort import get_workflow_reasoning_effort_kwargs
 from agent.modules.usage import with_usage_tracking
@@ -187,14 +187,31 @@ async def _route_agent_name(
     context: WorkflowContext | None = None,
     agent_config: AgentConfig | None = None,
 ) -> str:
+    from agent.shared.config import get_config_service
+
+    try:
+        router_model = get_config_service().get_str("decision.router.llm_model", "").strip()
+    except RuntimeError:
+        router_model = ""
+    if router_model:
+        provider, separator, model = router_model.partition("/")
+        if not separator or not provider.strip() or not model.strip():
+            raise ValueError("Router LLM model must use provider/model format.")
+        provider, model = provider.strip(), model.strip()
     resolved = get_resolved_chat_model(provider_name=provider, model=model)
 
     async def attempt(resolved):
         llm = resolved.model
-        model_kwargs = (
-            get_workflow_reasoning_effort_kwargs(context, agent_config, resolved)
-            if agent_config is not None else {}
-        )
+        if router_model:
+            model_kwargs = get_reasoning_effort_kwargs(
+                resolved.provider_type, resolved.model_name, None,
+                profile=getattr(resolved, "profile", None),
+            )
+        else:
+            model_kwargs = (
+                get_workflow_reasoning_effort_kwargs(context, agent_config, resolved)
+                if agent_config is not None else {}
+            )
         router_system = _build_router_system(
             user_input=user_input,
             candidates=candidates,

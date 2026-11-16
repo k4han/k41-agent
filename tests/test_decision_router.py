@@ -216,6 +216,75 @@ def isolated_router_env(monkeypatch: pytest.MonkeyPatch):
 # --- 1. Mode: llm_only Tests ---
 
 
+@pytest.mark.parametrize("mode,confidence,expected_llm_calls", [
+    ("llm_only", 0.95, 1), ("shadow", 0.95, 1), ("cascade", 0.5, 1),
+    ("cascade", 0.95, 0), ("clef_only", 0.95, 0),
+])
+@pytest.mark.asyncio
+async def test_configured_router_model_is_used_only_for_llm_decisions(
+    monkeypatch, isolated_router_env, mode, confidence, expected_llm_calls,
+):
+    settings = {"decision.router.llm_model": "routing/org/router-model"}
+    monkeypatch.setattr("agent.shared.config.get_config_service", lambda: SimpleNamespace(
+        get_str=lambda key, default="": settings.get(key, default),
+    ))
+    selections = []
+    efforts = []
+    chat_model = _FakeChatModel("researcher")
+
+    def resolve(**kwargs):
+        selections.append(kwargs)
+        return _fake_resolved_model(chat_model)
+
+    def effort(provider_type, model_name, selected_effort, **kwargs):
+        efforts.append(selected_effort)
+        return {}
+
+    monkeypatch.setattr(router_module, "get_resolved_chat_model", resolve)
+    monkeypatch.setattr(router_module, "get_reasoning_effort_kwargs", effort)
+    decision = MockDecisionClient(canned_answers={"*": {"choice": "planner", "confidence": confidence}})
+    context = _runtime_context(provider="chat-provider", model="chat-model", reasoning_effort="high")
+    result = await router_module.llm_call_router(
+        {"messages": [HumanMessage(content="Research this topic")]},
+        {"configurable": {"router_mode": mode, "confidence_threshold": 0.75, "decision_client": decision}},
+        SimpleNamespace(context=context),
+    )
+    assert selections == [{"provider_name": "routing", "model": "org/router-model"}] * expected_llm_calls
+    assert efforts == [None] * expected_llm_calls
+    assert chat_model.call_count == expected_llm_calls
+    assert context.get_provider() == "chat-provider"
+    assert context.get_model() == "chat-model"
+    assert context.reasoning_effort == "high"
+    assert result["target_agent"].name == ("researcher" if expected_llm_calls else "planner")
+
+
+@pytest.mark.asyncio
+async def test_router_model_changes_apply_to_next_call_and_can_restore_inheritance(monkeypatch, isolated_router_env):
+    settings = {"decision.router.llm_model": "routing/first"}
+    monkeypatch.setattr("agent.shared.config.get_config_service", lambda: SimpleNamespace(
+        get_str=lambda key, default="": settings.get(key, default),
+    ))
+    selections = []
+
+    def resolve(**kwargs):
+        selections.append(kwargs)
+        return _fake_resolved_model(_FakeChatModel("researcher"))
+
+    monkeypatch.setattr(router_module, "get_resolved_chat_model", resolve)
+    for model in ["routing/first", "routing/second", ""]:
+        settings["decision.router.llm_model"] = model
+        await router_module.llm_call_router(
+            {"messages": [HumanMessage(content="Research this topic")]},
+            {"configurable": {"router_mode": "llm_only", "confidence_threshold": 0.75}},
+            SimpleNamespace(context=_runtime_context(provider="chat-provider", model="chat-model")),
+        )
+    assert selections == [
+        {"provider_name": "routing", "model": "first"},
+        {"provider_name": "routing", "model": "second"},
+        {"provider_name": "chat-provider", "model": "chat-model"},
+    ]
+
+
 @pytest.mark.asyncio
 async def test_route_llm_only_uses_chat_llm_and_ignores_clef(monkeypatch: pytest.MonkeyPatch, isolated_router_env):
     chat_model = _FakeChatModel("researcher")

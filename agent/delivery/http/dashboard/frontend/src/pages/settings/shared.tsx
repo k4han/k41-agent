@@ -148,8 +148,8 @@ export function settingsFromPayload(payload: SettingsPayload): Record<string, Se
 
 // --- Hooks ---------------------------------------------------------------
 
-export function useSettingsData(endpoint: string) {
-  const { data, error, load } = useDashboardData<SettingsPayload>(endpoint, { defer: true });
+export function useSettingsData<T extends SettingsPayload = SettingsPayload>(endpoint: string, options: { saveEndpoint?: string } = {}) {
+  const { data, error, load } = useDashboardData<T>(endpoint, { defer: true });
   const [draftState, setDraftState] = createStore<{ values: Record<string, unknown> }>({ values: {} });
   const drafts = () => draftState.values;
   const setDrafts = (values: Record<string, unknown>) =>
@@ -256,7 +256,7 @@ export function useSettingsData(endpoint: string) {
       changes.map((change: PendingChange) => [change.key, change.newValue]),
     );
     try {
-      await putJson("/settings", { values });
+      await putJson(options.saveEndpoint || "/settings", { values });
       showToast(
         restartRequired
           ? `Updated ${changes.length} setting(s). ${RESTART_REQUIRED_NOTICE}`

@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Any
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from agent.modules.providers import (
     list_provider_model_catalog,
@@ -248,6 +248,32 @@ def build_provider_rows(
         })
 
     return provider_rows
+
+
+async def build_provider_rows_with_sessions(
+    request: Request,
+    settings: dict[str, dict[str, Any]],
+    expected_fields: list[str],
+    default_provider: str,
+) -> list[dict[str, Any]]:
+    """Apply the same local ChatGPT readiness checks to provider selectors."""
+    import asyncio
+    from agent.delivery.http.dashboard.routes.helpers.deps import get_app_container
+
+    rows = build_provider_rows(settings, expected_fields, default_provider)
+    for row in rows:
+        if row["type"] != "chatgpt":
+            continue
+        session = await asyncio.to_thread(get_app_container(request).chatgpt_auth_manager.session, row["name"])
+        row["chatgpt_session"] = session
+        default_model = row["fields"]["default_model"]["info"]["value"]
+        row["ready"] = row["enabled"] and session["sharing"] and bool(default_model)
+        row["can_set_default"] = row["ready"] and not row["is_default"]
+        if not session["sharing"]:
+            row["default_block_reason"] = "Sign in with ChatGPT and enable ChatGPT plan usage first."
+        elif row["ready"] and not row["is_default"]:
+            row["default_block_reason"] = ""
+    return rows
 
 
 def serialize_model_catalog(catalog: Any) -> dict[str, Any]:

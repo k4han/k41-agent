@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from agent.delivery.http.dashboard.spa import spa_index_response
@@ -11,6 +11,12 @@ from agent.delivery.http.dashboard.routes.helpers.agents import (
     invalidate_agent_provider_options_cache,
 )
 from agent.delivery.http.dashboard.routes.helpers.deps import get_request_config_service
+from agent.delivery.http.dashboard.routes.helpers.decisions import (
+    DECISION_SETTING_KEYS,
+    configured_router_llm_options,
+    validated_default_decision_provider,
+    validate_router_model_update,
+)
 from agent.delivery.http.dashboard.routes.helpers.settings import (
     delete_config_tree,
     ensure_runtime_keys,
@@ -28,6 +34,7 @@ from agent.modules.tools import (
 from agent.shared.config.web_connections import (
     connection_payload, is_legacy_web_key, translate_legacy_updates, validate_tool_references, web_tool_schemas, web_tool_sources,
 )
+from agent.shared.config.decision_providers import provider_payload
 
 
 router = APIRouter()
@@ -89,9 +96,9 @@ async def get_dashboard_decisions_settings(request: Request) -> dict[str, Any]:
     """Decision model and routing strategy settings."""
     service = get_request_config_service(request)
     settings_raw, settings_sources_raw = service.get_settings_overview_and_sources()
-    settings = {key: info for key, info in settings_raw.items() if key.startswith("decision.")}
+    settings = {key: info for key, info in settings_raw.items() if key in DECISION_SETTING_KEYS}
     settings_sources = {
-        key: info for key, info in settings_sources_raw.items() if key.startswith("decision.")
+        key: info for key, info in settings_sources_raw.items() if key in DECISION_SETTING_KEYS
     }
     return {
         "active_nav": "decisions",
@@ -100,6 +107,8 @@ async def get_dashboard_decisions_settings(request: Request) -> dict[str, Any]:
         "settings": settings,
         "by_category": group_settings_by_category(settings),
         "settings_sources": settings_sources,
+        "decision_providers": provider_payload(service),
+        "llm_model_options": await configured_router_llm_options(request),
     }
 
 
@@ -113,6 +122,23 @@ class UpdateSettingsBody(BaseModel):
     """Request body for batch-updating multiple settings."""
 
     values: dict[str, Any | None] = Field(..., description="Mapping of setting keys to new values.")
+
+
+@router.put("/dashboard-api/decisions")
+async def update_dashboard_decisions_settings(body: UpdateSettingsBody, request: Request) -> dict[str, Any]:
+    """Validate all routing choices before saving them together."""
+    if body.values.keys() - DECISION_SETTING_KEYS:
+        raise HTTPException(400, "Only Decision selection and routing settings can be updated here.")
+    if not body.values:
+        return {"status": "success", "updated": []}
+    service = get_request_config_service(request)
+    values = normalize_setting_updates(body.values)
+    if "decision.default_provider" in values:
+        values["decision.default_provider"] = validated_default_decision_provider(service, values["decision.default_provider"])
+    await validate_router_model_update(values, request=request)
+    update_config_settings(service, values, require_writable=True)
+    invalidate_agent_provider_options_cache()
+    return {"status": "success", "updated": list(values)}
 
 
 @router.put("/settings/{key:path}")
@@ -134,6 +160,9 @@ async def update_setting(
         value = normalize_setting_value(key, body.value)
 
     await validate_default_model_update(service, {key: value}, request=request)
+    values = {key: value}
+    await validate_router_model_update(values, request=request)
+    value = values[key]
     if key.startswith("llm.model_pools."):
         from fastapi import HTTPException
         raise HTTPException(400, "Manage model pools through the model-pools API.")
@@ -181,6 +210,7 @@ async def update_settings(body: UpdateSettingsBody, request: Request) -> dict[st
     values = normalize_setting_updates(raw_values)
     service = get_request_config_service(request)
     await validate_default_model_update(service, values, request=request)
+    await validate_router_model_update(values, request=request)
     if any(key.startswith("llm.model_pools.") for key in values):
         from fastapi import HTTPException
         raise HTTPException(400, "Manage model pools through the model-pools API.")
