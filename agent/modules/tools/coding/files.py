@@ -167,9 +167,6 @@ class FileService:
             return self.search(name, path, values, context)
         with self.lock(path):
             original = self.read_mutation_source(path) if path.exists() else None
-            expected = values.get("expected_version")
-            if expected and (original is None or hashlib.sha256(original).hexdigest() != expected):
-                raise CodingError("stale_content", "File version changed. Read it again before writing.")
             if name == "edit":
                 if original is None:
                     raise CodingError("not_found", f"File does not exist: {path}")

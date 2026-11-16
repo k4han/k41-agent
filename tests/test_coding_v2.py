@@ -51,7 +51,7 @@ def python_command(source):
 
 
 @pytest.mark.asyncio
-async def test_read_pages_version_and_stale_edit(coding):
+async def test_read_pages_version_and_edit_after_external_change(coding):
     service, context, workspace = coding
     path = workspace / "source.txt"
     path.write_text("one\ntwo\nthree\n", encoding="utf-8")
@@ -59,10 +59,50 @@ async def test_read_pages_version_and_stale_edit(coding):
     assert page.content.startswith("1: one\n2: two\n[version=")
     assert "next_offset=3" in page.content
     assert page.data["version"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    path.write_text("one\nchanged\nthree\n", encoding="utf-8")
+    result = await invoke(service, context, "edit", path="source.txt", old_string="one", new_string="next")
+    assert result.status == "success"
+    assert path.read_text() == "next\nchanged\nthree\n"
+    assert result.data["version"] == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("name", ["edit", "write"])
+@pytest.mark.parametrize("targeted", [False, True])
+def test_mutation_tool_schema_omits_expected_version(name, targeted):
+    tool = make_coding_tool(name, targeted=targeted)
+    schema = tool.tool_call_schema.model_json_schema()
+    assert "expected_version" not in schema["properties"]
+    assert "expected_version" not in tool.description
+    assert ("target" in schema["properties"]) is targeted
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("name", "args"), [
+    ("edit", {"old_string": "original", "new_string": "updated"}),
+    ("write", {"content": "updated"}),
+])
+@pytest.mark.parametrize("expected_version", [None, "stale"])
+async def test_mutation_rejects_removed_expected_version(coding, name, args, expected_version):
+    service, context, workspace = coding
+    path = workspace / "source.txt"
+    path.write_text("original", encoding="utf-8")
+    result = await invoke(service, context, name, path="source.txt", expected_version=expected_version, **args)
+    assert result.error.code == "invalid_input"
+    assert path.read_text() == "original"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("append", [False, True])
+async def test_write_uses_current_content_after_read(coding, append):
+    service, context, workspace = coding
+    path = workspace / "source.txt"
+    path.write_text("original\n", encoding="utf-8")
+    assert (await invoke(service, context, "read", path="source.txt")).status == "success"
     path.write_text("changed\n", encoding="utf-8")
-    result = await invoke(service, context, "edit", path="source.txt", old_string="changed", new_string="next", expected_version=page.data["version"])
-    assert result.error.code == "stale_content"
-    assert path.read_text() == "changed\n"
+    result = await invoke(service, context, "write", path="source.txt", content="replacement\n", append=append)
+    assert result.status == "success"
+    assert path.read_text() == ("changed\nreplacement\n" if append else "replacement\n")
+    assert result.data["version"] == hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 @pytest.mark.asyncio
@@ -80,15 +120,15 @@ async def test_edit_preserves_bom_crlf_and_mode(coding):
 
 
 @pytest.mark.asyncio
-async def test_concurrent_versioned_edits_do_not_overwrite(coding):
+async def test_concurrent_edits_do_not_overwrite_the_same_match(coding):
     service, context, workspace = coding
     path = workspace / "source.txt"
     path.write_text("original", encoding="utf-8")
-    version = hashlib.sha256(path.read_bytes()).hexdigest()
     results = await asyncio.gather(*(invoke(service, replace(context, tool_call_id=f"call-{index}"), "edit",
-        path="source.txt", old_string="original", new_string=str(index), expected_version=version) for index in range(2)))
+        path="source.txt", old_string="original", new_string=str(index)) for index in range(2)))
     assert sorted(result.status for result in results) == ["error", "success"]
-    assert next(result.error.code for result in results if result.error) == "stale_content"
+    assert next(result.error.code for result in results if result.error) == "not_found"
+    assert path.read_text() in {"0", "1"}
 
 
 @pytest.mark.asyncio
@@ -447,6 +487,20 @@ async def test_journal_prevents_reexecution_and_unknown_outcomes(coding):
 
 
 @pytest.mark.asyncio
+async def test_journal_with_removed_version_field_prevents_reexecution(coding):
+    service, context, workspace = coding
+    called = replace(context, tool_call_id="legacy-versioned-write")
+    args = {"path": "legacy.txt", "content": "once", "append": True}
+    applied = await invoke(service, called, "write", **args)
+    assert applied.status == "success"
+    legacy_values = {**SCHEMAS["write"].model_validate(args).model_dump(), "expected_version": None}
+    service.storage.complete(called, service.fingerprint("write", legacy_values), applied)
+    result = await invoke(service, called, "write", **args)
+    assert result.error.code == "invalid_input"
+    assert (workspace / "legacy.txt").read_text() == "once"
+
+
+@pytest.mark.asyncio
 async def test_process_stdin_cursor_exit_and_thread_isolation(coding):
     service, context, workspace = coding
     result = await invoke(service, context, "bash", command=python_command("import sys; print('ready', flush=True); value=sys.stdin.readline(); print(value, end='', flush=True); sys.exit(7)"), yield_time_ms=100)
@@ -657,6 +711,40 @@ async def test_batch_approval_before_any_effect_and_multiple_resumes(coding, mon
     assert "__interrupt__" not in result
     assert len(result["messages"]) == 3
     assert all((workspace / f"{index}.txt").read_text() == "once" for index in range(2))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("name", "args"), [
+    ("edit", {"old_string": "original", "new_string": "updated"}),
+    ("write", {"content": "updated"}),
+])
+@pytest.mark.parametrize("stage", ["before_commit", "before_replace"])
+async def test_existing_file_changes_during_mutation_are_not_overwritten(coding, monkeypatch, name, args, stage):
+    service, context, workspace = coding
+    target = workspace / "source.txt"
+    target.write_text("original", encoding="utf-8")
+    if stage == "before_commit":
+        commit = service.files.commit
+
+        def change_before_commit(path, expected, content, ctx):
+            target.write_text("concurrent", encoding="utf-8")
+            return commit(path, expected, content, ctx)
+
+        monkeypatch.setattr(service.files, "commit", change_before_commit)
+    else:
+        write_bytes = Path.write_bytes
+
+        def change_after_temporary_write(path, content):
+            written = write_bytes(path, content)
+            if path.parent == target.parent and path.name.startswith(".tmp-"):
+                target.write_text("concurrent", encoding="utf-8")
+            return written
+
+        monkeypatch.setattr(Path, "write_bytes", change_after_temporary_write)
+    result = await invoke(service, context, name, path="source.txt", **args)
+    assert result.error.code == "stale_content"
+    assert target.read_text() == "concurrent"
+    assert not list(workspace.glob(".tmp-*"))
 
 
 @pytest.mark.asyncio

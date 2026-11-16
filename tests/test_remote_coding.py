@@ -147,20 +147,20 @@ async def test_remote_stop_process_succeeds_and_keeps_command_cancellation(remot
 
 
 @pytest.mark.asyncio
-async def test_remote_versioned_edits_write_search_and_replay(remote_coding):
+async def test_remote_edits_write_search_and_replay(remote_coding):
     service, context, workspace, _ = remote_coding
     source = workspace / "source.py"
     source.write_bytes(b"\xef\xbb\xbfone\r\ntwo\r\n")
     page = await invoke(service, context, "read", path="source.py", limit=1)
     assert page.data["next_offset"] == 2
     assert page.data["version"] == hashlib.sha256(source.read_bytes()).hexdigest()
-    edited = await invoke(service, context, "edit", path="source.py", old_string="one", new_string="first",
-                          expected_version=page.data["version"])
+    source.write_bytes(b"\xef\xbb\xbfone\r\nchanged\r\n")
+    edited = await invoke(service, context, "edit", path="source.py", old_string="one", new_string="first")
     assert edited.status == "success"
-    assert source.read_bytes() == b"\xef\xbb\xbffirst\r\ntwo\r\n"
-    stale = await invoke(service, context, "write", path="source.py", content="lost",
-                         expected_version=page.data["version"])
-    assert stale.error.code == "stale_content"
+    assert source.read_bytes() == b"\xef\xbb\xbffirst\r\nchanged\r\n"
+    rewritten = await invoke(service, context, "write", path="source.py", content="first rewritten\n")
+    assert rewritten.status == "success"
+    assert source.read_bytes() == b"\xef\xbb\xbffirst rewritten\r\n"
     call = replace(context, tool_call_id="write", message_id="message")
     args = {"path": "new.py", "content": "first\n"}
     applied = await invoke(service, call, "write", **args)
@@ -244,9 +244,9 @@ async def test_remote_skill_mutations_invalidate_discovery_only_after_commit(rem
     changed = await invoke(service, context, "write", path=".agent/skills/demo/SKILL.md", content="skill")
     assert changed.status == "success" and get_revision(SKILLS_REVISION) > before
     committed = get_revision(SKILLS_REVISION)
-    rejected = await invoke(service, context, "write", path=".agent/skills/demo/SKILL.md",
-                            content="stale", expected_version="stale")
-    assert rejected.error.code == "stale_content"
+    rejected = await invoke(service, context, "edit", path=".agent/skills/demo/SKILL.md",
+                            old_string="missing", new_string="changed")
+    assert rejected.error.code == "not_found"
     assert get_revision(SKILLS_REVISION) == committed
 
 

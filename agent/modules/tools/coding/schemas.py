@@ -45,14 +45,12 @@ class EditInput(Input):
     old_string: str = Field(min_length=1)
     new_string: str
     replace_all: bool = False
-    expected_version: str | None = None
 
 
 class WriteInput(Input):
     path: str
     content: str
     append: bool = False
-    expected_version: str | None = None
 
 
 class GlobInput(Input):

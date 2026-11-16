@@ -358,8 +358,7 @@ async def test_conversations_share_notes_outputs_and_search(output_environment):
         assert written.status == "success"
         read = await invoke(service, other, "read", path=note_path)
         assert read.status == "success" and "Shared project decision" in read.content
-        changed = await invoke(service, other, "write", path=note_path, content="Updated project decision",
-                               expected_version=written.data["version"])
+        changed = await invoke(service, other, "write", path=note_path, content="Updated project decision")
         assert changed.status == "success"
         original = await invoke(service, context, "read", path=note_path)
         assert "Updated project decision" in original.content

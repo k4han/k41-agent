@@ -289,8 +289,12 @@ Each resolved candidate receives a file permission check, including symlinks.
 Results identify engine, limit and result truncation.
 
 `edit` requires exact text; missing/ambiguous/no-op edits are rejected.
-`expected_version` is optional on edit/write. Writes recheck current content
-immediately before replacement, preserve UTF-8 BOM, CRLF/LF and file mode,
+`edit` and `write` do not accept `expected_version`. Changes since a previous
+read do not independently block a mutation: `edit` matches `old_string` against
+the current content, while `write` rewrites or appends to the current file.
+Read existing files before changing them. Returned content versions remain
+available as metadata. Writes recheck the content captured at the start of the
+mutation immediately before replacement, preserve UTF-8 BOM, CRLF/LF and file mode,
 and atomically replace prepared files. Exclusive hard-link creation rejects
 files created concurrently. Filesystems without hard-link support fail safely.
 Text mutation inputs are capped at 10 MiB per file. External writers are not
