@@ -190,6 +190,8 @@ async def agent_workflows_payload() -> dict[str, Any]:
 
 
 async def agent_tools_payload() -> dict[str, Any]:
+    from agent.modules.acp.native_tools import native_tools_payload
+
     global _agent_tools_cache
 
     if _agent_tools_cache is not None:
@@ -226,6 +228,7 @@ async def agent_tools_payload() -> dict[str, Any]:
             "tool_descriptions": {desc.name: desc.description for desc in builtin_descriptors},
             "tool_config_schemas": tool_config_schemas,
             "acp_unavailable_tools": sorted(ACP_UNAVAILABLE_TOOL_NAMES),
+            "acp_tools": native_tools_payload(),
         }
         if cache_version == _agent_tools_cache_version:
             _agent_tools_cache = payload

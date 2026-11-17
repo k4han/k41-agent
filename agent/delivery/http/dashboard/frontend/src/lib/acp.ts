@@ -34,9 +34,9 @@ export type AcpAgentStatus = {
 
 export const ANTIGRAVITY_CLI_AGENT_ID = "antigravity-cli";
 
-/** Separate CLI profile and workspace choices. */
-export function acpOptionScope(cardName: string, settings: { agent: string; agent_name?: string | null }, cwd = ""): string {
-  return JSON.stringify([cardName, settings.agent, settings.agent_name?.trim() || null, cwd]);
+/** Separate card and workspace choices, retaining the legacy default-profile key. */
+export function acpOptionScope(cardName: string, settings: { agent: string }, cwd = ""): string {
+  return JSON.stringify([cardName, settings.agent, null, cwd]);
 }
 
 export type AcpConfigOption = {

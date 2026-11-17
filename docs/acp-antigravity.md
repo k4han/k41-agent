@@ -7,14 +7,16 @@ Agent cards use `graph_type: acp_agent` and the runtime identifier `antigravity-
 
 1. Install Antigravity CLI on the machine running K41 and put `agy` on `PATH`.
 2. Check `agy --version` and `agy acp --help`. The CLI must support `--agent`
-   and `--process-per-session`. Update it with `agy update` when necessary.
+   and `--process-per-session`, and be version 1.3.3 or newer. Update it with
+   `agy update` when necessary.
 3. Sign in on that machine with `agy acp --login`.
 4. Open **Settings > ACP Agents** and choose **Refresh** to check the executable,
    version and account status.
 5. Select the built-in **Antigravity** card in Chat, or create your own ACP card.
 
-K41 uses the CLI's existing user and workspace configuration, including an explicit
-`GEMINI_HOME`. Installation, updates and account management happen outside K41.
+K41 uses the CLI's existing credentials and an explicit `GEMINI_HOME`. Each card
+runs with a K41-managed profile for its prompt and native tool selection.
+Installation, updates and account management happen outside K41.
 The dashboard provides read-only status; it has no installer, API-key form or sign-in relay.
 
 ~~~markdown
@@ -25,35 +27,43 @@ permission_mode: ask
 tools: [read, web_search]
 acp:
   agent: antigravity-cli
-  agent_name: reviewer
-  use_default_tools: true
+  tools: null
 ---
 
 Review the code and explain actionable findings.
 ~~~
 
-`agent_name` is optional and selects an existing AGY profile with `--agent`.
-Leave it blank to use the AGY default. Workspace profiles are resolved from the
-conversation's working directory. Names cannot start with a dash or contain control
-characters and are limited to 128 characters.
-
 Each process runs `agy acp --process-per-session`. Processes are isolated by
-profile, resolved workspace and `use_default_tools`, and idle processes are reaped.
+resolved workspace, native tool selection and prompt policy, and idle processes
+are reaped.
 
 ## Prompt, tools and permissions
 
 Configure the ACP card's system prompt, tools, tool settings, MCP bindings and permissions
 directly. Card instructions and selected tools are sent when a new session starts.
 
-By default, `use_default_tools: true` preserves AGY's native tools and customizations.
-To use the card's prompt and K41 tools without AGY's default file, command and web tools,
-set `use_default_tools: false` and leave `agent_name` empty. This requires AGY 1.3.3
-or newer. K41 creates its own profile under its ACP data directory, discovers it with
-`--add-dir`, and passes `--include-default-customizations=false`.
+The **ACP** category inside the card's **Tools** tab lists AGY's native tools.
+They are separate from K41 tools, even when their names match. Select tools
+individually or select/clear the category. New cards enable all optional native
+tools by default. Required internal helpers such as `send_message` and
+`manage_task` are shown as always enabled.
 
-The generated profile sets `excludeDefaultComponents: true`, `tools: []`,
-`inheritCustomizations: false` and `inheritMcp: false`. Existing user and workspace
-profiles remain unchanged. AGY may still expose internal task and MCP resource helpers.
+`acp.tools: null` (or an omitted `acp.tools`) enables all catalogued native tools.
+An explicit list selects only those native tools; `acp.tools: []` disables all
+optional native tools. Card-level `tools` continues to select K41 tools bridged
+over MCP. Names are AGY profile component identifiers; their callable names can
+vary by CLI version (for example, `view_file` supplies `read_file` in current AGY).
+Retired no-op components are excluded from the catalog. Unknown native tool names
+are rejected before starting AGY.
+
+K41 creates its profile under its ACP data directory, discovers it with `--add-dir`,
+and passes `--include-default-customizations=false`. The profile sets
+`excludeDefaultComponents: true`, `inheritCustomizations: false`, `inheritMcp: false`
+and the selected native tool names. Its Markdown body is empty: the card's visible
+system prompt, with prompt variables resolved and tool-specific additions, is
+sent once when the session starts. No placeholder instructions, AGY default prompt
+or external profile instructions are added. Existing user and workspace profiles
+remain unchanged. AGY may still expose internal task and MCP resource helpers.
 
 ~~~yaml
 graph_type: acp_agent
@@ -61,7 +71,7 @@ permission_mode: ask
 tools: [read, web_search, mcp__github__create_issue]
 acp:
   agent: antigravity-cli
-  use_default_tools: false
+  tools: [view_file, search_web]
 ~~~
 
 The built-in Antigravity card is read-only and has no K41 tools. Clone it or create
@@ -94,10 +104,10 @@ acp:
     thinking_level: low
 ~~~
 
-Chat choices are stored per card, profile and workspace in the current browser.
-For the default profile, legacy card-level choices seed a CLI scope only when that
-scope has no saved choices. Existing CLI choices, including an explicitly empty choice
-set, take precedence. Values no longer advertised by the CLI are filtered out.
+Chat choices are stored per card and workspace in the current browser. Legacy
+card-level choices seed a CLI scope only when that scope has no saved choices.
+Existing default-profile CLI choices, including an explicitly empty choice set,
+take precedence. Values no longer advertised by the CLI are filtered out.
 
 Channels and scheduled runs use card defaults unless an API client supplies
 `acp_config_options`. The agent's `mode` option is excluded because K41 controls
@@ -111,13 +121,20 @@ permissions and configuration options are preserved. Reading a card does not rew
 its file; saving or serializing it writes the canonical CLI identifier. Unknown runtime
 identifiers are rejected.
 
+The former `acp.use_default_tools` setting is read without rewriting the card:
+`false` becomes `acp.tools: []`, while `true` or a missing flag uses the all-tools
+default. An explicit `acp.tools` takes precedence. The former `acp.agent_name` is
+ignored: the card's visible prompt is the only source of base instructions.
+Saving writes only the new settings and preserves `config_options`.
+
 Old server sessions and checkpoints without a CLI runtime key start a new CLI session
 with a notice. Stored K41 conversation history remains available, but the CLI does not
 receive the old server's context. Existing CLI sessions continue to resume after restart.
 Old server credentials, installation files and session data are not copied or deleted.
 
-Changing the profile, workspace, default-tool setting, card prompt, tools or permissions
-starts a fresh session. Changing only model or thinking options preserves the session.
+Changing the workspace, native tool selection, card prompt, K41 tools or permissions
+starts a fresh session. Sessions from the previous prompt policy also start fresh.
+Changing only model or thinking options preserves the session.
 A turn interrupted by restart cannot resume: K41 reports it and never resends the prompt.
 Actions already performed are not undone.
 
@@ -147,8 +164,9 @@ configured K41 provider.
 The administrator-only endpoints are:
 
 - `GET /dashboard-api/acp/agents`: returns the single CLI runtime.
-- `GET /dashboard-api/acp/agents/antigravity-cli`: accepts optional `agent_name`,
-  `cwd` and `refresh` query parameters.
+- `GET /dashboard-api/acp/agents/antigravity-cli`: accepts optional `cwd` and
+  `refresh` query parameters. The deprecated `agent_name` parameter is accepted
+  but does not select an external profile.
 
 Responses use `Cache-Control: no-store` and expose installation discovery,
 authentication status, plan and selectable configuration options. Refresh invalidates

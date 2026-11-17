@@ -37,6 +37,7 @@ import { PermissionModePicker } from "@/components/PermissionModePicker";
 import { isAcpCard } from "@/lib/acp";
 import type { AgentMcpInstall, AgentsPayload, ToolConfigSchema } from "@/types";
 import { AgentToolConfig } from "./AgentToolConfig";
+import { acpToolName, isToolSelected } from "./agentForm";
 import type {
   AgentCapabilityTab,
   AgentForm,
@@ -45,6 +46,7 @@ import type {
 } from "./agentForm";
 
 const categoryIcons: Record<string, typeof FileText> = {
+  acp: Bot,
   file: FileText,
   shell: Terminal,
   web: Globe,
@@ -72,11 +74,13 @@ const toolTitles: Record<string, string> = {
   get_current_time: "Get the current time",
 };
 function formatCategory(category: string) {
+  if (category === "acp") return "ACP";
   if (category === "unknown") return "Other";
   if (category === "file") return "Files";
   return category.charAt(0).toUpperCase() + category.slice(1);
 }
 function toolTitle(name: string) {
+  name = acpToolName(name) ?? name;
   const title = name.replaceAll("_", " ");
   return toolTitles[name] || title.charAt(0).toUpperCase() + title.slice(1);
 }
@@ -126,8 +130,11 @@ export function AgentToolsTab(props: {
   const availableTools = createMemo(() =>
     props.toolGroups.flatMap((group) => group.tools),
   );
+  const nativeTool = (tool: string) => props.payload.acp_tools?.find((item) => item.name === acpToolName(tool));
+  const isSelected = (tool: string) => isToolSelected(props.form, tool, props.payload);
+  const isRequired = (tool: string) => Boolean(nativeTool(tool)?.always_enabled);
   const selectedBuiltIns = createMemo(() =>
-    availableTools().filter((tool) => props.form.tools.includes(tool)),
+    availableTools().filter(isSelected),
   );
   const selectedTool = createMemo(() => {
     const current = focusedTool();
@@ -142,6 +149,7 @@ export function AgentToolsTab(props: {
     props.toolGroups.find((group) => group.tools.includes(tool))?.category ||
     "unknown";
   const descriptionFor = (tool: string) =>
+    nativeTool(tool)?.description ||
     props.payload.tool_descriptions?.[tool]?.trim().split(/\n\s*\n/)[0] ||
     `Use ${toolTitle(tool).toLowerCase()} in this agent’s workflow.`;
   const activeMcpCount = () =>
@@ -177,7 +185,7 @@ export function AgentToolsTab(props: {
         ...group,
         visibleTools: group.tools.filter(
           (tool) =>
-            (!selectedOnly() || props.form.tools.includes(tool)) &&
+            (!selectedOnly() || isSelected(tool)) &&
             (!needle ||
               `${tool} ${toolTitle(tool)} ${descriptionFor(tool)}`
                 .toLowerCase()
@@ -261,17 +269,17 @@ export function AgentToolsTab(props: {
             />
           </span>
           <h3>{toolTitle(tool)}</h3>
-          <div class="agent-tools-tool-name mono">{tool}</div>
+          <div class="agent-tools-tool-name mono">{acpToolName(tool) ?? tool}</div>
           <p class="agent-tool-description">{descriptionFor(tool)}</p>
           <div class="agent-tools-tags">
-            <span class="agent-tools-badge">Built-in</span>
+            <span class="agent-tools-badge">{acpToolName(tool) === undefined ? "Built-in" : "Native"}</span>
             <span class="agent-tools-badge">
               {formatCategory(categoryFor(tool))}
             </span>
           </div>
           <label class="agent-tool-enable">
             <span>
-              {props.form.tools.includes(tool)
+              {isRequired(tool) ? "Always enabled by AGY" : isSelected(tool)
                 ? "Enabled for this agent"
                 : "Enable for this agent"}
             </span>
@@ -280,8 +288,8 @@ export function AgentToolsTab(props: {
               type="checkbox"
               role="switch"
               aria-label={`Enable ${tool} for this agent`}
-              checked={props.form.tools.includes(tool)}
-              disabled={props.readOnly}
+              checked={isSelected(tool)}
+              disabled={props.readOnly || isRequired(tool)}
               onChange={(event) =>
                 props.onToggleListValue(
                   "tools",
@@ -292,7 +300,7 @@ export function AgentToolsTab(props: {
             />
           </label>
           <Show
-            when={props.form.tools.includes(tool)}
+            when={isSelected(tool)}
             fallback={
               <p class="agent-tool-notice">
                 Enable this tool to configure it for this agent.
@@ -300,24 +308,33 @@ export function AgentToolsTab(props: {
             }
           >
             <Show
-              when={props.toolConfigSchemas[tool]?.fields.length}
+              when={acpToolName(tool) === undefined}
               fallback={
                 <p class="agent-tool-notice">
-                  This tool uses workspace defaults. No agent-specific
-                  configuration is needed.
+                  This native tool runs in AGY and follows the agent's permission mode.
                 </p>
               }
             >
-              <AgentToolConfig
-                tool={tool}
-                form={props.form}
-                readOnly={props.readOnly}
-                schema={props.toolConfigSchemas[tool]}
-                effective={props.toolConfigEffective}
-                payload={props.payload}
-                onUpdate={props.onUpdateToolConfig}
-                onReset={props.onResetToolConfigField}
-              />
+              <Show
+                when={props.toolConfigSchemas[tool]?.fields.length}
+                fallback={
+                  <p class="agent-tool-notice">
+                    This tool uses workspace defaults. No agent-specific
+                    configuration is needed.
+                  </p>
+                }
+              >
+                <AgentToolConfig
+                  tool={tool}
+                  form={props.form}
+                  readOnly={props.readOnly}
+                  schema={props.toolConfigSchemas[tool]}
+                  effective={props.toolConfigEffective}
+                  payload={props.payload}
+                  onUpdate={props.onUpdateToolConfig}
+                  onReset={props.onResetToolConfigField}
+                />
+              </Show>
             </Show>
           </Show>
           <p class="agent-tool-permission-note">
@@ -523,11 +540,10 @@ export function AgentToolsTab(props: {
               >
                 {(group) => {
                   const checkedCount = () =>
-                    group.tools.filter((tool) =>
-                      props.form.tools.includes(tool),
-                    ).length;
+                    group.tools.filter(isSelected).length;
+                  const selectableTools = () => group.tools.filter((tool) => !isRequired(tool));
                   const allChecked = () =>
-                    checkedCount() === group.tools.length;
+                    selectableTools().length > 0 && selectableTools().every(isSelected);
                   return (
                     <section
                       class="agent-tools-group"
@@ -541,10 +557,10 @@ export function AgentToolsTab(props: {
                             ref={(input) =>
                               createEffect(() => {
                                 input.indeterminate =
-                                  checkedCount() > 0 && !allChecked();
+                                  selectableTools().some(isSelected) && !allChecked();
                               })
                             }
-                            disabled={props.readOnly}
+                            disabled={props.readOnly || selectableTools().length === 0}
                             aria-label={`Select all ${formatCategory(group.category).toLowerCase()} tools`}
                             onChange={(event) =>
                               props.onToggleToolGroup(
@@ -570,8 +586,8 @@ export function AgentToolsTab(props: {
                                 <input
                                   type="checkbox"
                                   aria-label={`Enable ${tool}`}
-                                  checked={props.form.tools.includes(tool)}
-                                  disabled={props.readOnly}
+                                  checked={isSelected(tool)}
+                                  disabled={props.readOnly || isRequired(tool)}
                                   onChange={(event) =>
                                     props.onToggleListValue(
                                       "tools",
@@ -599,7 +615,7 @@ export function AgentToolsTab(props: {
                                 <span class="agent-tools-row-copy">
                                   <strong>{toolTitle(tool)}</strong>
                                   <span class="agent-tools-tool-name mono">
-                                    {tool}
+                                    {acpToolName(tool) ?? tool}
                                   </span>
                                   <span class="agent-tools-row-description">
                                     {descriptionFor(tool)}

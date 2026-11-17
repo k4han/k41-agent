@@ -26,10 +26,11 @@ test("CLI status URLs carry agent and workspace as encoded parameters", () => {
   assert.equal(API_PATHS.acpAgent("antigravity-cli"), "/dashboard-api/acp/agents/antigravity-cli");
 });
 
-test("CLI option choices are separated by agent and workspace", () => {
+test("CLI option choices are separated by card and workspace and ignore retired profiles", () => {
   const settings = { agent: "antigravity-cli", agent_name: "reviewer" };
   const scope = acp.acpOptionScope("card", settings, "/workspace");
-  assert.notEqual(scope, acp.acpOptionScope("card", { ...settings, agent_name: "coder" }, "/workspace"));
+  assert.equal(scope, acp.acpOptionScope("card", { ...settings, agent_name: "coder" }, "/workspace"));
+  assert.notEqual(scope, acp.acpOptionScope("other-card", settings, "/workspace"));
   assert.notEqual(scope, acp.acpOptionScope("card", settings, "/other"));
   assert.equal(acp.acpOptionScope("card", { agent: "antigravity-cli", agent_name: " " }),
     acp.acpOptionScope("card", { agent: "antigravity-cli", agent_name: null }));

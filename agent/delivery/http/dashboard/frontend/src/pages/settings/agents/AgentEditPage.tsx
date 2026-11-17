@@ -27,6 +27,7 @@ import {
   defaultWorkflow,
   isFormDirty,
   manualToolNames,
+  setToolSelection,
 } from "./agentForm";
 import { keepSettingsDraft, takeSettingsDraft } from "@/lib/settingsDrafts";
 
@@ -73,6 +74,10 @@ export function AgentEditPage(props: { agentName?: string }) {
     value: string,
     checked: boolean,
   ) => {
+    if (key === "tools") {
+      setForm((current) => setToolSelection(current, [value], checked, payload() ?? {}));
+      return;
+    }
     setForm((current) => {
       const values = new Set(current[key]);
       if (checked) {
@@ -80,34 +85,12 @@ export function AgentEditPage(props: { agentName?: string }) {
       } else {
         values.delete(value);
       }
-      if (key !== "tools" || checked) {
-        return { ...current, [key]: Array.from(values).sort() };
-      }
-      const tool_configs = { ...current.tool_configs };
-      delete tool_configs[value];
-      return { ...current, [key]: Array.from(values).sort(), tool_configs };
+      return { ...current, [key]: Array.from(values).sort() };
     });
   };
 
   const toggleToolGroup = (tools: string[], checked: boolean) => {
-    setForm((current) => {
-      const values = new Set(current.tools);
-      for (const tool of tools) {
-        if (checked) {
-          values.add(tool);
-        } else {
-          values.delete(tool);
-        }
-      }
-      if (checked) {
-        return { ...current, tools: Array.from(values).sort() };
-      }
-      const tool_configs = { ...current.tool_configs };
-      for (const tool of tools) {
-        delete tool_configs[tool];
-      }
-      return { ...current, tools: Array.from(values).sort(), tool_configs };
-    });
+    setForm((current) => setToolSelection(current, tools, checked, payload() ?? {}));
   };
 
   const updateToolConfig = (

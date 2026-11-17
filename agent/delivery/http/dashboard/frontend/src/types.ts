@@ -113,9 +113,14 @@ export type ModelCatalog = {
 
 export type AcpAgentSettings = {
   agent: "antigravity-cli";
-  agent_name?: string | null;
-  use_default_tools?: boolean;
+  tools?: string[] | null;
   config_options: Record<string, string>;
+};
+
+export type AcpTool = {
+  name: string;
+  description: string;
+  always_enabled: boolean;
 };
 
 export type AgentCard = {
@@ -254,6 +259,7 @@ export type AgentToolsPayload = {
   tool_groups?: ToolGroup[];
   tool_descriptions?: Record<string, string>;
   acp_unavailable_tools?: string[];
+  acp_tools?: AcpTool[];
   tool_config_schemas?: Record<string, ToolConfigSchema>;
   tool_config_effective?: Record<string, Record<string, unknown>>;
 };

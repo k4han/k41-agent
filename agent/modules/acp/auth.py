@@ -32,8 +32,8 @@ class AcpAuthManager:
     async def status(
         self, agent_id: str, *, refresh: bool = False, agent_name: str | None = None, cwd: str | None = None,
     ) -> dict[str, Any]:
-        """Opening a session checks the CLI's externally managed sign-in."""
-        key = runtime_key(agent_id, agent_name, cwd)
+        """Check sign-in; the retired agent_name argument is accepted for old clients."""
+        key = runtime_key(agent_id, cwd)
         details = await asyncio.to_thread(cli_details, refresh=refresh)
         if not details["executable_path"]:
             return auth_status("not_installed")
@@ -47,15 +47,15 @@ class AcpAuthManager:
         cached = self._probes.get(key)
         if cached is not None and not refresh and time.monotonic() - cached[0] < PROBE_TTL_SECONDS:
             return cached[1]
-        result = await self._probe(agent_id, agent_name=agent_name, cwd=cwd)
+        result = await self._probe(agent_id, cwd=cwd)
         self._probes[key] = (time.monotonic(), result)
         return result
 
-    async def _probe(self, agent_id: str, *, agent_name: str | None = None, cwd: str | None = None) -> dict[str, Any]:
-        key = runtime_key(agent_id, agent_name, cwd)
+    async def _probe(self, agent_id: str, *, cwd: str | None = None) -> dict[str, Any]:
+        key = runtime_key(agent_id, cwd)
         self.service.hold(key)
         try:
-            client = await self.service.client_for(agent_id, agent_name=agent_name, cwd=cwd)
+            client = await self.service.client_for(agent_id, cwd=cwd)
             try:
                 session = await client.new_session(str(Path(cwd or Path.home()).resolve()))
             except AcpRpcError as exc:

@@ -6,7 +6,7 @@ from agent.modules.tools import PermissionMode
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from agent.modules.providers import EFFORT_PATTERN
 
@@ -36,8 +36,7 @@ class AcpAgentSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent: Literal["antigravity-cli"] = "antigravity-cli"
-    agent_name: str | None = None
-    use_default_tools: bool = True
+    tools: list[str] | None = None
     # Session config option id -> value, for example {"model": "gemini-3.8-flash"}.
     config_options: dict[str, str] = Field(default_factory=dict)
 
@@ -58,18 +57,25 @@ class AcpAgentSettings(BaseModel):
                              "then configure its prompt, tools, MCP and permissions directly.")
         return data
 
-    @field_validator("agent_name")
+    @model_validator(mode="before")
     @classmethod
-    def normalize_agent_name(cls, value: str | None) -> str | None:
-        from agent.modules.acp.launcher import normalize_agent_name
+    def normalize_legacy_tools(cls, data: Any) -> Any:
+        """Read older cards without importing external profile instructions."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        data.pop("agent_name", None)
+        legacy = data.pop("use_default_tools", True)
+        if "tools" not in data:
+            data["tools"] = None if TypeAdapter(bool).validate_python(legacy) else []
+        return data
 
-        return normalize_agent_name(value)
+    @field_validator("tools")
+    @classmethod
+    def normalize_tools(cls, value: list[str] | None) -> list[str] | None:
+        from agent.modules.acp.native_tools import normalize_native_tools
 
-    @model_validator(mode="after")
-    def validate_agent_name(self):
-        if not self.use_default_tools and self.agent_name:
-            raise ValueError("Clear acp.agent_name to use only the K41 card's prompt and tools.")
-        return self
+        return normalize_native_tools(value)
 
 
 def normalize_acp_card(data: Any) -> Any:

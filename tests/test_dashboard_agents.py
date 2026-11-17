@@ -60,8 +60,7 @@ def test_acp_card_api_preserves_direct_configuration(dashboard_agent_client):
     client, repo = dashboard_agent_client
     payload = {**_payload("acp-configured"), "graph_type": "acp_agent", "system_prompt": "Card prompt.",
         "tools": ["write"], "permission_mode": "auto", "tool_configs": {"write": {}},
-        "acp": {"agent": "antigravity-cli", "agent_name": "reviewer",
-            "use_default_tools": True,
+        "acp": {"agent": "antigravity-cli", "tools": ["view_file"],
             "config_options": {"model": "acp-model", "thinking_level": "low"}}}
     response = client.post("/agents/cards", json=payload)
     assert response.status_code == 200
@@ -78,19 +77,41 @@ def test_acp_card_api_preserves_direct_configuration(dashboard_agent_client):
     assert client.post("/agents/cards", json=bad).status_code == 422
 
 
-def test_acp_tools_only_card_round_trips_and_rejects_incompatible_settings(dashboard_agent_client):
+def test_acp_legacy_tools_only_card_round_trips_and_rejects_unknown_tools(dashboard_agent_client):
     client, repo = dashboard_agent_client
     payload = {**_payload("acp-tools-only"), "graph_type": "acp_agent", "permission_mode": "ask",
         "acp": {"agent": "antigravity-cli", "use_default_tools": False}}
     response = client.post("/agents/cards", json=payload)
     assert response.status_code == 200
-    assert response.json()["card"]["acp"]["use_default_tools"] is False
+    assert response.json()["card"]["acp"] == {"agent": "antigravity-cli", "tools": [], "config_options": {}}
     repo.reload()
-    assert repo.get_card("acp-tools-only").acp.use_default_tools is False
+    assert repo.get_card("acp-tools-only").acp.tools == []
     for settings in ({"agent": "unknown", "use_default_tools": False},
-                     {"agent": "antigravity-cli", "agent_name": "reviewer", "use_default_tools": False}):
+                     {"agent": "antigravity-cli", "tools": ["not_a_native_tool"]}):
         response = client.put("/agents/cards/acp-tools-only", json={**payload, "acp": settings})
         assert response.status_code == 422
+
+
+@pytest.mark.parametrize("selection", [None, [], ["view_file", "generate_image"]])
+def test_acp_native_catalog_and_card_selection_remain_separate_from_k41_tools(dashboard_agent_client, selection):
+    client, repo = dashboard_agent_client
+    catalog = client.get("/dashboard-api/agents/tools").json()
+    native = {tool["name"]: tool for tool in catalog["acp_tools"]}
+    assert native["send_message"]["always_enabled"] is True
+    assert native["generate_image"]["always_enabled"] is False
+    assert "acp:list_dir" not in catalog["tools"]
+    payload = {**_payload("native-selection"), "graph_type": "acp_agent", "tools": ["list_dir"],
+               "permission_mode": "ask", "system_prompt": "Visible card instructions.",
+               "acp": {"agent": "antigravity-cli", "tools": selection, "use_default_tools": False,
+                       "agent_name": "retired-profile", "config_options": {"model": "custom"}}}
+    response = client.post("/agents/cards", json=payload)
+    assert response.status_code == 200
+    expected = sorted(selection) if selection is not None else None
+    card = response.json()["card"]
+    assert card["tools"] == ["list_dir"] and card["system_prompt"] == payload["system_prompt"]
+    assert card["acp"] == {"agent": "antigravity-cli", "tools": expected, "config_options": {"model": "custom"}}
+    repo.reload()
+    assert repo.get_card("native-selection").acp.tools == expected
 
 
 @pytest.mark.parametrize("settings", [{}, {"agent": None}, {"agent": ""}, {"agent": "antigravity-acp"}])

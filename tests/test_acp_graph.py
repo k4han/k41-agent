@@ -651,13 +651,13 @@ async def test_run_options_are_applied_again_after_the_agent_process_restarts(en
 
 
 @pytest.mark.asyncio
-async def test_cli_agent_changes_start_new_sessions_without_resuming_another_agent(env):
-    env.agent.acp = AcpAgentSettings(agent="antigravity-cli", agent_name="reviewer")
+async def test_native_tool_changes_start_new_sessions_without_resuming_another_configuration(env):
+    env.agent.acp = AcpAgentSettings(tools=["view_file"])
     await env.collect("one")
     first = (await env.state()).values
     await env.collect("two")
     assert (await env.state()).values["acp_session_id"] == first["acp_session_id"]
-    env.agent.acp = AcpAgentSettings(agent="antigravity-cli", agent_name="coder")
+    env.agent.acp = AcpAgentSettings(tools=["search_web"])
     changed = await env.collect("three")
     second = (await env.state()).values
     assert second["acp_runtime_key"] != first["acp_runtime_key"]
@@ -670,7 +670,7 @@ async def test_cli_agent_changes_start_new_sessions_without_resuming_another_age
 
 @pytest.mark.asyncio
 async def test_cli_session_resumes_with_its_options_after_process_restart(env):
-    env.agent.acp = AcpAgentSettings(agent="antigravity-cli", agent_name="reviewer")
+    env.agent.acp = AcpAgentSettings(tools=["view_file"])
     await env.collect("one", acp_config_options={"thinking_level": "low"})
     await env.service.restart_client("antigravity-cli")
     await env.collect("two", acp_config_options={"thinking_level": "low"})
@@ -792,7 +792,7 @@ async def test_card_uses_own_prompt_tools_and_all_supported_options(env, tmp_pat
     assert [call["params"]["configId"] for call in env.calls("session/set_config_option")] == ["model", "thinking_level"]
     from agent.modules.acp.launcher import runtime_key
 
-    assert (await env.state()).values["acp_runtime_key"] == runtime_key(agent_id, card.acp.agent_name, str(env.workspace))
+    assert (await env.state()).values["acp_runtime_key"] == runtime_key(agent_id, str(env.workspace), native_tools=card.acp.tools)
     assert not (env.workspace / ".agents").exists()
 
 

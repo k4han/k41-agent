@@ -41,7 +41,7 @@ function mount(t, callback) {
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-test('ACP options ignore late probes and separate CLI agent and workspace choices', async t => {
+test('ACP options ignore late probes and separate card and workspace choices', async t => {
   const acp = loadModule('../src/lib/acp.ts');
   const { API_PATHS } = loadModule('../src/lib/endpoints.ts');
   const pending = [];
@@ -51,7 +51,8 @@ test('ACP options ignore late probes and separate CLI agent and workspace choice
     '@/lib/api': { apiFetch: url => new Promise(resolve => pending.push({ url, resolve })) },
     '@/lib/endpoints': { API_PATHS },
   });
-  const option = (value) => ({ id: 'model', name: 'Model', category: 'model', current_value: value, options: [{ value, name: value }] });
+  const option = (value) => ({ id: 'model', name: 'Model', category: 'model', current_value: value,
+    options: [{ value, name: value }, { value: 'chosen', name: 'Chosen' }] });
   const view = mount(t, () => {
     const [card, setCard] = solid.createSignal({ name: 'card', graph_type: 'acp_agent', acp: { agent: 'antigravity-cli', agent_name: 'one', config_options: {} } });
     const [cwd, setCwd] = solid.createSignal('/workspace');
@@ -59,26 +60,33 @@ test('ACP options ignore late probes and separate CLI agent and workspace choice
   }).value;
   await tick();
   assert.equal(pending.length, 1);
-  view.setCard({ ...view.card(), acp: { ...view.card().acp, agent_name: 'two' } });
+  assert.equal(new URL(pending[0].url, 'http://localhost').searchParams.has('agent_name'), false);
+  view.setCwd('/second');
   await tick();
   pending[1].resolve({ auth: { config_options: [option('second')] } });
   await tick();
   pending[0].resolve({ auth: { config_options: [option('first')] } });
   await tick();
   assert.equal(view.hook.options()[0].current_value, 'second');
-  view.hook.setValue('model', 'second');
+  view.hook.setValue('model', 'chosen');
+  assert.equal(view.hook.requestOptions().model, 'chosen');
+  view.setCard({ ...view.card(), name: 'other-card' });
+  await tick();
   assert.equal(view.hook.requestOptions().model, 'second');
+  view.setCard({ ...view.card(), name: 'card' });
+  await tick();
+  assert.equal(view.hook.requestOptions().model, 'chosen');
   view.setCwd('/other');
   await tick();
   assert.equal(view.hook.options().length, 0);
   assert.equal(view.hook.requestOptions(), undefined);
   assert.equal(new URL(pending[2].url, 'http://localhost').searchParams.get('cwd'), '/other');
-  view.setCwd('/workspace');
+  view.setCwd('/second');
   await tick();
-  assert.equal(view.hook.requestOptions().model, 'second');
+  assert.equal(view.hook.requestOptions().model, 'chosen');
 });
 
-test('default CLI profiles inherit legacy browser choices while named profiles stay isolated', async t => {
+test('managed ACP cards inherit legacy browser choices and ignore retired profiles', async t => {
   let stored = JSON.stringify({ card: { model: 'legacy' } });
   const acp = loadModule('../src/lib/acp.ts', {}, { window: {
     localStorage: { getItem: () => stored, setItem: (_key, value) => { stored = value; } },
@@ -103,7 +111,10 @@ test('default CLI profiles inherit legacy browser choices while named profiles s
   assert.deepEqual(JSON.parse(stored)[scope], { model: 'legacy' });
   view.setCard({ ...view.card(), acp: { ...view.card().acp, agent_name: 'reviewer' } });
   await tick();
-  assert.deepEqual(view.hook.requestOptions(), { model: 'default' });
+  assert.deepEqual(view.hook.requestOptions(), { model: 'legacy' });
+  view.setCard({ ...view.card(), acp: { ...view.card().acp, tools: [] } });
+  await tick();
+  assert.deepEqual(view.hook.requestOptions(), { model: 'legacy' });
 });
 
 test('ACP cards expose and send model and thinking options directly', async t => {
@@ -1531,6 +1542,62 @@ function loadAgentForm() {
     '@/lib/utils': loadModule('../src/lib/utils.ts'),
   });
 }
+
+const acpToolsFixture = {
+  acp_tools: [
+    { name: 'view_file', description: 'Read a file in AGY.', always_enabled: false },
+    { name: 'generate_image', description: 'Generate an image in AGY.', always_enabled: false },
+    { name: 'manage_task', description: 'Required AGY task helper.', always_enabled: true },
+    { name: 'send_message', description: 'Required AGY helper.', always_enabled: true },
+  ],
+  tool_groups: [
+    { category: 'file', tools: ['list_dir'] },
+    { category: 'image', tools: ['generate_image'] },
+  ],
+};
+
+test('ACP defaults and legacy drafts normalize without marking an opened card dirty', () => {
+  const { blankForm, cardToForm, agentFormPayload, isFormDirty, isToolSelected } = loadAgentForm();
+  const fresh = blankForm('acp_agent');
+  assert.equal(fresh.acp.tools, null);
+  assert.equal(isToolSelected(fresh, 'acp:view_file', acpToolsFixture), true);
+  const card = { name: 'legacy', graph_type: 'acp_agent', acp: {
+    agent: 'antigravity-cli', agent_name: 'reviewer', use_default_tools: false, config_options: { model: 'custom' },
+  } };
+  const current = cardToForm(card);
+  assert.deepEqual(current.acp, { agent: 'antigravity-cli', tools: [], config_options: { model: 'custom' } });
+  assert.equal(isFormDirty(current, cardToForm(card)), false);
+  assert.equal(isToolSelected(current, 'acp:view_file', acpToolsFixture), false);
+  assert.equal(isToolSelected(current, 'acp:send_message', acpToolsFixture), true);
+  assert.deepEqual(agentFormPayload({ ...current, acp: card.acp }).acp, current.acp);
+  assert.equal(card.acp.use_default_tools, false);
+  assert.equal(cardToForm({ ...card, acp: { ...card.acp, tools: null } }).acp.tools, null);
+});
+
+test('native ACP tools have distinct catalog identities and never enter K41 tool payloads', () => {
+  const { blankForm, buildToolGroups, setToolSelection, isToolSelected, agentFormPayload } = loadAgentForm();
+  const groups = buildToolGroups(acpToolsFixture, [], true);
+  assert.deepEqual(groups[0], { category: 'acp', tools: ['acp:view_file', 'acp:generate_image', 'acp:manage_task', 'acp:send_message'] });
+  assert.equal(buildToolGroups(acpToolsFixture, [], false).some(group => group.category === 'acp'), false);
+  const form = { ...blankForm('acp_agent'), tools: ['generate_image'], tool_configs: { generate_image: { model: 'custom' } } };
+  const partial = setToolSelection(form, ['acp:generate_image'], false, acpToolsFixture);
+  assert.deepEqual(partial.acp.tools, ['view_file']);
+  assert.equal(isToolSelected(partial, 'generate_image', acpToolsFixture), true);
+  assert.equal(isToolSelected(partial, 'acp:generate_image', acpToolsFixture), false);
+  assert.deepEqual(partial.tool_configs, form.tool_configs);
+  const cleared = setToolSelection(partial, groups[0].tools, false, acpToolsFixture);
+  assert.deepEqual(cleared.acp.tools, []);
+  assert.equal(isToolSelected(cleared, 'acp:send_message', acpToolsFixture), true);
+  assert.deepEqual(cleared.tools, ['generate_image']);
+  assert.equal(setToolSelection(cleared, groups[0].tools, true, acpToolsFixture).acp.tools, null);
+  const payload = agentFormPayload({ ...partial, tools: [...partial.tools, 'acp:generate_image'] });
+  assert.deepEqual(payload.tools, ['generate_image']);
+  assert.deepEqual(payload.acp.tools, ['view_file']);
+  const manualCleared = setToolSelection(partial, ['generate_image'], false, acpToolsFixture);
+  assert.deepEqual(manualCleared.tool_configs, {});
+  assert.deepEqual(manualCleared.acp, partial.acp);
+  assert.equal(form.acp.tools, null);
+});
 
 test('legacy delegation tools are hidden without making a newly opened agent dirty', () => {
   const { cardToForm, isFormDirty, buildToolGroups } = loadAgentForm();

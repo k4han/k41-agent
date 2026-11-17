@@ -3,6 +3,7 @@ import { createEffect, Show } from "solid-js";
 import type { AgentMcpInstall, AgentsPayload, PromptVariable } from "@/types";
 
 import {
+  isToolSelected,
   type AgentForm,
   type AgentTab,
   type AgentToolGroup,
@@ -59,7 +60,7 @@ export function AgentEditTabs(props: {
           tools: props.toolGroups.reduce(
             (count, group) =>
               count +
-              group.tools.filter((tool) => props.form.tools.includes(tool))
+              group.tools.filter((tool) => isToolSelected(props.form, tool, props.payload))
                 .length,
             0,
           ),

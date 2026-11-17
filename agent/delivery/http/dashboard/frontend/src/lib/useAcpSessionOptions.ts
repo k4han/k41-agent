@@ -24,11 +24,11 @@ export function useAcpSessionOptions(card: Accessor<AgentCard | undefined>, cwd:
   });
   const statusUrl = createMemo(() => {
     const settings = isAcpCard(card()) ? card()?.acp : undefined;
-    return settings ? API_PATHS.acpAgent(settings.agent, settings.agent_name, cwd()) : undefined;
+    return settings ? API_PATHS.acpAgent(settings.agent, undefined, cwd()) : undefined;
   });
 
   createEffect(on(scope, (name) => setChoices(name
-    ? readAcpOptionChoices(name, card()?.acp?.agent_name?.trim() ? undefined : cardName())
+    ? readAcpOptionChoices(name, cardName())
     : {})));
 
   // A plain request rather than a resource: the first probe starts the agent and

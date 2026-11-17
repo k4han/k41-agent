@@ -47,8 +47,7 @@ class TurnRequest:
     agent_id: str
     cwd: str
     blocks: list[dict[str, Any]]
-    agent_name: str | None = None
-    use_default_tools: bool = True
+    native_tools: list[str] | None = None
     session_id: str = ""
     session_cwd: str = ""
     session_runtime_key: str = ""
@@ -94,9 +93,9 @@ class AcpService:
 
     # Client lifetime --------------------------------------------------------
 
-    async def client_for(self, agent_id: str, *, agent_name: str | None = None, cwd: str | None = None, use_default_tools: bool = True) -> AcpClient:
+    async def client_for(self, agent_id: str, *, cwd: str | None = None, native_tools: list[str] | None = None) -> AcpClient:
         self._loop = asyncio.get_running_loop()
-        key = runtime_key(agent_id, agent_name, cwd, use_default_tools=use_default_tools)
+        key = runtime_key(agent_id, cwd, native_tools=native_tools)
         self._client_agents[key] = agent_id
         lock = self._client_locks.setdefault(key, asyncio.Lock())
         async with lock:
@@ -108,7 +107,7 @@ class AcpService:
                 # It died by itself. Stopping it still releases its job and pipes.
                 await asyncio.to_thread(client.stop)
             if self._resolve_command is None:
-                command = await asyncio.to_thread(resolve_cli_command, agent_name=agent_name, cwd=cwd, use_default_tools=use_default_tools)
+                command = await asyncio.to_thread(resolve_cli_command, cwd=cwd, native_tools=native_tools)
             else:
                 command = await asyncio.to_thread(self._resolve_command, agent_id)
             client = await asyncio.to_thread(AcpClient, command)
@@ -219,10 +218,10 @@ class AcpService:
         self._prune_finished()
         # Recorded before any I/O: a failure part-way must not allow a re-send.
         self._started_turn_ids.add(request.turn_id)
-        key = runtime_key(request.agent_id, request.agent_name, request.cwd, use_default_tools=request.use_default_tools)
+        key = runtime_key(request.agent_id, request.cwd, native_tools=request.native_tools)
         self.hold(key)
         try:
-            client = await self.client_for(request.agent_id, agent_name=request.agent_name, cwd=request.cwd, use_default_tools=request.use_default_tools)
+            client = await self.client_for(request.agent_id, cwd=request.cwd, native_tools=request.native_tools)
             session_id, blocks, notices = await self._prepare_session(client, request)
             tools = self._session_tools.get((key, session_id))
             turn = AcpTurn(
@@ -255,7 +254,7 @@ class AcpService:
         tool_names = await self._wanted_tool_names(client, request, notices)
         session_id = ""
         result: dict[str, Any] = {}
-        key = runtime_key(request.agent_id, request.agent_name, request.cwd, use_default_tools=request.use_default_tools)
+        key = runtime_key(request.agent_id, request.cwd, native_tools=request.native_tools)
         # Checkpoints without a runtime key predate CLI integration and cannot be resumed.
         previous_key = request.session_runtime_key
         configuration_changed = previous_key != key or (
@@ -376,7 +375,7 @@ class AcpService:
                 raise
             logger.info("ACP session could not be restored (code %s).", exc.code)
             return "", {}
-        self._bind_tools((runtime_key(request.agent_id, request.agent_name, request.cwd, use_default_tools=request.use_default_tools), request.session_id), tools)
+        self._bind_tools((runtime_key(request.agent_id, request.cwd, native_tools=request.native_tools), request.session_id), tools)
         return request.session_id, result
 
     async def _apply_config_options(

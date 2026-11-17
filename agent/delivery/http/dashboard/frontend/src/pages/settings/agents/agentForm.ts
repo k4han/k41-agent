@@ -46,8 +46,58 @@ export function isAgentTab(value: string | undefined): value is AgentTab {
 
 export const DEFAULT_CONTEXT_COMPACT_THRESHOLD = 75;
 
+const ACP_TOOL_PREFIX = "acp:";
+
+export function acpToolName(tool: string): string | undefined {
+  return tool.startsWith(ACP_TOOL_PREFIX) ? tool.slice(ACP_TOOL_PREFIX.length) : undefined;
+}
+
+export function normalizeAcpSettings(value: AcpAgentSettings | null): AcpAgentSettings {
+  const legacy = value as (AcpAgentSettings & { use_default_tools?: boolean }) | null;
+  return {
+    agent: "antigravity-cli",
+    tools: value && Object.hasOwn(value, "tools") ? value.tools ?? null : legacy?.use_default_tools === false ? [] : null,
+    config_options: value?.config_options ?? {},
+  };
+}
+
+export function isToolSelected(form: AgentForm, tool: string, payload: Pick<AgentsPayload, "acp_tools">): boolean {
+  const name = acpToolName(tool);
+  if (name === undefined) return form.tools.includes(tool);
+  const settings = normalizeAcpSettings(form.acp);
+  return Boolean(payload.acp_tools?.find((item) => item.name === name)?.always_enabled)
+    || settings.tools == null || settings.tools.includes(name);
+}
+
+export function setToolSelection(form: AgentForm, tools: string[], checked: boolean, payload: Pick<AgentsPayload, "acp_tools">): AgentForm {
+  const native = tools.map(acpToolName).filter((name): name is string => name !== undefined);
+  const manual = tools.filter((tool) => acpToolName(tool) === undefined);
+  const selected = new Set(form.tools);
+  const tool_configs = { ...form.tool_configs };
+  for (const tool of manual) {
+    if (checked) selected.add(tool);
+    else {
+      selected.delete(tool);
+      delete tool_configs[tool];
+    }
+  }
+  let acp = form.acp;
+  if (native.length) {
+    const settings = normalizeAcpSettings(acp);
+    const available = (payload.acp_tools ?? []).filter((tool) => !tool.always_enabled).map((tool) => tool.name);
+    const names = new Set(settings.tools ?? available);
+    for (const name of native) {
+      if (!available.includes(name)) continue;
+      if (checked) names.add(name);
+      else names.delete(name);
+    }
+    acp = { ...settings, tools: available.every((name) => names.has(name)) ? null : [...names].sort() };
+  }
+  return { ...form, tools: [...selected].sort(), tool_configs, acp };
+}
+
 export function manualToolNames(tools: readonly string[]): string[] {
-  return tools.filter((name) => !["delegate_task", "call_agent", "start_async_task", "check_async_task", "list_async_tasks",
+  return tools.filter((name) => acpToolName(name) === undefined && !["delegate_task", "call_agent", "start_async_task", "check_async_task", "list_async_tasks",
     "update_async_task", "cancel_async_task"].includes(name));
 }
 
@@ -67,6 +117,9 @@ export function buildToolGroups(payload: AgentsPayload, initialTools: string[], 
       groups.push({ category: "unknown", tools: uniqueSorted(extras) });
     }
   }
+  if (isAcp && payload.acp_tools?.length) {
+    groups.unshift({ category: "acp", tools: payload.acp_tools.map((tool) => `${ACP_TOOL_PREFIX}${tool.name}`) });
+  }
   return groups;
 }
 
@@ -75,6 +128,7 @@ export function agentFormPayload(form: AgentForm): AgentForm {
   return {
     ...form,
     permission_mode: form.permission_mode ?? null,
+    acp: form.acp || form.graph_type === "acp_agent" ? normalizeAcpSettings(form.acp) : null,
     tools,
     tool_configs: Object.fromEntries(
       Object.entries(form.tool_configs).filter(
@@ -102,7 +156,7 @@ export function blankForm(workflow: string): AgentForm {
     internal: false,
     context_compact_threshold: DEFAULT_CONTEXT_COMPACT_THRESHOLD,
     system_prompt: "",
-    acp: null,
+    acp: workflow === "acp_agent" ? normalizeAcpSettings(null) : null,
   };
 }
 
@@ -124,7 +178,7 @@ export function cardToForm(card: AgentCard): AgentForm {
     internal: card.internal || false,
     context_compact_threshold: card.context_compact_threshold || DEFAULT_CONTEXT_COMPACT_THRESHOLD,
     system_prompt: card.system_prompt || "",
-    acp: card.acp ?? null,
+    acp: card.acp || card.graph_type === "acp_agent" ? normalizeAcpSettings(card.acp ?? null) : null,
   };
 }
 

@@ -37,6 +37,13 @@ const toolGroups = [
   { category: 'utility', tools: ['get_current_time'] },
 ];
 const toolNames = toolGroups.flatMap((group) => group.tools);
+const acpTools = [
+  { name: 'view_file', description: 'Read a file in AGY.', always_enabled: false },
+  { name: 'run_command', description: 'Run a command in AGY.', always_enabled: false },
+  { name: 'generate_image', description: 'Generate an image in AGY.', always_enabled: false },
+  { name: 'manage_task', description: 'Required AGY task helper.', always_enabled: true },
+  { name: 'send_message', description: 'Required AGY helper.', always_enabled: true },
+];
 const field = (name, input_type, extra = {}) => ({
   name,
   input_type,
@@ -109,9 +116,14 @@ const cards = [
   card('builtin', { source: 'builtin', editable: false }),
   card('acp', {
     graph_type: 'acp_agent',
-    acp: { agent: 'antigravity-cli', agent_name: null, use_default_tools: true, config_options: { model: 'legacy-model' } },
+    tools: ['list_dir', 'generate_image', 'web_search', 'web_fetch'],
+    acp: { agent: 'antigravity-cli', tools: null, config_options: { model: 'legacy-model' } },
     permission_mode: 'ask',
   }),
+  card('acp-legacy', { graph_type: 'acp_agent', permission_mode: 'ask',
+    acp: { agent: 'antigravity-cli', use_default_tools: false, agent_name: null, config_options: {} } }),
+  card('acp-builtin', { graph_type: 'acp_agent', source: 'builtin', editable: false, permission_mode: 'ask',
+    acp: { agent: 'antigravity-cli', tools: null, config_options: {} } }),
   card('empty', { tools: [], sub_agents: [], plan_approval_targets: [] }),
 ];
 const installs = Object.fromEntries(
@@ -201,6 +213,7 @@ const server = await createServer({
                 web_search: { provider: 'tavily', include_raw: true },
               },
               acp_unavailable_tools: ['read'],
+              acp_tools: acpTools,
             };
           if (url.pathname === '/dashboard-api/agents/workflows')
             payload = { workflows: ['react_agent', 'acp_agent'] };
@@ -385,6 +398,9 @@ try {
     clickNode(
       `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).find(button => button.textContent.trim() === ${JSON.stringify(label)})`,
     );
+  const category = (label) => clickNode(
+    `Array.from(document.querySelectorAll('.agent-tools-nav-item')).find(button => button.querySelector('span')?.textContent === ${JSON.stringify(label)})`,
+  );
   const resize = async (width, height = 1000) => {
     await call('Emulation.setDeviceMetricsOverride', {
       width,
@@ -408,8 +424,8 @@ try {
             `location.href === ${JSON.stringify(url)} && document.readyState === 'complete'`,
           )) && (await count(selector)) > 0
         );
-      }, selector).catch(async (error) => {
-        error.message += '\n' + (await js('document.body.innerText'));
+      }, selector, 90000).catch(async (error) => {
+        error.message += '\n' + (await js('JSON.stringify({ url: location.href, state: document.readyState, html: document.documentElement.outerHTML.slice(0, 6000), resources: performance.getEntriesByType("resource").map(item => ({ name: item.name, duration: item.duration })) })'));
         throw error;
       });
     await ready('.agent-editor-navigation [role="tab"]:not(:disabled)');
@@ -761,12 +777,27 @@ try {
   );
   await section('General');
   assert.equal(await count('button[aria-label="Antigravity runtime"]'), 0);
-  assert.equal(await count('#acp-agent-name:not(:disabled)'), 1);
+  assert.equal(await count('#acp-agent-name'), 0);
   assert.equal(await count('button[aria-label="Base agent card"]'), 0);
-  assert.equal(await property('#acp-default-tools', 'checked'), true);
-  await input('#acp-agent-name', 'reviewer');
+  assert.equal(await count('#acp-default-tools'), 0);
   await section('Tools');
   assert.ok(await count('.agent-tools-row-check input:not(:disabled)'));
+  await category('ACP');
+  assert.equal(await count('.agent-tools-row'), acpTools.length);
+  assert.equal(await property('input[aria-label="Enable acp:view_file"]', 'checked'), true);
+  assert.equal(await property('input[aria-label="Enable acp:send_message"]', 'disabled'), true);
+  await click('input[aria-label="Enable acp:generate_image"]');
+  assert.equal(await property('input[aria-label="Enable acp:generate_image"]', 'checked'), false);
+  await click('input[aria-label="Select all acp tools"]');
+  await click('input[aria-label="Select all acp tools"]');
+  assert.equal(await property('input[aria-label="Enable acp:send_message"]', 'checked'), true);
+  assert.equal(await property('input[aria-label="Enable acp:view_file"]', 'checked'), false);
+  await click('input[aria-label="Enable acp:view_file"]');
+  await category('Image');
+  assert.equal(await property('input[aria-label="Enable generate_image"]', 'checked'), true);
+  await category('ACP');
+  await click('button[aria-label="Configure acp:generate_image"]');
+  assert.equal(await count('.agent-tool-details .agent-tool-config'), 0);
   await section('MCP');
   assert.ok(await count('.agent-tools-main input:not(:disabled)'));
   await section('Permissions');
@@ -785,34 +816,50 @@ try {
   await until(() => js('location.pathname === "/settings/agents"'), 'ACP runtime save');
   const acpWrite = writes.find(write => write.path === '/agents/cards/acp');
   assert.deepEqual(acpWrite.body.acp, {
-    agent: 'antigravity-cli', agent_name: 'reviewer', use_default_tools: true,
+    agent: 'antigravity-cli', tools: ['view_file'],
     config_options: { model: 'fake-lite', thinking_level: 'low' },
   });
   assert.equal(acpWrite.body.system_prompt, 'Direct ACP card instructions.');
+  assert.ok(acpWrite.body.tools.includes('generate_image'));
+  assert.ok(acpWrite.body.tools.every(tool => !tool.startsWith('acp:')));
   await navigate('acp');
   await section('System prompt');
   assert.equal(await property('textarea', 'value'), 'Direct ACP card instructions.');
-  await section('General');
-  assert.equal(await property('#acp-default-tools', 'checked'), true);
-  await click('#acp-default-tools');
-  assert.equal(await property('#acp-agent-name', 'disabled'), true);
-  assert.equal(await property('#acp-agent-name', 'value'), '');
+  await section('Tools');
+  await category('ACP');
+  assert.equal(await property('input[aria-label="Enable acp:view_file"]', 'checked'), true);
+  assert.equal(await property('input[aria-label="Enable acp:generate_image"]', 'checked'), false);
+  await click('input[aria-label="Enable acp:view_file"]');
   await buttonText('.settings-topbar-actions button', 'Save');
   await until(() => js('location.pathname === "/settings/agents"'), 'ACP tools-only save');
   const toolsOnlyWrite = writes.filter(write => write.path === '/agents/cards/acp').at(-1);
-  assert.equal(toolsOnlyWrite.body.acp.use_default_tools, false);
-  assert.equal(toolsOnlyWrite.body.acp.agent_name, null);
+  assert.deepEqual(toolsOnlyWrite.body.acp.tools, []);
+  assert.equal('use_default_tools' in toolsOnlyWrite.body.acp, false);
+  assert.equal('agent_name' in toolsOnlyWrite.body.acp, false);
   assert.equal(toolsOnlyWrite.body.system_prompt, 'Direct ACP card instructions.');
   await navigate('acp');
-  await section('General');
-  assert.equal(await property('#acp-default-tools', 'checked'), false);
-  await click('#acp-default-tools');
-  assert.equal(await property('#acp-agent-name', 'disabled'), false);
-  await click('#acp-default-tools');
-  console.log('PASS: ACP cards save their prompt, K41 tools, AGY profile, default-tools toggle and session options.');
+  await section('Tools');
+  await category('ACP');
+  assert.equal(await property('input[aria-label="Enable acp:view_file"]', 'checked'), false);
+  await navigate('acp-legacy');
+  await category('ACP');
+  assert.equal(await property('input[aria-label="Enable acp:view_file"]', 'checked'), false);
+  await navigate('acp-builtin');
+  await category('ACP');
+  assert.equal(await count('.agent-tools-row-check input:not(:disabled)'), 0);
+  console.log('PASS: ACP tool defaults, individual and group selections, distinct K41 tools, legacy cards and prompt round trips.');
   await navigate('new');
   await section('MCP');
   assert.equal(await count('.agent-tools-main input:not(:disabled)'), 0);
+  await section('General');
+  await click('button[aria-label="Workflow"]');
+  await click('[role="option"][data-value="acp_agent"]');
+  await section('Tools');
+  await category('ACP');
+  assert.equal(await count('.agent-tools-row-check input:checked'), acpTools.length);
+  await section('General');
+  await click('button[aria-label="Workflow"]');
+  await click('[role="option"][data-value="react_agent"]');
   await navigate('empty');
   await buttonText('.agent-tools-filters button', 'Selected 0');
   assert.equal(await count('.agent-tools-empty'), 1);
