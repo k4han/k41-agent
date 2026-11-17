@@ -109,7 +109,7 @@ const cards = [
   card('builtin', { source: 'builtin', editable: false }),
   card('acp', {
     graph_type: 'acp_agent',
-    acp: { agent: 'external', config_options: {} },
+    acp: { agent: 'antigravity-cli', agent_name: null, use_default_tools: true, config_options: { model: 'legacy-model' } },
     permission_mode: 'ask',
   }),
   card('empty', { tools: [], sub_agents: [], plan_approval_targets: [] }),
@@ -181,6 +181,11 @@ const server = await createServer({
           if (req.method !== 'GET')
             writes.push({ method: req.method, path: url.pathname, body });
           let payload = {};
+          if (req.method === 'PUT' && url.pathname === '/agents/cards/acp') {
+            const saved = cards.find(item => item.name === 'acp');
+            Object.assign(saved, body);
+            payload = { status: 'ok', card: saved };
+          }
           if (url.pathname === '/dashboard-api/agents/cards')
             payload = { cards, agent_names: cards.map((item) => item.name) };
           if (url.pathname === '/dashboard-api/agents/tools')
@@ -242,7 +247,12 @@ const server = await createServer({
           if (url.pathname === '/dashboard-api/acp/agents')
             payload = { agents: [], definitions: [] };
           if (url.pathname.startsWith('/dashboard-api/acp/agents/'))
-            payload = { auth: { signed_in: false, config_options: [] } };
+            payload = { auth: { signed_in: true, config_options: [
+              { id: 'model', name: 'ACP model', category: 'model', current_value: 'fake-pro',
+                options: [{ value: 'fake-pro', name: 'ACP Pro' }, { value: 'fake-lite', name: 'ACP Fast' }] },
+              { id: 'thinking_level', name: 'Thinking level', category: 'thought_level', current_value: 'high',
+                options: [{ value: 'high', name: 'High' }, { value: 'low', name: 'Low' }] },
+            ] } };
           if (url.pathname.startsWith('/api/mcp/')) {
             if (failMcp) {
               res.statusCode = 500;
@@ -749,6 +759,57 @@ try {
       'document.querySelector(".permission-mode-picker").textContent.includes("ACP")',
     ),
   );
+  await section('General');
+  assert.equal(await count('button[aria-label="Antigravity runtime"]'), 0);
+  assert.equal(await count('#acp-agent-name:not(:disabled)'), 1);
+  assert.equal(await count('button[aria-label="Base agent card"]'), 0);
+  assert.equal(await property('#acp-default-tools', 'checked'), true);
+  await input('#acp-agent-name', 'reviewer');
+  await section('Tools');
+  assert.ok(await count('.agent-tools-row-check input:not(:disabled)'));
+  await section('MCP');
+  assert.ok(await count('.agent-tools-main input:not(:disabled)'));
+  await section('Permissions');
+  assert.ok(await count('.agent-tools-main input:enabled, .agent-tools-main select:enabled'));
+  await section('System prompt');
+  assert.ok(await count('textarea:not(:disabled):not([readonly])'));
+  await input('textarea:not(:disabled):not([readonly])', 'Direct ACP card instructions.');
+  await section('General');
+  await until(() => count('button[aria-label="ACP model"]').then(value => value === 1), 'ACP model choices');
+  assert.equal(await count('button[aria-label="Thinking level"]'), 1);
+  await click('button[aria-label="ACP model"]');
+  await click('[role="option"][data-value="fake-lite"]');
+  await click('button[aria-label="Thinking level"]');
+  await click('[role="option"][data-value="low"]');
+  await buttonText('.settings-topbar-actions button', 'Save');
+  await until(() => js('location.pathname === "/settings/agents"'), 'ACP runtime save');
+  const acpWrite = writes.find(write => write.path === '/agents/cards/acp');
+  assert.deepEqual(acpWrite.body.acp, {
+    agent: 'antigravity-cli', agent_name: 'reviewer', use_default_tools: true,
+    config_options: { model: 'fake-lite', thinking_level: 'low' },
+  });
+  assert.equal(acpWrite.body.system_prompt, 'Direct ACP card instructions.');
+  await navigate('acp');
+  await section('System prompt');
+  assert.equal(await property('textarea', 'value'), 'Direct ACP card instructions.');
+  await section('General');
+  assert.equal(await property('#acp-default-tools', 'checked'), true);
+  await click('#acp-default-tools');
+  assert.equal(await property('#acp-agent-name', 'disabled'), true);
+  assert.equal(await property('#acp-agent-name', 'value'), '');
+  await buttonText('.settings-topbar-actions button', 'Save');
+  await until(() => js('location.pathname === "/settings/agents"'), 'ACP tools-only save');
+  const toolsOnlyWrite = writes.filter(write => write.path === '/agents/cards/acp').at(-1);
+  assert.equal(toolsOnlyWrite.body.acp.use_default_tools, false);
+  assert.equal(toolsOnlyWrite.body.acp.agent_name, null);
+  assert.equal(toolsOnlyWrite.body.system_prompt, 'Direct ACP card instructions.');
+  await navigate('acp');
+  await section('General');
+  assert.equal(await property('#acp-default-tools', 'checked'), false);
+  await click('#acp-default-tools');
+  assert.equal(await property('#acp-agent-name', 'disabled'), false);
+  await click('#acp-default-tools');
+  console.log('PASS: ACP cards save their prompt, K41 tools, AGY profile, default-tools toggle and session options.');
   await navigate('new');
   await section('MCP');
   assert.equal(await count('.agent-tools-main input:not(:disabled)'), 0);

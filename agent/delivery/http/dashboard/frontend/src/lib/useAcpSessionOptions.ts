@@ -1,7 +1,8 @@
-import { createEffect, createMemo, createSignal, on, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js";
 
 import {
   isAcpCard,
+  acpOptionScope,
   readAcpOptionChoices,
   resolveAcpOptionValues,
   writeAcpOptionChoices,
@@ -13,22 +14,33 @@ import { apiFetch } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
 import type { AgentCard } from "@/types";
 
-export function useAcpSessionOptions(card: Accessor<AgentCard | undefined>) {
+export function useAcpSessionOptions(card: Accessor<AgentCard | undefined>, cwd: Accessor<string> = () => "") {
   const [options, setOptions] = createSignal<AcpConfigOption[]>([]);
   const [choices, setChoices] = createSignal<AcpOptionValues>({});
   const cardName = createMemo(() => (isAcpCard(card()) ? card()?.name : undefined));
-  const agentId = createMemo(() => (isAcpCard(card()) ? card()?.acp?.agent : undefined));
+  const scope = createMemo(() => {
+    const settings = card()?.acp;
+    return cardName() && settings ? acpOptionScope(cardName()!, settings, cwd()) : undefined;
+  });
+  const statusUrl = createMemo(() => {
+    const settings = isAcpCard(card()) ? card()?.acp : undefined;
+    return settings ? API_PATHS.acpAgent(settings.agent, settings.agent_name, cwd()) : undefined;
+  });
 
-  createEffect(on(cardName, (name) => setChoices(name ? readAcpOptionChoices(name) : {})));
+  createEffect(on(scope, (name) => setChoices(name
+    ? readAcpOptionChoices(name, card()?.acp?.agent_name?.trim() ? undefined : cardName())
+    : {})));
 
   // A plain request rather than a resource: the first probe starts the agent and
   // takes several seconds, which must not suspend the chat page.
-  createEffect(on(agentId, (agent) => {
+  createEffect(on(statusUrl, (url) => {
     setOptions([]);
-    if (!agent) return;
-    apiFetch<AcpAgentStatus>(API_PATHS.acpAgent(agent))
+    if (!url) return;
+    let active = true;
+    onCleanup(() => { active = false; });
+    apiFetch<AcpAgentStatus>(url)
       .then((status) => {
-        if (agentId() === agent) setOptions(status.auth.config_options);
+        if (active) setOptions(status.auth.config_options);
       })
       // The picker stays hidden; the turn itself reports a missing install or sign-in.
       .catch(() => undefined);
@@ -37,7 +49,7 @@ export function useAcpSessionOptions(card: Accessor<AgentCard | undefined>) {
   const values = createMemo(() => resolveAcpOptionValues(options(), choices(), card()?.acp?.config_options ?? {}));
 
   const setValue = (id: string, value: string) => {
-    const name = cardName();
+    const name = scope();
     if (!name) return;
     const next = { ...choices(), [id]: value };
     setChoices(next);

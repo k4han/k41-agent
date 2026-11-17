@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent.modules.acp.turns import AcpTurn
+from agent.modules.acp.tool_bridge import SessionTools, bridged_tool_name
 from agent.modules.tools.coding.models import InvocationContext, PermissionRule
 from agent.modules.tools.permissions import Permissions
 from agent.modules.tools.permissions.risk import RiskLevel, acp_operations, classify_acp_tool_call
@@ -24,6 +25,32 @@ def make_turn(tmp_path, mode="ask", *, can_interrupt=True, rules=()):
     turn = AcpTurn(turn_id="turn", thread_id="thread", session_id="session", agent_id="provider", client=client,
                    permission_context=context, can_interrupt=can_interrupt)
     return turn, responses
+
+
+@pytest.mark.parametrize("call,expected", [
+    ({"name": "mcp_k41_get_current_time"}, "get_current_time"),
+    ({"_meta": {"mcp": {"server": "k41", "tool": "get_current_time"}}}, "get_current_time"),
+    ({"name": "mcp_other_get_current_time"}, None),
+    ({"name": "mcp_k41_"}, None),
+    ({"title": "Run mcp_k41_get_current_time"}, None),
+    ({"name": "mcp_k41_get_current_time", "_meta": {"mcp": {"server": "other", "tool": "get_current_time"}}}, None),
+])
+def test_mcp_bridge_recognizes_vendor_metadata_and_cli_callable_names(call, expected):
+    assert bridged_tool_name(call) == expected
+
+
+def test_cli_mcp_approval_only_correlates_bound_tools_and_exact_arguments(tmp_path):
+    turn, responses = make_turn(tmp_path)
+    turn.tools = SessionTools(frozenset({"get_current_time"}))
+    call = {"toolCallId": "cli-call", "name": "mcp_k41_get_current_time", "kind": "other",
+            "rawInput": {"format": "iso", "toolSummary": "Read the clock"}}
+    turn.on_permission_request(1, {"toolCall": call, "options": OPTIONS})
+    assert responses == [(1, "once")]
+    assert turn.tools.take_approval("get_current_time", {"format": "different"}) is None
+    assert turn.tools.take_approval("get_current_time", {"format": "iso"}) == "cli-call"
+    assert turn.tools.take_approval("get_current_time", {"format": "iso"}) is None
+    turn.on_permission_request(2, {"toolCall": {**call, "name": "mcp_k41_other_tool"}, "options": OPTIONS})
+    assert responses[-1] == (2, "reject")
 
 
 @pytest.mark.parametrize("mode", ["ask", "auto", "full_access"])

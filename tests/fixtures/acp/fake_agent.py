@@ -1,21 +1,18 @@
 """Scriptable ACP agent for tests. Standard library only; run with ``python -I -u``.
 
-The default shapes mirror what agy_acp_server 1.4.5 was observed to send, including
-its quirks. They are written by hand, so no captured traffic or credentials exist here.
+The shapes cover AGY CLI updates and ACP protocol edge cases. They are written by hand, so no captured traffic or credentials exist here.
 
 Usage: fake_agent.py <state_dir> [--no-resume] [--no-load] [--require-auth] [--mcp-http] [--mcp-on-new]
 The scenario is chosen per prompt from the prompt text: "scenario:<name>".
 Every received message is appended to <state_dir>/calls.jsonl.
 """
 
-import http.server
 import json
 import os
 import sys
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -100,7 +97,7 @@ def run_edit(session_id, tag="1"):
 
 
 def mcp_request(session_id, method, params=None, *, token=None):
-    """POST one JSON-RPC request as agy_acp_server does. Returns (status, parsed body)."""
+    """POST one session MCP request. Return the status and parsed body."""
     server = session_mcp_servers[session_id][0]
     headers = {item["name"]: item["value"] for item in server["headers"]}
     if token is not None:
@@ -122,7 +119,10 @@ def mcp_tool_text(reply):
 
 
 def mcp_tool_call_fields(tool, arguments):
-    """The shape agy_acp_server gives a client-provided MCP tool."""
+    """Describe a client-provided MCP tool in an ACP update."""
+    if "--mcp-cli" in FLAGS:
+        raw = {**arguments, "toolSummary": "Run the K41 tool"}
+        return {"name": f"mcp_k41_{tool}", "args": raw, "title": f"Run mcp_k41_{tool}", "kind": "other", "rawInput": raw}
     return {"title": f"k41_{tool}", "kind": "other", "rawInput": {"arguments": arguments, **arguments},
             "_meta": {"mcp": {"tool": tool, "server": "k41"}, "is_mcp_tool_call": True}}
 
@@ -291,42 +291,6 @@ def turn_body(session_id, name, cancel, text):
     return "end_turn"
 
 
-def run_oauth(rid):
-    """Mirrors the real flow: link on stderr, and a listener that accepts any callback."""
-    state = uuid.uuid4().hex
-    outcome = {}
-    finished = threading.Event()
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-            outcome["ok"] = query.get("state") == [state] and bool(query.get("code"))
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"Authentication complete")
-            finished.set()
-
-        def log_message(self, *_args):
-            pass
-
-    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    redirect = urllib.parse.quote(f"http://127.0.0.1:{server.server_address[1]}/", safe="")
-    sys.stderr.write(
-        "Open the following link to authenticate the ACP server: "
-        f"https://accounts.google.com/o/oauth2/v2/auth?redirect_uri={redirect}&state={state}\n"
-    )
-    sys.stderr.flush()
-    finished.wait(60)
-    server.shutdown()
-    if outcome.get("ok"):
-        AUTH_MARKER.write_text("yes", encoding="utf-8")
-        send({"jsonrpc": "2.0", "id": rid, "result": {"_meta": {"antigravity": {"tier": {"name": "Fake Pro"}}}}})
-    else:
-        AUTH_MARKER.unlink(missing_ok=True)
-        send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32000, "message": "Onboarding failed", "data": {"reason": "onboarding_failed"}}})
-
-
 def prompt_text(params):
     return " ".join(block.get("text", "") for block in params.get("prompt", []) if block.get("type") == "text")
 
@@ -368,7 +332,6 @@ def main():
         if method == "initialize":
             capabilities = {"loadSession": "--no-load" not in FLAGS,
                             "promptCapabilities": {"image": True},
-                            "auth": {"logout": {}},
                             "sessionCapabilities": {} if "--no-resume" in FLAGS else {"resume": {}},
                             "_meta": {"antigravity": {"systemPrompt": {"append": True}}}}
             if "--mcp-http" in FLAGS:
@@ -376,23 +339,7 @@ def main():
             send({"jsonrpc": "2.0", "id": rid, "result": {
                 "protocolVersion": 1, "agentCapabilities": capabilities,
                 "agentInfo": {"name": "fake", "title": "Fake", "version": "0.0.0"},
-                "authMethods": [{"id": "oauth-personal", "name": "Log in with Google"},
-                                {"id": "gemini-api-key", "name": "Gemini API key"}]}})
-        elif method == "authenticate":
-            if params.get("methodId") == "gemini-api-key":
-                if os.environ.get("GEMINI_API_KEY") != "good-key":
-                    send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32000, "message": "Invalid API key"}})
-                    continue
-                AUTH_MARKER.write_text("yes", encoding="utf-8")
-                send({"jsonrpc": "2.0", "id": rid, "result": {}})
-            elif "--oauth" in FLAGS:
-                threading.Thread(target=run_oauth, args=(rid,), daemon=True).start()
-            else:
-                AUTH_MARKER.write_text("yes", encoding="utf-8")
-                send({"jsonrpc": "2.0", "id": rid, "result": {}})
-        elif method == "logout":
-            AUTH_MARKER.unlink(missing_ok=True)
-            send({"jsonrpc": "2.0", "id": rid, "result": {}})
+                "authMethods": []}})
         elif method == "session/new":
             if "--require-auth" in FLAGS and not AUTH_MARKER.exists():
                 send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32000, "message": "Authentication required"}})
@@ -400,7 +347,7 @@ def main():
             session_id = str(uuid.uuid4())
             session_mcp_servers[session_id] = params.get("mcpServers") or []
             if "--mcp-on-new" in FLAGS and session_mcp_servers[session_id]:
-                # Connecting this early is allowed, although agy_acp_server waits for the first prompt.
+                # A session can connect to the MCP endpoint before its first prompt.
                 _, reply = mcp_request(session_id, "tools/list")
                 listed = [tool["name"] for tool in reply["result"]["tools"]]
                 (STATE / "mcp_tools_on_new.json").write_text(json.dumps(listed), encoding="utf-8")

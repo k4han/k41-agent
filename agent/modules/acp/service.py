@@ -17,6 +17,7 @@ from typing import Any
 from agent.modules.acp.agents import get_agent_definition
 from agent.modules.acp.client import AcpClient
 from agent.modules.acp.errors import AcpError, AcpNotInstalled, AcpRpcError
+from agent.modules.acp.launcher import resolve_cli_command, runtime_key
 from agent.modules.acp.process import AgentCommand
 from agent.modules.acp.tool_bridge import SessionTools, ToolBridge, ToolProvider
 from agent.modules.acp.turns import AcpTurn, PendingHandoff, PendingToolPermission
@@ -46,8 +47,13 @@ class TurnRequest:
     agent_id: str
     cwd: str
     blocks: list[dict[str, Any]]
+    agent_name: str | None = None
+    use_default_tools: bool = True
     session_id: str = ""
     session_cwd: str = ""
+    session_runtime_key: str = ""
+    session_config_key: str = ""
+    previous_session_config_key: str = ""
     permission_context: Any = None
     native_grants: frozenset[str] = frozenset()
     can_interrupt: bool = False
@@ -64,66 +70,72 @@ class AcpService:
         command_resolver: CommandResolver | None = None,
         idle_seconds: float = DEFAULT_IDLE_SECONDS,
     ) -> None:
-        self._resolve_command = command_resolver or self._installed_command
+        self._resolve_command = command_resolver
         self.idle_seconds = idle_seconds
         # A checkpoint from another boot proves its turn ran in a process that
         # is gone, so its prompt must never be sent again.
         self.boot_id = uuid.uuid4().hex
         self._clients: dict[str, AcpClient] = {}
+        self._client_agents: dict[str, str] = {}
         self._client_locks: dict[str, asyncio.Lock] = {}
         self._turns: dict[str, AcpTurn] = {}
         self._started_turn_ids: set[str] = set()
         self._active_by_thread: dict[str, str] = {}
-        self._thread_sessions: dict[str, str] = {}
+        self._thread_sessions: dict[str, tuple[str, str]] = {}
         self._stranded_commits: set[asyncio.Task[None]] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._idle_handles: dict[str, asyncio.TimerHandle] = {}
         self._holds: dict[str, int] = {}
-        self._applied_options: dict[str, dict[str, str]] = {}
-        self._option_categories: dict[str, dict[str, str]] = {}
+        self._applied_options: dict[tuple[str, str], dict[str, str]] = {}
+        self._option_categories: dict[tuple[str, str], dict[str, str]] = {}
         self._tool_bridge = ToolBridge()
-        self._session_tools: dict[str, SessionTools] = {}
+        self._session_tools: dict[tuple[str, str], SessionTools] = {}
         self._closed = False
-
-    @staticmethod
-    def _installed_command(agent_id: str) -> AgentCommand:
-        from agent.modules.acp.installer import resolve_installed_command
-
-        return resolve_installed_command(agent_id)
 
     # Client lifetime --------------------------------------------------------
 
-    async def client_for(self, agent_id: str) -> AcpClient:
+    async def client_for(self, agent_id: str, *, agent_name: str | None = None, cwd: str | None = None, use_default_tools: bool = True) -> AcpClient:
         self._loop = asyncio.get_running_loop()
-        lock = self._client_locks.setdefault(agent_id, asyncio.Lock())
+        key = runtime_key(agent_id, agent_name, cwd, use_default_tools=use_default_tools)
+        self._client_agents[key] = agent_id
+        lock = self._client_locks.setdefault(key, asyncio.Lock())
         async with lock:
-            client = self._clients.get(agent_id)
+            client = self._clients.get(key)
             if client is not None and not client.closed:
-                self._cancel_idle(agent_id)
+                self._cancel_idle(key)
                 return client
             if client is not None:
                 # It died by itself. Stopping it still releases its job and pipes.
                 await asyncio.to_thread(client.stop)
-            command = self._resolve_command(agent_id)
+            if self._resolve_command is None:
+                command = await asyncio.to_thread(resolve_cli_command, agent_name=agent_name, cwd=cwd, use_default_tools=use_default_tools)
+            else:
+                command = await asyncio.to_thread(self._resolve_command, agent_id)
             client = await asyncio.to_thread(AcpClient, command)
             try:
                 await client.initialize()
             except BaseException:
                 await asyncio.to_thread(client.stop)
                 raise
-            self._clients[agent_id] = client
+            self._clients[key] = client
             return client
 
     async def restart_client(self, agent_id: str) -> None:
         """Stop an agent so its next use picks up new credentials or a new version."""
-        lock = self._client_locks.setdefault(agent_id, asyncio.Lock())
+        for key in list(self._client_agents):
+            if self._client_agents[key] == agent_id:
+                await self._restart_runtime(key)
+
+    async def _restart_runtime(self, key: str) -> None:
+        lock = self._client_locks.setdefault(key, asyncio.Lock())
         async with lock:
-            client = self._clients.pop(agent_id, None)
+            self._cancel_idle(key)
+            client = self._clients.pop(key, None)
             if client is not None:
                 await asyncio.to_thread(client.stop)
 
     def agent_is_busy(self, agent_id: str) -> bool:
-        if self._holds.get(agent_id):
+        if any(count and self._client_agents.get(key, key) == agent_id for key, count in self._holds.items()):
             return True
         return any(turn.agent_id == agent_id and turn.has_unresolved_work() for turn in self._turns.values())
 
@@ -151,8 +163,11 @@ class AcpService:
 
     async def _reap(self, agent_id: str) -> None:
         self._idle_handles.pop(agent_id, None)
-        if not self.agent_is_busy(agent_id):
-            await self.restart_client(agent_id)
+        busy = self._holds.get(agent_id) or any(
+            turn.runtime_key == agent_id and turn.has_unresolved_work() for turn in self._turns.values()
+        )
+        if not busy:
+            await self._restart_runtime(agent_id)
 
     async def close(self) -> None:
         self._closed = True
@@ -195,7 +210,7 @@ class AcpService:
         loop = self._loop
         if loop is not None and not loop.is_closed():
             try:
-                loop.call_soon_threadsafe(self._schedule_idle, turn.agent_id)
+                loop.call_soon_threadsafe(self._schedule_idle, turn.runtime_key)
             except RuntimeError:
                 pass
 
@@ -204,16 +219,19 @@ class AcpService:
         self._prune_finished()
         # Recorded before any I/O: a failure part-way must not allow a re-send.
         self._started_turn_ids.add(request.turn_id)
-        client = await self.client_for(request.agent_id)
+        key = runtime_key(request.agent_id, request.agent_name, request.cwd, use_default_tools=request.use_default_tools)
+        self.hold(key)
         try:
-            self.hold(request.agent_id)
+            client = await self.client_for(request.agent_id, agent_name=request.agent_name, cwd=request.cwd, use_default_tools=request.use_default_tools)
             session_id, blocks, notices = await self._prepare_session(client, request)
-            tools = self._session_tools.get(session_id)
+            tools = self._session_tools.get((key, session_id))
             turn = AcpTurn(
                 turn_id=request.turn_id,
                 thread_id=request.thread_id,
                 session_id=session_id,
                 agent_id=request.agent_id,
+                runtime_key=key,
+                session_config_key=request.session_config_key,
                 client=client,
                 permission_context=request.permission_context,
                 native_grants=request.native_grants,
@@ -226,19 +244,30 @@ class AcpService:
                 tools.begin_turn(turn, request.tools)
             self._turns[request.turn_id] = turn
             self._active_by_thread[request.thread_id] = request.turn_id
-            self._thread_sessions[request.thread_id] = session_id
+            self._thread_sessions[request.thread_id] = (key, session_id)
             turn.start(blocks, notices=notices)
             return turn
         finally:
-            self.release(request.agent_id)
+            self.release(key)
 
     async def _prepare_session(self, client: AcpClient, request: TurnRequest) -> tuple[str, list[dict[str, Any]], list[str]]:
         notices: list[str] = []
         tool_names = await self._wanted_tool_names(client, request, notices)
         session_id = ""
         result: dict[str, Any] = {}
-        if request.session_id and request.session_cwd == request.cwd:
-            if request.session_id in client.live_sessions and self._attached_tools_match(request.session_id, tool_names):
+        key = runtime_key(request.agent_id, request.agent_name, request.cwd, use_default_tools=request.use_default_tools)
+        # Checkpoints without a runtime key predate CLI integration and cannot be resumed.
+        previous_key = request.session_runtime_key
+        configuration_changed = previous_key != key or (
+            bool(request.previous_session_config_key)
+            and request.previous_session_config_key != request.session_config_key
+        )
+        if request.session_id and request.session_cwd != request.cwd:
+            notices.append("The workspace changed, so the agent started a new session without earlier context.")
+        elif request.session_id and configuration_changed:
+            notices.append("The agent configuration changed, so the agent started a new session without earlier context.")
+        elif request.session_id and request.session_cwd == request.cwd:
+            if request.session_id in client.live_sessions and self._attached_tools_match((key, request.session_id), tool_names):
                 session_id = request.session_id
             else:
                 # A live session also takes this path when the card's tools changed or
@@ -246,11 +275,9 @@ class AcpService:
                 session_id, result = await self._reattach(client, request, tool_names)
                 if not session_id:
                     notices.append(SESSION_LOST_NOTICE)
-        elif request.session_id:
-            notices.append("The workspace changed, so the agent started a new session without earlier context.")
-        if request.session_id and session_id != request.session_id:
+        if request.session_id and (session_id != request.session_id or configuration_changed):
             # The thread moves to a new session and nothing uses this one again.
-            self._forget_session(request.session_id)
+            self._forget_session((previous_key, request.session_id))
         blocks = [block for block in request.blocks if block.get("type") != "image" or client.supports_image()]
         if not session_id:
             prompt_text = await request.system_prompt() if request.system_prompt else ""
@@ -265,9 +292,9 @@ class AcpService:
                 session_id = str(result.get("sessionId") or "")
                 if not session_id:
                     raise AcpError("The agent did not return a session id.")
-            self._bind_tools(session_id, tools)
+            self._bind_tools((key, session_id), tools)
         client.live_sessions.add(session_id)
-        notices.extend(await self._apply_config_options(client, session_id, result, request.config_options))
+        notices.extend(await self._apply_config_options(client, session_id, result, request.config_options, key=key))
         return session_id, blocks, notices
 
     async def _wanted_tool_names(self, client: AcpClient, request: TurnRequest, notices: list[str]) -> frozenset[str]:
@@ -287,7 +314,7 @@ class AcpService:
             notices.append(f"K41 tools are unavailable for this message: {exc}")
             return frozenset()
 
-    def _attached_tools_match(self, session_id: str, wanted: frozenset[str]) -> bool:
+    def _attached_tools_match(self, session_id: tuple[str, str], wanted: frozenset[str]) -> bool:
         tools = self._session_tools.get(session_id)
         if tools is None:
             return not wanted
@@ -305,19 +332,20 @@ class AcpService:
     def _mcp_servers(self, tools: SessionTools | None) -> list[dict[str, Any]]:
         return [self._tool_bridge.server_entry(tools)] if tools is not None else []
 
-    def _bind_tools(self, session_id: str, tools: SessionTools | None) -> None:
+    def _bind_tools(self, session_id: tuple[str, str], tools: SessionTools | None) -> None:
         previous = self._session_tools.pop(session_id, None)
         if previous is not None:
             self._tool_bridge.revoke(previous)
         if tools is not None:
             self._session_tools[session_id] = tools
 
-    def _forget_session(self, session_id: str) -> None:
+    def _forget_session(self, session_id: tuple[str, str]) -> None:
         self._bind_tools(session_id, None)
         self._applied_options.pop(session_id, None)
         self._option_categories.pop(session_id, None)
-        for client in self._clients.values():
-            client.live_sessions.discard(session_id)
+        client = self._clients.get(session_id[0])
+        if client is not None:
+            client.live_sessions.discard(session_id[1])
 
     def forget_thread(self, thread_id: str) -> None:
         """End what a deleted conversation still holds. The agent's session itself just stays unused."""
@@ -348,7 +376,7 @@ class AcpService:
                 raise
             logger.info("ACP session could not be restored (code %s).", exc.code)
             return "", {}
-        self._bind_tools(request.session_id, tools)
+        self._bind_tools((runtime_key(request.agent_id, request.agent_name, request.cwd, use_default_tools=request.use_default_tools), request.session_id), tools)
         return request.session_id, result
 
     async def _apply_config_options(
@@ -357,12 +385,15 @@ class AcpService:
         session_id: str,
         session_result: dict[str, Any],
         wanted: dict[str, str] | None,
+        *,
+        key: str,
     ) -> list[str]:
-        self._record_options(session_id, session_result)
+        session_key = (key, session_id)
+        self._record_options(session_key, session_result)
         if not wanted:
             return []
-        applied = self._applied_options.setdefault(session_id, {})
-        categories = self._option_categories.get(session_id, {})
+        applied = self._applied_options.setdefault(session_key, {})
+        categories = self._option_categories.get(session_key, {})
         notices: list[str] = []
         # A model change can reset what depends on it, so the model is set first.
         for config_id, value in sorted(wanted.items(), key=lambda item: categories.get(item[0]) != "model"):
@@ -373,7 +404,7 @@ class AcpService:
             if applied.get(config_id) == value:
                 continue
             try:
-                self._record_options(session_id, await client.set_config_option(session_id, config_id, value))
+                self._record_options(session_key, await client.set_config_option(session_id, config_id, value))
                 applied[config_id] = value
             except AcpRpcError as exc:
                 if exc.auth_required:
@@ -381,7 +412,7 @@ class AcpService:
                 notices.append(f"The agent kept its current '{config_id}' setting because '{value}' is not available.")
         return notices
 
-    def _record_options(self, session_id: str, result: dict[str, Any]) -> None:
+    def _record_options(self, session_id: tuple[str, str], result: dict[str, Any]) -> None:
         """Remember what the agent reported; a live session reports nothing until it changes."""
         for option in result.get("configOptions") or []:
             if isinstance(option, dict):
@@ -465,7 +496,7 @@ class AcpService:
             # The agent ignored the cancel. A new prompt in the same session would
             # interleave with the old one, so the process has to go.
             logger.warning("ACP agent ignored a cancel; restarting it.")
-            await self.restart_client(turn.agent_id)
+            await self._restart_runtime(turn.runtime_key)
 
 
 def get_acp_service(container: Any | None = None) -> AcpService:
@@ -491,7 +522,7 @@ def peek_acp_service() -> AcpService | None:
 def not_installed_notice(agent_id: str) -> str:
     definition = get_agent_definition(agent_id)
     name = definition.display_name if definition else agent_id
-    return f"{name} is not installed. Install it under Settings > ACP agents, then send your message again."
+    return f"{name} is not installed. Install agy on the machine running K41 and add it to PATH, then retry."
 
 
 __all__ = [

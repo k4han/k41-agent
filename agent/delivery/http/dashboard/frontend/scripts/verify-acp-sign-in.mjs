@@ -16,18 +16,20 @@ const executable = process.env.BROWSER_EXECUTABLE || [
 assert.ok(executable, 'Set BROWSER_EXECUTABLE to run browser checks.');
 
 let polls = 0;
-let reversed = false;
-let attempts = 0;
-let attempt = null;
-let completion;
-const submissions = [];
-const agent = (id, signIn = null) => ({
-  id, display_name: id, terms_url: '', installed: true, version: `1.0.${polls}`, license: 'proprietary', job: null,
-  auth: { signed_in: false, state: 'signed_out', methods: [
-    { id: 'oauth', name: 'Browser sign-in', description: '' },
-    { id: 'gemini-api-key', name: 'API key', description: '' },
-  ] },
-  sign_in: signIn,
+let installed = false;
+let signedIn = false;
+let authError = "";
+let failNext = false;
+let refreshes = 0;
+const mutations = [];
+const agent = () => ({
+  id: "antigravity-cli", display_name: "Google Antigravity (agy acp)",
+  installed, version: installed ? "1.5.10" : null,
+  executable_path: installed ? "C:/Program Files/agy/agy.exe" : null,
+  auth: {
+    signed_in: signedIn, state: authError ? "error" : !installed ? "not_installed" : signedIn ? "signed_in" : "signed_out",
+    plan: signedIn ? "Pro" : "", error: authError, config_options: [],
+  },
 });
 const fixtures = {
   '/dashboard-api/nav-projects': { projects: [], has_more: false, next_cursor: null },
@@ -41,38 +43,18 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.startsWith('/dashboard-api') || url.pathname === '/health') {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'test-csrf');
+    if (req.method !== "GET") mutations.push(req.url);
     if (url.pathname === '/dashboard-api/acp/agents') {
       polls++;
-      const agents = [agent('antigravity', attempt), agent('other')];
-      res.end(JSON.stringify({ agents: reversed ? agents.reverse() : agents }));
+      if (url.searchParams.get("refresh") === "true") refreshes++;
+      if (failNext) {
+        failNext = false;
+        res.writeHead(503);
+        res.end(JSON.stringify({ detail: "CLI status unavailable." }));
+      } else {
+        res.end(JSON.stringify({ agents: [agent()] }));
+      }
       return;
-    }
-    if (req.method === 'POST') {
-      const body = await new Promise(resolve => {
-        let value = '';
-        req.on('data', chunk => value += chunk);
-        req.on('end', () => resolve(JSON.parse(value || '{}')));
-      });
-      assert.equal(req.headers['x-csrf-token'], 'test-csrf');
-      if (url.pathname.endsWith('/sign-in')) {
-        attempt = {
-          attempt_id: `attempt-${++attempts}`, method_id: body.method_id, status: 'pending', error: '',
-          authorization_url: `https://example.com/authorize?state=state-${attempts}`,
-          expires_at: Date.now() / 1000 + 300,
-        };
-        res.end(JSON.stringify(attempt));
-        return;
-      }
-      if (url.pathname.endsWith('/complete')) {
-        submissions.push({ path: url.pathname, ...body });
-        completion = res;
-        return;
-      }
-      if (url.pathname.endsWith('/cancel')) {
-        attempt = { ...attempt, status: 'cancelled', authorization_url: '' };
-        res.end(JSON.stringify(attempt));
-        return;
-      }
     }
     res.end(JSON.stringify(fixtures[url.pathname] || {}));
     return;
@@ -136,56 +118,42 @@ try {
     if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
     return result.result.value;
   };
-  const panel = `document.querySelector('section[aria-label="antigravity"]')`;
-  const callback = `document.querySelector('textarea[aria-label="Sign-in callback address"]')`;
-  const button = text => `Array.from(${panel}.querySelectorAll('button')).find(button => button.textContent.trim() === ${JSON.stringify(text)})`;
-  await call('Page.enable');
-  await call('Runtime.enable');
+  const panel = 'document.querySelector("section.panel")';
+  const refresh = 'document.querySelector("section button")';
   await call('Page.navigate', { url: base + '/settings/acp' });
-  await until(() => js(`!!${panel}`), 'ACP agent panel');
-  await js(`${button('Browser sign-in')}.click()`);
-  await until(() => js(`!!${callback} && !${callback}.disabled`), 'callback input');
-  const value = 'http://127.0.0.1:12345/?state=test-state&code=test-code';
-  await js(`window.originalCallback = ${callback}; originalCallback.focus()`);
-  await call('Input.insertText', { text: value });
-  await js('originalCallback.setSelectionRange(12, 19)');
-  const beforePolls = polls;
-  await until(() => polls >= beforePolls + 3, 'three polling snapshots');
-  // Wait for the browser to consume the last snapshot, not just for the server to send it.
-  await until(() => js(`${panel}.textContent.includes('Version 1.0.${polls},')`), 'latest snapshot applied');
-  assert.equal(await js(`${callback} === originalCallback`), true, 'Polling must retain the input node');
-  assert.equal(await js('document.activeElement === originalCallback'), true, 'Polling must retain focus');
-  assert.deepEqual(await js('[originalCallback.value, originalCallback.selectionStart, originalCallback.selectionEnd]'), [value, 12, 19]);
+  await until(() => js("document.body.textContent.includes('Not installed')"), "missing CLI");
+  assert.equal(await js("document.querySelectorAll('section.panel').length"), 1);
+  assert.equal(await js("document.querySelectorAll('section input, section textarea').length"), 0);
+  assert.equal(await js("document.body.textContent.includes('agy acp --login')"), true);
+  assert.equal(await js("document.body.textContent.includes('agy update')"), true);
+  assert.equal(await js("document.querySelectorAll('section button').length"), 1);
 
-  reversed = true;
-  await until(() => js(`document.querySelector('section.panel')?.getAttribute('aria-label') === 'other'`), 'reordered snapshot');
-  assert.equal(await js(`${callback} === originalCallback && originalCallback.value === ${JSON.stringify(value)}`), true, 'Form state must follow the agent ID when agents reorder');
-
-  await js(`${button('Complete sign-in')}.click()`);
-  await until(() => submissions.length === 1, 'callback submission');
-  const duringSubmit = polls;
-  await until(() => polls >= duringSubmit + 2, 'polling during submission');
-  assert.equal(await js(`${callback}.disabled`), true, 'Polling must preserve busy state');
-  assert.equal(await js(`${button('Complete sign-in')}.disabled`), true);
-  assert.equal(await js(`${callback}.value`), '', 'Submitted callbacks must be cleared');
-  assert.deepEqual(submissions, [{ path: '/dashboard-api/acp/agents/antigravity/sign-in/attempt-1/complete', callback_url: value }]);
-  completion.writeHead(400);
-  completion.end(JSON.stringify({ detail: 'Invalid callback URL.' }));
-  await until(() => js(`!${callback}.disabled && document.body.textContent.includes('Invalid callback URL.')`), 'callback rejection');
-
-  await js(`${callback}.focus()`);
-  await call('Input.insertText', { text: 'old-attempt-address' });
-  await js(`${button('Cancel')}.click()`);
-  await until(() => js(`!${callback} && !${button('Browser sign-in')}.disabled`), 'cancelled sign-in');
-  await js(`${button('Browser sign-in')}.click()`);
-  await until(() => js(`!!${callback} && !${callback}.disabled`), 'new sign-in attempt');
-  assert.equal(await js(`${callback}.value`), '', 'A new attempt must not reuse the old callback');
-  attempt = { ...attempt, status: 'succeeded', authorization_url: '' };
-  await until(() => js(`!${callback}`), 'completed attempt removes callback form');
+  const refreshStatus = async (expected) => {
+    const before = refreshes;
+    await js(refresh + ".click()");
+    await until(() => refreshes > before, "refresh query");
+    await until(() => js("!" + refresh + ".disabled && document.body.textContent.includes(" + JSON.stringify(expected) + ")"), expected);
+  };
+  installed = true;
+  await refreshStatus("Version 1.5.10, not signed in");
+  assert.equal(await js("document.body.textContent.includes('C:/Program Files/agy/agy.exe')"), true);
+  signedIn = true;
+  await refreshStatus("Version 1.5.10, signed in (Pro)");
+  signedIn = false;
+  authError = "Run agy update, then refresh.";
+  await refreshStatus(authError);
+  assert.equal(await js(panel + ".querySelector('[role=alert]').textContent.includes('agy update')"), true);
+  failNext = true;
+  await refreshStatus("CLI status unavailable.");
+  authError = "";
+  await refreshStatus("Version 1.5.10, not signed in");
+  const before = polls;
+  await delay(1700);
+  assert.equal(polls, before, "Read-only CLI status must not poll installation or sign-in jobs");
+  assert.deepEqual(mutations, []);
   assert.deepEqual(exceptions, []);
-  console.log('PASS: ACP polling preserves input, focus, selection and busy state; forms follow agent IDs after reordering; submission, rejection, cancellation and completion work.');
+  console.log("PASS: CLI setup, status, refresh, errors and recovery work without managed installation or sign-in.");
 } finally {
-  completion?.end();
   if (call && ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
   ws?.close();
   browser.kill();

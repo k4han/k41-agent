@@ -22,7 +22,7 @@ MAX_TOOL_TEXT_CHARS = 32_000
 MAX_TOOL_INPUT_CHARS = 8_000
 
 TERMINAL_STATUSES = {"completed", "failed"}
-# agy_acp_server reports the original call this way once an approved edit ran
+# AGY reports the original call this way once an approved edit ran
 # under a second tool call id, and when a turn is cancelled while it was pending.
 NEVER_EXECUTED_OUTPUT = "Tool call was approved but never executed."
 CANCELLED_NOTICE_TEXT = "The request was cancelled by the client."

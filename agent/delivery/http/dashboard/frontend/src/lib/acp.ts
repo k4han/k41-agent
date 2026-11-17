@@ -27,7 +27,17 @@ export function acpPermissionRequestId(questionId: string): string | null {
 }
 
 /** The part of an agent's status that session settings read. */
-export type AcpAgentStatus = { display_name: string; auth: { signed_in: boolean; config_options: AcpConfigOption[] } };
+export type AcpAgentStatus = {
+  display_name: string;
+  auth: { signed_in: boolean; error?: string; config_options: AcpConfigOption[] };
+};
+
+export const ANTIGRAVITY_CLI_AGENT_ID = "antigravity-cli";
+
+/** Separate CLI profile and workspace choices. */
+export function acpOptionScope(cardName: string, settings: { agent: string; agent_name?: string | null }, cwd = ""): string {
+  return JSON.stringify([cardName, settings.agent, settings.agent_name?.trim() || null, cwd]);
+}
 
 export type AcpConfigOption = {
   id: string;
@@ -66,10 +76,14 @@ function readAcpOptionStore(): Record<string, AcpOptionValues> {
   }
 }
 
-export function readAcpOptionChoices(cardName: string): AcpOptionValues {
-  const stored = readAcpOptionStore()[cardName];
+export function readAcpOptionChoices(scope: string, legacyCardName?: string): AcpOptionValues {
+  const store = readAcpOptionStore();
+  const exists = Object.hasOwn(store, scope);
+  const stored = exists ? store[scope] : legacyCardName ? store[legacyCardName] : undefined;
   if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
-  return Object.fromEntries(Object.entries(stored).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  const choices = Object.fromEntries(Object.entries(stored).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  if (!exists && legacyCardName) writeAcpOptionChoices(scope, choices);
+  return choices;
 }
 
 export function writeAcpOptionChoices(cardName: string, choices: AcpOptionValues): void {
@@ -78,28 +92,4 @@ export function writeAcpOptionChoices(cardName: string, choices: AcpOptionValues
   } catch {
     // Chat remains usable when browser storage is unavailable.
   }
-}
-
-export type AcpInstallJob = {
-  state: "running" | "succeeded" | "failed";
-  phase: string;
-  version: string | null;
-  downloaded_bytes: number;
-  total_bytes: number | null;
-  error: string | null;
-};
-
-export function installProgressLabel(job: AcpInstallJob): string {
-  if (job.state === "failed") return job.error || "The install failed.";
-  if (job.phase === "up_to_date") return `Already up to date${job.version ? ` (${job.version})` : ""}.`;
-  if (job.phase === "installed") return `Installed version ${job.version ?? ""}.`.replace(" .", ".");
-  if (job.phase === "resolving") return "Checking the ACP Registry…";
-  if (job.phase === "extracting") return "Unpacking…";
-  if (job.phase === "downloading") {
-    const megabytes = (value: number) => Math.round(value / (1024 * 1024));
-    return job.total_bytes
-      ? `Downloading ${megabytes(job.downloaded_bytes)} of ${megabytes(job.total_bytes)} MB…`
-      : `Downloading ${megabytes(job.downloaded_bytes)} MB…`;
-  }
-  return "Working…";
 }

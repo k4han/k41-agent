@@ -35,9 +35,41 @@ class AcpAgentSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    agent: str = Field(default="antigravity-acp", min_length=1)
+    agent: Literal["antigravity-cli"] = "antigravity-cli"
+    agent_name: str | None = None
+    use_default_tools: bool = True
     # Session config option id -> value, for example {"model": "gemini-3.8-flash"}.
     config_options: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("agent", mode="before")
+    @classmethod
+    def normalize_agent(cls, value: Any) -> Any:
+        """Upgrade legacy card runtime identifiers without rewriting their files."""
+        if isinstance(value, str):
+            value = value.strip()
+        return "antigravity-cli" if value in (None, "", "antigravity-acp") else value
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_base_agent(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "base_agent" in data:
+            raise ValueError("Removed acp.base_agent. Migrate this card with "
+                             "uv run python -m scripts.migrate_acp_cards --card <name>, "
+                             "then configure its prompt, tools, MCP and permissions directly.")
+        return data
+
+    @field_validator("agent_name")
+    @classmethod
+    def normalize_agent_name(cls, value: str | None) -> str | None:
+        from agent.modules.acp.launcher import normalize_agent_name
+
+        return normalize_agent_name(value)
+
+    @model_validator(mode="after")
+    def validate_agent_name(self):
+        if not self.use_default_tools and self.agent_name:
+            raise ValueError("Clear acp.agent_name to use only the K41 card's prompt and tools.")
+        return self
 
 
 def normalize_acp_card(data: Any) -> Any:

@@ -9,6 +9,8 @@ the transcript at every permission boundary, and only ``acp_permission`` interru
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import uuid
 from pathlib import Path
@@ -231,6 +233,11 @@ async def _start_turn(state: AcpState, config: RunnableConfig, runtime: Runtime[
     if agent_config is None or agent_config.acp is None:
         raise AcpError(f"Agent '{ctx.get_agent_name()}' has no ACP settings.")
     settings = agent_config.acp
+    options = {**settings.config_options, **(ctx.acp_config_options or {})}
+    source = {field: getattr(agent_config, field) for field in (
+        "system_prompt", "tools", "tool_configs", "permission_mode", "tool_permissions",
+    )}
+    session_config_key = hashlib.sha256(json.dumps(source, sort_keys=True, default=str).encode()).hexdigest()
     from types import SimpleNamespace
     from agent.modules.tools import invocation_context
     from agent.modules.tools import get_coding_service
@@ -261,14 +268,19 @@ async def _start_turn(state: AcpState, config: RunnableConfig, runtime: Runtime[
         turn_id=turn_id,
         thread_id=thread_id,
         agent_id=settings.agent,
+        agent_name=settings.agent_name,
+        use_default_tools=settings.use_default_tools,
         cwd=cwd,
         blocks=prompt_blocks(user_message) if user_message is not None else [],
         session_id=str(state.get("acp_session_id") or ""),
         session_cwd=str(state.get("acp_session_cwd") or ""),
+        session_runtime_key=str(state.get("acp_runtime_key") or ""),
+        session_config_key=session_config_key,
+        previous_session_config_key=str(state.get("acp_session_config_key") or ""),
         permission_context=policy_context,
         native_grants=native_grants,
         can_interrupt=bool(config.get("configurable", {}).get("approval_supported")),
-        config_options={**settings.config_options, **(ctx.acp_config_options or {})},
+        config_options=options,
         system_prompt=system_prompt,
         tools=tools,
         commit_stopped=_commit_stopped_turn,
@@ -314,7 +326,11 @@ async def acp_turn_node(state: AcpState, config: RunnableConfig, runtime: Runtim
         except AcpNotInstalled as exc:
             return _end_with_notice(writer, turn_id, "setup", str(exc))
         except AcpError as exc:
-            return _end_with_notice(writer, turn_id, "setup", describe_failure(exc))
+            from agent.modules.agents import get_catalog_service
+
+            agent = get_catalog_service().get_agent(runtime.context.get_agent_name())
+            agent_id = agent.acp.agent if agent and agent.acp else ""
+            return _end_with_notice(writer, turn_id, "setup", describe_failure(exc, agent_id))
     turn.attached = True
     try:
         while True:
@@ -335,6 +351,8 @@ async def acp_turn_node(state: AcpState, config: RunnableConfig, runtime: Runtim
     update: dict[str, Any] = {
         "acp_session_id": turn.session_id,
         "acp_session_cwd": str(Path(runtime.context.get_working_dir()).resolve()),
+        "acp_runtime_key": turn.runtime_key,
+        "acp_session_config_key": turn.session_config_key,
     }
     if paused:
         turn.attached = False

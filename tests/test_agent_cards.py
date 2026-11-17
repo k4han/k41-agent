@@ -5,6 +5,7 @@ import yaml
 
 from agent.delivery.http.dashboard.routes.agents import AgentCardBody
 from agent.modules.agents.models import AgentCard, AgentConfig
+from agent.modules.agents.models import AcpAgentSettings
 from agent.modules.agents.parser import AgentMarkdownError, parse_agent_file, parse_agent_markdown_content, serialize_agent_config
 from agent.modules.agents.repository import FilesystemAgentRepository
 from agent.modules.agents.service import AgentCatalogService
@@ -37,6 +38,53 @@ def _config(
         context_compact_threshold=75,
         system_prompt="You are a sample agent.",
     )
+
+
+def test_acp_card_owns_its_configuration_and_round_trips(tmp_path: Path):
+    service, repo = _make_service(tmp_path / "agents")
+    config = AgentConfig(name="configured", graph_type="acp_agent", permission_mode="auto",
+        system_prompt="Card instructions.", tools=["read", "web_search", "ask_user", "delegate_task"],
+        tool_configs={"web_search": {"result_limit": 3}},
+        tool_permissions=[{"action": "shell.execute", "effect": "deny"}],
+        acp=AcpAgentSettings(agent="antigravity-cli", agent_name="reviewer",
+            config_options={"model": "acp-model", "thinking_level": "low"}))
+    service.create_agent_card(config)
+    effective = service.get_agent("configured")
+    assert effective == config and effective.tools == ["read", "web_search"]
+    assert service.get_agent_card("configured").system_prompt == "Card instructions."
+    assert effective.sub_agents is None and effective.plan_approval_targets == []
+    assert parse_agent_markdown_content(serialize_agent_config(config)) == config
+    service.create_agent_card(_config("unrelated"))
+    source = _config("unrelated")
+    source.system_prompt = "Changed unrelated instructions."
+    service.update_agent_card("unrelated", source)
+    assert service.get_agent("configured") == config
+    updated = config.model_copy(update={"system_prompt": "Updated card instructions."})
+    service.update_agent_card("configured", updated)
+    repo.reload()
+    assert service.get_agent("configured").system_prompt == updated.system_prompt
+
+
+def test_acp_tool_policy_uses_the_cards_own_mcp_bindings(tmp_path: Path, monkeypatch):
+    from agent.modules.tools.policy import ToolPolicy
+
+    service, _repo = _make_service(tmp_path / "agents")
+    service.create_agent_card(AgentConfig(name="configured", graph_type="acp_agent", permission_mode="ask"))
+    seen = []
+    monkeypatch.setattr("agent.modules.mcp.list_agent_mcp_server_names", lambda name: seen.append(name) or ["github"])
+    policy = ToolPolicy.from_agent_config(service.get_agent("configured"))
+    assert seen == ["configured"] and policy.agent_name == "configured"
+    assert policy.allowed_mcp_servers == frozenset({"github"})
+
+
+@pytest.mark.parametrize("base_agent", ["source", None])
+def test_removed_base_agent_requires_explicit_migration(base_agent):
+    data = {"name": "legacy", "graph_type": "acp_agent", "permission_mode": "ask", "acp": {"base_agent": base_agent}}
+    for model in (AgentConfig, AgentCardBody):
+        with pytest.raises(ValueError, match="Removed acp.base_agent"):
+            model.model_validate(data)
+    with pytest.raises(AgentMarkdownError, match="migrate_acp_cards"):
+        parse_agent_markdown_content("---\n" + yaml.safe_dump(data) + "---\nPrompt\n")
 
 
 @pytest.mark.parametrize("fields", [

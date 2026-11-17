@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.messages import BaseMessage
 
 from agent.modules.acp.client import CANCELLED_OUTCOME, AcpClient
-from agent.modules.acp.errors import AcpConnectionClosed, AcpRpcError
+from agent.modules.acp.errors import AcpConnectionClosed, AcpError, AcpRpcError
 from agent.modules.acp.tool_bridge import bridged_tool_name
 from agent.modules.acp.translator import TurnTranscript, _clip_value, mcp_call_arguments
 
@@ -47,15 +47,17 @@ _STOP_NOTICES = {
     "max_turn_requests": "The agent stopped because it reached its request limit for one turn.",
     "refusal": "The agent declined to continue.",
 }
-SIGN_IN_NOTICE = "This agent is not signed in. Sign in under Settings > ACP agents, then send your message again."
+SIGN_IN_NOTICE = "Antigravity CLI is not signed in. Run agy acp --login on the machine running K41, refresh ACP settings, then retry."
 NO_FINAL_TEXT_NOTICE = "The agent finished without a final message."
 
 
-def describe_failure(error: BaseException) -> str:
+def describe_failure(error: BaseException, agent_id: str = "") -> str:
     if isinstance(error, AcpRpcError):
         return SIGN_IN_NOTICE if error.auth_required else f"The agent reported an error: {error.message}"
     if isinstance(error, AcpConnectionClosed):
         return "The agent process stopped unexpectedly. Send your message again to continue."
+    if isinstance(error, AcpError):
+        return str(error)
     return "The agent turn failed unexpectedly."
 
 
@@ -169,6 +171,8 @@ class AcpTurn:
         session_id: str,
         agent_id: str,
         client: AcpClient,
+        runtime_key: str = "",
+        session_config_key: str = "",
         permission_context=None,
         native_grants: frozenset[str] = frozenset(),
         can_interrupt: bool = False,
@@ -180,6 +184,8 @@ class AcpTurn:
         self.thread_id = thread_id
         self.session_id = session_id
         self.agent_id = agent_id
+        self.runtime_key = runtime_key or agent_id
+        self.session_config_key = session_config_key
         self.client = client
         self.permission_context = permission_context
         self.native_grants = set(native_grants)
@@ -307,7 +313,7 @@ class AcpTurn:
         if any("agy.security.warning" in str(option.get("_meta", {})) for option in options):
             meta = tool_call.get("_meta")
             tool_call = {**tool_call, "_meta": {**(meta if isinstance(meta, dict) else {}), "agy.security.warning": True}}
-        bridged = bridged_tool_name(tool_call) if self.tools is not None else None
+        bridged = bridged_tool_name(tool_call, self.tools.names) if self.tools is not None else None
         effect, reason = ("allow", "") if bridged else self._native_policy(tool_call)
         once = _select_automatic_option(options, _ALLOW_KINDS)
         if once is None:
@@ -476,7 +482,7 @@ class AcpTurn:
 
     def result_notice(self) -> str:
         if self.error is not None:
-            return describe_failure(self.error)
+            return describe_failure(self.error, self.agent_id)
         if self.stop_reason in _STOP_NOTICES:
             return _STOP_NOTICES[self.stop_reason]
         if self.stop_reason not in _NORMAL_STOPS and not self.transcript.ends_with_text:

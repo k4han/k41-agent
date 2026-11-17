@@ -176,7 +176,6 @@ class AppContainer:
     _coding_service: Any = field(default=None, repr=False)
     _acp_service: Any = field(default=None, repr=False)
     _acp_auth_manager: Any = field(default=None, repr=False)
-    _acp_installer: Any = field(default=None, repr=False)
     _project_workspace_service: Any = field(default=None, repr=False)
     _instabox_service: Any = field(default=None, repr=False)
     _computer_control: Any = field(default=None, repr=False)

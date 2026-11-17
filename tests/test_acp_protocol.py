@@ -63,7 +63,7 @@ async def run_prompt(client, session_id, text):
 async def test_handshake_and_text_turn(started_client):
     client = started_client
     assert client.supports_resume() and client.supports_load() and client.supports_system_prompt_append()
-    assert [method["id"] for method in client.auth_methods] == ["oauth-personal", "gemini-api-key"]
+    assert client.auth_methods == []
     session = await client.new_session(str(Path.cwd()))
     recorder = Recorder(client)
     client.subscribe(session["sessionId"], recorder)

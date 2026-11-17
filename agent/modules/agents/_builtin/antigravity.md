@@ -7,6 +7,6 @@ provider: None
 model: None
 tools: []
 acp:
-  agent: antigravity-acp
+  agent: antigravity-cli
 permission_mode: ask
 ---

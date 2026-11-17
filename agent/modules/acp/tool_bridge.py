@@ -83,12 +83,18 @@ class ToolProvider(Protocol):
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolOutput: ...
 
 
-def bridged_tool_name(tool_call: dict[str, Any]) -> str | None:
+def bridged_tool_name(tool_call: dict[str, Any], available_names: frozenset[str] | None = None) -> str | None:
     """Return the K41 tool an ACP tool call targets, if it targets one."""
     meta = tool_call.get("_meta")
     mcp = meta.get("mcp") if isinstance(meta, dict) else None
-    if isinstance(mcp, dict) and mcp.get("server") == BRIDGE_SERVER_NAME and mcp.get("tool"):
-        return str(mcp["tool"])
+    if isinstance(mcp, dict):
+        return str(mcp["tool"]) if mcp.get("server") == BRIDGE_SERVER_NAME and mcp.get("tool") else None
+    # Recent agy CLI releases send the callable name instead of vendor metadata.
+    name = tool_call.get("name")
+    prefix = f"mcp_{BRIDGE_SERVER_NAME}_"
+    if isinstance(name, str) and name.startswith(prefix):
+        tool = name[len(prefix):]
+        return tool if tool and (available_names is None or tool in available_names) else None
     return None
 
 
@@ -117,7 +123,7 @@ class SessionTools:
         # Set before the session opens, because an agent may connect while it does.
         self.provider = provider
         self._lock = threading.Lock()
-        self._approvals: list[tuple[str, str, str]] = []
+        self._approvals: list[tuple[str, str, frozenset[str]]] = []
         self._running: set[asyncio.Task[Any]] = set()
 
     def begin_turn(self, turn: AcpTurn, provider: ToolProvider | None) -> None:
@@ -137,7 +143,11 @@ class SessionTools:
     def approve(self, tool_call: dict[str, Any], tool: str) -> None:
         # rawInput is optional in ACP, while an MCP call always carries an arguments object.
         arguments = mcp_call_arguments(tool_call)
-        entry = (str(tool_call.get("toolCallId") or ""), tool, _canonical({} if arguments is None else arguments))
+        matches = {_canonical({} if arguments is None else arguments)}
+        if tool_call.get("name") == f"mcp_{BRIDGE_SERVER_NAME}_{tool}" and isinstance(arguments, dict) and "toolSummary" in arguments:
+            # agy adds this display field to ACP input, then removes it before MCP execution.
+            matches.add(_canonical({key: value for key, value in arguments.items() if key != "toolSummary"}))
+        entry = (str(tool_call.get("toolCallId") or ""), tool, frozenset(matches))
         with self._lock:
             self._approvals.append(entry)
 
@@ -146,7 +156,7 @@ class SessionTools:
         wanted = _canonical(arguments)
         with self._lock:
             for entry in self._approvals:
-                if entry[1] == tool and entry[2] == wanted:
+                if entry[1] == tool and wanted in entry[2]:
                     self._approvals.remove(entry)
                     return entry[0]
         return None
@@ -244,7 +254,12 @@ class ToolBridge:
             session = request_session()
             if session is None or session.provider is None:
                 return []
-            return [mcp_types.Tool(**tool) for tool in await session.provider.list_tools()]
+            # A tools-only AGY profile has no discovery tool. Offer the selected
+            # K41 tools directly, including when the agent defers MCP tools by default.
+            return [
+                mcp_types.Tool(**{**tool, "_meta": {**(tool.get("_meta") or {}), "antigravity/alwaysLoad": True}})
+                for tool in await session.provider.list_tools()
+            ]
 
         @server.call_tool(validate_input=False)
         async def call_tool(name: str, arguments: dict[str, Any]) -> mcp_types.CallToolResult:

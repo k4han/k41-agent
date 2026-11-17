@@ -2,7 +2,12 @@ export const API_PATHS = {
   logs: "/dashboard-api/logs",
   logContent: (source: string) => `/dashboard-api/logs/${encodeURIComponent(source)}`,
   acpAgents: "/dashboard-api/acp/agents",
-  acpAgent: (agentId: string) => `/dashboard-api/acp/agents/${encodeURIComponent(agentId)}`,
+  acpAgent: (agentId: string, agentName?: string | null, cwd?: string) => {
+    const query = new URLSearchParams();
+    if (agentName?.trim()) query.set("agent_name", agentName.trim());
+    if (cwd?.trim()) query.set("cwd", cwd.trim());
+    return `/dashboard-api/acp/agents/${encodeURIComponent(agentId)}${query.size ? `?${query}` : ""}`;
+  },
   browserProfiles: "/dashboard-api/browser/profiles",
   browserDefaultProfile: "/dashboard-api/browser/default-profile",
   browserTemporaryProfile: "/dashboard-api/browser/temporary-profile",

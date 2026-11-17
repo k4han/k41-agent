@@ -1,396 +1,17 @@
-"""ACP install, sign-in relay, dashboard routes, and non-model guards."""
+"""Read-only ACP CLI status, dashboard routes, and non-model guards."""
 
-import asyncio
-import hashlib
-import io
-import json
-import stat
-import sys
-import time
-import urllib.parse
-import urllib.request
-import zipfile
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import pytest_asyncio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.modules.acp.agents import ANTIGRAVITY_AGENT_ID, get_agent_definition
-from agent.modules.acp.auth import AcpAuthError, AcpAuthManager, CallbackRejected, parse_authorization_link, validate_callback
-from agent.modules.acp.errors import AcpError, AcpNotInstalled
-from agent.modules.acp.installer import AcpInstaller, agent_home, is_installed, read_api_key, resolve_installed_command, write_api_key
-from agent.modules.acp.process import AgentCommand
-from agent.modules.acp.registry import AgentRelease, current_target, parse_release
+from agent.modules.acp.agents import ANTIGRAVITY_CLI_AGENT_ID
+from agent.modules.acp.auth import AcpAuthManager
 from agent.modules.acp.service import AcpService
 from agent.modules.agents.models import AgentConfig
 
-AGENT = ANTIGRAVITY_AGENT_ID
-DEFINITION = get_agent_definition(AGENT)
-FAKE_AGENT = Path(__file__).parent / "fixtures" / "acp" / "fake_agent.py"
-
-
-def make_zip(files: dict[str, bytes], *, symlink: str | None = None) -> bytes:
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as archive:
-        for name, content in files.items():
-            info = zipfile.ZipInfo(name)
-            info.external_attr = (stat.S_IFREG | 0o644) << 16
-            archive.writestr(info, content)
-        if symlink:
-            info = zipfile.ZipInfo(symlink)
-            info.external_attr = (stat.S_IFLNK | 0o777) << 16
-            archive.writestr(info, "/etc/passwd")
-    return buffer.getvalue()
-
-
-def release(payload: bytes, *, version="1.0.0", sha256=None, command="server.exe") -> AgentRelease:
-    return AgentRelease(
-        agent_id=AGENT, version=version, license="proprietary",
-        archive_url="https://dl.google.com/x.zip", sha256=sha256 or hashlib.sha256(payload).hexdigest(),
-        command=command, args=("--flag",),
-    )
-
-
-def installer_for(tmp_path, payload, **release_args) -> AcpInstaller:
-    def download(_url):
-        yield payload, len(payload)
-
-    return AcpInstaller(data_root=tmp_path, release_fetcher=lambda _definition: release(payload, **release_args), downloader=download)
-
-
-def run_install(installer: AcpInstaller) -> dict:
-    installer.start(AGENT)
-    deadline = time.monotonic() + 20
-    while installer.is_running(AGENT):
-        assert time.monotonic() < deadline
-        time.sleep(0.01)
-    return installer.status(AGENT)
-
-
-# Registry ---------------------------------------------------------------------
-
-
-def registry_entry(**target):
-    selected = {"archive": "https://dl.google.com/a.zip", "cmd": "./agy", "sha256": "a" * 64, **target}
-    return {"id": AGENT, "version": "1.4.5", "license": "proprietary", "distribution": {"binary": {"linux-x86_64": selected}}}
-
-
-def test_release_is_parsed_for_the_requested_target():
-    parsed = parse_release(registry_entry(args=["--uid="]), DEFINITION, "linux-x86_64")
-    assert parsed.command == "agy" and parsed.args == ("--uid=",) and parsed.version == "1.4.5"
-
-
-@pytest.mark.parametrize("archive", [
-    "https://evil.example/a.zip",
-    "http://dl.google.com/a.zip",
-    "https://dl.google.com.evil.example/a.zip",
-    "https://user:pw@dl.google.com/a.zip",
-    "file:///etc/passwd",
-])
-def test_release_from_an_unexpected_location_is_refused(archive):
-    with pytest.raises(AcpError):
-        parse_release(registry_entry(archive=archive), DEFINITION, "linux-x86_64")
-
-
-@pytest.mark.parametrize("fields", [
-    {"sha256": ""}, {"sha256": "abc"}, {"cmd": "../../evil"}, {"cmd": "/bin/sh"}, {"cmd": "C:\\evil.exe"}, {"cmd": ""}, {"args": "--x"},
-])
-def test_malformed_release_is_refused(fields):
-    with pytest.raises(AcpError):
-        parse_release(registry_entry(**fields), DEFINITION, "linux-x86_64")
-
-
-def test_missing_target_is_reported():
-    with pytest.raises(AcpError, match="no release"):
-        parse_release(registry_entry(), DEFINITION, "windows-x86_64")
-
-
-def test_current_target_uses_registry_names():
-    system, machine = current_target().split("-")
-    assert system in {"windows", "linux", "darwin"} and machine in {"x86_64", "aarch64"}
-
-
-# Installer --------------------------------------------------------------------
-
-
-def test_install_activates_and_resolves_with_an_isolated_home(tmp_path):
-    payload = make_zip({"server.exe": b"binary", "helper.exe": b"helper"})
-    job = run_install(installer_for(tmp_path, payload))
-    assert job["state"] == "succeeded" and job["phase"] == "installed" and job["downloaded_bytes"] == len(payload)
-    command = resolve_installed_command(AGENT, tmp_path)
-    assert Path(command.argv[0]).read_bytes() == b"binary" and command.argv[1:] == ["--flag"]
-    assert command.env["GEMINI_HOME"] == str(agent_home(AGENT, tmp_path))
-    assert "GEMINI_API_KEY" not in command.env
-    assert not list((tmp_path / AGENT).glob(".install-*"))
-
-
-def test_wrong_checksum_installs_nothing(tmp_path):
-    job = run_install(installer_for(tmp_path, make_zip({"server.exe": b"x"}), sha256="0" * 64))
-    assert job["state"] == "failed" and "sha256" in job["error"]
-    assert not is_installed(AGENT, tmp_path)
-    assert not list((tmp_path / AGENT).glob(".install-*"))
-
-
-@pytest.mark.parametrize("files,symlink", [
-    ({"../evil.exe": b"x", "server.exe": b"x"}, None),
-    ({"..\\evil.exe": b"x", "server.exe": b"x"}, None),
-    ({"/abs.exe": b"x", "server.exe": b"x"}, None),
-    ({"server.exe": b"x"}, "link"),
-])
-def test_unsafe_archives_are_refused(tmp_path, files, symlink):
-    job = run_install(installer_for(tmp_path, make_zip(files, symlink=symlink)))
-    assert job["state"] == "failed" and not is_installed(AGENT, tmp_path)
-    assert not (tmp_path / "evil.exe").exists()
-
-
-def test_archive_without_the_program_is_refused(tmp_path):
-    job = run_install(installer_for(tmp_path, make_zip({"other.exe": b"x"})))
-    assert job["state"] == "failed" and "expected program" in job["error"]
-
-
-def test_garbage_archive_fails_cleanly(tmp_path):
-    assert run_install(installer_for(tmp_path, b"not a zip"))["state"] == "failed"
-
-
-def test_reinstalling_the_same_version_downloads_nothing(tmp_path):
-    payload = make_zip({"server.exe": b"x"})
-    assert run_install(installer_for(tmp_path, payload))["phase"] == "installed"
-
-    def fail_download(_url):
-        raise AssertionError("must not download")
-        yield
-
-    installer = AcpInstaller(data_root=tmp_path, release_fetcher=lambda _d: release(payload), downloader=fail_download)
-    assert run_install(installer)["phase"] == "up_to_date"
-
-
-def test_update_switches_version_and_removes_the_old_one(tmp_path):
-    run_install(installer_for(tmp_path, make_zip({"server.exe": b"old"})))
-    run_install(installer_for(tmp_path, make_zip({"server.exe": b"new"}), version="2.0.0"))
-    assert Path(resolve_installed_command(AGENT, tmp_path).argv[0]).read_bytes() == b"new"
-    assert [path.name for path in (tmp_path / AGENT / "versions").iterdir()] == ["2.0.0"]
-
-
-def test_failed_update_keeps_the_working_version(tmp_path):
-    run_install(installer_for(tmp_path, make_zip({"server.exe": b"old"})))
-    run_install(installer_for(tmp_path, make_zip({"server.exe": b"new"}), version="2.0.0", sha256="0" * 64))
-    assert Path(resolve_installed_command(AGENT, tmp_path).argv[0]).read_bytes() == b"old"
-
-
-def test_too_little_disk_space_stops_before_downloading_everything(tmp_path, monkeypatch):
-    monkeypatch.setattr("shutil.disk_usage", lambda _path: SimpleNamespace(free=1))
-    job = run_install(installer_for(tmp_path, make_zip({"server.exe": b"x"})))
-    assert job["state"] == "failed" and "disk space" in job["error"]
-
-
-def test_second_install_while_running_is_refused(tmp_path):
-    from agent.modules.acp.installer import InstallBusyError
-
-    gate = []
-
-    def slow_fetch(_definition):
-        while not gate:
-            time.sleep(0.01)
-        raise AcpError("stopped")
-
-    installer = AcpInstaller(data_root=tmp_path, release_fetcher=slow_fetch)
-    installer.start(AGENT)
-    with pytest.raises(InstallBusyError):
-        installer.start(AGENT)
-    gate.append(True)
-
-
-def test_uninstall_removes_binary_and_credentials(tmp_path):
-    installer = installer_for(tmp_path, make_zip({"server.exe": b"x"}))
-    run_install(installer)
-    write_api_key(AGENT, "secret", tmp_path)
-    installer.uninstall(AGENT)
-    assert not is_installed(AGENT, tmp_path) and read_api_key(AGENT, tmp_path) == ""
-
-
-def test_missing_install_raises_a_friendly_error(tmp_path):
-    with pytest.raises(AcpNotInstalled, match="not installed"):
-        resolve_installed_command(AGENT, tmp_path)
-
-
-def test_api_key_reaches_only_the_agent_environment(tmp_path):
-    run_install(installer_for(tmp_path, make_zip({"server.exe": b"x"})))
-    write_api_key(AGENT, "secret", tmp_path)
-    assert resolve_installed_command(AGENT, tmp_path).env["GEMINI_API_KEY"] == "secret"
-
-
-# Callback validation ----------------------------------------------------------
-
-
-GOOD = {"port": 5000, "path": "/", "state": "abc"}
-
-
-def test_valid_callback_is_rebuilt_against_loopback():
-    assert validate_callback("http://localhost:5000/?state=abc&code=xyz", **GOOD) == "http://127.0.0.1:5000/?state=abc&code=xyz"
-
-
-@pytest.mark.parametrize("url", [
-    "http://evil.example:5000/?state=abc&code=x",
-    "https://127.0.0.1:5000/?state=abc&code=x",
-    "http://127.0.0.1:5001/?state=abc&code=x",
-    "http://127.0.0.1:5000/other?state=abc&code=x",
-    "http://127.0.0.1:5000/?state=wrong&code=x",
-    "http://127.0.0.1:5000/?code=x",
-    "http://127.0.0.1:5000/?state=abc",
-    "http://user:pw@127.0.0.1:5000/?state=abc&code=x",
-    "http://169.254.169.254:5000/?state=abc&code=x",
-    "http://127.0.0.1.evil.example:5000/?state=abc&code=x",
-    "http://127.0.0.1:notaport/?state=abc&code=x",
-    "not a url",
-    "",
-])
-def test_bad_callbacks_are_rejected_before_forwarding(url):
-    with pytest.raises(CallbackRejected):
-        validate_callback(url, **GOOD)
-
-
-def test_authorization_link_must_point_at_an_allowed_host():
-    redirect = urllib.parse.quote("http://127.0.0.1:5000/", safe="")
-    good = f"https://accounts.google.com/auth?redirect_uri={redirect}&state=abc"
-    assert parse_authorization_link(good, ("accounts.google.com",))[1:] == (5000, "/", "abc")
-    assert parse_authorization_link(good.replace("accounts.google.com", "evil.example"), ("accounts.google.com",)) is None
-    assert parse_authorization_link("https://accounts.google.com/auth?state=abc", ("accounts.google.com",)) is None
-
-
-# Sign-in against the fake agent ----------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def auth_env(tmp_path):
-    (tmp_path / AGENT / "versions" / "1.0.0").mkdir(parents=True)
-    (tmp_path / AGENT / "versions" / "1.0.0" / "fake").write_bytes(b"x")
-    (tmp_path / AGENT / "current.json").write_text(json.dumps({"version": "1.0.0", "command": "fake"}), encoding="utf-8")
-    state = tmp_path / "fake-state"
-
-    def resolver(_agent_id):
-        env = {"GEMINI_API_KEY": read_api_key(AGENT, tmp_path)} if read_api_key(AGENT, tmp_path) else {}
-        return AgentCommand(
-            argv=[sys.executable, "-I", "-u", str(FAKE_AGENT), str(state), "--require-auth", "--oauth"],
-            cwd=state, env=env,
-        )
-
-    service = AcpService(command_resolver=resolver)
-    yield SimpleNamespace(service=service, auth=AcpAuthManager(service, data_root=tmp_path), state=state, root=tmp_path)
-    await service.close()
-
-
-async def start_oauth(auth_env):
-    attempt = await auth_env.auth.start_sign_in(AGENT, "oauth-personal")
-    assert attempt["status"] == "pending" and attempt["authorization_url"].startswith("https://accounts.google.com/")
-    return attempt, auth_env.auth._attempts[AGENT]
-
-
-def get_url(url):
-    urllib.request.urlopen(url, timeout=5).read()
-
-
-@pytest.mark.asyncio
-async def test_status_reports_signed_out_then_signed_in_with_options(auth_env):
-    status = await auth_env.auth.status(AGENT)
-    assert status["state"] == "signed_out"
-    assert [method["id"] for method in status["methods"]] == ["oauth-personal", "gemini-api-key"]
-    attempt, internal = await start_oauth(auth_env)
-    url = f"http://127.0.0.1:{internal.redirect_port}/?state={internal.state}&code=abc"
-    result = await auth_env.auth.complete_sign_in(AGENT, attempt["attempt_id"], url)
-    assert result["status"] == "succeeded" and result["authorization_url"] == ""
-    status = await auth_env.auth.status(AGENT)
-    assert status["signed_in"] is True
-    assert {option["id"] for option in status["config_options"]} == {"model", "thinking_level"}
-
-
-@pytest.mark.asyncio
-async def test_direct_browser_callback_also_finishes_the_attempt(auth_env):
-    attempt, internal = await start_oauth(auth_env)
-    await asyncio.to_thread(get_url, f"http://127.0.0.1:{internal.redirect_port}/?state={internal.state}&code=abc")
-    await asyncio.wait_for(internal.task, 10)
-    assert auth_env.auth.attempt_status(AGENT)["status"] == "succeeded"
-
-
-@pytest.mark.asyncio
-async def test_wrong_state_is_never_forwarded_and_attempt_stays_usable(auth_env):
-    attempt, internal = await start_oauth(auth_env)
-    with pytest.raises(CallbackRejected):
-        await auth_env.auth.complete_sign_in(AGENT, attempt["attempt_id"], f"http://127.0.0.1:{internal.redirect_port}/?state=wrong&code=abc")
-    assert auth_env.auth.attempt_status(AGENT)["status"] == "pending"
-    url = f"http://127.0.0.1:{internal.redirect_port}/?state={internal.state}&code=abc"
-    assert (await auth_env.auth.complete_sign_in(AGENT, attempt["attempt_id"], url))["status"] == "succeeded"
-
-
-@pytest.mark.asyncio
-async def test_callback_for_another_attempt_id_is_rejected(auth_env):
-    await start_oauth(auth_env)
-    with pytest.raises(CallbackRejected):
-        await auth_env.auth.complete_sign_in(AGENT, "other", "http://127.0.0.1:1/?state=x&code=y")
-
-
-@pytest.mark.asyncio
-async def test_only_one_attempt_at_a_time(auth_env):
-    await start_oauth(auth_env)
-    with pytest.raises(AcpAuthError, match="already in progress"):
-        await auth_env.auth.start_sign_in(AGENT, "oauth-personal")
-
-
-@pytest.mark.asyncio
-async def test_cancel_ends_the_attempt_and_allows_a_new_one(auth_env):
-    attempt, _internal = await start_oauth(auth_env)
-    result = await auth_env.auth.cancel_sign_in(AGENT, attempt["attempt_id"])
-    assert result["status"] == "cancelled" and result["authorization_url"] == ""
-    await start_oauth(auth_env)
-
-
-@pytest.mark.asyncio
-async def test_authorization_details_are_not_exposed_after_the_attempt(auth_env):
-    attempt, internal = await start_oauth(auth_env)
-    await auth_env.auth.cancel_sign_in(AGENT, attempt["attempt_id"])
-    assert internal.state == "" and internal.authorization_url == ""
-
-
-@pytest.mark.asyncio
-async def test_api_key_is_verified_and_a_rejected_key_is_not_kept(auth_env):
-    with pytest.raises(AcpAuthError, match="did not accept"):
-        await auth_env.auth.set_api_key(AGENT, "bad-key")
-    assert read_api_key(AGENT, auth_env.root) == ""
-    status = await auth_env.auth.set_api_key(AGENT, "good-key")
-    assert status["signed_in"] is True and status["uses_api_key"] is True
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("key", ["", "   ", "two words", "x" * 5000])
-async def test_malformed_api_key_is_refused_without_starting_anything(auth_env, key):
-    with pytest.raises(AcpAuthError):
-        await auth_env.auth.set_api_key(AGENT, key)
-    assert read_api_key(AGENT, auth_env.root) == ""
-
-
-@pytest.mark.asyncio
-async def test_sign_out_clears_the_key_and_the_session(auth_env):
-    await auth_env.auth.set_api_key(AGENT, "good-key")
-    status = await auth_env.auth.sign_out(AGENT)
-    assert status["state"] == "signed_out" and read_api_key(AGENT, auth_env.root) == ""
-
-
-@pytest.mark.asyncio
-async def test_api_key_method_cannot_start_a_browser_flow(auth_env):
-    with pytest.raises(AcpAuthError):
-        await auth_env.auth.start_sign_in(AGENT, "gemini-api-key")
-
-
-@pytest.mark.asyncio
-async def test_status_without_install_does_not_start_anything(tmp_path):
-    service = AcpService(command_resolver=lambda _agent: pytest.fail("must not start"))
-    status = await AcpAuthManager(service, data_root=tmp_path).status(AGENT)
-    assert status["state"] == "not_installed"
-
-
-# Routes -----------------------------------------------------------------------
+AGENT = ANTIGRAVITY_CLI_AGENT_ID
 
 
 @pytest.fixture
@@ -399,42 +20,85 @@ def client(tmp_path, monkeypatch, isolated_container):
     from agent.modules.admin_auth import get_current_admin
 
     monkeypatch.setattr(routes, "get_app_container", lambda _request: isolated_container)
+    monkeypatch.setattr("agent.modules.acp.launcher.shutil.which", lambda _name: None)
     isolated_container._acp_service = AcpService(command_resolver=lambda _agent: pytest.fail("must not start"))
-    isolated_container._acp_auth_manager = AcpAuthManager(isolated_container._acp_service, data_root=tmp_path)
-    isolated_container._acp_installer = installer_for(tmp_path, make_zip({"server.exe": b"x"}))
+    isolated_container._acp_auth_manager = AcpAuthManager(isolated_container._acp_service)
     app = FastAPI()
     app.include_router(routes.router)
     app.dependency_overrides[get_current_admin] = lambda: "admin"
     return TestClient(app)
 
 
-def test_routes_require_admin(tmp_path, monkeypatch, isolated_container):
+def test_routes_require_admin():
     from agent.delivery.http.dashboard.routes import acp as routes
 
     app = FastAPI()
     app.include_router(routes.router)
-    unauthenticated = TestClient(app)
-    assert unauthenticated.get("/dashboard-api/acp/agents").status_code == 401
-    assert unauthenticated.post(f"/dashboard-api/acp/agents/{AGENT}/install", json={"accept_license": True}).status_code == 401
+    client = TestClient(app)
+    assert client.get("/dashboard-api/acp/agents").status_code == 401
+    assert client.get(f"/dashboard-api/acp/agents/{AGENT}").status_code == 401
 
 
-def test_list_reports_a_missing_agent_with_its_terms(client):
-    agent = client.get("/dashboard-api/acp/agents").json()["agents"][0]
-    assert agent["id"] == AGENT and agent["installed"] is False and agent["auth"]["state"] == "not_installed"
-    assert agent["terms_url"].startswith("https://") and agent["license"] == "proprietary"
+def test_list_reports_only_cli_and_missing_installation(client):
+    response = client.get("/dashboard-api/acp/agents")
+    assert response.headers["cache-control"] == "no-store"
+    agents = response.json()["agents"]
+    assert len(agents) == 1
+    agent = agents[0]
+    assert agent["id"] == AGENT and agent["installed"] is False
+    assert agent["installation_source"] == "path" and agent["executable_path"] is None
+    assert agent["version"] is None and agent["auth"]["state"] == "not_installed"
+    assert not ({"job", "sign_in"} & agent.keys())
+    assert not ({"methods", "uses_api_key", "can_sign_out"} & agent["auth"].keys())
 
 
-def test_install_requires_accepting_the_license(client):
-    assert client.post(f"/dashboard-api/acp/agents/{AGENT}/install", json={}).status_code == 400
+@pytest.mark.parametrize("agent_id", ["unknown", "antigravity-acp"])
+def test_unknown_and_removed_runtimes_are_not_found(client, agent_id):
+    assert client.get(f"/dashboard-api/acp/agents/{agent_id}").status_code == 404
 
 
-def test_unknown_agent_is_not_found(client):
-    assert client.get("/dashboard-api/acp/agents/nope").status_code == 404
-    assert client.post("/dashboard-api/acp/agents/nope/install", json={"accept_license": True}).status_code == 404
+def test_cli_status_forwards_agent_workspace_and_refresh(client, monkeypatch, isolated_container, tmp_path):
+    from agent.delivery.http.dashboard.routes import acp as routes
+
+    calls = []
+
+    async def status(agent_id, **kwargs):
+        calls.append((agent_id, kwargs))
+        return {"signed_in": True, "state": "signed_in", "config_options": []}
+
+    monkeypatch.setattr(routes, "cli_details", lambda **_kw: {
+        "executable_path": "C:/Program Files/agy/agy.exe", "version": "1.5.10", "error": None,
+    })
+    monkeypatch.setattr(isolated_container._acp_auth_manager, "status", status)
+    response = client.get(f"/dashboard-api/acp/agents/{AGENT}", params={
+        "agent_name": " reviewer ", "cwd": str(tmp_path), "refresh": True,
+    })
+    assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
+    assert response.json()["version"] == "1.5.10" and response.json()["installed"]
+    assert calls == [(AGENT, {"refresh": True, "agent_name": "reviewer", "cwd": str(tmp_path)})]
 
 
-def test_responses_with_sign_in_details_are_not_cached(client):
-    assert client.get("/dashboard-api/acp/agents").headers["cache-control"] == "no-store"
+@pytest.mark.parametrize("method,path", [
+    ("post", "/install"), ("delete", ""), ("post", "/sign-in"),
+    ("post", "/sign-in/attempt/complete"), ("post", "/sign-in/attempt/cancel"),
+    ("post", "/api-key"), ("post", "/sign-out"),
+])
+def test_management_routes_are_removed(client, method, path):
+    response = getattr(client, method)(f"/dashboard-api/acp/agents/{AGENT}{path}")
+    assert response.status_code == (405 if method == "delete" else 404)
+
+
+def test_status_rejects_invalid_agent_name_parameters(client):
+    assert client.get(f"/dashboard-api/acp/agents/{AGENT}", params={"agent_name": "--help"}).status_code == 422
+
+
+@pytest.mark.parametrize("executable", [None, "C:/Program Files/agy/agy.exe"])
+def test_dashboard_onboarding_recognizes_cli_on_path(monkeypatch, executable):
+    from agent.delivery.http.dashboard.routes import dashboard
+
+    monkeypatch.setattr(dashboard, "which", lambda _name: executable)
+    onboarding = dashboard._build_onboarding(services=[], providers=[], agents_total=1)
+    assert onboarding["needs_provider"] is (executable is None)
 
 
 # Guards -----------------------------------------------------------------------

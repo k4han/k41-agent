@@ -11,17 +11,11 @@ from typing import Any
 
 _EXPORTS = {
     "AGENT_DEFINITIONS": "agent.modules.acp.agents",
-    "AcpAuthError": "agent.modules.acp.auth",
-    "CallbackRejected": "agent.modules.acp.auth",
     "auth_status": "agent.modules.acp.auth",
     "AcpError": "agent.modules.acp.errors",
     "AcpNotInstalled": "agent.modules.acp.errors",
     "AcpRpcError": "agent.modules.acp.errors",
-    "InstallBusyError": "agent.modules.acp.installer",
-    "installed_binary": "agent.modules.acp.installer",
-    "is_installed": "agent.modules.acp.installer",
     "get_acp_auth_manager": "agent.modules.acp.runtime",
-    "get_acp_installer": "agent.modules.acp.runtime",
     "TurnRequest": "agent.modules.acp.service",
     "get_acp_service": "agent.modules.acp.service",
     "not_installed_notice": "agent.modules.acp.service",

@@ -411,7 +411,9 @@ async def test_graceful_stop_commits_partial_output_and_ends_the_run(env):
 
 
 @pytest.mark.asyncio
-async def test_hard_cancel_then_continue_never_resends_the_prompt(env):
+@pytest.mark.parametrize("agent_id", ["antigravity-cli"])
+async def test_hard_cancel_then_continue_never_resends_the_prompt(env, agent_id):
+    env.agent.acp = AcpAgentSettings(agent=agent_id)
     task, _queue = await start_slow_turn(env)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -642,10 +644,85 @@ async def test_run_options_can_change_during_a_conversation(env):
 async def test_run_options_are_applied_again_after_the_agent_process_restarts(env):
     # The real agent resumes a session with its default settings, as the fake does.
     await env.collect("one", acp_config_options={"thinking_level": "low"})
-    await env.service.restart_client("antigravity-acp")
+    await env.service.restart_client("antigravity-cli")
     await env.collect("two", acp_config_options={"thinking_level": "low"})
     assert len(env.calls("session/resume")) == 1
     assert [call["params"]["value"] for call in env.calls("session/set_config_option")] == ["low", "low"]
+
+
+@pytest.mark.asyncio
+async def test_cli_agent_changes_start_new_sessions_without_resuming_another_agent(env):
+    env.agent.acp = AcpAgentSettings(agent="antigravity-cli", agent_name="reviewer")
+    await env.collect("one")
+    first = (await env.state()).values
+    await env.collect("two")
+    assert (await env.state()).values["acp_session_id"] == first["acp_session_id"]
+    env.agent.acp = AcpAgentSettings(agent="antigravity-cli", agent_name="coder")
+    changed = await env.collect("three")
+    second = (await env.state()).values
+    assert second["acp_runtime_key"] != first["acp_runtime_key"]
+    assert second["acp_session_id"] != first["acp_session_id"]
+    assert "agent configuration changed" in texts(changed)
+    env.agent.acp = AcpAgentSettings()
+    await env.collect("four")
+    assert len(env.calls("session/new")) == 3 and not env.calls("session/resume")
+
+
+@pytest.mark.asyncio
+async def test_cli_session_resumes_with_its_options_after_process_restart(env):
+    env.agent.acp = AcpAgentSettings(agent="antigravity-cli", agent_name="reviewer")
+    await env.collect("one", acp_config_options={"thinking_level": "low"})
+    await env.service.restart_client("antigravity-cli")
+    await env.collect("two", acp_config_options={"thinking_level": "low"})
+    assert len(env.calls("session/resume")) == 1
+    assert [call["params"]["value"] for call in env.calls("session/set_config_option")] == ["low", "low"]
+
+
+@pytest.mark.asyncio
+async def test_cli_tools_only_sends_custom_prompt_and_tools_and_resumes(env):
+    use_card_tools(env, "get_current_time")
+    env.agent.system_prompt = "Follow the K41 card's instructions."
+    env.agent.acp = AcpAgentSettings(agent="antigravity-cli", use_default_tools=False)
+    events = await env.collect("scenario:mcp_list")
+    listed = json.loads(texts(events))
+    assert "get_current_time" in {tool["name"] for tool in listed}
+    assert all(tool["_meta"]["antigravity/alwaysLoad"] is True for tool in listed)
+    assert env.calls("session/new")[0]["params"]["_meta"]["antigravity"]["systemPrompt"]["append"] == env.agent.system_prompt
+    first = (await env.state()).values
+    await env.service.restart_client("antigravity-cli")
+    await env.collect("scenario:mcp_list")
+    assert (await env.state()).values["acp_session_id"] == first["acp_session_id"]
+    assert len(env.calls("session/resume")) == 1
+    env.agent.acp = AcpAgentSettings(agent="antigravity-cli")
+    events = await env.collect("scenario:mcp_list")
+    second = (await env.state()).values
+    assert "agent configuration changed" in texts(events)
+    assert second["acp_runtime_key"] != first["acp_runtime_key"]
+    assert second["acp_session_id"] != first["acp_session_id"]
+    assert len(env.calls("session/new")) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_key", ["", "antigravity-acp"])
+@pytest.mark.parametrize("restart", [False, True])
+async def test_legacy_server_checkpoint_starts_cli_session_and_keeps_history(env, restart, legacy_key):
+    use_card_tools(env, "get_current_time")
+    await env.collect("one")
+    first = (await env.state()).values
+    await env.graph.aupdate_state({"configurable": {"thread_id": THREAD}}, {
+        "acp_runtime_key": legacy_key, "acp_session_config_key": "",
+    })
+    if restart:
+        await env.restart_server()
+    events = await env.collect("scenario:mcp_list")
+    state = (await env.state()).values
+    assert state["acp_session_id"] != first["acp_session_id"]
+    assert state["acp_runtime_key"].startswith("antigravity-cli:")
+    assert state["acp_session_config_key"] == first["acp_session_config_key"]
+    assert '"name": "get_current_time"' in texts(events)
+    assert len(env.calls("session/new")) == 2 and not env.calls("session/resume")
+    assert "agent configuration changed" in texts(events)
+    assert any(message.content == "one" for message in state["messages"])
 
 
 @pytest.mark.asyncio
@@ -687,6 +764,78 @@ def test_card_round_trips_acp_settings_and_keeps_only_usable_tool_settings():
 # K41 tools --------------------------------------------------------------------
 
 
+def use_configured_card(env, tmp_path, *, agent_id="antigravity-cli", deny=False):
+    from agent.modules.agents.repository import FilesystemAgentRepository
+    from agent.modules.agents.service import AgentCatalogService
+
+    repo = FilesystemAgentRepository(tmp_path / "configured-agents")
+    repo.load()
+    catalog = AgentCatalogService(repo)
+    card = AgentConfig(name="ag", graph_type="acp_agent", system_prompt="Card instructions.",
+        tools=["get_current_time"], permission_mode="auto",
+        tool_permissions=[{"action": "get_current_time", "effect": "deny"}] if deny else None,
+        acp=AcpAgentSettings(agent=agent_id, agent_name="reviewer" if agent_id == "antigravity-cli" else None))
+    catalog.create_agent_card(card)
+    env.agent = card
+    env.flags = ["--mcp-http"]
+    env.monkeypatch.setattr("agent.modules.agents.get_catalog_service", lambda: catalog)
+    return catalog, card
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("agent_id", ["antigravity-cli"])
+async def test_card_uses_own_prompt_tools_and_all_supported_options(env, tmp_path, agent_id):
+    _, card = use_configured_card(env, tmp_path, agent_id=agent_id)
+    events = await env.collect("scenario:mcp_list", acp_config_options={"model": "fake-lite", "thinking_level": "low"})
+    assert [tool["name"] for tool in json.loads(texts(events))] == ["get_current_time", "read"]
+    assert env.calls("session/new")[0]["params"]["_meta"]["antigravity"]["systemPrompt"]["append"] == card.system_prompt
+    assert [call["params"]["configId"] for call in env.calls("session/set_config_option")] == ["model", "thinking_level"]
+    from agent.modules.acp.launcher import runtime_key
+
+    assert (await env.state()).values["acp_runtime_key"] == runtime_key(agent_id, card.acp.agent_name, str(env.workspace))
+    assert not (env.workspace / ".agents").exists()
+
+
+@pytest.mark.asyncio
+async def test_card_enforces_own_permissions_on_native_and_k41_tools(env, tmp_path):
+    catalog, card = use_configured_card(env, tmp_path, deny=True)
+    events = await env.collect("scenario:mcp_call")
+    assert "permission_denied" in texts(events) and "user_input_request" not in types(events)
+    card.tool_permissions = [{"action": "*", "effect": "deny"}]
+    catalog.update_agent_card("ag", card)
+    await env.collect("scenario:permission")
+    assert not env.effects()
+
+
+@pytest.mark.asyncio
+async def test_card_edits_reset_session_but_model_and_thinking_changes_preserve_it(env, tmp_path):
+    catalog, card = use_configured_card(env, tmp_path)
+    await env.collect("first", acp_config_options={"model": "fake-lite", "thinking_level": "low"})
+    first_id = (await env.state()).values["acp_session_id"]
+    await env.collect("second", acp_config_options={"model": "fake-pro", "thinking_level": "high"})
+    assert (await env.state()).values["acp_session_id"] == first_id
+    card.system_prompt = "Changed card instructions."
+    catalog.update_agent_card("ag", card)
+    events = await env.collect("third")
+    assert "agent configuration changed" in texts(events)
+    assert (await env.state()).values["acp_session_id"] != first_id
+    assert env.calls("session/new")[-1]["params"]["_meta"]["antigravity"]["systemPrompt"]["append"] == card.system_prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [("tool_configs", {"get_current_time": {"format": "iso"}}),
+    ("permission_mode", "ask"), ("tools", ["web_search"])])
+async def test_card_capability_edits_renew_session_and_release_old_tools(env, tmp_path, field, value):
+    catalog, card = use_configured_card(env, tmp_path)
+    await env.collect("first")
+    old_tokens = bridge_tokens(env)
+    card = AgentConfig.model_validate({**card.model_dump(), field: value})
+    catalog.update_agent_card("ag", card)
+    await env.collect("second")
+    assert len(env.calls("session/new")) == 2
+    assert not old_tokens & bridge_tokens(env)
+
+
 def use_card_tools(env, *tools, permission_mode="ask"):
     env.flags = ["--mcp-http"]
     env.agent = AgentConfig(permission_mode=permission_mode, name="ag", graph_type="acp_agent", tools=list(tools),
@@ -710,8 +859,10 @@ async def test_a_card_without_tools_attaches_no_server(env):
 
 
 @pytest.mark.asyncio
-async def test_card_tools_are_listed_with_their_schemas(env):
+@pytest.mark.parametrize("agent_id", ["antigravity-cli"])
+async def test_card_tools_are_listed_with_their_schemas(env, agent_id):
     use_card_tools(env, "get_current_time")
+    env.agent.acp = AcpAgentSettings(agent=agent_id)
     events = await env.collect("scenario:mcp_list")
     [server] = attached_servers(env)
     assert server["type"] == "http" and server["name"] == "k41" and server["url"].startswith("http://127.0.0.1:")
@@ -731,8 +882,12 @@ async def test_an_agent_without_http_mcp_runs_with_its_own_tools_and_says_so(env
 
 
 @pytest.mark.asyncio
-async def test_approved_call_runs_and_the_transcript_shows_the_real_result(env):
+@pytest.mark.parametrize("agent_id,cli_format", [("antigravity-cli", False), ("antigravity-cli", True)])
+async def test_approved_call_runs_and_the_transcript_shows_the_real_result(env, agent_id, cli_format):
     use_card_tools(env, "get_current_time")
+    env.agent.acp = AcpAgentSettings(agent=agent_id)
+    if cli_format:
+        env.flags.append("--mcp-cli")
     events = await env.collect("scenario:mcp_call")
     assert "user_input_request" not in types(events)
     output = next(event for event in events if event["type"] == "tool_result")["content"]
@@ -751,8 +906,11 @@ async def test_duplicated_mcp_arguments_are_not_shown_twice(env):
 
 
 @pytest.mark.asyncio
-async def test_denied_call_does_not_run(env):
+@pytest.mark.parametrize("cli_format", [False, True])
+async def test_denied_call_does_not_run(env, cli_format):
     use_card_tools(env, "get_current_time")
+    if cli_format:
+        env.flags.append("--mcp-cli")
     env.agent.tool_permissions = [{"action": "get_current_time", "effect": "ask"}]
     first = await env.collect("scenario:mcp_call")
     second = await env.collect(resume_payload=resume_k41(first, "deny"))
@@ -843,16 +1001,18 @@ async def test_the_endpoint_requires_the_session_token_and_post(env):
 
 
 @pytest.mark.asyncio
-async def test_a_token_stops_working_after_a_tool_change_and_the_session_is_resumed(env):
+async def test_a_token_stops_working_after_a_tool_change_and_the_session_is_replaced(env):
     use_card_tools(env, "get_current_time")
     await env.collect("scenario:text")
     first_token = attached_servers(env)[0]["headers"][0]["value"]
     use_card_tools(env, "get_current_time", "html_preview")
     events = await env.collect("scenario:mcp_list")
-    assert len(env.calls("session/new")) == 1
-    second_token = attached_servers(env, "session/resume")[0]["headers"][0]["value"]
+    assert len(env.calls("session/new")) == 2
+    second_token = attached_servers(env)[0]["headers"][0]["value"]
     assert second_token != first_token
-    assert [tool["name"] for tool in json.loads(texts(events))] == ["get_current_time", "html_preview", "read"]
+    notice, _, output = texts(events).partition("\n\n")
+    assert "agent configuration changed" in notice
+    assert [tool["name"] for tool in json.loads(output)] == ["get_current_time", "html_preview", "read"]
     assert first_token.removeprefix("Bearer ") not in env.service._tool_bridge._sessions
 
 
@@ -948,8 +1108,10 @@ def bridge_tokens(env):
 
 
 @pytest.mark.asyncio
-async def test_a_workspace_change_revokes_the_token_of_the_old_session(env, tmp_path):
+@pytest.mark.parametrize("agent_id", ["antigravity-cli"])
+async def test_a_workspace_change_revokes_the_token_of_the_old_session(env, tmp_path, agent_id):
     use_card_tools(env, "get_current_time")
+    env.agent.acp = AcpAgentSettings(agent=agent_id)
     await env.collect("scenario:text")
     old_tokens = bridge_tokens(env)
     other = tmp_path / "other"

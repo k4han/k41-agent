@@ -41,6 +41,92 @@ function mount(t, callback) {
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+test('ACP options ignore late probes and separate CLI agent and workspace choices', async t => {
+  const acp = loadModule('../src/lib/acp.ts');
+  const { API_PATHS } = loadModule('../src/lib/endpoints.ts');
+  const pending = [];
+  const saved = new Map();
+  const { useAcpSessionOptions } = loadModule('../src/lib/useAcpSessionOptions.ts', {
+    '@/lib/acp': { ...acp, readAcpOptionChoices: key => saved.get(key) || {}, writeAcpOptionChoices: (key, value) => saved.set(key, value) },
+    '@/lib/api': { apiFetch: url => new Promise(resolve => pending.push({ url, resolve })) },
+    '@/lib/endpoints': { API_PATHS },
+  });
+  const option = (value) => ({ id: 'model', name: 'Model', category: 'model', current_value: value, options: [{ value, name: value }] });
+  const view = mount(t, () => {
+    const [card, setCard] = solid.createSignal({ name: 'card', graph_type: 'acp_agent', acp: { agent: 'antigravity-cli', agent_name: 'one', config_options: {} } });
+    const [cwd, setCwd] = solid.createSignal('/workspace');
+    return { hook: useAcpSessionOptions(card, cwd), card, setCard, setCwd };
+  }).value;
+  await tick();
+  assert.equal(pending.length, 1);
+  view.setCard({ ...view.card(), acp: { ...view.card().acp, agent_name: 'two' } });
+  await tick();
+  pending[1].resolve({ auth: { config_options: [option('second')] } });
+  await tick();
+  pending[0].resolve({ auth: { config_options: [option('first')] } });
+  await tick();
+  assert.equal(view.hook.options()[0].current_value, 'second');
+  view.hook.setValue('model', 'second');
+  assert.equal(view.hook.requestOptions().model, 'second');
+  view.setCwd('/other');
+  await tick();
+  assert.equal(view.hook.options().length, 0);
+  assert.equal(view.hook.requestOptions(), undefined);
+  assert.equal(new URL(pending[2].url, 'http://localhost').searchParams.get('cwd'), '/other');
+  view.setCwd('/workspace');
+  await tick();
+  assert.equal(view.hook.requestOptions().model, 'second');
+});
+
+test('default CLI profiles inherit legacy browser choices while named profiles stay isolated', async t => {
+  let stored = JSON.stringify({ card: { model: 'legacy' } });
+  const acp = loadModule('../src/lib/acp.ts', {}, { window: {
+    localStorage: { getItem: () => stored, setItem: (_key, value) => { stored = value; } },
+  } });
+  const { API_PATHS } = loadModule('../src/lib/endpoints.ts');
+  const { useAcpSessionOptions } = loadModule('../src/lib/useAcpSessionOptions.ts', {
+    '@/lib/acp': acp,
+    '@/lib/api': { apiFetch: async () => ({ auth: { config_options: [
+      { id: 'model', name: 'Model', category: 'model', current_value: 'default',
+        options: [{ value: 'legacy', name: 'Legacy' }, { value: 'default', name: 'Default' }] },
+    ] } }) },
+    '@/lib/endpoints': { API_PATHS },
+  });
+  const view = mount(t, () => {
+    const [card, setCard] = solid.createSignal({ name: 'card', graph_type: 'acp_agent',
+      acp: { agent: 'antigravity-cli', agent_name: null, config_options: {} } });
+    return { hook: useAcpSessionOptions(card, () => '/workspace'), card, setCard };
+  }).value;
+  await tick();
+  assert.deepEqual(view.hook.requestOptions(), { model: 'legacy' });
+  const scope = acp.acpOptionScope('card', view.card().acp, '/workspace');
+  assert.deepEqual(JSON.parse(stored)[scope], { model: 'legacy' });
+  view.setCard({ ...view.card(), acp: { ...view.card().acp, agent_name: 'reviewer' } });
+  await tick();
+  assert.deepEqual(view.hook.requestOptions(), { model: 'default' });
+});
+
+test('ACP cards expose and send model and thinking options directly', async t => {
+  const acp = loadModule('../src/lib/acp.ts');
+  const { API_PATHS } = loadModule('../src/lib/endpoints.ts');
+  const configOptions = [
+    { id: 'model', name: 'Model', category: 'model', current_value: 'default', options: [{ value: 'custom', name: 'Custom' }] },
+    { id: 'thinking_level', name: 'Thinking', category: 'thought_level', current_value: 'high', options: [{ value: 'low', name: 'Low' }] },
+  ];
+  const { useAcpSessionOptions } = loadModule('../src/lib/useAcpSessionOptions.ts', {
+    '@/lib/acp': { ...acp, readAcpOptionChoices: () => ({}), writeAcpOptionChoices: () => {} },
+    '@/lib/api': { apiFetch: async () => ({ auth: { config_options: configOptions } }) },
+    '@/lib/endpoints': { API_PATHS },
+  });
+  const hook = mount(t, () => useAcpSessionOptions(() => ({
+    name: 'configured', graph_type: 'acp_agent', acp: { agent: 'antigravity-cli', agent_name: 'reviewer',
+      config_options: { model: 'custom', thinking_level: 'low' } },
+  }))).value;
+  await tick();
+  assert.deepEqual(hook.options().map(option => option.id), ['model', 'thinking_level']);
+  assert.deepEqual(hook.requestOptions(), { model: 'custom', thinking_level: 'low' });
+});
+
 function loadActivityView() {
   const activity = loadModule('../src/lib/transcriptActivity.ts', {
     '@/lib/htmlPreview': { HTML_PREVIEW_TOOL_NAME: 'html_preview' },
@@ -284,7 +370,9 @@ test('run history pauses hidden polling, refreshes on return, and keeps its idle
   const component = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'RunHistoryPanel');
   const statements = component.body.statements;
   const end = statements.findIndex(node => ts.isVariableStatement(node) && node.declarationList.declarations[0].name.getText(ast) === 'clearHistory');
-  const { outputText } = ts.transpileModule(`function runHistoryState(props) {
+  const activeRun = ast.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations[0].name.getText(ast) === 'activeRun');
+  const { outputText } = ts.transpileModule(`${activeRun.getText(ast)}
+  function runHistoryState(props) {
     ${statements.slice(0, end).map(node => node.getText(ast)).join('\n')}
     return { runs, loading };
   }`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } });

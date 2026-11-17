@@ -95,8 +95,7 @@ class AgentProcess:
         """Stop the agent and its descendants. Blocking; call from a worker thread."""
         from agent.modules.tools import kill_process_tree
 
-        # Closing stdin alone does not end agy_acp_server, so the grace period
-        # only covers agents that do exit on EOF.
+        # The grace period only covers agents that exit on stdin EOF.
         try:
             self.popen.stdin.close()
         except (OSError, ValueError):

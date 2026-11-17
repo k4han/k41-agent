@@ -320,7 +320,7 @@ export function ChatPage() {
     validCards().find((card) => card.name === agentName()),
   );
   const acpAgentSelected = createMemo(() => isAcpCard(selectedCard()));
-  const acpOptions = useAcpSessionOptions(selectedCard);
+  const acpOptions = useAcpSessionOptions(selectedCard, workingDir);
   const selectableCards = createMemo(() => selectableAgentCards(validCards(), selectedCard(), Boolean(currentThreadId())));
 
   const modelSelectionAvailable = (nextProvider: string, nextModel: string, customModel = false): boolean => {

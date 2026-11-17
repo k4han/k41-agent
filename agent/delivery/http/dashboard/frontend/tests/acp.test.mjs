@@ -12,10 +12,28 @@ async function loadModule(path) {
 }
 
 const acp = await loadModule("../src/lib/acp.ts");
+const { API_PATHS } = await loadModule("../src/lib/endpoints.ts");
 const { toolCallSummary } = await loadModule("../src/lib/toolCallSummary.ts");
 
 const acpCard = { name: "ag", graph_type: "acp_agent" };
 const reactCard = { name: "kode", graph_type: "react_agent" };
+
+test("CLI status URLs carry agent and workspace as encoded parameters", () => {
+  const path = API_PATHS.acpAgent("antigravity-cli", " custom/agent ", "D:\\My Projects\\workspace");
+  const url = new URL(path, "http://localhost");
+  assert.equal(url.searchParams.get("agent_name"), "custom/agent");
+  assert.equal(url.searchParams.get("cwd"), "D:\\My Projects\\workspace");
+  assert.equal(API_PATHS.acpAgent("antigravity-cli"), "/dashboard-api/acp/agents/antigravity-cli");
+});
+
+test("CLI option choices are separated by agent and workspace", () => {
+  const settings = { agent: "antigravity-cli", agent_name: "reviewer" };
+  const scope = acp.acpOptionScope("card", settings, "/workspace");
+  assert.notEqual(scope, acp.acpOptionScope("card", { ...settings, agent_name: "coder" }, "/workspace"));
+  assert.notEqual(scope, acp.acpOptionScope("card", settings, "/other"));
+  assert.equal(acp.acpOptionScope("card", { agent: "antigravity-cli", agent_name: " " }),
+    acp.acpOptionScope("card", { agent: "antigravity-cli", agent_name: null }));
+});
 
 test("a new conversation can pick any agent", () => {
   assert.deepEqual(acp.selectableAgentCards([acpCard, reactCard], reactCard, false), [acpCard, reactCard]);
@@ -58,12 +76,20 @@ test("session options never carry a choice the agent did not list", () => {
   assert.deepEqual(acp.resolveAcpOptionValues([thinking], { mode: "yolo", thinking_level: "low" }, {}), { thinking_level: "low" });
 });
 
-test("install progress is readable in every phase", () => {
-  const job = { state: "running", phase: "downloading", version: "1.0", downloaded_bytes: 10485760, total_bytes: 104857600, error: null };
-  assert.equal(acp.installProgressLabel(job), "Downloading 10 of 100 MB…");
-  assert.equal(acp.installProgressLabel({ ...job, total_bytes: null }), "Downloading 10 MB…");
-  assert.equal(acp.installProgressLabel({ ...job, phase: "extracting" }), "Unpacking…");
-  assert.equal(acp.installProgressLabel({ ...job, state: "succeeded", phase: "installed" }), "Installed version 1.0.");
-  assert.equal(acp.installProgressLabel({ ...job, state: "succeeded", phase: "up_to_date" }), "Already up to date (1.0).");
-  assert.equal(acp.installProgressLabel({ ...job, state: "failed", phase: "failed", error: "No space." }), "No space.");
+test("legacy card choices seed a CLI scope without overwriting newer or empty choices", (t) => {
+  const previousWindow = globalThis.window;
+  let stored = JSON.stringify({ card: { model: "legacy", thinking_level: "retired", invalid: 7 } });
+  globalThis.window = { localStorage: { getItem: () => stored, setItem: (_key, value) => { stored = value; } } };
+  t.after(() => { globalThis.window = previousWindow; });
+  const scope = acp.acpOptionScope("card", { agent: "antigravity-cli" }, "/workspace");
+  assert.deepEqual(acp.readAcpOptionChoices(scope, "card"), { model: "legacy", thinking_level: "retired" });
+  assert.deepEqual(JSON.parse(stored)[scope], { model: "legacy", thinking_level: "retired" });
+  assert.equal(JSON.parse(stored).card.model, "legacy");
+  acp.writeAcpOptionChoices(scope, { model: "new" });
+  assert.deepEqual(acp.readAcpOptionChoices(scope, "card"), { model: "new" });
+  acp.writeAcpOptionChoices(scope, {});
+  assert.deepEqual(acp.readAcpOptionChoices(scope, "card"), {});
+  const named = acp.acpOptionScope("card", { agent: "antigravity-cli", agent_name: "reviewer" }, "/workspace");
+  assert.deepEqual(acp.readAcpOptionChoices(named), {});
+  assert.deepEqual(acp.resolveAcpOptionValues([thinking], { thinking_level: "retired" }, {}), { thinking_level: "high" });
 });

@@ -56,6 +56,58 @@ def _payload(name: str) -> dict:
     }
 
 
+def test_acp_card_api_preserves_direct_configuration(dashboard_agent_client):
+    client, repo = dashboard_agent_client
+    payload = {**_payload("acp-configured"), "graph_type": "acp_agent", "system_prompt": "Card prompt.",
+        "tools": ["write"], "permission_mode": "auto", "tool_configs": {"write": {}},
+        "acp": {"agent": "antigravity-cli", "agent_name": "reviewer",
+            "use_default_tools": True,
+            "config_options": {"model": "acp-model", "thinking_level": "low"}}}
+    response = client.post("/agents/cards", json=payload)
+    assert response.status_code == 200
+    assert response.json()["card"]["acp"] == payload["acp"]
+    repo.reload()
+    cards = client.get("/dashboard-api/agents/cards").json()["cards"]
+    card = next(item for item in cards if item["name"] == payload["name"])
+    assert card["system_prompt"] == "Card prompt." and card["tools"] == ["write"]
+    assert card["permission_mode"] == "auto" and card["acp"] == payload["acp"]
+    changed = {**payload, "system_prompt": "Updated prompt."}
+    response = client.put("/agents/cards/acp-configured", json=changed)
+    assert response.status_code == 200 and response.json()["card"]["system_prompt"] == "Updated prompt."
+    bad = {**payload, "name": "legacy", "acp": {"base_agent": "default"}}
+    assert client.post("/agents/cards", json=bad).status_code == 422
+
+
+def test_acp_tools_only_card_round_trips_and_rejects_incompatible_settings(dashboard_agent_client):
+    client, repo = dashboard_agent_client
+    payload = {**_payload("acp-tools-only"), "graph_type": "acp_agent", "permission_mode": "ask",
+        "acp": {"agent": "antigravity-cli", "use_default_tools": False}}
+    response = client.post("/agents/cards", json=payload)
+    assert response.status_code == 200
+    assert response.json()["card"]["acp"]["use_default_tools"] is False
+    repo.reload()
+    assert repo.get_card("acp-tools-only").acp.use_default_tools is False
+    for settings in ({"agent": "unknown", "use_default_tools": False},
+                     {"agent": "antigravity-cli", "agent_name": "reviewer", "use_default_tools": False}):
+        response = client.put("/agents/cards/acp-tools-only", json={**payload, "acp": settings})
+        assert response.status_code == 422
+
+
+@pytest.mark.parametrize("settings", [{}, {"agent": None}, {"agent": ""}, {"agent": "antigravity-acp"}])
+def test_acp_card_api_normalizes_legacy_runtime_without_losing_settings(dashboard_agent_client, settings):
+    client, repo = dashboard_agent_client
+    payload = {**_payload("legacy-acp"), "graph_type": "acp_agent", "permission_mode": "auto",
+        "acp": {**settings, "config_options": {"model": "legacy-model"}}, "system_prompt": "Keep this prompt."}
+    response = client.post("/agents/cards", json=payload)
+    assert response.status_code == 200
+    card = response.json()["card"]
+    assert card["acp"]["agent"] == "antigravity-cli"
+    assert card["acp"]["config_options"] == {"model": "legacy-model"}
+    assert card["system_prompt"] == payload["system_prompt"] and card["tools"] == payload["tools"]
+    repo.reload()
+    assert repo.get_card("legacy-acp").acp.agent == "antigravity-cli"
+
+
 def test_agents_page_serves_spa_and_agent_api_returns_cards(dashboard_agent_client) -> None:
     client, _ = dashboard_agent_client
 

@@ -8,6 +8,8 @@ class AcpState(BaseState):
 
     acp_session_id: NotRequired[str]
     acp_session_cwd: NotRequired[str]
+    acp_runtime_key: NotRequired[str]
+    acp_session_config_key: NotRequired[str]
     acp_turn_id: NotRequired[str]
     acp_boot_id: NotRequired[str]
     acp_pending: NotRequired[bool]
