@@ -513,6 +513,9 @@ export function ChatComposer(props: ChatComposerProps) {
           </div>
           <AgentModelPicker
             hideModel={props.hideModelPicker}
+            acpOptions={props.acpOptions}
+            acpOptionValues={props.acpOptionValues}
+            onAcpOptionChange={props.onAcpOptionChange}
             externalOptions={
               <AcpSessionOptions
                 options={props.acpOptions ?? []}

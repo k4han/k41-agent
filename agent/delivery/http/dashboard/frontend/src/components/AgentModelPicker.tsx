@@ -2,6 +2,8 @@ import { Bot, Check, ChevronDown, ChevronRight, Search, Sparkles, Star, X } from
 import { createEffect, createMemo, createSignal, For, type JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
+import { AcpSessionOptions } from "@/components/AcpSessionOptions";
+import type { AcpConfigOption, AcpOptionValues } from "@/lib/acp";
 import { resolveModelAndProvider } from "@/lib/modelSelection";
 import { MOBILE_MEDIA_QUERY } from "@/lib/uiConstants";
 import { createMediaQuery } from "@/lib/useMediaQuery";
@@ -16,6 +18,9 @@ export interface AgentModelPickerProps {
   // External agents list their own settings here instead of the K41 model catalog.
   hideModel?: boolean;
   externalOptions?: JSX.Element;
+  acpOptions?: AcpConfigOption[];
+  acpOptionValues?: AcpOptionValues;
+  onAcpOptionChange?: (id: string, value: string) => void;
   agentName: string;
   agents: AgentCard[];
   onAgentChange: (name: string) => void;
@@ -87,6 +92,9 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
     const wasOpen = open() && activePicker() === tab;
     setSearchQuery("");
     setPreviewModel(undefined);
+    if (isAcp()) {
+      setPreviewAcpModel(currentAcpModelValue() || filteredAcpModels()[0]?.value);
+    }
     setActivePicker(tab);
     setOpen(!wasOpen);
   };
@@ -161,7 +169,102 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
   );
   const effortLabel = (value: string) => value ? value.charAt(0).toUpperCase() + value.slice(1) : "Auto";
   const selectedEffortLabel = createMemo(() => props.reasoningEffortLevels.length ? effortLabel(props.reasoningEffort) : "");
+
+  const isAcp = createMemo(() => Boolean(props.hideModel));
+
+  const acpModelOption = createMemo(() =>
+    props.acpOptions?.find((o) => o.category === "model" || o.id === "model")
+  );
+
+  const acpThinkingOption = createMemo(() =>
+    props.acpOptions?.find((o) =>
+      o.category === "thought_level" || o.category === "thinking"
+      || o.id === "thinking_level" || o.id === "thought_level"
+    )
+  );
+
+  const acpOtherOptions = createMemo(() => {
+    if (!isAcp() || !props.acpOptions) return [];
+    const model = acpModelOption();
+    const thinking = acpThinkingOption();
+    return props.acpOptions.filter((opt) => opt !== model && opt !== thinking);
+  });
+
+  const isAcpModel = createMemo(() =>
+    isAcp() && (Boolean(acpModelOption()) || Boolean(props.acpOptionValues?.["model"]) || (props.acpOptions ?? []).length === 0)
+  );
+
+  const currentAcpModelValue = createMemo(() => {
+    const opt = acpModelOption();
+    if (opt) {
+      return props.acpOptionValues?.[opt.id] ?? opt.current_value ?? "";
+    }
+    return props.acpOptionValues?.["model"] ?? "";
+  });
+
+  const currentAcpThinkingValue = createMemo(() => {
+    const opt = acpThinkingOption();
+    if (opt) {
+      return props.acpOptionValues?.[opt.id] ?? opt.current_value ?? "";
+    }
+    return props.acpOptionValues?.["thinking_level"] ?? "";
+  });
+
+  const acpModelLabel = createMemo(() => {
+    const val = currentAcpModelValue();
+    const opt = acpModelOption();
+    const matched = opt?.options.find((item) => item.value === val);
+    if (matched) return matched.name;
+    if (val) return formatShortModelName("", val);
+    return "Model";
+  });
+
+  const acpThinkingLabel = createMemo(() => {
+    const val = currentAcpThinkingValue();
+    const opt = acpThinkingOption();
+    const matched = opt?.options.find((item) => item.value === val);
+    if (matched) return matched.name;
+    if (val) return effortLabel(val);
+    return "";
+  });
+
+  const [previewAcpModel, setPreviewAcpModel] = createSignal<string>();
+
+  const acpModelList = createMemo(() => {
+    const modelOpt = acpModelOption();
+    if (modelOpt && modelOpt.options.length > 0) {
+      return modelOpt.options;
+    }
+    const currentVal = currentAcpModelValue();
+    if (currentVal) {
+      return [{ value: currentVal, name: acpModelLabel() }];
+    }
+    return [];
+  });
+
+  const filteredAcpModels = createMemo(() => {
+    const query = searchQuery().trim().toLowerCase();
+    const list = acpModelList();
+    if (!query) return list;
+    return list.filter((m) => m.name.toLowerCase().includes(query) || m.value.toLowerCase().includes(query));
+  });
+
   const effortTarget = createMemo(() => {
+    if (isAcp()) {
+      const thinking = acpThinkingOption();
+      const currentEffort = currentAcpThinkingValue();
+      const preview = previewAcpModel();
+      const modelId = preview || currentAcpModelValue();
+      return {
+        provider: "acp",
+        id: modelId,
+        isSelected: modelId === currentAcpModelValue(),
+        levels: thinking?.options.map((o) => o.value) || [],
+        defaultEffort: thinking?.current_value || "",
+        effort: currentEffort,
+        name: thinking?.name || "Effort",
+      };
+    }
     const preview = previewModel();
     const current = resolvedSelection();
     const provider = preview?.provider || current.provider;
@@ -173,14 +276,21 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
       levels: isSelected ? props.reasoningEffortLevels : option?.reasoning_effort_levels || [],
       defaultEffort: isSelected ? props.reasoningEffortDefault : option?.reasoning_effort_default,
       effort: isSelected ? props.reasoningEffort : option?.reasoning_effort_default || "",
+      name: "Effort",
     };
   });
-  const effortOpen = createMemo(() => open() && activePicker() === "model" && !!previewModel() && effortTarget().levels.length > 0);
+  const effortOpen = createMemo(() => {
+    if (!open() || activePicker() !== "model") return false;
+    if (isAcp()) {
+      return !!previewAcpModel() && effortTarget().levels.length > 0;
+    }
+    return !!previewModel() && effortTarget().levels.length > 0;
+  });
   const updateEffortPosition = () => {
     if (!effortOpen() || !menuRef) return;
     const target = effortTarget();
     const row = Array.from(menuRef.querySelectorAll<HTMLElement>(".model-item-row"))
-      .find((item) => item.dataset.provider === target.provider && item.dataset.modelId === target.id);
+      .find((item) => (target.provider === "acp" ? true : item.dataset.provider === target.provider) && item.dataset.modelId === target.id);
     if (!row) return;
     const anchor = row.getBoundingClientRect();
     const parent = menuRef.getBoundingClientRect();
@@ -211,6 +321,14 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
       window.removeEventListener("resize", handler);
     });
   });
+  const selectAcpModel = (modelValue: string) => {
+    const model = acpModelOption();
+    if (model) {
+      props.onAcpOptionChange?.(model.id, modelValue);
+    }
+    setOpen(false);
+    modelTriggerRef?.focus();
+  };
   const selectModel = (provider: string, id: string, customModel = isCustomModel(provider, id)) => {
     props.onProviderModelChange(provider, id, provider !== "@pool" && customModel);
     if (provider === "@pool") props.onReasoningEffortChange("auto");
@@ -218,6 +336,20 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
     modelTriggerRef?.focus();
   };
   const selectEffort = (effort: string) => {
+    if (isAcp()) {
+      const thinking = acpThinkingOption();
+      if (thinking) {
+        props.onAcpOptionChange?.(thinking.id, effort);
+      }
+      const model = acpModelOption();
+      const targetModel = effortTarget().id;
+      if (model && targetModel && targetModel !== currentAcpModelValue()) {
+        props.onAcpOptionChange?.(model.id, targetModel);
+      }
+      setOpen(false);
+      modelTriggerRef?.focus();
+      return;
+    }
     const target = effortTarget();
     if (!target.isSelected) props.onProviderModelChange(target.provider, target.id, false);
     // Apply effort after model-change effects have reset the previous override.
@@ -338,7 +470,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
         <span class="agent-model-badge-agent">{currentAgentName()}</span>
         <ChevronDown size={13} class={`agent-model-badge-caret ${open() && activePicker() === "agent" ? "is-open" : ""}`} />
       </button>
-      <Show when={!props.hideModel} fallback={props.externalOptions}>
+      <Show when={!props.hideModel || isAcpModel()} fallback={props.externalOptions}>
       <span class="agent-model-divider" aria-hidden="true" />
       <button
         ref={modelTriggerRef}
@@ -346,20 +478,36 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
         type="button"
         onClick={() => togglePicker("model")}
         disabled={props.disabled}
-        title={`Model: ${resolvedSelection().provider}/${resolvedSelection().model}${selectedEffortLabel() ? ` · ${selectedEffortLabel()}` : ""}`}
-        aria-label={`Select model: ${resolvedSelection().provider}/${resolvedSelection().model}${selectedEffortLabel() ? `, effort: ${selectedEffortLabel()}` : ""}`}
+        title={
+          isAcp()
+            ? `Model: ${acpModelLabel()}${acpThinkingLabel() ? ` · ${acpThinkingLabel()}` : ""}`
+            : `Model: ${resolvedSelection().provider}/${resolvedSelection().model}${selectedEffortLabel() ? ` · ${selectedEffortLabel()}` : ""}`
+        }
+        aria-label={
+          isAcp()
+            ? `Select model: ${acpModelLabel()}${acpThinkingLabel() ? `, effort: ${acpThinkingLabel()}` : ""}`
+            : `Select model: ${resolvedSelection().provider}/${resolvedSelection().model}${selectedEffortLabel() ? `, effort: ${selectedEffortLabel()}` : ""}`
+        }
         aria-haspopup="dialog"
         aria-expanded={open() && activePicker() === "model"}
       >
         <span class="agent-model-badge-icon">
           <Sparkles size={14} />
         </span>
-        <span class="agent-model-badge-model">{shortModelLabel()}</span>
-        <Show when={selectedEffortLabel()}>
-          <span class="agent-model-badge-effort">{selectedEffortLabel()}</span>
+        <span class="agent-model-badge-model">{isAcp() ? acpModelLabel() : shortModelLabel()}</span>
+        <Show when={isAcp() ? acpThinkingLabel() : selectedEffortLabel()}>
+          <span class="agent-model-badge-effort">{isAcp() ? acpThinkingLabel() : selectedEffortLabel()}</span>
         </Show>
         <ChevronDown size={13} class={`agent-model-badge-caret ${open() && activePicker() === "model" ? "is-open" : ""}`} />
       </button>
+      <Show when={acpOtherOptions().length > 0}>
+        <AcpSessionOptions
+          options={acpOtherOptions()}
+          values={props.acpOptionValues ?? {}}
+          onChange={(id, value) => props.onAcpOptionChange?.(id, value)}
+          disabled={props.disabled}
+        />
+      </Show>
       </Show>
 
       <Show when={open()}>
@@ -442,164 +590,266 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
             </Show>
 
             <Show when={activePicker() === "model"}>
-              <div class="agent-model-column agent-model-models-col">
-                <div class="agent-model-search-wrap">
-                  <Search size={13} class="agent-model-search-icon" />
-                  <input
-                    ref={searchInputRef}
-                    class="agent-model-search-input"
-                    type="text"
-                    placeholder="Search models..."
-                    value={searchQuery()}
-                    onInput={(e) => {
-                      setSearchQuery(e.currentTarget.value);
-                      const group = filteredModelGroups()[0];
-                      setPreviewModel(searchQuery().trim() && group ? { provider: group.models[0].provider, id: group.models[0].id } : undefined);
-                    }}
-                  />
-                  <Show when={searchQuery()}>
-                    <button
-                      class="agent-model-search-clear"
-                      type="button"
-                      aria-label="Clear model search"
-                      onClick={() => {
-                        setSearchQuery("");
-                        setPreviewModel(undefined);
-                        searchInputRef?.focus();
-                      }}
-                    >
-                      <X size={12} />
-                    </button>
-                  </Show>
-                </div>
+              <Show
+                when={isAcp()}
+                fallback={
+                  <div class="agent-model-column agent-model-models-col">
+                    <div class="agent-model-search-wrap">
+                      <Search size={13} class="agent-model-search-icon" />
+                      <input
+                        ref={searchInputRef}
+                        class="agent-model-search-input"
+                        type="text"
+                        placeholder="Search models..."
+                        value={searchQuery()}
+                        onInput={(e) => {
+                          setSearchQuery(e.currentTarget.value);
+                          const group = filteredModelGroups()[0];
+                          setPreviewModel(searchQuery().trim() && group ? { provider: group.models[0].provider, id: group.models[0].id } : undefined);
+                        }}
+                      />
+                      <Show when={searchQuery()}>
+                        <button
+                          class="agent-model-search-clear"
+                          type="button"
+                          aria-label="Clear model search"
+                          onClick={() => {
+                            setSearchQuery("");
+                            setPreviewModel(undefined);
+                            searchInputRef?.focus();
+                          }}
+                        >
+                          <X size={12} />
+                        </button>
+                      </Show>
+                    </div>
 
-                <div class="agent-model-list">
-                  <For each={filteredModelGroups()}>
-                    {(group) => (
-                      <div class="model-provider-group">
-                        <div class="model-provider-group-title">{group.label}</div>
-                        <For each={group.models}>
-                          {(modelOption) => {
-                            const favorite = { provider: modelOption.provider, model: modelOption.id };
-                            const isModelFavorite = () => isFavorite(favorite);
-                            const isSelected = () =>
-                              resolvedSelection().provider === modelOption.provider &&
-                              resolvedSelection().model === modelOption.id;
-                            return (
-                              <div
-                                class={`model-item-row ${isSelected() ? "selected" : ""} ${effortTarget().provider === modelOption.provider && effortTarget().id === modelOption.id ? "is-previewed" : ""}`}
-                                role="group"
-                                data-provider={modelOption.provider}
-                                data-model-id={modelOption.id}
-                                aria-label={modelOption.label || modelOption.id}
-                                onMouseEnter={() => setPreviewModel({ provider: modelOption.provider, id: modelOption.id })}
-                                onClick={() => selectModel(modelOption.provider, modelOption.id)}
-                              >
-                                <button
-                                  type="button"
-                                  class="model-item-select"
-                                  aria-pressed={isSelected()}
-                                  onFocus={() => setPreviewModel({ provider: modelOption.provider, id: modelOption.id })}
-                                  title={`${modelOption.provider}/${modelOption.id}${modelOption.context_window ? ` · ${Math.round(modelOption.context_window / 1024)}k context` : ""}`}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "ArrowRight") {
-                                      e.preventDefault();
-                                      setPreviewModel({ provider: modelOption.provider, id: modelOption.id });
-                                      focusEffortOption();
-                                    }
-                                  }}
-                                >
-                                  <div class="model-item-row-info">
-                                    <span class="model-item-row-name">
-                                      {modelOption.label || modelOption.id}
-                                    </span>
+                    <div class="agent-model-list">
+                      <For each={filteredModelGroups()}>
+                        {(group) => (
+                          <div class="model-provider-group">
+                            <div class="model-provider-group-title">{group.label}</div>
+                            <For each={group.models}>
+                              {(modelOption) => {
+                                const favorite = { provider: modelOption.provider, model: modelOption.id };
+                                const isModelFavorite = () => isFavorite(favorite);
+                                const isSelected = () =>
+                                  resolvedSelection().provider === modelOption.provider &&
+                                  resolvedSelection().model === modelOption.id;
+                                return (
+                                  <div
+                                    class={`model-item-row ${isSelected() ? "selected" : ""} ${effortTarget().provider === modelOption.provider && effortTarget().id === modelOption.id ? "is-previewed" : ""}`}
+                                    role="group"
+                                    data-provider={modelOption.provider}
+                                    data-model-id={modelOption.id}
+                                    aria-label={modelOption.label || modelOption.id}
+                                    onMouseEnter={() => setPreviewModel({ provider: modelOption.provider, id: modelOption.id })}
+                                    onClick={() => selectModel(modelOption.provider, modelOption.id)}
+                                  >
+                                    <button
+                                      type="button"
+                                      class="model-item-select"
+                                      aria-pressed={isSelected()}
+                                      onFocus={() => setPreviewModel({ provider: modelOption.provider, id: modelOption.id })}
+                                      title={`${modelOption.provider}/${modelOption.id}${modelOption.context_window ? ` · ${Math.round(modelOption.context_window / 1024)}k context` : ""}`}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "ArrowRight") {
+                                          e.preventDefault();
+                                          setPreviewModel({ provider: modelOption.provider, id: modelOption.id });
+                                          focusEffortOption();
+                                        }
+                                      }}
+                                    >
+                                      <div class="model-item-row-info">
+                                        <span class="model-item-row-name">
+                                          {modelOption.label || modelOption.id}
+                                        </span>
+                                        <Show when={modelOption.reasoning_effort_levels?.length}>
+                                          <span class="model-item-row-effort">
+                                            {effortLabel(isSelected() ? props.reasoningEffort : modelOption.reasoning_effort_default || "")}
+                                          </span>
+                                        </Show>
+                                      </div>
+                                      <Show when={isSelected()}>
+                                        <span class="model-item-row-check">
+                                          <Check size={14} />
+                                        </span>
+                                      </Show>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      class={`model-item-favorite ${isModelFavorite() ? "active" : ""}`}
+                                      aria-label={`${isModelFavorite() ? "Remove" : "Add"} favorite model: ${modelOption.provider}/${modelOption.id}`}
+                                      aria-pressed={isModelFavorite()}
+                                      title={isModelFavorite() ? "Remove favorite model" : "Add favorite model"}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setPreviewModel(undefined);
+                                        toggleFavorite(favorite);
+                                      }}
+                                    >
+                                      <Star size={14} fill={isModelFavorite() ? "currentColor" : "none"} />
+                                    </button>
                                     <Show when={modelOption.reasoning_effort_levels?.length}>
-                                      <span class="model-item-row-effort">
-                                        {effortLabel(isSelected() ? props.reasoningEffort : modelOption.reasoning_effort_default || "")}
-                                      </span>
+                                      <button
+                                        type="button"
+                                        class="model-item-effort-trigger"
+                                        aria-label={`Choose effort for ${modelOption.label || modelOption.id}`}
+                                        aria-haspopup="menu"
+                                        onFocus={() => setPreviewModel({ provider: modelOption.provider, id: modelOption.id })}
+                                        aria-expanded={effortOpen() && effortTarget().provider === modelOption.provider && effortTarget().id === modelOption.id}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setPreviewModel({ provider: modelOption.provider, id: modelOption.id });
+                                          focusEffortOption();
+                                        }}
+                                        onKeyDown={(event) => event.stopPropagation()}
+                                      ><ChevronRight size={13} /></button>
                                     </Show>
                                   </div>
-                                  <Show when={isSelected()}>
-                                    <span class="model-item-row-check">
-                                      <Check size={14} />
-                                    </span>
-                                  </Show>
-                                </button>
-                                <button
-                                  type="button"
-                                  class={`model-item-favorite ${isModelFavorite() ? "active" : ""}`}
-                                  aria-label={`${isModelFavorite() ? "Remove" : "Add"} favorite model: ${modelOption.provider}/${modelOption.id}`}
-                                  aria-pressed={isModelFavorite()}
-                                  title={isModelFavorite() ? "Remove favorite model" : "Add favorite model"}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    setPreviewModel(undefined);
-                                    toggleFavorite(favorite);
-                                  }}
-                                >
-                                  <Star size={14} fill={isModelFavorite() ? "currentColor" : "none"} />
-                                </button>
-                                <Show when={modelOption.reasoning_effort_levels?.length}>
-                                  <button
-                                    type="button"
-                                    class="model-item-effort-trigger"
-                                    aria-label={`Choose effort for ${modelOption.label || modelOption.id}`}
-                                    aria-haspopup="menu"
-                                    onFocus={() => setPreviewModel({ provider: modelOption.provider, id: modelOption.id })}
-                                    aria-expanded={effortOpen() && effortTarget().provider === modelOption.provider && effortTarget().id === modelOption.id}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      setPreviewModel({ provider: modelOption.provider, id: modelOption.id });
-                                      focusEffortOption();
-                                    }}
-                                    onKeyDown={(event) => event.stopPropagation()}
-                                  ><ChevronRight size={13} /></button>
+                                );
+                              }}
+                            </For>
+                          </div>
+                        )}
+                      </For>
+
+                      <Show when={searchQuery().trim() && !hasExactMatch()}>
+                        <div
+                          class="model-item-row model-item-custom"
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => {
+                            const query = searchQuery().trim();
+                            const slashIdx = query.indexOf("/");
+                            const p = slashIdx > 0 ? query.slice(0, slashIdx).trim() : resolvedSelection().provider;
+                            const m = slashIdx > 0 ? query.slice(slashIdx + 1).trim() : query;
+                            selectModel(p, m, true);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              event.currentTarget.click();
+                            }
+                          }}
+                        >
+                          <div class="model-item-row-info">
+                            <span class="model-item-row-name">Use "{searchQuery().trim()}"</span>
+                            <span class="model-item-row-desc">Custom model identifier</span>
+                          </div>
+                        </div>
+                      </Show>
+                      <Show when={filteredModelGroups().length === 0 && !searchQuery().trim()}>
+                        <p class="model-effort-unavailable">No models available.</p>
+                      </Show>
+                    </div>
+                  </div>
+                }
+              >
+                <div class="agent-model-column agent-model-models-col">
+                  <div class="agent-model-search-wrap">
+                    <Search size={13} class="agent-model-search-icon" />
+                    <input
+                      ref={searchInputRef}
+                      class="agent-model-search-input"
+                      type="text"
+                      placeholder="Search models..."
+                      value={searchQuery()}
+                      onInput={(e) => {
+                        setSearchQuery(e.currentTarget.value);
+                        const first = filteredAcpModels()[0];
+                        if (first) setPreviewAcpModel(first.value);
+                      }}
+                    />
+                    <Show when={searchQuery()}>
+                      <button
+                        class="agent-model-search-clear"
+                        type="button"
+                        aria-label="Clear model search"
+                        onClick={() => {
+                          setSearchQuery("");
+                          setPreviewAcpModel(currentAcpModelValue());
+                          searchInputRef?.focus();
+                        }}
+                      >
+                        <X size={12} />
+                      </button>
+                    </Show>
+                  </div>
+
+                  <div class="agent-model-list">
+                    <For each={filteredAcpModels()} fallback={<p class="model-effort-unavailable">No models available.</p>}>
+                      {(modelItem) => {
+                        const isSelected = () => currentAcpModelValue() === modelItem.value;
+                        const isPreviewed = () => (previewAcpModel() || currentAcpModelValue()) === modelItem.value;
+                        return (
+                          <div
+                            class={`model-item-row ${isSelected() ? "selected" : ""} ${isPreviewed() ? "is-previewed" : ""}`}
+                            role="group"
+                            data-model-id={modelItem.value}
+                            aria-label={modelItem.name}
+                            onMouseEnter={() => setPreviewAcpModel(modelItem.value)}
+                            onClick={() => selectAcpModel(modelItem.value)}
+                          >
+                            <button
+                              type="button"
+                              class="model-item-select"
+                              aria-pressed={isSelected()}
+                              onFocus={() => setPreviewAcpModel(modelItem.value)}
+                              title={modelItem.name}
+                              onKeyDown={(e) => {
+                                if (e.key === "ArrowRight" && acpThinkingOption()?.options.length) {
+                                  e.preventDefault();
+                                  setPreviewAcpModel(modelItem.value);
+                                  focusEffortOption();
+                                }
+                              }}
+                            >
+                              <div class="model-item-row-info">
+                                <span class="model-item-row-name">
+                                  {modelItem.name}
+                                </span>
+                                <Show when={acpThinkingLabel()}>
+                                  <span class="model-item-row-effort">
+                                    {acpThinkingLabel()}
+                                  </span>
                                 </Show>
                               </div>
-                            );
-                          }}
-                        </For>
-                      </div>
-                    )}
-                  </For>
-
-                  <Show when={searchQuery().trim() && !hasExactMatch()}>
-                    <div
-                      class="model-item-row model-item-custom"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => {
-                        const query = searchQuery().trim();
-                        const slashIdx = query.indexOf("/");
-                        const p = slashIdx > 0 ? query.slice(0, slashIdx).trim() : resolvedSelection().provider;
-                        const m = slashIdx > 0 ? query.slice(slashIdx + 1).trim() : query;
-                        selectModel(p, m, true);
+                              <Show when={isSelected()}>
+                                <span class="model-item-row-check">
+                                  <Check size={14} />
+                                </span>
+                              </Show>
+                            </button>
+                            <Show when={acpThinkingOption()?.options.length}>
+                              <button
+                                type="button"
+                                class="model-item-effort-trigger"
+                                aria-label="Thinking level options"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setPreviewAcpModel(modelItem.value);
+                                  focusEffortOption();
+                                }}
+                                onKeyDown={(event) => event.stopPropagation()}
+                              >
+                                <ChevronRight size={13} />
+                              </button>
+                            </Show>
+                          </div>
+                        );
                       }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          event.currentTarget.click();
-                        }
-                      }}
-                    >
-                      <div class="model-item-row-info">
-                        <span class="model-item-row-name">Use "{searchQuery().trim()}"</span>
-                        <span class="model-item-row-desc">Custom model identifier</span>
-                      </div>
-                    </div>
-                  </Show>
-                  <Show when={filteredModelGroups().length === 0 && !searchQuery().trim()}>
-                    <p class="model-effort-unavailable">No models available.</p>
-                  </Show>
+                    </For>
+                  </div>
                 </div>
-              </div>
+              </Show>
             </Show>
           </div>
         </div>
         <Show when={effortOpen()}>
           <div ref={effortMenuRef} class="model-effort-panel" role="group" aria-label="Reasoning effort"
             style={{ top: `${effortPos().top}px`, left: `${effortPos().left}px`, width: `${effortPos().width}px` }}>
-            <div class="model-effort-heading">Effort</div>
+            <div class="model-effort-heading">{effortTarget().name}</div>
             <div class="model-effort-options" role="menu" aria-label="Reasoning effort"
               onKeyDown={(event) => {
                 const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button"));
@@ -615,17 +865,31 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
               <Show when={effortTarget().levels.length} fallback={
                 <p class="model-effort-unavailable">No configurable effort for this model.</p>
               }>
-                <For each={["", ...effortTarget().levels]}>
-                  {(level) => (
-                    <button type="button" class="model-effort-option" role="menuitemradio"
-                      aria-checked={effortTarget().effort === level}
-                      title={!level && effortTarget().defaultEffort ? `Model default: ${effortLabel(effortTarget().defaultEffort!)}` : undefined}
-                      onClick={() => selectEffort(level)}>
-                      <span>{effortLabel(level)}</span>
-                      <Show when={effortTarget().effort === level}><Check size={13} /></Show>
-                    </button>
-                  )}
-                </For>
+                <Show when={isAcp()} fallback={
+                  <For each={["", ...effortTarget().levels]}>
+                    {(level) => (
+                      <button type="button" class="model-effort-option" role="menuitemradio"
+                        aria-checked={effortTarget().effort === level}
+                        title={!level && effortTarget().defaultEffort ? `Model default: ${effortLabel(effortTarget().defaultEffort!)}` : undefined}
+                        onClick={() => selectEffort(level)}>
+                        <span>{effortLabel(level)}</span>
+                        <Show when={effortTarget().effort === level}><Check size={13} /></Show>
+                      </button>
+                    )}
+                  </For>
+                }>
+                  <For each={acpThinkingOption()?.options || []}>
+                    {(opt) => (
+                      <button type="button" class="model-effort-option" role="menuitemradio"
+                        aria-checked={effortTarget().effort === opt.value}
+                        title={opt.value === effortTarget().defaultEffort ? `Default: ${opt.name}` : undefined}
+                        onClick={() => selectEffort(opt.value)}>
+                        <span>{opt.name}</span>
+                        <Show when={effortTarget().effort === opt.value}><Check size={13} /></Show>
+                      </button>
+                    )}
+                  </For>
+                </Show>
               </Show>
             </div>
             <div class="model-effort-divider" role="separator" />
