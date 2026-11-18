@@ -8,8 +8,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from agent.delivery.http.dashboard.routes.helpers.deps import get_app_container
-from agent.modules.acp import AGENT_DEFINITIONS, ANTIGRAVITY_CLI_AGENT_ID, get_acp_auth_manager
-from agent.modules.acp.launcher import cli_details, normalize_agent_name
+from agent.modules.acp import (
+    AGENT_DEFINITIONS,
+    ANTIGRAVITY_CLI_AGENT_ID,
+    cli_details,
+    get_acp_auth_manager,
+    normalize_agent_name,
+)
 from agent.modules.admin_auth import get_current_admin
 
 

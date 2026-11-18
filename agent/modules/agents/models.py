@@ -73,7 +73,7 @@ class AcpAgentSettings(BaseModel):
     @field_validator("tools")
     @classmethod
     def normalize_tools(cls, value: list[str] | None) -> list[str] | None:
-        from agent.modules.acp.native_tools import normalize_native_tools
+        from agent.modules.acp import normalize_native_tools
 
         return normalize_native_tools(value)
 

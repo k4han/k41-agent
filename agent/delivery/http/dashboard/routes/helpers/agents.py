@@ -190,7 +190,7 @@ async def agent_workflows_payload() -> dict[str, Any]:
 
 
 async def agent_tools_payload() -> dict[str, Any]:
-    from agent.modules.acp.native_tools import native_tools_payload
+    from agent.modules.acp import native_tools_payload
 
     global _agent_tools_cache
 
