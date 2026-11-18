@@ -48,6 +48,7 @@ def test_job_returns_immediately_rejects_duplicates_and_runs_custom_path_without
     assert result["id"] == job["id"]
     assert result["state"] == "succeeded"
     assert result["configured_executable_path"] == path
+    assert result["checked_executable_path"] == path
     assert "Browser is ready" in result["output"]
 
 
@@ -69,9 +70,57 @@ def test_install_and_repair_verify_configured_override_and_do_not_hide_failed_ch
     assert commands[0][-len(suffix) - 1] == "browser"
     assert commands[1][-3:] == ["check", "--executable-path", "/wrong/chrome"]
     assert result["state"] == "failed"
+    assert result["checked_executable_path"] == "/wrong/chrome"
     assert "Installed system Chrome" in result["output"]
     assert "does not exist" in result["output"]
     assert result["error"]
+
+
+def test_repair_checks_runtime_override_after_installation(monkeypatch, tmp_path):
+    override = tmp_path / "chrome"
+    override.touch(mode=0o700)
+    monkeypatch.setenv("CHROME_PATH", str(override))
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        if command[-2:] == ["install", "--force"]:
+            return SimpleNamespace(returncode=0, stdout="System Chrome verified\n")
+        return SimpleNamespace(returncode=1, stdout="Selected Chrome did not start\n")
+
+    monkeypatch.setattr(browser_setup.subprocess, "run", run)
+    manager = browser_setup.BrowserSetupManager()
+    manager.start("repair")
+    result = finished(manager)
+    assert commands[0][-2:] == ["install", "--force"]
+    assert commands[1][-3:] == ["check", "--executable-path", str(override)]
+    assert result["state"] == "failed"
+    assert result["checked_executable_path"] == str(override)
+    assert "Selected Chrome did not start" in result["output"]
+
+
+def test_install_resolves_auto_discovery_after_binary_becomes_available(monkeypatch):
+    installed = False
+
+    def find():
+        assert installed
+        return "/new/chrome"
+
+    def run(command, **kwargs):
+        nonlocal installed
+        if command[-1] == "install":
+            installed = True
+        else:
+            assert command[-3:] == ["check", "--executable-path", "/new/chrome"]
+        return SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr(browser_setup, "find_browser", find)
+    monkeypatch.setattr(browser_setup.subprocess, "run", run)
+    manager = browser_setup.BrowserSetupManager()
+    manager.start("install")
+    result = finished(manager)
+    assert result["state"] == "succeeded"
+    assert result["checked_executable_path"] == "/new/chrome"
 
 
 def test_install_failure_retains_bounded_output_and_allows_retry(monkeypatch):
@@ -82,6 +131,7 @@ def test_install_failure_retains_bounded_output_and_allows_retry(monkeypatch):
     manager.start("install")
     result = finished(manager)
     assert result["state"] == "failed"
+    assert "checked_executable_path" not in result
     assert len(result["output"]) == 32768
     assert result["output"].endswith("sudo: a password is required")
     manager.start("check")

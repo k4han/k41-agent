@@ -21,6 +21,7 @@ from agent.shared.config import (
     PLATFORM_MANAGED_ENV_VARS,
     PROVIDER_SETTING_FIELD_ORDER,
     ConfigService,
+    get_setting_metadata,
     is_platform_managed_key,
     is_runtime_key,
 )
@@ -319,13 +320,15 @@ def normalize_setting_value(key: str, value: Any | None) -> Any | None:
         if not isinstance(value, bool):
             raise HTTPException(400, "Decision routing telemetry must be a boolean.")
         return value
-    if key in {"browser.stream_quality", "browser.stream_max_width", "browser.stream_max_height"}:
-        if value is None:
-            return None
-        maximum = 100 if key == "browser.stream_quality" else 8192
-        if type(value) is not int or not 1 <= value <= maximum:
-            raise HTTPException(400, f"{key} must be an integer between 1 and {maximum}.")
-        return value
+    if key.startswith("browser.") and value is not None:
+        metadata = get_setting_metadata(key)
+        if metadata["type"] == "number":
+            minimum = metadata["min"]
+            maximum = metadata.get("max")
+            if type(value) is not int or value < minimum or (maximum is not None and value > maximum):
+                bounds = f"between {minimum} and {maximum}" if maximum is not None else f"of at least {minimum}"
+                raise HTTPException(400, f"{key} must be an integer {bounds}.")
+            return value
     if key == "skills.local_execution_mode":
         if not isinstance(value, str) or value not in {"snapshot", "source"}:
             raise HTTPException(400, "Local skill execution must be snapshot or source.")

@@ -1,4 +1,4 @@
-import { createComputed, createMemo, createSignal, For, type JSX, Show, untrack } from "solid-js";
+import { createComputed, createMemo, createSignal, createUniqueId, For, type JSX, Show, untrack } from "solid-js";
 import { createStore, reconcile, unwrap } from "solid-js/store";
 import { ArrowRight, Check, RotateCcw, TriangleAlert } from "lucide-solid";
 
@@ -291,8 +291,10 @@ export function useSettingsData<T extends SettingsPayload = SettingsPayload>(end
 export function SettingControl(props: {
   info: SettingInfo;
   value: unknown;
+  ariaLabel?: string;
   onChange: (value: unknown) => void;
 }) {
+  const inputId = createUniqueId();
   if (props.info.key.startsWith("llm.providers.") && props.info.key.endsWith(".model_profiles")) {
     return <FormTextarea
       value={typeof props.value === "string" ? props.value : JSON.stringify(props.value ?? {}, null, 2)}
@@ -365,6 +367,9 @@ export function SettingControl(props: {
               when={props.info.key.endsWith(".models")}
               fallback={
                 <FormInput
+                  id={inputId}
+                  name={props.info.key}
+                  ariaLabel={props.ariaLabel || props.info.label || props.info.key}
                   value={displayDraft(props.value)}
                   onChange={(value) => props.onChange(value)}
                   type={controlInputType(props.info) as any}
@@ -515,6 +520,7 @@ export function SettingRow(props: {
               <SettingControl
                 info={{ ...props.info, key: props.settingKey }}
                 value={props.draft}
+                ariaLabel={label()}
                 onChange={props.onChange}
               />
             )}
@@ -635,6 +641,7 @@ export function SettingsConfirmDialog(props: {
 export function SettingsPendingBar(props: {
   count: number;
   saving?: boolean;
+  disabled?: boolean;
   restartRequired?: boolean;
   onDiscard: () => void;
   onSave: () => void;
@@ -654,10 +661,10 @@ export function SettingsPendingBar(props: {
           </Show>
         </div>
         <div class="settings-pending-actions">
-          <button class="btn btn-sm" type="button" disabled={props.saving} onClick={props.onDiscard}>
+          <button class="btn btn-sm" type="button" disabled={props.saving || props.disabled} onClick={props.onDiscard}>
             Discard
           </button>
-          <button class="btn btn-primary btn-sm" type="button" disabled={props.saving} onClick={props.onSave}>
+          <button class="btn btn-primary btn-sm" type="button" disabled={props.saving || props.disabled} onClick={props.onSave}>
             <Check size={14} />
             {props.saving ? "Saving…" : "Save Changes"}
           </button>

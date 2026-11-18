@@ -16,17 +16,19 @@ assert.ok(executable, 'Set BROWSER_EXECUTABLE to run browser setup UI checks.');
 const settings = Object.fromEntries([
   ['executable_path', 'Chrome executable', '', 'text'],
   ['storage_root', 'Browser storage root', '', 'text'],
-  ['idle_ttl_seconds', 'Browser idle timeout (seconds)', 600, 'number'],
-  ['operation_timeout_seconds', 'Browser operation timeout (seconds)', 75, 'number'],
+  ['idle_ttl_seconds', 'Browser idle timeout (seconds)', 600, 'number', { min: 1, step: 1 }],
+  ['operation_timeout_seconds', 'Browser operation timeout (seconds)', 75, 'number', { min: 75, max: 300, step: 1 }],
   ['stream_quality', 'Live image quality', 50, 'number'],
   ['stream_max_width', 'Maximum live image width', 1280, 'number'],
   ['stream_max_height', 'Maximum live image height', 720, 'number'],
-].map(([suffix, label, value, input_type]) => [`browser.${suffix}`, {
+].map(([suffix, label, value, input_type, constraints]) => [`browser.${suffix}`, {
   key: `browser.${suffix}`, label, value, input_type, source: 'default', category: 'browser',
-  description: label, restart_required: suffix === 'storage_root',
+  description: label, restart_required: suffix === 'storage_root', ...constraints,
 }]));
 let installed = false, supported = true, hold = true, failNext = false, launchError = false;
 let job = null, probes = 0;
+const originalDetectedPath = `/opt/${'a'.repeat(230)}/chrome`;
+let detectedPath = originalDetectedPath;
 const actions = [], saves = [];
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -62,11 +64,14 @@ const server = http.createServer(async (req, res) => {
         job.state = failNext ? 'failed' : 'succeeded';
         job.error = failNext ? 'Package installation failed' : null;
         job.output = failNext ? 'sudo: a password is required' : 'Browser is ready for browser tools.';
-        if (!failNext) installed = true;
+        if (!failNext) {
+          installed = true;
+          job.checked_executable_path = job.configured_executable_path || detectedPath;
+        }
       }
       res.end(JSON.stringify({ installed, installation_supported: supported,
         installation_unavailable_reason: supported ? null : 'Automatic installation supports Debian/Ubuntu x86_64 and ARM64.',
-        executable_path: settings['browser.executable_path'].value || (installed ? '/usr/bin/google-chrome' : null),
+        executable_path: settings['browser.executable_path'].value || (installed ? detectedPath : null),
         configured_executable_path: settings['browser.executable_path'].value, job })); return;
     }
     if (url.pathname === '/dashboard-api/system/version') {
@@ -132,6 +137,9 @@ try {
   };
   const button = label => `Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === ${JSON.stringify(label)})`;
   const status = text => js(`document.querySelector('.browser-setup-status')?.textContent.includes(${JSON.stringify(text)})`);
+  const changeInput = (selector, value) => js(`(() => { const input = document.querySelector(${JSON.stringify(selector)}); input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  const slider = (id, value) => changeInput(`#${id}`, value);
+  const operationTimeout = 'input[name="browser.operation_timeout_seconds"]';
   const open = async () => {
     await call('Page.navigate', { url: base + '/settings/browser' });
     await until(() => js(`document.querySelectorAll('.browser-settings-fields input').length === 6`), 'browser settings');
@@ -139,6 +147,20 @@ try {
   await open();
   await until(() => status('Browser not installed'), 'initial state');
   assert.equal(await js(`!!document.querySelector('a[href="/settings/browser"]')`), true);
+  const names = await js(`Array.from(document.querySelectorAll('.browser-settings-fields input:not([type="range"])'), input => ({ name: input.name, label: input.getAttribute('aria-label'), id: input.id }))`);
+  assert.equal(new Set(names.map(input => input.id)).size, names.length);
+  for (const input of names) {
+    assert.ok(input.id);
+    assert.equal(input.label, settings[input.name].label);
+  }
+  for (const invalid of [10, 301, 75.5]) {
+    await changeInput(operationTimeout, invalid);
+    await js(`${button('Save Changes')}.click()`);
+    assert.equal(await js(`document.activeElement.matches(${JSON.stringify(operationTimeout)}) && !document.activeElement.validity.valid`), true);
+    assert.equal(saves.length, 0, 'An invalid value must block the save');
+  }
+  await js(`${button('Discard')}.click()`);
+
   await js(`(() => { const button = ${button('Install browser')}; button.click(); button.click(); })()`);
   await until(() => status('Installing Chrome'), 'background installation');
   assert.deepEqual(actions, ['install']);
@@ -147,6 +169,14 @@ try {
   await until(() => status('Installing Chrome'), 'operation survives reload');
   hold = false;
   await until(() => status('Browser ready'), 'installation success');
+  detectedPath = '/opt/chromium/chrome';
+  await js(`${button('Refresh')}.click()`);
+  await until(() => status('Check required'), 'auto-discovered executable changed');
+  assert.equal(await js(`document.querySelector('.browser-setup-result summary').textContent.trim()`), `Previous operation for ${originalDetectedPath}`);
+  await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await until(() => js('window.innerWidth === 390'), 'mobile viewport');
+  assert.equal(await js('document.documentElement.scrollWidth <= window.innerWidth'), true, 'A long executable path must wrap on mobile');
+  await call('Emulation.clearDeviceMetricsOverride');
 
   hold = true; failNext = true;
   await js(`${button('Reinstall browser')}.click()`);
@@ -156,12 +186,16 @@ try {
   assert.equal(await js(`document.querySelector('.browser-setup-output')?.textContent.includes('sudo: a password is required')`), true);
   assert.equal(await js(`document.querySelector('.browser-setup-result details').open`), true);
 
-  await js(`(() => { const input = Array.from(document.querySelectorAll('.setting-row')).find(row => row.textContent.includes('Chrome executable')).querySelector('input'); input.value = '/custom/chrome'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await changeInput('input[name="browser.executable_path"]', '/custom/chrome');
   await until(() => js(`!!document.querySelector('.settings-pending-bar')`), 'draft path');
   assert.equal(await js(`${button('Check browser')}.disabled`), true);
   await js(`${button('Save Changes')}.click()`);
   await until(() => js(`!document.querySelector('.settings-pending-bar')`), 'save path');
   assert.equal(saves.at(-1)['browser.executable_path'], '/custom/chrome');
+  await until(() => status('Check required'), 'saved path requires a new check');
+  assert.equal(await js(`document.querySelector('.browser-setup-result details').open`), false);
+  assert.equal(await js(`!!document.querySelector('.browser-setup-result [role="alert"]')`), false);
+  assert.equal(await js(`document.querySelector('.browser-setup-result summary').textContent.trim()`), 'Previous operation for automatic discovery');
   failNext = false; hold = true;
   await js(`${button('Check browser')}.click()`);
   await until(() => status('Checking browser'), 'check starts');
@@ -184,7 +218,21 @@ try {
   await js(`${button('Refresh')}.click()`);
   await until(() => js(`${button('Reinstall browser')}.disabled`), 'unsupported installation disabled');
   assert.equal(await js(`${button('Check browser')}.disabled`), false);
-  const slider = async (id, value) => js(`(() => { const input = document.getElementById(${JSON.stringify(id)}); input.value = ${value}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+
+  settings['browser.operation_timeout_seconds'].value = 10;
+  await open();
+  assert.equal(await js(`document.querySelector(${JSON.stringify(operationTimeout)}).validity.rangeUnderflow`), true);
+  await slider('browser-stream-quality', 51);
+  await until(() => js(`${button('Check browser')}?.disabled === false`), 'check allowed with a viewer-only draft');
+  hold = true;
+  await js(`${button('Check browser')}.click()`);
+  await until(() => status('Checking browser'), 'check starts with an unsaved viewer change');
+  assert.equal(await js(`${button('Save Changes')}.disabled`), true);
+  hold = false;
+  await until(() => status('Browser ready'), 'check finishes with a viewer-only draft');
+  assert.equal(await js(`document.getElementById('browser-stream-quality').value`), '51');
+  assert.equal(await js(`${button('Save Changes')}.disabled`), false);
+
   assert.equal(await js(`document.querySelector('output[for="browser-stream-size"]').textContent`), '1280 × 720');
   for (const [index, size] of ['800 × 600', '1024 × 600', '1280 × 720', '1600 × 900', '1920 × 1080'].entries()) {
     await slider('browser-stream-size', index);
@@ -194,6 +242,7 @@ try {
   await js(`${button('Save Changes')}.click()`);
   await until(() => js(`!document.querySelector('.settings-pending-bar')`), 'save viewer settings');
   assert.equal(saves.at(-1)['browser.stream_quality'], 100);
+  assert.equal(saves.at(-1)['browser.operation_timeout_seconds'], undefined, 'An unchanged legacy value must not block saving viewer settings');
   assert.equal(saves.at(-1)['browser.stream_max_width'], 1920);
   assert.equal(saves.at(-1)['browser.stream_max_height'], 1080);
   await open();
@@ -219,7 +268,7 @@ try {
   await delay(300);
   assert.equal(await js('document.documentElement.scrollWidth <= window.innerWidth'), true, 'Mobile page must not overflow horizontally');
   assert.deepEqual(exceptions, []);
-  console.log('PASS: browser setup, viewer sliders, all size presets, save/reload, discard, undo, defaults, custom dimensions and mobile layout.');
+  console.log('PASS: browser setup, executable changes, validation, accessible labels, viewer drafts, presets, save/reload, discard, undo, defaults, custom dimensions and mobile layout.');
 } finally {
   await Promise.race([call?.('Browser.close').catch(() => {}), delay(2000)]);
   ws?.close(); browser.kill();

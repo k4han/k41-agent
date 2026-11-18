@@ -8,6 +8,7 @@ import { SettingsLayout } from "./SettingsLayout";
 import { SettingRow, SettingsPendingBar, SettingsSection, useSettingsData } from "./shared";
 
 type SetupAction = "install" | "repair" | "check";
+const EXECUTABLE_PATH = "browser.executable_path";
 const STREAM_QUALITY = "browser.stream_quality";
 const STREAM_WIDTH = "browser.stream_max_width";
 const STREAM_HEIGHT = "browser.stream_max_height";
@@ -18,6 +19,7 @@ type SetupJob = {
   action: SetupAction;
   state: "running" | "succeeded" | "failed";
   configured_executable_path: string;
+  checked_executable_path?: string | null;
   output: string;
   error: string | null;
 };
@@ -40,7 +42,16 @@ export function BrowserPage() {
   const [saving, setSaving] = createSignal(false);
   const [refreshing, setRefreshing] = createSignal(false);
   const busy = () => starting() || setup()?.job?.state === "running";
-  const actionsDisabled = () => busy() || saving() || !setup() || pendingChanges().length > 0;
+  const executablePathDirty = () => pendingChanges().some(change => change.key === EXECUTABLE_PATH);
+  const actionsDisabled = () => busy() || saving() || !setup() || executablePathDirty();
+  const previousJob = createMemo(() => {
+    const value = setup();
+    const job = value?.job;
+    if (!job || job.state === "running") return false;
+    return job.configured_executable_path !== value.configured_executable_path ||
+      (job.checked_executable_path !== undefined && job.checked_executable_path !== value.executable_path);
+  });
+  const currentJobFailed = () => setup()?.job?.state === "failed" && !previousJob();
   const streamWidth = () => Number(drafts()[STREAM_WIDTH] ?? 1280);
   const streamHeight = () => Number(drafts()[STREAM_HEIGHT] ?? 720);
   const streamSizeIndex = createMemo(() => STREAM_SIZES.findIndex(([width, height]) => width === streamWidth() && height === streamHeight()));
@@ -60,6 +71,7 @@ export function BrowserPage() {
   let disposed = false;
   let revision = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let configurationFields: HTMLFieldSetElement | undefined;
 
   const refreshSetup = async () => {
     clearTimeout(timer);
@@ -107,6 +119,15 @@ export function BrowserPage() {
   };
 
   const save = async () => {
+    if (saving() || busy()) return;
+    const changedKeys = new Set(pendingChanges().map(change => change.key));
+    if (!changedKeys.size) return;
+    const invalid = Array.from(configurationFields?.querySelectorAll<HTMLInputElement>('input[type="number"]') ?? [])
+      .find(input => changedKeys.has(input.name) && !input.validity.valid);
+    if (invalid) {
+      invalid.reportValidity();
+      return;
+    }
     setSaving(true);
     try {
       await saveChanges();
@@ -120,11 +141,13 @@ export function BrowserPage() {
     if (value.job?.state === "running") {
       return value.job.action === "check" ? "Checking browser…" : "Installing Chrome…";
     }
-    if (value.job?.state === "failed") return "Last operation failed";
-    if (value.installed && value.job?.state === "succeeded" && value.job.configured_executable_path === value.configured_executable_path) {
+    if (currentJobFailed()) return "Last operation failed";
+    if (!value.installed) return "Browser not installed";
+    if (previousJob()) return "Check required";
+    if (value.job?.state === "succeeded" && value.executable_path && value.job.checked_executable_path === value.executable_path) {
       return "Browser ready";
     }
-    return value.installed ? "Browser detected" : "Browser not installed";
+    return "Browser detected";
   });
 
   onMount(() => { void load(); void refreshSetup(); });
@@ -147,7 +170,7 @@ export function BrowserPage() {
           </div>
           <div class="panel-body stack">
             <div class="browser-setup-status" role="status" aria-live="polite">
-              <span class={`badge ${setup()?.job?.state === "failed" ? "badge-danger" : ""}`}>{statusLabel()}</span>
+              <span class={`badge ${currentJobFailed() ? "badge-danger" : ""}`}>{statusLabel()}</span>
               <Show when={setup()?.executable_path}>
                 <code class="browser-setup-path">{setup()?.executable_path}</code>
               </Show>
@@ -175,19 +198,32 @@ export function BrowserPage() {
                   </button>
                 </Show>
               </div>
-              <Show when={pendingChanges().length > 0}>
-                <p class="hint">Save or discard your configuration changes before checking or installing the browser.</p>
+              <Show when={executablePathDirty()}>
+                <p class="hint">Save or undo the Chrome executable change before checking or installing the browser.</p>
               </Show>
               <Show when={value().job}>{(job) =>
                 <div class="browser-setup-result" aria-live="polite">
-                  <Show when={job().state === "running"}>
-                    <p class="hint">This may take a few minutes. You can leave this page and return to view the result.</p>
-                  </Show>
-                  <Show when={job().error}><p class="browser-setup-error" role="alert">{job().error}</p></Show>
-                  <Show when={job().output}>
-                    <details open={job().state === "failed"}>
-                      <summary>Operation output</summary>
-                      <pre class="browser-setup-output">{job().output}</pre>
+                  <Show when={previousJob()} fallback={<>
+                    <Show when={job().state === "running"}>
+                      <p class="hint">This may take a few minutes. You can leave this page and return to view the result.</p>
+                    </Show>
+                    <Show when={job().error}><p class="browser-setup-error" role="alert">{job().error}</p></Show>
+                    <Show when={job().output}>
+                      <details open={currentJobFailed()}>
+                        <summary>Operation output</summary>
+                        <pre class="browser-setup-output">{job().output}</pre>
+                      </details>
+                    </Show>
+                  </>}>
+                    <details>
+                      <summary>
+                        Previous operation for{" "}
+                        <Show when={job().checked_executable_path || job().configured_executable_path} fallback="automatic discovery">
+                          {path => <code class="browser-setup-path">{path()}</code>}
+                        </Show>
+                      </summary>
+                      <Show when={job().error}><p class="browser-setup-error">{job().error}</p></Show>
+                      <Show when={job().output}><pre class="browser-setup-output">{job().output}</pre></Show>
                     </details>
                   </Show>
                 </div>
@@ -245,18 +281,19 @@ export function BrowserPage() {
             </fieldset>
           </SettingsSection>
           <SettingsSection title="Browser configuration">
-            <fieldset class="browser-settings-fields" disabled={busy() || saving()}>
+            <fieldset ref={configurationFields} class="browser-settings-fields" disabled={busy() || saving()}>
               <div class="settings-list">
                 <For each={Object.entries(payload().settings).filter(([key]) => !STREAM_KEYS.has(key))}>{([key, info]) =>
                   <SettingRow settingKey={key} info={info} draft={drafts()[key]}
                     dirty={pendingChanges().some(change => change.key === key)}
-                    onChange={value => setDraft(key, value)} onRestore={() => restoreDraft(key)} />
+                    onChange={value => setDraft(key, info.input_type === "number" && value === "" ? null : value)}
+                    onRestore={() => restoreDraft(key)} />
                 }</For>
               </div>
             </fieldset>
           </SettingsSection>
           <p class="hint">Leave the executable path empty to discover Chrome automatically. Path changes apply to new sessions; changing browser storage requires a server restart.</p>
-          <SettingsPendingBar count={pendingChanges().length} saving={saving() || busy()}
+          <SettingsPendingBar count={pendingChanges().length} saving={saving()} disabled={busy()}
             restartRequired={pendingChanges().some(change => payload().settings[change.key]?.restart_required)}
             onDiscard={discardAll} onSave={() => void save()} />
         </>}</DataGate>

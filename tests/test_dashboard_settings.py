@@ -158,6 +158,35 @@ def test_browser_stream_settings_reject_invalid_updates(make_dashboard_client, k
     assert service.get("browser.stream_quality") == 50
 
 
+@pytest.mark.parametrize("key,valid,invalid", [
+    ("browser.operation_timeout_seconds", (75, 300), (10, 301)),
+    ("browser.idle_ttl_seconds", (1, 600), (0,)),
+    ("browser.handoff_timeout_seconds", (1, 1800), (-1,)),
+    ("browser.max_sessions_per_owner", (1, 16), (0,)),
+    ("browser.max_tabs_per_session", (1, 16), (0, 2.9)),
+])
+def test_browser_runtime_settings_validate_before_saving(make_dashboard_client, key, valid, invalid):
+    service, _ = _db_config_service("")
+    client = make_dashboard_client(service)
+    default = service.get(key)
+
+    for value in (*invalid, True, "75"):
+        response = client.put(f"/settings/{key}", json={"value": value})
+        assert response.status_code == 400
+        assert "must be an integer" in response.json()["detail"]
+        response = client.put("/settings", json={"values": {"browser.stream_quality": 90, key: value}})
+        assert response.status_code == 400
+        assert service.get(key) == default
+        assert service.get("browser.stream_quality") == 50
+
+    assert client.put(f"/settings/{key}", json={"value": valid[0]}).status_code == 200
+    assert service.get(key) == valid[0]
+    assert client.put("/settings", json={"values": {key: valid[1]}}).status_code == 200
+    assert service.get(key) == valid[1]
+    assert client.put("/settings", json={"values": {key: None}}).status_code == 200
+    assert service.get(key) == default
+
+
 def test_model_profile_settings_save_validate_and_clear(make_dashboard_client) -> None:
     service, db_source = _db_config_service("llm: {default_model: ''}")
     client = make_dashboard_client(service)

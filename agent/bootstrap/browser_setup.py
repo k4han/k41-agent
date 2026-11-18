@@ -9,6 +9,7 @@ from threading import Lock, Thread
 from typing import Any, Literal
 from uuid import uuid4
 
+from agent.shared.infrastructure.browser import find_browser
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
 
 BrowserSetupAction = Literal["install", "repair", "check"]
@@ -51,28 +52,35 @@ class BrowserSetupManager:
         if executable.name.lower() == "pythonw.exe" and executable.with_name("python.exe").exists():
             executable = executable.with_name("python.exe")
         base = [str(executable), "-m", "agent.bootstrap.cli", "browser"]
-        command = [*base, "check", "--executable-path", executable_path] if action == "check" else [*base, "install"]
-        if action == "repair":
-            command.append("--force")
         output = ""
         error = None
+        checked: dict[str, str | None] = {}
+
+        def run(command: list[str]) -> int:
+            nonlocal output
+            result = subprocess.run(
+                command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", timeout=1800,
+                env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"},
+                **hidden_subprocess_kwargs(),
+            )
+            output = (output + (result.stdout or ""))[-32768:]
+            return result.returncode
+
         try:
-            commands = [command]
-            # A custom path overrides discovery in the runtime. Verify it too so
-            # installing a different system Chrome cannot hide a broken override.
-            if action != "check" and executable_path:
-                commands.append([*base, "check", "--executable-path", executable_path])
-            for current in commands:
-                result = subprocess.run(
-                    current, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, encoding="utf-8", errors="replace", timeout=1800,
-                    env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"},
-                    **hidden_subprocess_kwargs(),
-                )
-                output = (output + (result.stdout or ""))[-32768:]
-                if result.returncode:
-                    error = f"Browser {action} failed (exit {result.returncode}). See the operation output below."
-                    break
+            exit_code = 0
+            if action != "check":
+                command = [*base, "install"]
+                if action == "repair":
+                    command.append("--force")
+                exit_code = run(command)
+            if not exit_code:
+                # Installation can change discovery, and the runtime may prefer a different binary.
+                target = executable_path or find_browser()
+                checked["checked_executable_path"] = target
+                exit_code = run([*base, "check", "--executable-path", target or ""])
+            if exit_code:
+                error = f"Browser {action} failed (exit {exit_code}). See the operation output below."
         except subprocess.TimeoutExpired as exc:
             partial = exc.stdout or b""
             if isinstance(partial, bytes):
@@ -84,5 +92,5 @@ class BrowserSetupManager:
         with self._lock:
             self._job.update(
                 state="failed" if error else "succeeded", output=output,
-                error=error, finished_at=time.time(),
+                error=error, finished_at=time.time(), **checked,
             )
