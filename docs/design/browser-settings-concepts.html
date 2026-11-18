@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Kai Console · Browser settings concepts</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; background: light-dark(#f5f5f5, #0a0a0a); }
+    #browser-settings-concepts { width: min(100% - 32px, 1180px); margin: 24px auto; }
+    .concept-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 24px; margin-bottom: 14px; }
+    .concept-toolbar p { color: var(--kai-muted); font-size: 12px; }
+    .concept-picker { display: flex; flex-wrap: wrap; gap: 5px; }
+    #browser-settings-concepts .concept-picker [aria-pressed="true"] { border-color: var(--kai-accent); background: var(--kai-accent); color: var(--kai-accent-fg); }
+    @container (max-width: 740px) {
+      body #browser-settings-concepts .kai-surface { min-height: 0; }
+    }
+    @media (max-width: 500px) {
+      #browser-settings-concepts { width: calc(100% - 16px); margin: 12px auto; }
+    }
+  </style>
+</head>
+<body>
+<!-- Preview fragment start -->
+<style>
+  #browser-settings-concepts {
+    --kai-bg: light-dark(#fafafa, #0a0a0a);
+    --kai-surface: light-dark(#fff, #111);
+    --kai-surface-2: light-dark(#f5f5f5, #171717);
+    --kai-surface-3: light-dark(#ededed, #262626);
+    --kai-fg: light-dark(#0a0a0a, #fafafa);
+    --kai-muted: light-dark(#595959, #a3a3a3);
+    --kai-border: light-dark(#e5e5e5, rgb(255 255 255 / .1));
+    --kai-border-strong: light-dark(#d4d4d4, rgb(255 255 255 / .16));
+    --kai-accent: light-dark(#0a0a0a, #fff);
+    --kai-accent-fg: light-dark(#fff, #0a0a0a);
+    --kai-accent-hover: light-dark(#262626, #e5e5e5);
+    --kai-warning: light-dark(#b45309, #f59e0b);
+    --kai-shadow: 0 1px 2px rgb(0 0 0 / .04);
+    color: var(--kai-fg);
+    font: 400 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    text-align: start;
+    container-type: inline-size;
+  }
+  #browser-settings-concepts *, #browser-settings-concepts *::before, #browser-settings-concepts *::after { box-sizing: border-box; }
+  #browser-settings-concepts [hidden] { display: none !important; }
+  #browser-settings-concepts :is(h1, h2, h3, p) { margin: 0; font-family: inherit; }
+  #browser-settings-concepts h1 { font-size: 24px; line-height: 1.25; font-weight: 700; letter-spacing: -.025em; }
+  #browser-settings-concepts :is(h2, h3) { font-size: 14px; line-height: 1.4; font-weight: 700; letter-spacing: -.01em; }
+  #browser-settings-concepts :is(button, input, select) { font: inherit; color: inherit; }
+  #browser-settings-concepts :is(button, input, select, summary):focus-visible { outline: 2px solid var(--kai-accent); outline-offset: 2px; }
+  #browser-settings-concepts :is(button, summary, select, input[type="range"]) { cursor: pointer; }
+  #browser-settings-concepts button:disabled { cursor: not-allowed; opacity: .55; }
+  #browser-settings-concepts svg { display: block; width: 15px; height: 15px; flex: none; }
+  #browser-settings-concepts .kai-surface {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr);
+    min-height: 680px;
+    border: 1px solid var(--kai-border);
+    border-radius: 10px;
+    background: var(--kai-bg);
+    overflow: clip;
+  }
+  #browser-settings-concepts .kai-rail { padding: 6px 6px 12px; border-inline-end: 1px solid var(--kai-border); background: var(--kai-surface); }
+  #browser-settings-concepts .kai-rail-group { display: grid; justify-items: center; gap: 2px; padding-block: 5px; }
+  #browser-settings-concepts .kai-rail-group + .kai-rail-group { border-top: 1px solid var(--kai-border); }
+  #browser-settings-concepts .kai-rail-item, #browser-settings-concepts .kai-mark {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 30px;
+    border-radius: 8px;
+    color: var(--kai-muted);
+  }
+  #browser-settings-concepts .kai-mark { height: 36px; background: var(--kai-accent); color: var(--kai-accent-fg); }
+  #browser-settings-concepts .kai-rail-item[aria-current="page"] { background: var(--kai-surface-3); color: var(--kai-fg); }
+  #browser-settings-concepts .kai-topbar {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    padding: 0 22px;
+    gap: 8px;
+    border-bottom: 1px solid var(--kai-border);
+    background: var(--kai-surface);
+    color: var(--kai-muted);
+    font-size: 13px;
+  }
+  #browser-settings-concepts .kai-topbar svg { width: 12px; height: 12px; }
+  #browser-settings-concepts .kai-topbar strong { color: var(--kai-fg); font-weight: 650; }
+  #browser-settings-concepts .kai-content { display: grid; gap: 16px; padding: 18px 22px 24px; }
+  #browser-settings-concepts .kai-heading { display: grid; gap: 5px; }
+  #browser-settings-concepts .kai-hint { color: var(--kai-muted); font-size: 12px; overflow-wrap: anywhere; }
+  #browser-settings-concepts .kai-stack { display: grid; gap: 12px; align-content: start; min-width: 0; }
+  #browser-settings-concepts .kai-desk { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+  #browser-settings-concepts .kai-span { grid-column: 1 / -1; }
+  #browser-settings-concepts .kai-box { min-width: 0; border: 1px solid var(--kai-border); border-radius: 10px; background: var(--kai-surface); box-shadow: var(--kai-shadow); }
+  #browser-settings-concepts .kai-box-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    min-height: 46px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--kai-border);
+    border-radius: 9px 9px 0 0;
+    background: color-mix(in srgb, var(--kai-surface-2) 45%, var(--kai-surface));
+  }
+  #browser-settings-concepts .kai-box-top :is(h2, h3), #browser-settings-concepts .kai-action-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+  #browser-settings-concepts .kai-body { display: grid; gap: 12px; padding: 13px 14px; }
+  #browser-settings-concepts .kai-button {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 5px 9px;
+    border: 1px solid var(--kai-border);
+    border-radius: 8px;
+    background: var(--kai-surface);
+    color: var(--kai-fg);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+  }
+  #browser-settings-concepts .kai-button:not(:disabled):hover { background: var(--kai-surface-2); }
+  #browser-settings-concepts .kai-button-main { border-color: var(--kai-accent); background: var(--kai-accent); color: var(--kai-accent-fg); }
+  #browser-settings-concepts .kai-button-main:not(:disabled):hover { background: var(--kai-accent-hover); }
+  #browser-settings-concepts .kai-button-quiet { border-color: transparent; background: transparent; color: var(--kai-muted); }
+  #browser-settings-concepts .kai-field { display: grid; align-content: start; gap: 4px; min-width: 0; font-size: 13px; font-weight: 600; }
+  #browser-settings-concepts .kai-input {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    min-height: 34px;
+    padding: 6px 9px;
+    border: 1px solid var(--kai-border);
+    border-radius: 8px;
+    background: var(--kai-surface);
+    font-size: 13px;
+    font-weight: 400;
+  }
+  #browser-settings-concepts .kai-input::placeholder { color: var(--kai-muted); }
+  #browser-settings-concepts .kai-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+  #browser-settings-concepts .kai-create { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+  #browser-settings-concepts .kai-create .kai-button { min-height: 34px; }
+  #browser-settings-concepts .kai-profile-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; border-top: 1px solid var(--kai-border); padding-block: 9px; }
+  #browser-settings-concepts .kai-profile-row:last-child { padding-bottom: 0; }
+  #browser-settings-concepts .kai-profile-name { min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+  #browser-settings-concepts .kai-badge {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    gap: 5px;
+    padding: 2px 7px;
+    border: 1px solid var(--kai-border);
+    border-radius: 999px;
+    background: var(--kai-surface-2);
+    color: var(--kai-muted);
+    font-size: 11px;
+    font-weight: 650;
+  }
+  #browser-settings-concepts .kai-badge[data-status]::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+  #browser-settings-concepts .kai-status { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+  #browser-settings-concepts code, #browser-settings-concepts pre {
+    color: inherit;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font: 400 12px/1.5 ui-monospace, "SF Mono", Consolas, monospace;
+    overflow-wrap: anywhere;
+  }
+  #browser-settings-concepts .kai-operation summary { font-size: 12px; color: var(--kai-muted); }
+  #browser-settings-concepts .kai-operation pre { margin: 6px 0 0; padding: 8px; border-radius: 8px; background: var(--kai-surface-2); white-space: pre-wrap; }
+  #browser-settings-concepts .kai-runtime-actions { display: grid; gap: 10px; }
+  #browser-settings-concepts .kai-range { display: grid; gap: 5px; min-width: 0; }
+  #browser-settings-concepts .kai-range + .kai-range { padding-top: 10px; border-top: 1px solid var(--kai-border); }
+  #browser-settings-concepts .kai-range label { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 3px 8px; font-size: 13px; font-weight: 600; }
+  #browser-settings-concepts .kai-range output { font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  #browser-settings-concepts .kai-range input { display: block; width: 100%; min-width: 0; margin: 1px 0; accent-color: var(--kai-accent); }
+  #browser-settings-concepts .kai-config-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(112px, 32%); align-items: center; gap: 4px 14px; padding-block: 9px; }
+  #browser-settings-concepts .kai-config-row + .kai-config-row { border-top: 1px solid var(--kai-border); }
+  #browser-settings-concepts .kai-config-row:first-child { padding-top: 0; }
+  #browser-settings-concepts .kai-config-row:last-child { padding-bottom: 0; }
+  #browser-settings-concepts .kai-restart { color: var(--kai-warning); }
+  #browser-settings-concepts .kai-tabs { display: flex; flex-wrap: wrap; gap: 3px 4px; border-bottom: 1px solid var(--kai-border); }
+  #browser-settings-concepts .kai-tab { min-height: 37px; padding: 6px 10px 7px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--kai-muted); font-size: 13px; font-weight: 600; }
+  #browser-settings-concepts .kai-tab:hover { color: var(--kai-fg); }
+  #browser-settings-concepts .kai-tab[aria-selected="true"] { border-bottom-color: var(--kai-accent); color: var(--kai-fg); }
+  #browser-settings-concepts .kai-disclosure { padding: 0; }
+  #browser-settings-concepts .kai-disclosure > summary { display: flex; gap: 8px; align-items: center; min-height: 46px; padding: 9px 14px; list-style: none; }
+  #browser-settings-concepts .kai-disclosure > summary::-webkit-details-marker { display: none; }
+  #browser-settings-concepts .kai-disclosure > summary strong { font-weight: 700; }
+  #browser-settings-concepts .kai-disclosure > summary svg:last-child { margin-inline-start: auto; }
+  #browser-settings-concepts .kai-disclosure[open] > summary { border-bottom: 1px solid var(--kai-border); }
+  #browser-settings-concepts .kai-disclosure[open] > summary svg:last-child { transform: rotate(180deg); }
+  #browser-settings-concepts .kai-disclosure .kai-box { border: 0; border-radius: 0 0 9px 9px; box-shadow: none; }
+  #browser-settings-concepts :is(.kai-disclosure, [role="tabpanel"]) .kai-box-top { justify-content: flex-end; background: transparent; border: 0; padding-bottom: 0; min-height: 0; }
+  #browser-settings-concepts :is(.kai-disclosure, [role="tabpanel"]) .kai-box-top h2 { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
+  #browser-settings-concepts :is(.kai-disclosure, [role="tabpanel"]) .kai-box-top:has(h2:only-child) { display: none; }
+  #browser-settings-concepts .kai-runtime-first .kai-runtime-actions { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  #browser-settings-concepts .kai-runtime-first .kai-operation { grid-column: 1 / -1; }
+  #browser-settings-concepts .kai-pending { position: sticky; bottom: 12px; z-index: 1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 9px 12px; }
+  #browser-settings-concepts .kai-feedback { color: var(--kai-muted); font-size: 12px; }
+  #browser-settings-concepts .kai-feedback:empty { display: none; }
+  @container (max-width: 740px) {
+    #browser-settings-concepts .kai-desk { grid-template-columns: minmax(0, 1fr); }
+  }
+  @container (max-width: 600px) {
+    #browser-settings-concepts .kai-surface { grid-template-columns: minmax(0, 1fr); }
+    #browser-settings-concepts .kai-rail { display: none; }
+    #browser-settings-concepts .kai-topbar { padding: 0 13px; }
+    #browser-settings-concepts .kai-content { padding: 14px 12px 16px; }
+    #browser-settings-concepts .kai-runtime-first .kai-runtime-actions { grid-template-columns: minmax(0, 1fr); }
+  }
+  @container (max-width: 420px) {
+    #browser-settings-concepts .kai-grid, #browser-settings-concepts .kai-config-row { grid-template-columns: minmax(0, 1fr); }
+    #browser-settings-concepts .kai-tab { padding-inline: 7px; }
+    #browser-settings-concepts .kai-create { grid-template-columns: minmax(0, 1fr); }
+    #browser-settings-concepts .kai-create .kai-button { justify-self: start; }
+  }
+  @media (pointer: coarse) {
+    #browser-settings-concepts :is(.kai-tab, .kai-button, .kai-input) { min-height: 44px; }
+    #browser-settings-concepts .kai-range input { min-height: 28px; }
+  }
+</style>
+<div id="browser-settings-concepts">
+  <!-- Standalone controls start -->
+  <header class="concept-toolbar">
+    <div class="concept-picker" role="group" aria-label="Browser settings layouts">
+      <button class="kai-button" type="button" data-concept="profiles-first" aria-pressed="true">Profiles first</button>
+      <button class="kai-button" type="button" data-concept="tabs" aria-pressed="false">Tabs</button>
+      <button class="kai-button" type="button" data-concept="runtime-first" aria-pressed="false">Runtime first</button>
+    </div>
+    <p>Interactive preview · Sample data</p>
+  </header>
+  <!-- Standalone controls end -->
+  <div class="viz-carousel" aria-label="Browser settings layouts">
+    <section data-variant="Profiles first" data-layout="profiles-first" aria-label="Profiles-first layout"></section>
+    <section data-variant="Tabs" data-layout="tabs" aria-label="Tabbed layout" hidden></section>
+    <section data-variant="Runtime first" data-layout="runtime-first" aria-label="Runtime-first layout" hidden></section>
+  </div>
+
+  <template data-template="shell">
+    <div class="kai-surface">
+      <aside class="kai-rail" aria-label="Kai Console settings sidebar">
+        <div class="kai-rail-group">
+          <span class="kai-mark" aria-label="Kai Console"><i data-lucide="bot" aria-hidden="true"></i></span>
+          <span class="kai-rail-item"><i data-lucide="arrow-left" aria-hidden="true"></i></span>
+        </div>
+        <div class="kai-rail-group">
+          <span class="kai-rail-item"><i data-lucide="palette" aria-hidden="true"></i></span>
+          <span class="kai-rail-item"><i data-lucide="key-round" aria-hidden="true"></i></span>
+        </div>
+        <div class="kai-rail-group">
+          <span class="kai-rail-item"><i data-lucide="link-2" aria-hidden="true"></i></span>
+          <span class="kai-rail-item"><i data-lucide="cloud-cog" aria-hidden="true"></i></span>
+        </div>
+        <div class="kai-rail-group">
+          <span class="kai-rail-item"><i data-lucide="workflow" aria-hidden="true"></i></span>
+          <span class="kai-rail-item"><i data-lucide="route" aria-hidden="true"></i></span>
+          <span class="kai-rail-item"><i data-lucide="wrench" aria-hidden="true"></i></span>
+          <span class="kai-rail-item"><i data-lucide="users" aria-hidden="true"></i></span>
+          <span class="kai-rail-item"><i data-lucide="bot" aria-hidden="true"></i></span>
+          <span class="kai-rail-item"><i data-lucide="book-open" aria-hidden="true"></i></span>
+          <span class="kai-rail-item"><i data-lucide="braces" aria-hidden="true"></i></span>
+        </div>
+        <div class="kai-rail-group">
+          <span class="kai-rail-item"><i data-lucide="network" aria-hidden="true"></i></span>
+        </div>
+        <div class="kai-rail-group">
+          <span class="kai-rail-item"><i data-lucide="file-text" aria-hidden="true"></i></span>
+          <span class="kai-rail-item" aria-current="page" aria-label="Browser"><i data-lucide="globe" aria-hidden="true"></i></span>
+          <span class="kai-rail-item"><i data-lucide="cog" aria-hidden="true"></i></span>
+        </div>
+        <div class="kai-rail-group">
+          <span class="kai-rail-item"><i data-lucide="chart-no-axes-column" aria-hidden="true"></i></span>
+        </div>
+      </aside>
+      <div>
+        <header class="kai-topbar">Settings <i data-lucide="chevron-right" aria-hidden="true"></i> <strong>Browser</strong></header>
+        <div class="kai-content">
+          <header class="kai-heading">
+            <h1>Browser</h1>
+          </header>
+          <div data-layout-body></div>
+          <div class="kai-box kai-pending" data-pending hidden>
+            <p class="kai-hint" data-pending-label role="status"></p>
+            <div class="kai-action-row">
+              <button class="kai-button" type="button" data-discard>Discard</button>
+              <button class="kai-button kai-button-main" type="button" data-save>Save changes</button>
+            </div>
+          </div>
+          <p class="kai-feedback" data-settings-feedback role="status"></p>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <template data-template="profiles-first">
+    <div class="kai-desk">
+      <div data-slot="profiles"></div>
+      <div class="kai-stack">
+        <div data-slot="setup"></div>
+        <div data-slot="viewer"></div>
+      </div>
+      <details class="kai-box kai-disclosure kai-span">
+        <summary><i data-lucide="sliders-horizontal" aria-hidden="true"></i><strong>Browser configuration</strong><i data-lucide="chevron-down" aria-hidden="true"></i></summary>
+        <div data-slot="config"></div>
+      </details>
+    </div>
+  </template>
+
+  <template data-template="tabs">
+    <div class="kai-stack">
+      <div class="kai-tabs" role="tablist" aria-label="Browser settings sections">
+        <button class="kai-tab" type="button" role="tab" data-section="profiles">Login profiles</button>
+        <button class="kai-tab" type="button" role="tab" data-section="setup">Browser setup</button>
+        <button class="kai-tab" type="button" role="tab" data-section="viewer">Live viewer</button>
+        <button class="kai-tab" type="button" role="tab" data-section="config">Browser configuration</button>
+      </div>
+      <div role="tabpanel" data-slot="profiles"></div>
+      <div role="tabpanel" data-slot="setup" hidden></div>
+      <div role="tabpanel" data-slot="viewer" hidden></div>
+      <div role="tabpanel" data-slot="config" hidden></div>
+    </div>
+  </template>
+
+  <template data-template="runtime-first">
+    <div class="kai-stack kai-runtime-first">
+      <div data-slot="setup"></div>
+      <details class="kai-box kai-disclosure">
+        <summary><i data-lucide="users" aria-hidden="true"></i><strong>Login profiles</strong><i data-lucide="chevron-down" aria-hidden="true"></i></summary>
+        <div data-slot="profiles"></div>
+      </details>
+      <details class="kai-box kai-disclosure">
+        <summary><i data-lucide="monitor" aria-hidden="true"></i><strong>Live viewer</strong><i data-lucide="chevron-down" aria-hidden="true"></i></summary>
+        <div data-slot="viewer"></div>
+      </details>
+      <details class="kai-box kai-disclosure">
+        <summary><i data-lucide="sliders-horizontal" aria-hidden="true"></i><strong>Browser configuration</strong><i data-lucide="chevron-down" aria-hidden="true"></i></summary>
+        <div data-slot="config"></div>
+      </details>
+    </div>
+  </template>
+
+  <template data-template="profiles">
+    <section class="kai-box">
+      <header class="kai-box-top">
+        <h2>Login profiles</h2>
+        <button class="kai-button" type="button" data-reload>Reload profiles</button>
+      </header>
+      <div class="kai-body">
+        <div class="kai-grid">
+          <label class="kai-field">Default login profile
+            <select class="kai-input" data-profile-choice="account"></select>
+          </label>
+          <label class="kai-field">No workspace login profile
+            <select class="kai-input" data-profile-choice="temporary"></select>
+          </label>
+        </div>
+        <form class="kai-create" autocomplete="off" data-create>
+          <label class="kai-field">New profile name
+            <input class="kai-input" name="profileName" maxlength="100" required>
+          </label>
+          <button class="kai-button kai-button-main" type="submit" disabled>Create profile</button>
+        </form>
+        <div data-profile-list></div>
+        <p class="kai-feedback" data-profile-feedback role="status"></p>
+      </div>
+    </section>
+  </template>
+
+  <template data-template="profile-row">
+    <div class="kai-profile-row">
+      <strong class="kai-profile-name" data-profile-name></strong>
+      <div class="kai-action-row" data-profile-actions>
+        <button class="kai-button" type="button" data-rename>Rename</button>
+        <button class="kai-button" type="button" data-delete>Delete</button>
+      </div>
+      <form class="kai-create" autocomplete="off" data-rename-form hidden>
+        <label class="kai-field">New name
+          <input class="kai-input" name="profileName" maxlength="100" required>
+        </label>
+        <div class="kai-action-row">
+          <button class="kai-button kai-button-main" type="submit">Save name</button>
+          <button class="kai-button" type="button" data-cancel-rename>Cancel</button>
+        </div>
+      </form>
+    </div>
+  </template>
+
+  <template data-template="setup">
+    <section class="kai-box">
+      <header class="kai-box-top">
+        <h2><i data-lucide="globe" aria-hidden="true"></i> Browser setup</h2>
+        <button class="kai-button" type="button" data-refresh><i data-lucide="refresh-cw" aria-hidden="true"></i> Refresh</button>
+      </header>
+      <div class="kai-body">
+        <div class="kai-runtime-actions">
+          <div class="kai-status">
+            <span class="kai-badge" data-status role="status">Browser ready</span>
+            <code data-detected-path>/usr/bin/google-chrome</code>
+          </div>
+          <div class="kai-action-row">
+            <button class="kai-button" type="button" data-check><i data-lucide="shield-check" aria-hidden="true"></i> Check browser</button>
+            <button class="kai-button" type="button" data-reinstall><i data-lucide="rotate-ccw" aria-hidden="true"></i> Reinstall browser</button>
+          </div>
+          <details class="kai-operation">
+            <summary>Operation output</summary>
+            <pre data-operation-output>Browser is ready for browser tools.</pre>
+          </details>
+        </div>
+        <label class="kai-field">Chrome executable
+          <input class="kai-input" type="text" placeholder="Automatic discovery" data-setting="executable">
+        </label>
+        <p class="kai-hint" data-executable-hint hidden>Save or discard the executable change to run browser setup.</p>
+      </div>
+    </section>
+  </template>
+
+  <template data-template="viewer">
+    <section class="kai-box">
+      <header class="kai-box-top">
+        <h2>Live viewer</h2>
+        <button class="kai-button kai-button-quiet" type="button" data-reset-viewer>
+          <i data-lucide="rotate-ccw" aria-hidden="true"></i> Reset viewer defaults
+        </button>
+      </header>
+      <div class="kai-body">
+        <div class="kai-range">
+          <label for="quality">Live image quality <output for="quality" data-quality-output>50%</output></label>
+          <input id="quality" type="range" min="1" max="100" value="50" data-setting="quality">
+        </div>
+        <div class="kai-range">
+          <label for="resolution">Maximum live image size <output for="resolution" data-size-output>1280 × 720</output></label>
+          <input id="resolution" type="range" min="0" max="4" step="1" value="2" list="resolutions" data-setting="resolution">
+          <datalist id="resolutions">
+            <option value="0" label="800 × 600"></option>
+            <option value="1" label="1024 × 600"></option>
+            <option value="2" label="1280 × 720"></option>
+            <option value="3" label="1600 × 900"></option>
+            <option value="4" label="1920 × 1080"></option>
+          </datalist>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <template data-template="config">
+    <section class="kai-box">
+      <header class="kai-box-top"><h2>Browser configuration</h2></header>
+      <div class="kai-body">
+        <div>
+          <label class="kai-config-row" title="Private profiles and images, outside project workspaces.">
+            <span class="kai-field">Browser storage root <span class="kai-restart">Requires restart</span></span>
+            <input class="kai-input" type="text" placeholder="~/.k41-agent/browser" data-setting="storage">
+          </label>
+          <label class="kai-config-row" title="Close inactive browsers while preserving login profiles.">
+            <span class="kai-field">Browser idle timeout (seconds)</span>
+            <input class="kai-input" type="number" min="1" step="1" value="600" required data-setting="idle">
+          </label>
+          <label class="kai-config-row" title="Close the browser if an operation exceeds this time limit.">
+            <span class="kai-field">Browser operation timeout (seconds)</span>
+            <input class="kai-input" type="number" min="75" max="300" step="1" value="75" required data-setting="operation">
+          </label>
+          <label class="kai-config-row" title="Time to wait for a person to interact with the browser.">
+            <span class="kai-field">Human handoff timeout (seconds)</span>
+            <input class="kai-input" type="number" min="1" step="1" value="1800" required data-setting="handoff">
+          </label>
+          <label class="kai-config-row" title="Active tasks and pending handoffs are protected from eviction.">
+            <span class="kai-field">Maximum browser sessions per account</span>
+            <input class="kai-input" type="number" min="1" step="1" value="16" required data-setting="sessions">
+          </label>
+          <label class="kai-config-row" title="The tab limit applies to new browser sessions.">
+            <span class="kai-field">Maximum tabs per browser session</span>
+            <input class="kai-input" type="number" min="1" step="1" value="16" required data-setting="tabs">
+          </label>
+        </div>
+      </div>
+    </section>
+  </template>
+</div>
+
+<script>
+  (() => {
+    const root = document.getElementById("browser-settings-concepts");
+    const clone = name => root.querySelector(`template[data-template="${name}"]`).content.cloneNode(true);
+    const templates = [...root.querySelectorAll("[data-layout]")];
+
+    for (const variant of templates) {
+      const layout = variant.dataset.layout;
+      variant.append(clone("shell"));
+      variant.querySelector("[data-layout-body]").append(clone(layout));
+      for (const slot of variant.querySelectorAll("[data-slot]")) {
+        slot.append(clone(slot.dataset.slot));
+      }
+      for (const node of variant.querySelectorAll("[id], [for], [list]")) {
+        if (node.id) node.id = `${layout}-${node.id}`;
+        if (node.hasAttribute("for")) node.setAttribute("for", `${layout}-${node.getAttribute("for")}`);
+        if (node.hasAttribute("list")) node.setAttribute("list", `${layout}-${node.getAttribute("list")}`);
+      }
+      bindTabs(variant, layout);
+      bindProfiles(variant);
+      bindSettings(variant);
+    }
+
+    function bindTabs(variant, layout) {
+      const tabs = [...variant.querySelectorAll("[data-section]")];
+      if (!tabs.length) return;
+      const panels = tabs.map(tab => variant.querySelector(`[data-slot="${tab.dataset.section}"]`));
+
+      function activate(activeIndex) {
+        tabs.forEach((tab, index) => {
+          const active = index === activeIndex;
+          tab.setAttribute("aria-selected", String(active));
+          tab.tabIndex = active ? 0 : -1;
+          panels[index].hidden = !active;
+        });
+      }
+
+      tabs.forEach((tab, index) => {
+        const panel = panels[index];
+        tab.id = `${layout}-tab-${tab.dataset.section}`;
+        panel.id = `${layout}-panel-${tab.dataset.section}`;
+        tab.setAttribute("aria-controls", panel.id);
+        panel.setAttribute("aria-labelledby", tab.id);
+        tab.addEventListener("click", () => activate(index));
+        tab.addEventListener("keydown", event => {
+          const next = {
+            ArrowLeft: (index + tabs.length - 1) % tabs.length,
+            ArrowRight: (index + 1) % tabs.length,
+            Home: 0,
+            End: tabs.length - 1,
+          }[event.key];
+          if (next === undefined) return;
+          event.preventDefault();
+          activate(next);
+          tabs[next].focus();
+        });
+      });
+      activate(0);
+    }
+
+    function bindProfiles(variant) {
+      const list = variant.querySelector("[data-profile-list]");
+      const feedback = variant.querySelector("[data-profile-feedback]");
+      const choices = [...variant.querySelectorAll("[data-profile-choice]")];
+      const create = variant.querySelector("[data-create]");
+      const createName = create.elements.profileName;
+      const createButton = create.querySelector("button");
+      const profiles = [
+        { id: "builtin", name: "Default" },
+        { id: "research", name: "Research" },
+        { id: "personal", name: "Personal" },
+      ];
+      const selected = { account: "builtin", temporary: "personal" };
+      let nextProfileId = 1;
+
+      function render() {
+        for (const select of choices) {
+          select.replaceChildren(...profiles.map(profile => new Option(profile.name, profile.id)));
+          select.value = selected[select.dataset.profileChoice];
+        }
+        list.replaceChildren(...profiles.map(profile => {
+          const fragment = clone("profile-row");
+          const row = fragment.firstElementChild;
+          const rename = row.querySelector("[data-rename]");
+          const remove = row.querySelector("[data-delete]");
+          const actions = row.querySelector("[data-profile-actions]");
+          const renameForm = row.querySelector("[data-rename-form]");
+          const renameName = renameForm.elements.profileName;
+          row.querySelector("[data-profile-name]").textContent = `${profile.name}${profile.id === "builtin" ? " (built-in)" : ""}`;
+          actions.hidden = profile.id === "builtin";
+          rename.setAttribute("aria-label", `Rename ${profile.name}`);
+          remove.setAttribute("aria-label", `Delete ${profile.name}`);
+          rename.addEventListener("click", () => {
+            actions.hidden = true;
+            renameForm.hidden = false;
+            renameName.value = profile.name;
+            renameName.focus();
+            renameName.select();
+          });
+          renameForm.querySelector("[data-cancel-rename]").addEventListener("click", () => {
+            renameForm.hidden = true;
+            actions.hidden = false;
+            rename.focus();
+          });
+          renameForm.addEventListener("submit", event => {
+            event.preventDefault();
+            const name = renameName.value.trim();
+            if (!name) return;
+            profile.name = name;
+            render();
+            feedback.textContent = `Renamed to ${name}.`;
+          });
+          remove.addEventListener("click", () => {
+            profiles.splice(profiles.indexOf(profile), 1);
+            for (const key of Object.keys(selected)) {
+              if (selected[key] === profile.id) selected[key] = "builtin";
+            }
+            render();
+            feedback.textContent = `Deleted ${profile.name}.`;
+          });
+          return fragment;
+        }));
+      }
+
+      for (const select of choices) {
+        select.addEventListener("change", () => {
+          selected[select.dataset.profileChoice] = select.value;
+          render();
+          feedback.textContent = "Login profile updated.";
+        });
+      }
+      variant.querySelector("[data-reload]").addEventListener("click", () => {
+        render();
+        feedback.textContent = "Profiles refreshed.";
+      });
+      createName.addEventListener("input", () => { createButton.disabled = !createName.value.trim(); });
+      create.addEventListener("submit", event => {
+        event.preventDefault();
+        const name = createName.value.trim();
+        if (!name) return;
+        profiles.push({ id: `profile-${nextProfileId++}`, name });
+        create.reset();
+        createButton.disabled = true;
+        render();
+        feedback.textContent = `Created ${name}.`;
+        createName.focus();
+      });
+      render();
+    }
+
+    function bindSettings(variant) {
+      const one = selector => variant.querySelector(selector);
+      const fields = [...variant.querySelectorAll("[data-setting]")];
+      const saved = Object.fromEntries(fields.map(field => [field.dataset.setting, field.value]));
+      const quality = one('[data-setting="quality"]');
+      const resolution = one('[data-setting="resolution"]');
+      const sizePresets = [...one("datalist").options].map(option => option.label);
+      const pending = one("[data-pending]");
+      const pendingLabel = one("[data-pending-label]");
+      const feedback = one("[data-settings-feedback]");
+      const status = one("[data-status]");
+      const check = one("[data-check]");
+      const reinstall = one("[data-reinstall]");
+      const detectedPath = one("[data-detected-path]");
+      const operationOutput = one("[data-operation-output]");
+      const executable = one('[data-setting="executable"]');
+
+      function render() {
+        const changed = fields.filter(field => field.value !== saved[field.dataset.setting]);
+        const pathChanged = executable.value !== saved.executable;
+        const size = sizePresets[Number(resolution.value)];
+        one("[data-quality-output]").textContent = `${quality.value}%`;
+        one("[data-size-output]").textContent = size;
+        resolution.setAttribute("aria-valuetext", size);
+        pending.hidden = !changed.length;
+        const restart = changed.some(field => field.dataset.setting === "storage");
+        const count = changed.length;
+        pendingLabel.textContent = `${count} unsaved ${count === 1 ? "change" : "changes"}${restart ? " · Restart required" : ""}`;
+        check.disabled = reinstall.disabled = pathChanged;
+        one("[data-executable-hint]").hidden = !pathChanged;
+      }
+
+      function updateDraft() {
+        feedback.textContent = "";
+        render();
+      }
+
+      for (const field of fields) field.addEventListener("input", updateDraft);
+      one("[data-reset-viewer]").addEventListener("click", () => {
+        quality.value = "50";
+        resolution.value = "2";
+        updateDraft();
+      });
+      one("[data-refresh]").addEventListener("click", () => {
+        operationOutput.textContent = "Browser status refreshed.";
+        operationOutput.closest("details").open = true;
+      });
+      check.addEventListener("click", () => {
+        status.textContent = "Browser ready";
+        operationOutput.textContent = "Browser check completed. Browser is ready for browser tools.";
+        operationOutput.closest("details").open = true;
+      });
+      reinstall.addEventListener("click", () => {
+        status.textContent = "Browser ready";
+        operationOutput.textContent = "Simulated reinstall completed.";
+        operationOutput.closest("details").open = true;
+      });
+      one("[data-discard]").addEventListener("click", () => {
+        fields.forEach(field => { field.value = saved[field.dataset.setting]; });
+        render();
+        feedback.textContent = "Draft changes discarded.";
+      });
+      one("[data-save]").addEventListener("click", () => {
+        const invalidField = fields.find(field => field.value !== saved[field.dataset.setting] && !field.validity.valid);
+        if (invalidField) {
+          const tabPanel = invalidField.closest('[role="tabpanel"]');
+          if (tabPanel?.hidden) one(`[aria-controls="${tabPanel.id}"]`).click();
+          const disclosure = invalidField.closest("details");
+          if (disclosure) disclosure.open = true;
+          invalidField.reportValidity();
+          return;
+        }
+        if (executable.value !== saved.executable) {
+          detectedPath.textContent = executable.value.trim() || "/usr/bin/google-chrome";
+          status.textContent = "Check required";
+        }
+        fields.forEach(field => { saved[field.dataset.setting] = field.value; });
+        render();
+        feedback.textContent = "Settings saved in this preview.";
+      });
+      render();
+    }
+
+    /* Design controls start */
+    if (globalThis.Tweak) {
+      for (const variant of templates) {
+        const surface = variant.querySelector(".kai-surface");
+        surface.setAttribute("aria-label", variant.getAttribute("aria-label"));
+        const content = surface.querySelector(".kai-content");
+        const spacing = { gap: 16 };
+        const tweak = new Tweak({
+          container: surface,
+          onChange: () => { content.style.gap = `${spacing.gap}px`; },
+        });
+        tweak.addSlider(spacing, "gap", { label: "Section spacing", min: 8, max: 24, unit: "px" });
+      }
+    }
+    /* Design controls end */
+  })();
+</script>
+<!-- Preview fragment end -->
+<!--
+ISC License
+
+Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2023 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2025.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+---
+
+The MIT License (MIT) (for portions derived from Feather)
+
+Copyright (c) 2013-2023 Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true" focusable="false">
+  <symbol id="kai-icon-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></symbol>
+  <symbol id="kai-icon-book-open" viewBox="0 0 24 24"><path d="M12 7v14"></path><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"></path></symbol>
+  <symbol id="kai-icon-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></symbol>
+  <symbol id="kai-icon-braces" viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"></path><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"></path></symbol>
+  <symbol id="kai-icon-chart-no-axes-column" viewBox="0 0 24 24"><path d="M5 21v-6"></path><path d="M12 21V3"></path><path d="M19 21V9"></path></symbol>
+  <symbol id="kai-icon-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></symbol>
+  <symbol id="kai-icon-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></symbol>
+  <symbol id="kai-icon-cloud-cog" viewBox="0 0 24 24"><path d="m10.852 19.772-.383.924"></path><path d="m13.148 14.228.383-.923"></path><path d="M13.148 19.772a3 3 0 1 0-2.296-5.544l-.383-.923"></path><path d="m13.53 20.696-.382-.924a3 3 0 1 1-2.296-5.544"></path><path d="m14.772 15.852.923-.383"></path><path d="m14.772 18.148.923.383"></path><path d="M4.2 15.1a7 7 0 1 1 9.93-9.858A7 7 0 0 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.2"></path><path d="m9.228 15.852-.923-.383"></path><path d="m9.228 18.148-.923.383"></path></symbol>
+  <symbol id="kai-icon-cog" viewBox="0 0 24 24"><path d="M11 10.27 7 3.34"></path><path d="m11 13.73-4 6.93"></path><path d="M12 22v-2"></path><path d="M12 2v2"></path><path d="M14 12h8"></path><path d="m17 20.66-1-1.73"></path><path d="m17 3.34-1 1.73"></path><path d="M2 12h2"></path><path d="m20.66 17-1.73-1"></path><path d="m20.66 7-1.73 1"></path><path d="m3.34 17 1.73-1"></path><path d="m3.34 7 1.73 1"></path><circle cx="12" cy="12" r="2"></circle><circle cx="12" cy="12" r="8"></circle></symbol>
+  <symbol id="kai-icon-file-text" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"></path><path d="M14 2v5a1 1 0 0 0 1 1h5"></path><path d="M10 9H8"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></symbol>
+  <symbol id="kai-icon-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></symbol>
+  <symbol id="kai-icon-key-round" viewBox="0 0 24 24"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"></path><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"></circle></symbol>
+  <symbol id="kai-icon-link-2" viewBox="0 0 24 24"><path d="M9 17H7A5 5 0 0 1 7 7h2"></path><path d="M15 7h2a5 5 0 1 1 0 10h-2"></path><line x1="8" x2="16" y1="12" y2="12"></line></symbol>
+  <symbol id="kai-icon-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></symbol>
+  <symbol id="kai-icon-network" viewBox="0 0 24 24"><rect x="16" y="16" width="6" height="6" rx="1"></rect><rect x="2" y="16" width="6" height="6" rx="1"></rect><rect x="9" y="2" width="6" height="6" rx="1"></rect><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"></path><path d="M12 12V8"></path></symbol>
+  <symbol id="kai-icon-palette" viewBox="0 0 24 24"><path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"></path><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle></symbol>
+  <symbol id="kai-icon-refresh-cw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></symbol>
+  <symbol id="kai-icon-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></symbol>
+  <symbol id="kai-icon-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"></circle><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"></path><circle cx="18" cy="5" r="3"></circle></symbol>
+  <symbol id="kai-icon-shield-check" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="m9 12 2 2 4-4"></path></symbol>
+  <symbol id="kai-icon-sliders-horizontal" viewBox="0 0 24 24"><path d="M10 5H3"></path><path d="M12 19H3"></path><path d="M14 3v4"></path><path d="M16 17v4"></path><path d="M21 12h-9"></path><path d="M21 19h-5"></path><path d="M21 5h-7"></path><path d="M8 10v4"></path><path d="M8 12H3"></path></symbol>
+  <symbol id="kai-icon-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><path d="M16 3.128a4 4 0 0 1 0 7.744"></path><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><circle cx="9" cy="7" r="4"></circle></symbol>
+  <symbol id="kai-icon-workflow" viewBox="0 0 24 24"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></symbol>
+  <symbol id="kai-icon-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"></path></symbol>
+</svg>
+<script>
+  (() => {
+    const root = document.getElementById("browser-settings-concepts");
+    const variants = [...root.querySelectorAll("[data-layout]")];
+    const buttons = [...root.querySelectorAll("[data-concept]")];
+    for (const button of buttons) {
+      button.addEventListener("click", () => {
+        for (const variant of variants) variant.hidden = variant.dataset.layout !== button.dataset.concept;
+        for (const option of buttons) option.setAttribute("aria-pressed", String(option === button));
+      });
+    }
+    const svgNamespace = "http://www.w3.org/2000/svg";
+    for (const marker of root.querySelectorAll("[data-lucide]")) {
+      const icon = document.createElementNS(svgNamespace, "svg");
+      const use = document.createElementNS(svgNamespace, "use");
+      icon.setAttribute("viewBox", "0 0 24 24");
+      icon.setAttribute("fill", "none");
+      icon.setAttribute("stroke", "currentColor");
+      icon.setAttribute("stroke-width", "2");
+      icon.setAttribute("stroke-linecap", "round");
+      icon.setAttribute("stroke-linejoin", "round");
+      icon.setAttribute("aria-hidden", "true");
+      use.setAttribute("href", `#kai-icon-${marker.dataset.lucide}`);
+      icon.append(use);
+      marker.replaceWith(icon);
+    }
+  })();
+</script>
+</body>
+</html>

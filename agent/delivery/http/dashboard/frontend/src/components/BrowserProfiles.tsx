@@ -1,10 +1,6 @@
-import "@/styles/routes/settings.css";
-
-import { A } from "@solidjs/router";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { apiFetch, deleteJson, patchJson, postJson, putJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
-import { chatThreadHref } from "@/lib/chatThreads";
 import type { BrowserProfile } from "@/types";
 
 export function BrowserProfiles() {
@@ -91,74 +87,68 @@ export function BrowserProfiles() {
     // A rejected choice changes no state, so nothing else would restore the saved option.
     if (!saved) select.value = (temporary ? temporarySelected() : selected()) ?? "";
   };
-  const openThreads = (profile: BrowserProfile) => profile.open_thread_ids ?? (profile.open_thread_id ? [profile.open_thread_id] : []);
+  const isProfileInUse = (profile: BrowserProfile) =>
+    profile.open_thread_ids ? profile.open_thread_ids.length > 0 : Boolean(profile.open_thread_id);
 
   let disposed = false;
   onMount(() => void load());
   onCleanup(() => { disposed = true; generation += 1; });
 
-  return <section id="login-profiles" class="panel settings-section-card" aria-label="Browser login profiles" aria-busy={busy()}>
-    <div class="panel-header split">
+  return <section id="login-profiles" class="panel" aria-label="Browser login profiles" aria-busy={busy()}>
+    <div class="panel-header">
       <h2 class="panel-title">Login profiles</h2>
-      <button class="btn btn-secondary btn-sm" disabled={busy()} onClick={() => void load()}>Reload profiles</button>
+      <button class="btn btn-secondary btn-sm" type="button" disabled={busy()} onClick={() => void load()}>Reload profiles</button>
     </div>
     <div class="panel-body stack">
-    <p>Manage saved logins for your account. Conversations using the same profile share one browser and saved logins, with their own tabs.</p>
-    <p class="hint">The account default applies to projects that inherit it. Conversations with No workspace have an independent setting. Changes apply when a browser next opens; conversation overrides keep their choice.</p>
-    <Show when={error()}><div class="browser-setup-error" role="alert">{error()}</div></Show>
-    <Show when={notice()}><p role="status">{notice()}</p></Show>
-    <Show when={loading()}><p role="status">Loading profiles...</p></Show>
-    <label class="field">Default login profile
-      <select class="input" aria-label="Default login profile" disabled={busy() || !loaded()}
-        onChange={(event) => void selectProfile(event.currentTarget)}>
-        <For each={profiles()}>{(profile) => <option value={profile.profile_id} selected={profile.profile_id === selected()}>{profile.name}</option>}</For>
-      </select>
-    </label>
-    <label class="field">No workspace login profile
-      <select class="input" aria-label="No workspace login profile" disabled={busy() || !loaded()}
-        onChange={(event) => void selectProfile(event.currentTarget, true)}>
-        <For each={profiles()}>{(profile) => <option value={profile.profile_id} selected={profile.profile_id === temporarySelected()}>{profile.name}</option>}</For>
-      </select>
-    </label>
-    <form class="row-wrap" autocomplete="off" onSubmit={(event) => void create(event)}>
-      <label class="field">New profile name
-        <input class="input" aria-label="New profile name" maxlength={100} value={newName()} disabled={busy()}
-          onInput={(event) => setNewName(event.currentTarget.value)} />
-      </label>
-      <button class="btn btn-primary" type="submit" disabled={busy() || !newName().trim()}>Create profile</button>
-    </form>
-    <Show when={loaded() && !loading() && !profiles().length}><p class="empty compact">You have no login profiles.</p></Show>
-    <div class="browser-profile-list">
-      <For each={profiles()}>{(profile) => <div class="browser-profile-row">
-        <Show when={renaming() === profile.profile_id} fallback={<>
-          <div class="browser-profile-info"><strong>{profile.name}{profile.is_builtin ? " (built-in)" : ""}{selected() === profile.profile_id ? " (default)" : ""}</strong>
-            <Show when={openThreads(profile).length} fallback={<span>Not open</span>}>
-              <For each={openThreads(profile)}>{threadId => <A href={chatThreadHref(threadId)}>Open in conversation {threadId}</A>}</For>
+      <Show when={error()}><div class="browser-setup-error" role="alert">{error()}</div></Show>
+      <Show when={notice()}><p role="status">{notice()}</p></Show>
+      <Show when={loading()}><p role="status">Loading profiles...</p></Show>
+      <div class="browser-profile-defaults">
+        <label class="field">Default login profile
+          <select class="input" aria-label="Default login profile" disabled={busy() || !loaded()}
+            onChange={(event) => void selectProfile(event.currentTarget)}>
+            <For each={profiles()}>{(profile) => <option value={profile.profile_id} selected={profile.profile_id === selected()}>{profile.name}</option>}</For>
+          </select>
+        </label>
+        <label class="field">No workspace login profile
+          <select class="input" aria-label="No workspace login profile" disabled={busy() || !loaded()}
+            onChange={(event) => void selectProfile(event.currentTarget, true)}>
+            <For each={profiles()}>{(profile) => <option value={profile.profile_id} selected={profile.profile_id === temporarySelected()}>{profile.name}</option>}</For>
+          </select>
+        </label>
+      </div>
+      <form class="browser-profile-create" autocomplete="off" onSubmit={(event) => void create(event)}>
+        <label class="field">New profile name
+          <input class="input" aria-label="New profile name" maxlength={100} value={newName()} disabled={busy()}
+            onInput={(event) => setNewName(event.currentTarget.value)} />
+        </label>
+        <button class="btn btn-primary" type="submit" disabled={busy() || !newName().trim()}>Create profile</button>
+      </form>
+      <Show when={loaded() && !loading() && !profiles().length}><p class="empty compact">You have no login profiles.</p></Show>
+      <Show when={profiles().length}>
+        <div>
+          <For each={profiles()}>{profile => <div class="browser-profile-row">
+            <Show when={renaming() === profile.profile_id} fallback={<>
+              <strong class="browser-profile-name">{profile.name}{profile.is_builtin ? " (built-in)" : ""}</strong>
+              <Show when={!profile.is_builtin}><div class="row-wrap">
+                <button class="btn btn-secondary btn-sm" type="button" disabled={busy()} aria-label={`Rename ${profile.name}`} onClick={() => {
+                  setRenamed(profile.name); setRenaming(profile.profile_id); setError("");
+                }}>Rename</button>
+                <button class="btn btn-secondary btn-sm" type="button" disabled={busy() || isProfileInUse(profile)} aria-label={`Delete ${profile.name}`}
+                  title={isProfileInUse(profile) ? "Close every conversation using this profile before deleting it." : undefined}
+                  onClick={() => remove(profile)}>Delete</button>
+              </div></Show>
+            </>}>
+              <form class="row-wrap" autocomplete="off" onSubmit={(event) => void rename(event, profile)}>
+                <input class="input" aria-label={`New name for ${profile.name}`} maxlength={100} value={renamed()} disabled={saving()}
+                  onInput={(event) => setRenamed(event.currentTarget.value)} />
+                <button class="btn btn-primary" type="submit" disabled={saving() || !renamed().trim()}>Save name</button>
+                <button class="btn" type="button" disabled={saving()} onClick={() => setRenaming(null)}>Cancel</button>
+              </form>
             </Show>
-            <Show when={profile.projects?.length} fallback={<span>No projects currently select this profile.</span>}>
-              <div class="row-wrap"><span>Used by:</span><For each={profile.projects}>{(project) =>
-                <A href={`/projects/${project.id}?tab=browser`}>{project.label}</A>
-              }</For></div>
-            </Show>
-          </div>
-          <Show when={!profile.is_builtin}><div class="row-wrap">
-            <button class="btn" disabled={busy()} aria-label={`Rename ${profile.name}`} onClick={() => {
-              setRenamed(profile.name); setRenaming(profile.profile_id); setError("");
-            }}>Rename</button>
-            <button class="btn" disabled={busy() || !!openThreads(profile).length} aria-label={`Delete ${profile.name}`}
-              title={openThreads(profile).length ? "Close every conversation using this profile before deleting it." : undefined}
-              onClick={() => remove(profile)}>Delete</button>
-          </div></Show>
-        </>}>
-          <form class="row-wrap" autocomplete="off" onSubmit={(event) => void rename(event, profile)}>
-            <input class="input" aria-label={`New name for ${profile.name}`} maxlength={100} value={renamed()} disabled={saving()}
-              onInput={(event) => setRenamed(event.currentTarget.value)} />
-            <button class="btn btn-primary" type="submit" disabled={saving() || !renamed().trim()}>Save name</button>
-            <button class="btn" type="button" disabled={saving()} onClick={() => setRenaming(null)}>Cancel</button>
-          </form>
-        </Show>
-      </div>}</For>
-    </div>
+          </div>}</For>
+        </div>
+      </Show>
     </div>
   </section>;
 }

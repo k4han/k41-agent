@@ -35,7 +35,15 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.startsWith('/dashboard-api/') || (url.pathname === '/settings' && req.method === 'PUT')) {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'browser-setup-csrf');
-    if (url.pathname === '/dashboard-api/browser/profiles') { res.end(JSON.stringify({ profiles: [] })); return; }
+    if (url.pathname === '/dashboard-api/browser/profiles') {
+      res.end(JSON.stringify({ profiles: [
+        { profile_id: 'default', name: 'Default', is_builtin: true },
+        { profile_id: 'active-profile', name: 'Active profile', open_thread_ids: ['session-one', 'session-two'],
+          projects: [{ id: 'example', label: 'Example project' }] },
+        { profile_id: 'idle-profile', name: 'Idle profile', open_thread_ids: [] },
+      ] }));
+      return;
+    }
     if (['/dashboard-api/browser/default-profile', '/dashboard-api/browser/temporary-profile'].includes(url.pathname)) { res.end(JSON.stringify({ profile_id: null })); return; }
     if (url.pathname === '/dashboard-api/browser/configuration') {
       res.end(JSON.stringify({ settings, by_category: { browser: settings }, settings_sources: {} })); return;
@@ -146,7 +154,24 @@ try {
   };
   await open();
   await until(() => status('Browser not installed'), 'initial state');
+  await until(() => js(`document.querySelector('[aria-label="Delete Idle profile"]')?.disabled === false`), 'login profiles loaded');
+  assert.equal(await js(`document.querySelector('[aria-label="Delete Active profile"]').disabled`), true);
+  assert.equal(await js(`document.querySelectorAll('#login-profiles a').length`), 0);
+  assert.doesNotMatch(await js(`document.querySelector('#login-profiles').textContent`),
+    /Example project|session-one|session-two/, 'Profiles must omit linked projects and sessions');
   assert.equal(await js(`!!document.querySelector('a[href="/settings/browser"]')`), true);
+  assert.equal(await js(`document.querySelector('.browser-configuration-card').open`), false);
+  await call('Emulation.setDeviceMetricsOverride', { width: 1200, height: 900, deviceScaleFactor: 1, mobile: false });
+  assert.equal(await js(`(() => {
+    const profiles = document.querySelector('#login-profiles').getBoundingClientRect();
+    const setup = document.querySelector('.browser-setup-card').getBoundingClientRect();
+    return profiles.right < setup.left && profiles.top === setup.top;
+  })()`), true, 'Desktop must show profiles to the left of setup');
+  assert.equal(await js(`(() => {
+    const row = document.querySelector('.browser-viewer-card .setting-row-main');
+    return row.firstElementChild.getBoundingClientRect().bottom <= row.lastElementChild.getBoundingClientRect().top;
+  })()`), true, 'Viewer sliders must sit below their labels');
+  await call('Emulation.clearDeviceMetricsOverride');
   const names = await js(`Array.from(document.querySelectorAll('.browser-settings-fields input:not([type="range"])'), input => ({ name: input.name, label: input.getAttribute('aria-label'), id: input.id }))`);
   assert.equal(new Set(names.map(input => input.id)).size, names.length);
   for (const input of names) {
@@ -262,11 +287,15 @@ try {
   assert.equal(await js(`document.querySelector('output[for="browser-stream-size"]').textContent`), 'Custom: 1500 × 850');
   assert.equal(await js(`!!document.querySelector('.settings-pending-bar')`), false, 'Loading custom dimensions must not change them');
   await slider('browser-stream-size', 1);
-  await js(`document.querySelectorAll('.settings-group')[0].querySelector('[aria-label="Undo change"]').click()`);
+  await js(`document.getElementById('browser-stream-size').closest('.setting-row').querySelector('[aria-label="Undo change"]').click()`);
   assert.equal(await js(`document.querySelector('output[for="browser-stream-size"]').textContent`), 'Custom: 1500 × 850');
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await delay(300);
   assert.equal(await js('document.documentElement.scrollWidth <= window.innerWidth'), true, 'Mobile page must not overflow horizontally');
+  assert.equal(await js(`
+    document.querySelector('#login-profiles').getBoundingClientRect().bottom <
+    document.querySelector('.browser-setup-card').getBoundingClientRect().top
+  `), true, 'Mobile must show profiles above setup');
   assert.deepEqual(exceptions, []);
   console.log('PASS: browser setup, executable changes, validation, accessible labels, viewer drafts, presets, save/reload, discard, undo, defaults, custom dimensions and mobile layout.');
 } finally {

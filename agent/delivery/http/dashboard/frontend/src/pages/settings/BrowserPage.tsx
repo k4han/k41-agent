@@ -1,18 +1,21 @@
+import "@/styles/browser-settings.css";
+
 import { batch, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { Download, Globe, RefreshCw, RotateCcw, ShieldCheck } from "lucide-solid";
+import { ChevronDown, Download, Globe, RefreshCw, RotateCcw, ShieldCheck } from "lucide-solid";
 
 import { DataGate } from "@/components/State";
 import { BrowserProfiles } from "@/components/BrowserProfiles";
+import { FormInput } from "@/components/FormInput";
 import { apiFetch, postJson } from "@/lib/api";
 import { SettingsLayout } from "./SettingsLayout";
-import { SettingRow, SettingsPendingBar, SettingsSection, useSettingsData } from "./shared";
+import { SettingRow, SettingsPendingBar, useSettingsData } from "./shared";
 
 type SetupAction = "install" | "repair" | "check";
 const EXECUTABLE_PATH = "browser.executable_path";
 const STREAM_QUALITY = "browser.stream_quality";
 const STREAM_WIDTH = "browser.stream_max_width";
 const STREAM_HEIGHT = "browser.stream_max_height";
-const STREAM_KEYS = new Set([STREAM_QUALITY, STREAM_WIDTH, STREAM_HEIGHT]);
+const PRIMARY_SETTINGS = new Set([EXECUTABLE_PATH, STREAM_QUALITY, STREAM_WIDTH, STREAM_HEIGHT]);
 const STREAM_SIZES = [[800, 600], [1024, 600], [1280, 720], [1600, 900], [1920, 1080]] as const;
 type SetupJob = {
   id: string;
@@ -71,6 +74,7 @@ export function BrowserPage() {
   let disposed = false;
   let revision = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let configurationCard: HTMLDetailsElement | undefined;
   let configurationFields: HTMLFieldSetElement | undefined;
 
   const refreshSetup = async () => {
@@ -125,6 +129,7 @@ export function BrowserPage() {
     const invalid = Array.from(configurationFields?.querySelectorAll<HTMLInputElement>('input[type="number"]') ?? [])
       .find(input => changedKeys.has(input.name) && !input.validity.valid);
     if (invalid) {
+      if (configurationCard) configurationCard.open = true;
       invalid.reportValidity();
       return;
     }
@@ -155,149 +160,157 @@ export function BrowserPage() {
 
   return (
     <SettingsLayout title="Browser" contentWidth="medium">
-      <div class="stack settings-page-stack">
-        <div class="settings-page-heading">
-          <p class="settings-page-description">
-            Install and configure the browser used by your agents. Browser automation runs on the agent server.
-          </p>
-        </div>
-        <section class="panel settings-section-card browser-setup-card" aria-busy={busy()}>
-          <div class="panel-header split">
-            <div class="panel-title"><Globe size={17} /> Browser setup</div>
-            <button class="btn btn-secondary btn-sm" type="button" disabled={refreshing()} onClick={() => void refresh()}>
-              <RefreshCw size={13} class={refreshing() ? "spinner-animate" : ""} /> Refresh
-            </button>
-          </div>
-          <div class="panel-body stack">
-            <div class="browser-setup-status" role="status" aria-live="polite">
-              <span class={`badge ${currentJobFailed() ? "badge-danger" : ""}`}>{statusLabel()}</span>
-              <Show when={setup()?.executable_path}>
-                <code class="browser-setup-path">{setup()?.executable_path}</code>
-              </Show>
-            </div>
-            <Show when={setupError() || actionError()}>
-              <div class="browser-setup-error" role="alert">{setupError() || actionError()}</div>
-            </Show>
-            <Show when={setup()}>{(value) => <>
-              <Show when={!value().installation_supported} fallback={
-                <p class="hint">Install Chrome or Chromium for this host and its required system libraries. The server needs root or passwordless sudo access.</p>
-              }>
-                <p class="hint">{value().installation_unavailable_reason}</p>
-              </Show>
-              <div class="row-wrap browser-setup-actions">
-                <button class="btn btn-secondary btn-sm" type="button" disabled={actionsDisabled()} onClick={() => void start("check")}>
-                  <ShieldCheck size={14} /> Check browser
+      <div class="browser-settings-layout">
+        <div class="browser-settings-grid">
+          <BrowserProfiles />
+
+          <div class="stack">
+            <section class="panel browser-setup-card" aria-busy={busy()}>
+              <div class="panel-header">
+                <h2 class="panel-title"><Globe size={17} /> Browser setup</h2>
+                <button class="btn btn-secondary btn-sm" type="button" disabled={refreshing()} onClick={() => void refresh()}>
+                  <RefreshCw size={13} class={refreshing() ? "spinner-animate" : ""} /> Refresh
                 </button>
-                <Show when={!value().installed} fallback={
-                  <button class="btn btn-secondary btn-sm" type="button" disabled={actionsDisabled() || !value().installation_supported} onClick={() => void start("repair")}>
-                    <RotateCcw size={14} /> Reinstall browser
-                  </button>
-                }>
-                  <button class="btn btn-primary btn-sm" type="button" disabled={actionsDisabled() || !value().installation_supported} onClick={() => void start("install")}>
-                    <Download size={14} /> Install browser
-                  </button>
-                </Show>
               </div>
-              <Show when={executablePathDirty()}>
-                <p class="hint">Save or undo the Chrome executable change before checking or installing the browser.</p>
-              </Show>
-              <Show when={value().job}>{(job) =>
-                <div class="browser-setup-result" aria-live="polite">
-                  <Show when={previousJob()} fallback={<>
-                    <Show when={job().state === "running"}>
-                      <p class="hint">This may take a few minutes. You can leave this page and return to view the result.</p>
-                    </Show>
-                    <Show when={job().error}><p class="browser-setup-error" role="alert">{job().error}</p></Show>
-                    <Show when={job().output}>
-                      <details open={currentJobFailed()}>
-                        <summary>Operation output</summary>
-                        <pre class="browser-setup-output">{job().output}</pre>
-                      </details>
-                    </Show>
-                  </>}>
-                    <details>
-                      <summary>
-                        Previous operation for{" "}
-                        <Show when={job().checked_executable_path || job().configured_executable_path} fallback="automatic discovery">
-                          {path => <code class="browser-setup-path">{path()}</code>}
-                        </Show>
-                      </summary>
-                      <Show when={job().error}><p class="browser-setup-error">{job().error}</p></Show>
-                      <Show when={job().output}><pre class="browser-setup-output">{job().output}</pre></Show>
-                    </details>
+              <div class="panel-body stack">
+                <div class="browser-setup-status" role="status" aria-live="polite">
+                  <span class={`badge ${currentJobFailed() ? "badge-danger" : ""}`}>{statusLabel()}</span>
+                  <Show when={setup()?.executable_path}>
+                    {path => <code class="browser-setup-path">{path()}</code>}
                   </Show>
                 </div>
-              }</Show>
-            </>}</Show>
-          </div>
-        </section>
+                <Show when={setupError() || actionError()}>
+                  <div class="browser-setup-error" role="alert">{setupError() || actionError()}</div>
+                </Show>
+                <Show when={setup()}>{(value) => <>
+                  <div class="row-wrap browser-setup-actions">
+                    <button class="btn btn-secondary btn-sm" type="button" disabled={actionsDisabled()} onClick={() => void start("check")}>
+                      <ShieldCheck size={14} /> Check browser
+                    </button>
+                    <Show when={!value().installed} fallback={
+                      <button class="btn btn-secondary btn-sm" type="button" disabled={actionsDisabled() || !value().installation_supported} onClick={() => void start("repair")}>
+                        <RotateCcw size={14} /> Reinstall browser
+                      </button>
+                    }>
+                      <button class="btn btn-primary btn-sm" type="button" disabled={actionsDisabled() || !value().installation_supported} onClick={() => void start("install")}>
+                        <Download size={14} /> Install browser
+                      </button>
+                    </Show>
+                  </div>
+                  <Show when={!value().installation_supported && value().installation_unavailable_reason}>
+                    {reason => <p class="hint">{reason()}</p>}
+                  </Show>
+                  <Show when={!value().installed && value().installation_supported && !busy()}>
+                    <p class="hint">Automatic installation needs root or passwordless sudo on the server.</p>
+                  </Show>
+                  <Show when={value().job}>{(job) =>
+                    <div class="browser-setup-result" aria-live="polite">
+                      <Show when={previousJob()} fallback={<>
+                        <Show when={job().error}><p class="browser-setup-error" role="alert">{job().error}</p></Show>
+                        <Show when={job().output}>
+                          <details open={currentJobFailed()}>
+                            <summary>Operation output</summary>
+                            <pre class="browser-setup-output">{job().output}</pre>
+                          </details>
+                        </Show>
+                      </>}>
+                        <details>
+                          <summary>
+                            Previous operation for{" "}
+                            <Show when={job().checked_executable_path || job().configured_executable_path} fallback="automatic discovery">
+                              {path => <code class="browser-setup-path">{path()}</code>}
+                            </Show>
+                          </summary>
+                          <Show when={job().error}><p class="browser-setup-error">{job().error}</p></Show>
+                          <Show when={job().output}><pre class="browser-setup-output">{job().output}</pre></Show>
+                        </details>
+                      </Show>
+                    </div>
+                  }</Show>
+                </>}</Show>
 
-        <BrowserProfiles />
-
-        <DataGate data={data()} error={error()} onRetry={load}>{(payload) => <>
-          <SettingsSection title="Live viewer" actions={
-            <button class="btn btn-ghost btn-sm" type="button" disabled={busy() || saving()}
-              onClick={() => batch(() => { setDraft(STREAM_QUALITY, 50); selectStreamSize(2); })}>
-              <RotateCcw size={13} /> Reset viewer defaults
-            </button>
-          }>
-            <fieldset class="browser-settings-fields" disabled={busy() || saving()}>
-              <div class="settings-list">
-                <Show when={payload().settings[STREAM_QUALITY]}>{info =>
-                  <SettingRow settingKey={STREAM_QUALITY} info={info()} draft={drafts()[STREAM_QUALITY]}
-                    dirty={pendingChanges().some(change => change.key === STREAM_QUALITY)}
-                    onChange={value => setDraft(STREAM_QUALITY, value)} onRestore={() => restoreDraft(STREAM_QUALITY)}
-                    control={<div class="browser-stream-control">
-                      <output for="browser-stream-quality">{Number(drafts()[STREAM_QUALITY] ?? 50)}%</output>
-                      <input id="browser-stream-quality" type="range" min="1" max="100" step="1"
-                        aria-label="Live image quality" aria-describedby="browser-stream-quality-hint"
-                        value={Number(drafts()[STREAM_QUALITY] ?? 50)}
-                        onInput={event => setDraft(STREAM_QUALITY, Number(event.currentTarget.value))} />
-                      <p class="hint" id="browser-stream-quality-hint">JPEG quality stays at this level, including on slow connections.</p>
-                    </div>} />
-                }</Show>
-                <Show when={payload().settings[STREAM_WIDTH]}>{info =>
-                  <SettingRow settingKey={STREAM_WIDTH} info={{ ...info(), label: "Maximum live image size" }} draft={drafts()[STREAM_WIDTH]}
-                    dirty={streamSizeDirty()} onChange={value => setDraft(STREAM_WIDTH, value)}
-                    onRestore={() => batch(() => { restoreDraft(STREAM_WIDTH); restoreDraft(STREAM_HEIGHT); })}
-                    control={<div class="browser-stream-control">
-                      <output for="browser-stream-size">{streamSizeLabel()}</output>
-                      <input id="browser-stream-size" type="range" min="0" max="4" step="1" list="browser-stream-size-marks"
-                        aria-label="Maximum live image size" aria-valuetext={streamSizeLabel()} aria-describedby="browser-stream-size-hint"
-                        value={streamSliderIndex()} onInput={event => selectStreamSize(Number(event.currentTarget.value))} />
-                      <datalist id="browser-stream-size-marks">
-                        <For each={STREAM_SIZES}>{([width, height], index) => <option value={index()} label={`${width} × ${height}`} />}</For>
-                      </datalist>
-                      <div class="browser-resolution-marks">
-                        <For each={STREAM_SIZES}>{([width, height], index) =>
-                          <button type="button" aria-label={`Use ${width} × ${height}`} aria-pressed={streamSizeIndex() === index()}
-                            onClick={() => selectStreamSize(index())}>{width} × {height}</button>
-                        }</For>
-                      </div>
-                      <p class="hint" id="browser-stream-size-hint">Smaller viewers use smaller images. Larger viewers scale the image locally. Page layout stays unchanged.</p>
-                    </div>} />
+                <Show when={data()?.settings[EXECUTABLE_PATH]}>{info =>
+                  <fieldset class="browser-settings-fields browser-executable" disabled={busy() || saving()}>
+                    <SettingRow settingKey={EXECUTABLE_PATH} info={info()} draft={drafts()[EXECUTABLE_PATH]}
+                      dirty={executablePathDirty()} onChange={value => setDraft(EXECUTABLE_PATH, value)}
+                      onRestore={() => restoreDraft(EXECUTABLE_PATH)}
+                      control={<FormInput
+                        id="browser-executable-path"
+                        name={EXECUTABLE_PATH}
+                        ariaLabel={info().label || "Chrome executable"}
+                        value={String(drafts()[EXECUTABLE_PATH] ?? "")}
+                        onChange={value => setDraft(EXECUTABLE_PATH, value)}
+                        placeholder="Automatic discovery"
+                      />} />
+                    <Show when={executablePathDirty()}>
+                      <p class="hint">Save or undo the executable change to run browser setup.</p>
+                    </Show>
+                  </fieldset>
                 }</Show>
               </div>
-            </fieldset>
-          </SettingsSection>
-          <SettingsSection title="Browser configuration">
-            <fieldset ref={configurationFields} class="browser-settings-fields" disabled={busy() || saving()}>
-              <div class="settings-list">
-                <For each={Object.entries(payload().settings).filter(([key]) => !STREAM_KEYS.has(key))}>{([key, info]) =>
+            </section>
+
+            <DataGate data={data()} error={error()} onRetry={load}>{payload =>
+              <section class="panel browser-viewer-card">
+                <div class="panel-header">
+                  <h2 class="panel-title">Live viewer</h2>
+                  <button class="btn btn-ghost btn-sm" type="button" disabled={busy() || saving()}
+                    onClick={() => batch(() => { setDraft(STREAM_QUALITY, 50); selectStreamSize(2); })}>
+                    <RotateCcw size={13} /> Reset viewer defaults
+                  </button>
+                </div>
+                <fieldset class="browser-settings-fields" disabled={busy() || saving()}>
+                  <Show when={payload().settings[STREAM_QUALITY]}>{info =>
+                    <SettingRow settingKey={STREAM_QUALITY} info={info()} draft={drafts()[STREAM_QUALITY]}
+                      dirty={pendingChanges().some(change => change.key === STREAM_QUALITY)}
+                      onChange={value => setDraft(STREAM_QUALITY, value)} onRestore={() => restoreDraft(STREAM_QUALITY)}
+                      actions={<output for="browser-stream-quality">{Number(drafts()[STREAM_QUALITY] ?? 50)}%</output>}
+                      control={<input id="browser-stream-quality" class="browser-stream-slider" type="range" min="1" max="100" step="1"
+                        aria-label="Live image quality" value={Number(drafts()[STREAM_QUALITY] ?? 50)}
+                        onInput={event => setDraft(STREAM_QUALITY, Number(event.currentTarget.value))} />} />
+                  }</Show>
+                  <Show when={payload().settings[STREAM_WIDTH]}>{info =>
+                    <SettingRow settingKey={STREAM_WIDTH} info={{ ...info(), label: "Maximum live image size" }} draft={drafts()[STREAM_WIDTH]}
+                      dirty={streamSizeDirty()} onChange={value => setDraft(STREAM_WIDTH, value)}
+                      onRestore={() => batch(() => { restoreDraft(STREAM_WIDTH); restoreDraft(STREAM_HEIGHT); })}
+                      actions={<output for="browser-stream-size">{streamSizeLabel()}</output>}
+                      control={<>
+                        <input id="browser-stream-size" class="browser-stream-slider" type="range" min="0" max="4" step="1" list="browser-stream-size-marks"
+                          aria-label="Maximum live image size" aria-valuetext={streamSizeLabel()}
+                          value={streamSliderIndex()} onInput={event => selectStreamSize(Number(event.currentTarget.value))} />
+                        <datalist id="browser-stream-size-marks">
+                          <For each={STREAM_SIZES}>{([width, height], index) => <option value={index()} label={`${width} × ${height}`} />}</For>
+                        </datalist>
+                      </>} />
+                  }</Show>
+                </fieldset>
+              </section>
+            }</DataGate>
+          </div>
+
+          <Show when={data()}>{payload =>
+            <details ref={configurationCard} class="panel browser-configuration-card">
+              <summary class="panel-header">
+                <span class="panel-title">Browser configuration</span>
+                <ChevronDown size={15} aria-hidden="true" />
+              </summary>
+              <fieldset ref={configurationFields} class="browser-settings-fields" disabled={busy() || saving()}>
+                <For each={Object.entries(payload().settings).filter(([key]) => !PRIMARY_SETTINGS.has(key))}>{([key, info]) =>
                   <SettingRow settingKey={key} info={info} draft={drafts()[key]}
                     dirty={pendingChanges().some(change => change.key === key)}
                     onChange={value => setDraft(key, info.input_type === "number" && value === "" ? null : value)}
                     onRestore={() => restoreDraft(key)} />
                 }</For>
-              </div>
-            </fieldset>
-          </SettingsSection>
-          <p class="hint">Leave the executable path empty to discover Chrome automatically. Path changes apply to new sessions; changing browser storage requires a server restart.</p>
-          <SettingsPendingBar count={pendingChanges().length} saving={saving()} disabled={busy()}
-            restartRequired={pendingChanges().some(change => payload().settings[change.key]?.restart_required)}
-            onDiscard={discardAll} onSave={() => void save()} />
-        </>}</DataGate>
+              </fieldset>
+            </details>
+          }</Show>
+        </div>
       </div>
+      <Show when={data()}>{payload =>
+        <SettingsPendingBar count={pendingChanges().length} saving={saving()} disabled={busy()}
+          restartRequired={pendingChanges().some(change => payload().settings[change.key]?.restart_required)}
+          onDiscard={discardAll} onSave={() => void save()} />
+      }</Show>
     </SettingsLayout>
   );
 }
