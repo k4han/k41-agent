@@ -33,6 +33,7 @@ export type AcpAgentStatus = {
 };
 
 export const ANTIGRAVITY_CLI_AGENT_ID = "antigravity-cli";
+export const OPENCODE_AGENT_ID = "opencode";
 
 /** Separate card and workspace choices, retaining the legacy default-profile key. */
 export function acpOptionScope(cardName: string, settings: { agent: string }, cwd = ""): string {

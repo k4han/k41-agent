@@ -218,6 +218,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
     if (val) return formatShortModelName("", val);
     return "Model";
   });
+  const shortAcpModelLabel = createMemo(() => acpModelLabel().split("/").at(-1)?.trim() || acpModelLabel());
 
   const acpThinkingLabel = createMemo(() => {
     const val = currentAcpThinkingValue();
@@ -494,7 +495,7 @@ export function AgentModelPicker(props: AgentModelPickerProps) {
         <span class="agent-model-badge-icon">
           <Sparkles size={14} />
         </span>
-        <span class="agent-model-badge-model">{isAcp() ? acpModelLabel() : shortModelLabel()}</span>
+        <span class="agent-model-badge-model">{isAcp() ? shortAcpModelLabel() : shortModelLabel()}</span>
         <Show when={isAcp() ? acpThinkingLabel() : selectedEffortLabel()}>
           <span class="agent-model-badge-effort">{isAcp() ? acpThinkingLabel() : selectedEffortLabel()}</span>
         </Show>

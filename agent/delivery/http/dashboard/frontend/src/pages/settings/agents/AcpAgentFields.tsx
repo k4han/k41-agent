@@ -10,6 +10,11 @@ import type { AcpAgentSettings } from "@/types";
 
 const AGENT_DEFAULT = "";
 
+const ACP_AGENT_OPTIONS = [
+  { value: "antigravity-cli", label: "Google Antigravity (agy acp)" },
+  { value: "opencode", label: "OpenCode (opencode acp)" },
+];
+
 export function AcpAgentFields(props: {
   form: AgentForm;
   readOnly: boolean;
@@ -28,6 +33,14 @@ export function AcpAgentFields(props: {
   );
   const currentStatus = () => (statusUrl() === API_PATHS.acpAgent(settings().agent) && !status.loading) ? status() : undefined;
 
+  const setAgent = (agent: string) => {
+    props.onUpdate("acp", {
+      ...settings(),
+      agent: (agent === "opencode" ? "opencode" : "antigravity-cli"),
+      config_options: {},
+    });
+  };
+
   const setOption = (id: string, value: string) => {
     const { [id]: _removed, ...rest } = settings().config_options;
     props.onUpdate("acp", { ...settings(), config_options: value === AGENT_DEFAULT ? rest : { ...rest, [id]: value } });
@@ -35,13 +48,30 @@ export function AcpAgentFields(props: {
 
   return (
     <div class="stack" style="gap: 16px;">
-      <p class="hint">Configure this card's system prompt, tools, MCP and permissions in their tabs. Native AGY tools are grouped under ACP in Tools. Card instructions and selected tools are sent each time a new session starts.</p>
+      <div class="field">
+        <label>ACP Agent Runtime</label>
+        <SelectControl
+          value={settings().agent}
+          options={ACP_AGENT_OPTIONS}
+          disabled={props.readOnly}
+          ariaLabel="ACP Agent Runtime"
+          onChange={setAgent}
+        />
+      </div>
+      <Show
+        when={settings().agent === "opencode"}
+        fallback={
+          <p class="hint">Configure this card's system prompt, tools, MCP and permissions in their tabs. Native AGY tools are grouped under ACP in Tools. Card instructions and selected tools are sent each time a new session starts.</p>
+        }
+      >
+        <p class="hint">Configure this card's system prompt, tools, MCP and permissions in their tabs. OpenCode runs its native coding tools and accepts K41 MCP tools. Card instructions and selected options are sent each time a new session starts.</p>
+      </Show>
       <Show when={status.error}>
         <p class="hint" role="alert">Could not load this agent's settings.</p>
       </Show>
       <Show when={currentStatus() && !currentStatus()?.auth.signed_in}>
         <p class="hint">
-          {currentStatus()?.auth.error || "Check agy installation and sign-in on the machine running K41."}
+          {currentStatus()?.auth.error || (settings().agent === "opencode" ? "Check opencode installation and sign-in on the machine running K41." : "Check agy installation and sign-in on the machine running K41.")}
           {" "}<a href="/settings/acp">ACP agents</a>
         </p>
       </Show>

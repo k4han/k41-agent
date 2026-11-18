@@ -202,7 +202,7 @@ export function AgentEditPage(props: { agentName?: string }) {
     if (!p) {
       return [];
     }
-    return buildToolGroups(p, initialForm().tools, isAcpCard(form()));
+    return buildToolGroups(p, initialForm().tools, isAcpCard(form()), form().acp?.agent);
   });
   const totalBuiltInTools = createMemo(() =>
     toolGroups().reduce((total, group) => total + group.tools.length, 0),

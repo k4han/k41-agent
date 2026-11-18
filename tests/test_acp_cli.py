@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from agent.modules.acp import launcher
-from agent.modules.acp.agents import AGENT_DEFINITIONS, ANTIGRAVITY_CLI_AGENT_ID
+from agent.modules.acp.agents import AGENT_DEFINITIONS, ANTIGRAVITY_CLI_AGENT_ID, OPENCODE_AGENT_ID
 from agent.modules.acp.auth import AcpAuthManager
 from agent.modules.acp.errors import AcpError, AcpNotInstalled
 from agent.modules.acp.native_tools import ALWAYS_ENABLED_TOOL_NAMES, effective_native_tools, native_tools_payload
@@ -68,11 +68,31 @@ def test_legacy_runtime_settings_normalize_to_cli(agent_id):
 
 
 def test_unknown_runtimes_are_rejected_and_only_cli_is_registered():
-    assert list(AGENT_DEFINITIONS) == [CLI]
+    assert list(AGENT_DEFINITIONS) == [CLI, OPENCODE_AGENT_ID]
+    assert AcpAgentSettings(agent=OPENCODE_AGENT_ID).agent == OPENCODE_AGENT_ID
     with pytest.raises(ValueError):
         AcpAgentSettings(agent="unknown")
     with pytest.raises(AcpError, match="Unknown ACP agent"):
         launcher.runtime_key("antigravity-acp")
+
+
+def test_opencode_command_resolution_and_runtime_key(tmp_path, monkeypatch):
+    key = launcher.runtime_key(OPENCODE_AGENT_ID, str(tmp_path))
+    assert key.startswith("opencode:")
+
+    monkeypatch.setattr(launcher, "cli_details", lambda agent_id="opencode", refresh=False: {
+        "executable_path": None, "version": None, "error": None,
+    })
+    with pytest.raises(AcpNotInstalled, match="OpenCode CLI is not installed"):
+        launcher.resolve_cli_command(OPENCODE_AGENT_ID, cwd=str(tmp_path))
+
+    fake_bin = "C:/Program Files/opencode/opencode.exe"
+    monkeypatch.setattr(launcher, "cli_details", lambda agent_id="opencode", refresh=False: {
+        "executable_path": fake_bin, "version": "0.1.0", "error": None,
+    })
+    cmd = launcher.resolve_cli_command(OPENCODE_AGENT_ID, cwd=str(tmp_path))
+    assert cmd.argv == [fake_bin, "acp"]
+    assert cmd.cwd == tmp_path
 
 
 def test_tools_only_card_round_trip_and_compatible_defaults():

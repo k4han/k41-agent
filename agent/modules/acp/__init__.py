@@ -11,6 +11,8 @@ from typing import Any
 
 _EXPORTS = {
     "AGENT_DEFINITIONS": "agent.modules.acp.agents",
+    "ANTIGRAVITY_CLI_AGENT_ID": "agent.modules.acp.agents",
+    "OPENCODE_AGENT_ID": "agent.modules.acp.agents",
     "auth_status": "agent.modules.acp.auth",
     "AcpError": "agent.modules.acp.errors",
     "AcpNotInstalled": "agent.modules.acp.errors",
@@ -28,6 +30,7 @@ _EXPORTS = {
     "PERMISSION_INTERRUPT_TYPE": "agent.modules.acp.turns",
     "PendingHandoff": "agent.modules.acp.turns",
     "PendingToolPermission": "agent.modules.acp.turns",
+    "OPENCODE_SIGN_IN_NOTICE": "agent.modules.acp.turns",
     "SIGN_IN_NOTICE": "agent.modules.acp.turns",
     "STOP_TURN_OPTION_ID": "agent.modules.acp.turns",
     "describe_failure": "agent.modules.acp.turns",

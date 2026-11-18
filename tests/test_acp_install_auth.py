@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.modules.acp.agents import ANTIGRAVITY_CLI_AGENT_ID
+from agent.modules.acp.agents import ANTIGRAVITY_CLI_AGENT_ID, OPENCODE_AGENT_ID
 from agent.modules.acp.auth import AcpAuthManager
 from agent.modules.acp.service import AcpService
 from agent.modules.agents.models import AgentConfig
@@ -43,13 +43,19 @@ def test_list_reports_only_cli_and_missing_installation(client):
     response = client.get("/dashboard-api/acp/agents")
     assert response.headers["cache-control"] == "no-store"
     agents = response.json()["agents"]
-    assert len(agents) == 1
-    agent = agents[0]
+    assert len(agents) == 2
+    by_id = {agent["id"]: agent for agent in agents}
+    assert AGENT in by_id and OPENCODE_AGENT_ID in by_id
+    agent = by_id[AGENT]
     assert agent["id"] == AGENT and agent["installed"] is False
     assert agent["installation_source"] == "path" and agent["executable_path"] is None
     assert agent["version"] is None and agent["auth"]["state"] == "not_installed"
     assert not ({"job", "sign_in"} & agent.keys())
     assert not ({"methods", "uses_api_key", "can_sign_out"} & agent["auth"].keys())
+    opencode = by_id[OPENCODE_AGENT_ID]
+    assert opencode["id"] == OPENCODE_AGENT_ID and opencode["installed"] is False
+    assert opencode["installation_source"] == "path" and opencode["executable_path"] is None
+    assert opencode["version"] is None and opencode["auth"]["state"] == "not_installed"
 
 
 @pytest.mark.parametrize("agent_id", ["unknown", "antigravity-acp"])

@@ -107,7 +107,10 @@ class AcpService:
                 # It died by itself. Stopping it still releases its job and pipes.
                 await asyncio.to_thread(client.stop)
             if self._resolve_command is None:
-                command = await asyncio.to_thread(resolve_cli_command, cwd=cwd, native_tools=native_tools)
+                if agent_id == "antigravity-cli":
+                    command = await asyncio.to_thread(resolve_cli_command, cwd=cwd, native_tools=native_tools)
+                else:
+                    command = await asyncio.to_thread(resolve_cli_command, agent_id=agent_id, cwd=cwd, native_tools=native_tools)
             else:
                 command = await asyncio.to_thread(self._resolve_command, agent_id)
             client = await asyncio.to_thread(AcpClient, command)

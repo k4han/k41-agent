@@ -320,7 +320,7 @@ export function ChatPage() {
     validCards().find((card) => card.name === agentName()),
   );
   const acpAgentSelected = createMemo(() => isAcpCard(selectedCard()));
-  const acpOptions = useAcpSessionOptions(selectedCard, workingDir);
+  const acpOptions = useAcpSessionOptions(selectedCard, workingDir, permissionScope);
   const selectableCards = createMemo(() => selectableAgentCards(validCards(), selectedCard(), Boolean(currentThreadId())));
 
   const modelSelectionAvailable = (nextProvider: string, nextModel: string, customModel = false): boolean => {
@@ -831,6 +831,7 @@ export function ChatPage() {
     const isViewingPending = !isUnmounting && currentStreamThreadId() === oldStreamTid;
 
     if (isViewingPending) {
+      acpOptions.bindConversation(threadId);
       if (permissionScope() !== threadId) savePermissionMode(localStorage, permissionScope(), undefined);
       savePermissionMode(localStorage, threadId, permissionMode());
       const mode = permissionMode();

@@ -32,6 +32,7 @@ const fixtures = {
     { name: 'alternate', display_name: 'Alternate', provider: 'test', model: 'model-c', valid: true },
     { name: 'custom', display_name: 'Custom', provider: 'test', model: 'configured-custom-model', valid: true },
     { name: 'unavailable', display_name: 'Unavailable', provider: 'removed', model: 'removed-model', valid: true },
+    { name: 'opencode', display_name: 'OpenCode', graph_type: 'acp_agent', provider: '', model: '', acp: { agent: 'opencode', config_options: {} }, valid: true },
   ] },
   '/dashboard-api/agents/providers': {
     provider_names: ['test'], default_provider: 'test', default_model: 'model-b',
@@ -56,8 +57,25 @@ let holdHistory = false;
 let workspaceResolution;
 let holdSessions = false;
 const delayedSessions = [];
+const acpProbes = [];
+const acpStatus = { display_name: 'OpenCode', auth: { signed_in: true, config_options: [
+  { id: 'model', name: 'Model', category: 'model', current_value: 'model-b',
+    options: ['model-a', 'model-b'].map(value => ({ value, name: value })) },
+] } };
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/dashboard-api/acp/agents/opencode') {
+    res.setHeader('Content-Type', 'application/json');
+    if (url.searchParams.has('cwd')) acpProbes.push(res);
+    else res.end(JSON.stringify(acpStatus));
+    return;
+  }
+  if (url.pathname === '/dashboard-api/workspace/runtime/acp-created') {
+    const execution = history['acp-created'].workspace;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ workspace: { execution, scope: { key: 'acp-created', kind: 'local', label: 'ACP temporary workspace', metadata: {} } }, runtime: null }));
+    return;
+  }
   if (req.method === 'POST' && url.pathname.endsWith('/fork')) {
     let body = '';
     for await (const chunk of req) body += chunk;
@@ -683,14 +701,48 @@ try {
   await until(() => js(`document.querySelectorAll('button[aria-label="Branch conversation"]').length === 0`), 'hide branch actions during streaming');
   finish('first', 'Continued after branching');
   await completed();
+
+  await navigate('/chat?agent=opencode');
+  await loaded();
+  await until(async () => await model() === 'model-b', 'OpenCode default model');
+  await js('document.querySelector(".model-picker-trigger").click()');
+  await until(() => js('!!document.querySelector(\'.model-item-row[data-model-id="model-a"]\')'), 'OpenCode model choices');
+  await js('document.querySelector(\'.model-item-row[data-model-id="model-a"] .model-item-select\').click()');
+  await send('Keep the selected OpenCode model while streaming');
+  assert.deepEqual(sentMessages.at(-1).acp_config_options, { model: 'model-a' });
+  history['acp-created'] = { ...structuredClone(history.first), thread_id: 'acp-created', agent_name: 'opencode',
+    workspace: { backend: 'local', locator: 'C:/temporary/acp-created', label: 'ACP temporary workspace', metadata: {} } };
+  const acpResponse = responses.get('pending');
+  responses.delete('pending');
+  responses.set('acp-created', acpResponse);
+  acpResponse.write(JSON.stringify({ type: 'thread_created', thread_id: 'acp-created' }) + '\n');
+  acpResponse.write(JSON.stringify({ type: 'message', content: 'OpenCode is streaming with model A' }) + '\n');
+  await until(() => acpProbes.length === 1, 'workspace discovery triggers another OpenCode probe');
+  assert.equal(await model(), 'model-a', 'workspace discovery keeps the selected model while its probe is pending');
+  acpProbes.shift().end(JSON.stringify(acpStatus));
+  await delay(150);
+  await until(() => js('document.querySelector(".chat-panel").textContent.includes("OpenCode is streaming with model A")'), 'OpenCode streaming response');
+  assert.equal(await model(), 'model-a', 'the probe default cannot replace the streaming model');
+  assert.equal(await js('!!document.querySelector(\'button[aria-label="Stop generating"]\')'), true);
+  finish('acp-created', 'OpenCode response completed');
+  await completed();
+  await reload();
+  await until(() => acpProbes.length > 0, 'OpenCode probe after reload');
+  acpProbes.shift().end(JSON.stringify(acpStatus));
+  assert.equal(await model(), 'model-a', 'the conversation model survives a page reload');
+  await send('Continue with the same OpenCode model');
+  assert.deepEqual(sentMessages.at(-1).acp_config_options, { model: 'model-a' });
+  finish('acp-created', 'OpenCode follow-up completed');
+  await completed();
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
-  console.log('PASS: model preferences, concurrent streams, delayed navigation, workspace snapshots, and conversation branching with old answers, repeated clicks, failures, and streaming.');
+  console.log('PASS: model preferences, concurrent streams, delayed navigation, workspace snapshots, conversation branching, and OpenCode model selection through workspace discovery, streaming, reloads, and follow-up turns.');
 } finally {
   for (const response of responses.values()) response.end();
   workspaceResolution?.end();
   delayedHistory?.res.end();
   for (const response of delayedSessions) response.end();
   for (const fork of pendingForks) fork.res.end();
+  for (const response of acpProbes) response.end();
   if (call && ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
   ws?.close();
   browser.kill();

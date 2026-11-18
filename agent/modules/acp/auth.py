@@ -34,7 +34,10 @@ class AcpAuthManager:
     ) -> dict[str, Any]:
         """Check sign-in; the retired agent_name argument is accepted for old clients."""
         key = runtime_key(agent_id, cwd)
-        details = await asyncio.to_thread(cli_details, refresh=refresh)
+        if agent_id == "antigravity-cli":
+            details = await asyncio.to_thread(cli_details, refresh=refresh)
+        else:
+            details = await asyncio.to_thread(cli_details, agent_id, refresh=refresh)
         if not details["executable_path"]:
             return auth_status("not_installed")
         if details["error"]:

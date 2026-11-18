@@ -112,7 +112,7 @@ export type ModelCatalog = {
 };
 
 export type AcpAgentSettings = {
-  agent: "antigravity-cli";
+  agent: "antigravity-cli" | "opencode";
   tools?: string[] | null;
   config_options: Record<string, string>;
 };

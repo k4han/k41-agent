@@ -12,6 +12,10 @@ type AcpAgent = {
   installed: boolean;
   version: string | null;
   executable_path: string | null;
+  docs_url?: string;
+  login_command?: string;
+  update_command?: string;
+  license?: string;
   auth: {
     signed_in: boolean;
     state: "not_installed" | "signed_out" | "signed_in" | "error";
@@ -50,7 +54,7 @@ export function AcpAgentsPage() {
       <div class="stack settings-page-stack">
         <div class="settings-page-heading">
           <p class="settings-page-description">
-            Connect Antigravity over the Agent Client Protocol using your installed CLI and account.
+            Connect external agents over the Agent Client Protocol using your installed CLI and account.
           </p>
         </div>
         <Show when={loadError()}><p class="hint" role="alert">{loadError()}</p></Show>
@@ -89,9 +93,20 @@ function AcpAgentPanel(props: {
       <div class="panel-body stack">
         <p role={props.agent.auth.state === "error" ? "alert" : "status"}>{statusText()}</p>
         <Show when={props.agent.executable_path}><p class="hint">Executable: <code>{props.agent.executable_path}</code></p></Show>
-        <p class="hint">K41 uses agy from PATH on this machine, with your existing user and workspace settings.</p>
-        <p class="hint">Install Antigravity CLI separately. Update with <code>agy update</code> and sign in with <code>agy acp --login</code>, then refresh.</p>
-        <a href="https://antigravity.google/docs/ide/extensions/acp" target="_blank" rel="noopener noreferrer">Antigravity CLI setup</a>
+        <Show
+          when={props.agent.id === "opencode"}
+          fallback={
+            <>
+              <p class="hint">K41 uses agy from PATH on this machine, with your existing user and workspace settings.</p>
+              <p class="hint">Install Antigravity CLI separately. Update with <code>agy update</code> and sign in with <code>agy acp --login</code>, then refresh.</p>
+              <a href="https://antigravity.google/docs/ide/extensions/acp" target="_blank" rel="noopener noreferrer">Antigravity CLI setup</a>
+            </>
+          }
+        >
+          <p class="hint">K41 uses opencode from PATH on this machine, with your existing user and workspace settings.</p>
+          <p class="hint">Install OpenCode CLI separately. Update with <code>npm i -g @opencode/cli@latest</code> and sign in with <code>opencode auth login</code>, then refresh.</p>
+          <a href="https://opencode.ai" target="_blank" rel="noopener noreferrer">OpenCode setup</a>
+        </Show>
         <Show when={props.agent.installed}>
           <p class="hint">
             This agent's tools run on the machine running K41, with the same access as K41 itself. Keep approvals on unless you trust everything the agent reads.

@@ -24,6 +24,7 @@ test("CLI status URLs carry agent and workspace as encoded parameters", () => {
   assert.equal(url.searchParams.get("agent_name"), "custom/agent");
   assert.equal(url.searchParams.get("cwd"), "D:\\My Projects\\workspace");
   assert.equal(API_PATHS.acpAgent("antigravity-cli"), "/dashboard-api/acp/agents/antigravity-cli");
+  assert.equal(API_PATHS.acpAgent(acp.OPENCODE_AGENT_ID), "/dashboard-api/acp/agents/opencode");
 });
 
 test("CLI option choices are separated by card and workspace and ignore retired profiles", () => {
@@ -34,6 +35,7 @@ test("CLI option choices are separated by card and workspace and ignore retired 
   assert.notEqual(scope, acp.acpOptionScope("card", settings, "/other"));
   assert.equal(acp.acpOptionScope("card", { agent: "antigravity-cli", agent_name: " " }),
     acp.acpOptionScope("card", { agent: "antigravity-cli", agent_name: null }));
+  assert.notEqual(scope, acp.acpOptionScope("card", { agent: acp.OPENCODE_AGENT_ID }, "/workspace"));
 });
 
 test("a new conversation can pick any agent", () => {

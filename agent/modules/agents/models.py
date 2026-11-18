@@ -35,7 +35,7 @@ class AcpAgentSettings(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    agent: Literal["antigravity-cli"] = "antigravity-cli"
+    agent: Literal["antigravity-cli", "opencode"] = "antigravity-cli"
     tools: list[str] | None = None
     # Session config option id -> value, for example {"model": "gemini-3.8-flash"}.
     config_options: dict[str, str] = Field(default_factory=dict)

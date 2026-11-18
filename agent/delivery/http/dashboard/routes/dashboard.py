@@ -198,8 +198,9 @@ def _build_onboarding(
 ) -> dict[str, bool]:
     running_channels = sum(1 for s in services if s.get("status") == "running")
     ready_providers = sum(1 for p in providers if p.get("ready"))
+    has_acp_cli = which("agy") is not None or which("opencode") is not None
     # An installed ACP agent can answer chats without any provider configured.
-    needs_provider = ready_providers == 0 and which("agy") is None
+    needs_provider = ready_providers == 0 and not has_acp_cli
     needs_channel = running_channels == 0
     needs_agent = agents_total == 0
     return {
@@ -306,7 +307,7 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
         tasks_failed=tasks_failed,
         jobs_total=len(jobs),
         sessions_active=sessions_active,
-        providers_configured=ready_providers + int(which("agy") is not None),
+        providers_configured=ready_providers + int(which("agy") is not None or which("opencode") is not None),
         mcp_connected=mcp_connected,
     )
 

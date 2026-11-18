@@ -54,8 +54,9 @@ export function acpToolName(tool: string): string | undefined {
 
 export function normalizeAcpSettings(value: AcpAgentSettings | null): AcpAgentSettings {
   const legacy = value as (AcpAgentSettings & { use_default_tools?: boolean }) | null;
+  const agent = value?.agent === "opencode" ? "opencode" : "antigravity-cli";
   return {
-    agent: "antigravity-cli",
+    agent,
     tools: value && Object.hasOwn(value, "tools") ? value.tools ?? null : legacy?.use_default_tools === false ? [] : null,
     config_options: value?.config_options ?? {},
   };
@@ -101,7 +102,7 @@ export function manualToolNames(tools: readonly string[]): string[] {
     "update_async_task", "cancel_async_task"].includes(name));
 }
 
-export function buildToolGroups(payload: AgentsPayload, initialTools: string[], isAcp = false): AgentToolGroup[] {
+export function buildToolGroups(payload: AgentsPayload, initialTools: string[], isAcp = false, acpAgent?: string): AgentToolGroup[] {
   const unavailable = new Set(isAcp ? payload.acp_unavailable_tools || [] : []);
   const groups = (payload.tool_groups || []).map((group) => ({
     category: group.category,
@@ -117,7 +118,7 @@ export function buildToolGroups(payload: AgentsPayload, initialTools: string[], 
       groups.push({ category: "unknown", tools: uniqueSorted(extras) });
     }
   }
-  if (isAcp && payload.acp_tools?.length) {
+  if (isAcp && acpAgent !== "opencode" && payload.acp_tools?.length) {
     groups.unshift({ category: "acp", tools: payload.acp_tools.map((tool) => `${ACP_TOOL_PREFIX}${tool.name}`) });
   }
   return groups;

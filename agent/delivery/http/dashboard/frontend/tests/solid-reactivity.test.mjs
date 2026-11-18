@@ -138,6 +138,123 @@ test('ACP cards expose and send model and thinking options directly', async t =>
   assert.deepEqual(hook.requestOptions(), { model: 'custom', thinking_level: 'low' });
 });
 
+test('OpenCode keeps submitted options through thread creation and workspace discovery', async t => {
+  const saved = new Map();
+  const acp = loadModule('../src/lib/acp.ts');
+  const { API_PATHS } = loadModule('../src/lib/endpoints.ts');
+  const pending = [];
+  const { useAcpSessionOptions } = loadModule('../src/lib/useAcpSessionOptions.ts', {
+    '@/lib/acp': { ...acp, readAcpOptionChoices: key => saved.get(key) || {}, writeAcpOptionChoices: (key, value) => saved.set(key, value) },
+    '@/lib/api': { apiFetch: url => new Promise(resolve => pending.push({ url, resolve })) },
+    '@/lib/endpoints': { API_PATHS },
+  });
+  const configOptions = [
+    { id: 'model', name: 'Model', category: 'model', current_value: 'model-b',
+      options: ['model-a', 'model-b'].map(value => ({ value, name: value })) },
+    { id: 'thinking_level', name: 'Thinking', category: 'thought_level', current_value: 'low',
+      options: ['low', 'high'].map(value => ({ value, name: value })) },
+  ];
+  const card = { name: 'opencode', graph_type: 'acp_agent', acp: { agent: 'opencode', config_options: {} } };
+  const workspace = '/temporary/thread-one';
+  saved.set(acp.acpOptionScope(card.name, card.acp, workspace), { model: 'model-b', thinking_level: 'low' });
+  const view = mount(t, () => {
+    const [cwd, setCwd] = solid.createSignal('');
+    const [conversation, setConversation] = solid.createSignal('draft');
+    const hook = useAcpSessionOptions(() => card, cwd, conversation);
+    return { hook, setCwd, setConversation, cwd, conversation };
+  }).value;
+  await tick();
+  pending[0].resolve({ auth: { config_options: configOptions } });
+  await tick();
+  view.hook.setValue('model', 'model-a');
+  view.hook.setValue('thinking_level', 'high');
+  const sent = view.hook.requestOptions();
+  assert.deepEqual(sent, { model: 'model-a', thinking_level: 'high' });
+
+  view.hook.bindConversation('thread-one');
+  view.setConversation('thread-one');
+  view.setCwd(workspace);
+  await tick();
+  assert.deepEqual(view.hook.values(), sent, 'keep the selection while the new workspace probe is pending');
+  pending[1].resolve({ auth: { config_options: configOptions } });
+  await tick();
+  assert.deepEqual(view.hook.values(), sent, 'probe defaults must not replace the streaming model');
+  assert.deepEqual(view.hook.requestOptions(), sent, 'the next turn must use the displayed model');
+
+  const remounted = mount(t, () => useAcpSessionOptions(() => card, view.cwd, view.conversation)).value;
+  await tick();
+  pending[2].resolve({ auth: { config_options: configOptions } });
+  await tick();
+  assert.deepEqual(remounted.requestOptions(), sent, 'a page remount keeps the conversation selection');
+
+  view.setConversation('thread-two');
+  await tick();
+  assert.deepEqual(view.hook.values(), { model: 'model-b', thinking_level: 'low' }, 'another conversation has its own choices');
+  view.hook.setValue('model', 'model-b');
+  view.setConversation('thread-one');
+  await tick();
+  assert.deepEqual(view.hook.values(), sent, 'workspace preferences from another chat cannot reset this chat');
+  view.hook.setValue('model', 'model-b');
+  assert.deepEqual(view.hook.requestOptions(), { model: 'model-b', thinking_level: 'high' }, 'an explicit model change still takes effect');
+});
+
+test('OpenCode preserves the submitted probe default when workspace defaults change', async t => {
+  const saved = new Map();
+  const acp = loadModule('../src/lib/acp.ts');
+  const { API_PATHS } = loadModule('../src/lib/endpoints.ts');
+  const { useAcpSessionOptions } = loadModule('../src/lib/useAcpSessionOptions.ts', {
+    '@/lib/acp': { ...acp, readAcpOptionChoices: key => saved.get(key) || {}, writeAcpOptionChoices: (key, value) => saved.set(key, value) },
+    '@/lib/api': { apiFetch: async url => ({ auth: { config_options: [
+      { id: 'model', name: 'Model', category: 'model', current_value: url.includes('cwd=') ? 'model-b' : 'model-a',
+        options: ['model-a', 'model-b'].map(value => ({ value, name: value })) },
+    ] } }) },
+    '@/lib/endpoints': { API_PATHS },
+  });
+  const view = mount(t, () => {
+    const [cwd, setCwd] = solid.createSignal('');
+    return { hook: useAcpSessionOptions(() => ({ name: 'opencode', graph_type: 'acp_agent', acp: { agent: 'opencode' } }), cwd, () => 'thread'), setCwd };
+  }).value;
+  await tick();
+  const sent = view.hook.requestOptions();
+  assert.deepEqual(sent, { model: 'model-a' });
+  view.setCwd('/discovered');
+  await tick();
+  assert.deepEqual(view.hook.values(), sent);
+});
+
+test('ACP conversation choices stay isolated by card and runtime when storage is unavailable', async t => {
+  const acp = loadModule('../src/lib/acp.ts');
+  const { API_PATHS } = loadModule('../src/lib/endpoints.ts');
+  const { useAcpSessionOptions } = loadModule('../src/lib/useAcpSessionOptions.ts', {
+    '@/lib/acp': { ...acp, readAcpOptionChoices: () => ({}), writeAcpOptionChoices: () => {} },
+    '@/lib/api': { apiFetch: async () => ({ auth: { config_options: [
+      { id: 'model', name: 'Model', category: 'model', current_value: 'model-b',
+        options: ['model-a', 'model-b'].map(value => ({ value, name: value })) },
+    ] } }) },
+    '@/lib/endpoints': { API_PATHS },
+  });
+  const original = { name: 'card', graph_type: 'acp_agent', acp: { agent: 'opencode' } };
+  const view = mount(t, () => {
+    const [card, setCard] = solid.createSignal(original);
+    const [conversation, setConversation] = solid.createSignal('draft');
+    return { hook: useAcpSessionOptions(card, () => '/workspace', conversation), setCard, setConversation };
+  }).value;
+  await tick();
+  view.hook.setValue('model', 'model-a');
+  view.hook.bindConversation('thread');
+  view.setConversation('thread');
+  await tick();
+  assert.deepEqual(view.hook.values(), { model: 'model-a' });
+  for (const card of [{ ...original, name: 'another-card' }, { ...original, acp: { agent: 'antigravity-cli' } }]) {
+    view.setCard(card);
+    await tick();
+    assert.deepEqual(view.hook.values(), { model: 'model-b' });
+    view.setCard(original);
+    await tick();
+    assert.deepEqual(view.hook.values(), { model: 'model-a' });
+  }
+});
+
 function loadActivityView() {
   const activity = loadModule('../src/lib/transcriptActivity.ts', {
     '@/lib/htmlPreview': { HTML_PREVIEW_TOOL_NAME: 'html_preview' },

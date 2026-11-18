@@ -48,12 +48,15 @@ _STOP_NOTICES = {
     "refusal": "The agent declined to continue.",
 }
 SIGN_IN_NOTICE = "Antigravity CLI is not signed in. Run agy acp --login on the machine running K41, refresh ACP settings, then retry."
+OPENCODE_SIGN_IN_NOTICE = "OpenCode is not signed in. Run opencode auth login on the machine running K41, refresh ACP settings, then retry."
 NO_FINAL_TEXT_NOTICE = "The agent finished without a final message."
 
 
 def describe_failure(error: BaseException, agent_id: str = "") -> str:
     if isinstance(error, AcpRpcError):
-        return SIGN_IN_NOTICE if error.auth_required else f"The agent reported an error: {error.message}"
+        if error.auth_required:
+            return OPENCODE_SIGN_IN_NOTICE if agent_id == "opencode" else SIGN_IN_NOTICE
+        return f"The agent reported an error: {error.message}"
     if isinstance(error, AcpConnectionClosed):
         return "The agent process stopped unexpectedly. Send your message again to continue."
     if isinstance(error, AcpError):
