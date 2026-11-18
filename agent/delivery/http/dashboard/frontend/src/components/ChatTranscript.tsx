@@ -345,12 +345,23 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       <Show when={props.items.length > 0 && props.showScrollToBottom}>
         <button
           class="scroll-to-bottom-btn"
+          classList={{ "is-streaming": streamActive() }}
           type="button"
           onClick={props.onScrollToBottomClick}
           title="Scroll to bottom"
           aria-label="Scroll to bottom"
+          data-streaming={streamActive() ? "true" : undefined}
         >
-          <ArrowDown size={18} />
+          <Show
+            when={streamActive()}
+            fallback={<ArrowDown size={18} />}
+          >
+            <span class="scroll-to-bottom-dots" aria-hidden="true">
+              <span class="scroll-to-bottom-dot" />
+              <span class="scroll-to-bottom-dot" />
+              <span class="scroll-to-bottom-dot" />
+            </span>
+          </Show>
         </button>
       </Show>
     </div>
