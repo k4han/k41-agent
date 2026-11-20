@@ -3,6 +3,7 @@ import { Plus, RefreshCw, Search, Trash2 } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DashboardTable } from "@/components/DashboardTable";
+import { EmptyState } from "@/components/EmptyState";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
 import { API_PATHS } from "@/lib/endpoints";
@@ -247,7 +248,7 @@ export function McpTab() {
                     </td>
                     <td>{server.tool_count}</td>
                     <td>
-                      <div class="row-wrap">
+                      <div class="row-wrap" style={{ "justify-content": "flex-end", gap: "8px" }}>
                         <button
                           class="btn btn-sm"
                           type="button"
@@ -260,13 +261,14 @@ export function McpTab() {
                           <RefreshCw size={13} />
                         </button>
                         <button
-                          class="btn btn-sm"
+                          class="btn btn-sm btn-danger"
+                          style={{ "margin-left": "6px" }}
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
                             setDeleteTargetName(server.name);
                           }}
-                          title="Delete"
+                          title="Delete server"
                         >
                           <Trash2 size={13} />
                         </button>
@@ -298,7 +300,11 @@ export function McpTab() {
                   </button>
                 </div>
                 <div class="grid-3">
-                  <For each={results()} fallback={<div class="empty">No marketplace results.</div>}>
+                  <For each={results()} fallback={
+                    <div style={{ "grid-column": "1 / -1", padding: "16px 0" }}>
+                      <EmptyState message="No marketplace results" hint="Try searching with a different keyword." />
+                    </div>
+                  }>
                     {(server) => (
                       <div class="panel mcp-popular-card">
                         <div class="setting-title mcp-popular-card-title">

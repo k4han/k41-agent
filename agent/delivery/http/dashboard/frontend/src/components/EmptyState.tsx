@@ -7,6 +7,8 @@ export function EmptyState(props: {
   hint?: string;
   href?: string;
   action?: string;
+  onAction?: () => void;
+  children?: JSX.Element;
 }) {
   const cta = createMemo(() =>
     props.href && props.action
@@ -29,6 +31,18 @@ export function EmptyState(props: {
             {ctaValue().label}
           </A>
         )}
+      </Show>
+      <Show when={!props.href && props.action && props.onAction}>
+        <button
+          class="btn btn-sm btn-primary empty-state-action"
+          type="button"
+          onClick={props.onAction}
+        >
+          {props.action}
+        </button>
+      </Show>
+      <Show when={props.children}>
+        {props.children}
       </Show>
     </div>
   );

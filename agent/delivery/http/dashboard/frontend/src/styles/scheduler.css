@@ -499,24 +499,68 @@
 
 .scheduler-job-actions {
   display: flex;
+  align-items: center;
   flex: none;
-  gap: 2px;
-  margin-right: -6px;
+  gap: 4px;
 }
 
 .scheduler-job-actions .btn {
-  width: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  width: 32px;
+  height: 32px;
   padding: 0;
+  border-radius: var(--radius-sm, 6px);
   color: var(--muted);
+  transition: all 120ms ease;
 }
 
 .scheduler-job-actions .btn:hover {
   color: var(--fg);
+  background: var(--surface-2);
 }
 
-.scheduler-job-actions .scheduler-job-delete:hover {
-  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+.scheduler-job-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 140px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.scheduler-job-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--fg);
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.scheduler-job-menu-item:hover,
+.scheduler-job-menu-item:focus-visible {
+  background: var(--surface-2);
+}
+
+.scheduler-job-menu-item.danger-text {
   color: var(--danger);
+}
+
+.scheduler-job-menu-item.danger-text:hover {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
 }
 
 .scheduler-job-task {

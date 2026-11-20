@@ -1,8 +1,10 @@
 .panel {
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 10px;
   background: var(--surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
 }
 
 .setting-dirty {
@@ -33,13 +35,14 @@
 
 .settings-resource-search input {
   width: 100%;
-  height: 34px;
+  height: 36px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   outline: none;
   background: var(--surface);
   color: var(--fg);
   padding: 0 12px 0 34px;
+  font-size: 0.8125rem;
 }
 
 .settings-resource-search input:focus {
@@ -426,6 +429,7 @@
   min-height: 46px;
   border-bottom: 1px solid var(--border);
   padding: 0 14px;
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
 }
 
 .panel-title {
@@ -469,11 +473,22 @@
   transition:
     background-color 120ms ease,
     border-color 120ms ease,
-    color 120ms ease;
+    color 120ms ease,
+    transform 80ms ease;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   background: var(--surface-2);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn:disabled,
+.btn[disabled] {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .btn.active {
@@ -488,7 +503,7 @@
   color: var(--accent-fg);
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 88%, transparent);
 }
 
@@ -498,7 +513,7 @@
   color: var(--fg);
 }
 
-.btn-secondary:hover {
+.btn-secondary:hover:not(:disabled) {
   background: var(--surface-3);
   border-color: var(--border-strong);
 }
@@ -509,7 +524,7 @@
   color: var(--fg);
 }
 
-.btn-ghost:hover {
+.btn-ghost:hover:not(:disabled) {
   background: var(--surface-2);
   border-color: transparent;
 }
@@ -519,7 +534,7 @@
   color: var(--danger);
 }
 
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 10%, var(--surface));
   border-color: var(--danger);
 }
@@ -529,14 +544,16 @@
   color: var(--warning);
 }
 
-.btn-warning:hover {
+.btn-warning:hover:not(:disabled) {
   background: color-mix(in srgb, var(--warning) 10%, var(--surface));
   border-color: var(--warning);
 }
 
 .btn-icon {
   width: 34px;
+  height: 34px;
   padding: 0;
+  flex-shrink: 0;
 }
 
 .btn-sm {
@@ -568,6 +585,19 @@
 .select:focus {
   border-color: var(--border-strong);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.btn:focus-visible,
+.input:focus-visible,
+.textarea:focus-visible,
+.select-control-trigger:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.btn-primary:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .select-control {
@@ -1016,6 +1046,8 @@
   color: var(--muted);
   padding: 0 8px;
   font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   line-height: 1;
 }
 
@@ -1311,9 +1343,11 @@
 @keyframes dialogContentEnter {
   from {
     opacity: 0;
+    transform: scale(0.97);
   }
   to {
     opacity: 1;
+    transform: scale(1);
   }
 }
 
@@ -1343,6 +1377,10 @@
   box-shadow: var(--shadow);
   color: var(--fg);
   padding: 10px 12px;
+}
+
+.toast.success {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
 }
 
 .toast.error {
@@ -1446,7 +1484,7 @@
   border: 1px solid var(--border);
   background: var(--surface);
   border-radius: 999px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .settings-tab {
@@ -1846,49 +1884,6 @@
   resize: none;
 }
 
-/* ── Settings polish overrides ── */
-
-.panel {
-  border-radius: 10px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-  overflow: hidden;
-}
-
-.panel-header {
-  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
-}
-
-.btn:focus-visible,
-.input:focus-visible,
-.textarea:focus-visible,
-.select-control-trigger:focus-visible {
-  outline: none;
-  border-color: var(--border-strong);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 7%, transparent);
-}
-
-.btn-primary:focus-visible {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
-}
-
-.badge {
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-
-.settings-resource-toolbar {
-  align-items: center;
-}
-
-.settings-resource-toolbar .settings-resource-search input {
-  height: 36px;
-  font-size: 0.8125rem;
-  border-radius: 8px;
-}
-
-.settings-tabs {
-  margin-bottom: 18px;
-}
 
 /* --- Mobile touch controls (≤640px) ----------------------------------- */
 @media (max-width: 640px) {

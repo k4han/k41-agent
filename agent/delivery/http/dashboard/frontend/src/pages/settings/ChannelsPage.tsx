@@ -31,6 +31,7 @@ import {
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DashboardTable } from "@/components/DashboardTable";
+import { EmptyState } from "@/components/EmptyState";
 import { SelectControl, type SelectControlOption } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
 import { useToast } from "@/components/Toast";
@@ -703,17 +704,14 @@ export function ChannelsPage() {
                 <Show
                   when={def()}
                   fallback={
-                    <div class="panel empty" style={{ padding: "32px", "text-align": "center" }}>
-                      <h3>Channel not found</h3>
-                      <button
-                        class="btn"
-                        style={{ "margin-top": "12px" }}
-                        type="button"
-                        onClick={() => navigate("/settings/channels")}
-                      >
-                        <ArrowLeft size={14} />
-                        Back to Channels
-                      </button>
+                    <div class="panel" style={{ padding: "24px" }}>
+                      <EmptyState
+                        icon={<Network size={24} />}
+                        message="Channel not found"
+                        hint="The requested channel could not be found."
+                        href="/settings/channels"
+                        action="Back to Channels"
+                      />
                     </div>
                   }
                 >
@@ -742,7 +740,7 @@ export function ChannelsPage() {
                               <span class="toggle-track">
                                 <span class="toggle-thumb" />
                               </span>
-                              <span class="toggle-label">
+                              <span class="toggle-text">
                                 {draftValueFor(name(), ENABLED_FIELD) ? "Enabled" : "Disabled"}
                               </span>
                             </button>
@@ -958,9 +956,9 @@ function PairedIdentitiesTable(props: {
             <td class="mono">{identity.external_id}</td>
             <td class="mono">{identity.user_id ?? "-"}</td>
             <td class="mono hint">{formatDate(identity.created_at)}</td>
-            <td>
+            <td style={{ "text-align": "right", "padding-right": "16px" }}>
               <button
-                class="btn btn-sm btn-danger"
+                class="btn btn-sm btn-danger channel-unpair-btn"
                 type="button"
                 onClick={() => props.onUnpair(identity)}
               >
@@ -1063,9 +1061,8 @@ function ChannelCard(props: {
             <span class="toggle-track">
               <span class="toggle-thumb" />
             </span>
-            <span class="toggle-label">Enabled</span>
+            <span class="toggle-text">{props.enabled ? "Enabled" : "Disabled"}</span>
           </button>
-          <span>{props.enabled ? "Enabled" : "Disabled"}</span>
         </label>
 
         <div class="channel-card-actions">
@@ -1181,9 +1178,7 @@ function ChannelSectionGroup(props: {
         <For
           each={fieldEntries()}
           fallback={
-            <div class="empty" style={{ padding: "18px" }}>
-              No fields available.
-            </div>
+            <EmptyState message="No fields available." hint="This section has no configurable settings." />
           }
         >
           {(entry) => {

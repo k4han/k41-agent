@@ -380,9 +380,8 @@ export function RepositoriesTab() {
               <span class="toggle-track">
                 <span class="toggle-thumb" />
               </span>
-              <span class="toggle-label">Enabled</span>
+              <span class="toggle-text">{gh.github()?.enabled ? "Enabled" : "Disabled"}</span>
             </button>
-            <span>{gh.github()?.enabled ? "Enabled" : "Disabled"}</span>
           </label>
 
           <div class="channel-card-actions">
@@ -545,9 +544,8 @@ export function GitHubSettingsPage() {
                       <span class="toggle-track">
                         <span class="toggle-thumb" />
                       </span>
-                      <span class="toggle-label">Enabled</span>
+                      <span class="toggle-text">{gh.github()?.enabled ? "Enabled" : "Disabled"}</span>
                     </button>
-                    <span>{gh.github()?.enabled ? "Enabled" : "Disabled"}</span>
                   </label>
                   <button
                     class="btn btn-sm"

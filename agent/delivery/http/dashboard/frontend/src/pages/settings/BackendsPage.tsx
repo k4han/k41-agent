@@ -11,11 +11,13 @@ import { useNavigate, useParams } from "@solidjs/router";
 import {
   ArrowLeft,
   Save,
+  ServerCog,
   Settings as SettingsIcon,
   TriangleAlert,
 } from "lucide-solid";
 
 import { DataGate } from "@/components/State";
+import { EmptyState } from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
 import { apiFetch, putJson } from "@/lib/api";
 import { getBackends } from "@/lib/catalogStore";
@@ -484,17 +486,14 @@ export function BackendsPage() {
                 <Show
                   when={def()}
                   fallback={
-                    <div class="panel empty" style={{ padding: "32px", "text-align": "center" }}>
-                      <h3>Backend not found</h3>
-                      <button
-                        class="btn"
-                        style={{ "margin-top": "12px" }}
-                        type="button"
-                        onClick={() => navigate("/settings/providers?tab=workspace")}
-                      >
-                        <ArrowLeft size={14} />
-                        Back to Backends
-                      </button>
+                    <div class="panel" style={{ padding: "24px" }}>
+                      <EmptyState
+                        icon={<ServerCog size={24} />}
+                        message="Backend not found"
+                        hint="The requested execution environment could not be found."
+                        href="/settings/providers?tab=workspace"
+                        action="Back to Environments"
+                      />
                     </div>
                   }
                 >
@@ -701,9 +700,7 @@ function BackendSectionGroup(props: {
         <For
           each={fieldEntries()}
           fallback={
-            <div class="empty" style={{ padding: "18px" }}>
-              No fields available.
-            </div>
+            <EmptyState message="No fields available." hint="This section has no configurable settings." />
           }
         >
           {(entry) => {

@@ -2,7 +2,7 @@ import "@/styles/routes/home.css";
 
 import { A } from "@solidjs/router";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { MessageSquarePlus } from "lucide-solid";
+import { AlertCircle, MessageSquarePlus } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { useToast } from "@/components/Toast";
@@ -162,12 +162,31 @@ export function HomePage() {
         </A>
       }
     >
+      <Show when={error() && !data()}>
+        <div class="home-error-banner" role="alert" style={{ "margin-bottom": "16px" }}>
+          <AlertCircle size={16} />
+          <span>{error()}</span>
+          <button class="btn btn-sm" type="button" onClick={() => void load()}>
+            Retry
+          </button>
+        </div>
+      </Show>
       <Show
         when={data()}
         fallback={<HomeSkeleton />}
       >
         {(payload) => (
           <div class="stack home-stack">
+            <Show when={error()}>
+              <div class="home-error-banner" role="alert">
+                <AlertCircle size={16} />
+                <span>{error()}</span>
+                <button class="btn btn-sm" type="button" onClick={() => void load()}>
+                  Retry
+                </button>
+              </div>
+            </Show>
+
             <HomeMetrics counters={payload().counters} />
 
             <OnboardingChecklist state={payload().onboarding} />
@@ -176,6 +195,10 @@ export function HomePage() {
               <div class="home-col">
                 <ActiveSessionsPanel initial={payload().active_sessions} />
                 <RecentThreadsPanel threads={payload().recent.threads} />
+                <UpcomingJobsPanel
+                  jobs={payload().recent.upcoming_jobs}
+                  timezone={payload().scheduler_timezone}
+                />
               </div>
               <div class="home-col">
                 <ServicesPanel
@@ -183,17 +206,9 @@ export function HomePage() {
                   onAction={serviceAction}
                   onAllAction={allAction}
                 />
-                <UpcomingJobsPanel
-                  jobs={payload().recent.upcoming_jobs}
-                  timezone={payload().scheduler_timezone}
-                />
                 <ProvidersHealthPanel providers={payload().providers_health} />
               </div>
             </div>
-
-            <Show when={error()}>
-              <div class="badge badge-danger">{error()}</div>
-            </Show>
           </div>
         )}
       </Show>
@@ -240,10 +255,10 @@ function HomeSkeleton() {
         <div class="home-col">
           <HomePanelSkeleton rows={3} />
           <HomePanelSkeleton rows={4} />
+          <HomePanelSkeleton rows={3} />
         </div>
         <div class="home-col">
           <HomePanelSkeleton rows={4} />
-          <HomePanelSkeleton rows={3} />
           <HomePanelSkeleton rows={3} />
         </div>
       </div>

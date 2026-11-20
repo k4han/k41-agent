@@ -400,8 +400,7 @@
 .message.user {
   justify-content: flex-end;
   position: relative;
-  margin-bottom: 8px;
-  padding-bottom: 36px;
+  margin-bottom: 14px;
 }
 
 .message-bubble {
@@ -432,6 +431,8 @@
   white-space: normal;
 }
 
+
+
 .message.error .message-bubble {
   border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
   background: color-mix(in srgb, var(--danger) 10%, var(--surface));
@@ -451,28 +452,43 @@
 }
 
 .message.user .message-bubble {
-  padding-bottom: 12px;
+  padding-bottom: 10px;
 }
 
 .message-actions {
   position: absolute;
-  right: 8px;
-  bottom: -32px;
+  right: 6px;
+  bottom: -14px;
   z-index: 2;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+  padding: 2px 4px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   color: var(--fg);
   opacity: 0;
   pointer-events: none;
   max-width: none;
-  transition: opacity 120ms ease;
+  transform: translateY(3px);
+  transition: opacity 140ms ease, transform 140ms ease;
 }
 
 .message.user:hover .message-actions,
 .message.user:focus-within .message-actions {
   opacity: 1;
   pointer-events: auto;
+  transform: translateY(0);
+}
+
+.message.user .message-action-btn {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  border-radius: 999px;
 }
 
 .message.assistant .message-actions.assistant-actions {
@@ -486,6 +502,11 @@
   pointer-events: auto;
   color: var(--muted);
   justify-content: flex-start;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  transform: none;
   transition: opacity 120ms ease, color 120ms ease;
 }
 
@@ -825,15 +846,23 @@
   }
 
   .message.user {
-    margin-bottom: 12px;
-    padding-bottom: 44px;
+    margin-bottom: 14px;
+    padding-bottom: 0;
   }
 
   .message.user .message-actions {
     opacity: 1;
     pointer-events: auto;
-    bottom: -40px;
+    bottom: -12px;
     right: 4px;
+    transform: none;
+  }
+
+  .message.user .message-action-btn {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
   }
 
   .message-action-btn {

@@ -60,16 +60,18 @@
 }
 
 .message-markdown blockquote {
-  margin: 0 0 10px;
-  padding: 4px 12px;
+  margin: 0 0 12px;
+  padding: 6px 14px;
   border-left: 3px solid var(--border-strong);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--surface-2) 40%, transparent);
   color: var(--muted);
 }
 
 .message-markdown code {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: var(--font-size-chat);
-  padding: 1px 5px;
+  font-size: calc(var(--font-size-chat) * 0.92);
+  padding: 2px 6px;
   border-radius: 5px;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -78,9 +80,9 @@
 }
 
 .message-markdown pre {
-  margin: 0 0 10px;
+  margin: 0 0 12px;
   padding: 12px 14px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   overflow-x: auto;
@@ -101,11 +103,11 @@
   max-width: 100%;
   min-width: 0;
   margin: 0 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 20px;
-  background: #0d0f12;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  color: #d8dee9;
+  border: 1px solid var(--code-frame-border, var(--border));
+  border-radius: 8px;
+  background: var(--code-frame-bg, var(--surface-1));
+  box-shadow: none;
+  color: var(--fg);
 }
 
 .message-markdown .markdown-code-header {
@@ -114,8 +116,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  background: transparent;
-  padding: 12px 14px 2px 18px;
+  background: var(--code-frame-header-bg, color-mix(in srgb, var(--surface-2) 60%, var(--surface)));
+  border-bottom: 1px solid var(--code-frame-border, var(--border));
+  padding: 8px 14px 8px 16px;
 }
 
 .message-markdown .markdown-code-title {
@@ -128,7 +131,7 @@
 .message-markdown .markdown-code-language {
   min-width: 0;
   overflow: hidden;
-  color: #c3ccd6;
+  color: var(--muted);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.8125rem;
   font-weight: 700;
@@ -142,7 +145,7 @@
   height: 18px;
   flex-shrink: 0;
   place-items: center;
-  color: #aeb8c3;
+  color: var(--muted);
 }
 
 .message-markdown .markdown-code-copy {
@@ -152,9 +155,9 @@
   flex-shrink: 0;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
-  color: #aeb8c3;
+  color: var(--muted);
   padding: 0;
   transition:
     background-color 120ms ease,
@@ -162,8 +165,8 @@
 }
 
 .message-markdown .markdown-code-copy:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #f2f6fb;
+  background: var(--surface-3);
+  color: var(--fg);
 }
 
 .message-markdown .markdown-code-copy.copied {
@@ -180,7 +183,7 @@
   border-radius: 0;
   background: transparent;
   padding: 14px 20px 18px;
-  color: #d8dee9;
+  color: var(--fg);
   font-size: var(--font-size-chat);
   line-height: 1.65;
   overflow-x: auto;
@@ -204,11 +207,11 @@
   max-width: 100%;
   min-width: 0;
   margin: 0 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 20px;
-  background: #0d0f12;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  color: #d8dee9;
+  border: 1px solid var(--code-frame-border, var(--border));
+  border-radius: 8px;
+  background: var(--code-frame-bg, var(--surface-1));
+  box-shadow: none;
+  color: var(--fg);
 }
 
 .message-markdown .markdown-mermaid-header {
@@ -217,8 +220,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 12px 14px 2px 18px;
-  background: transparent;
+  padding: 8px 14px 8px 16px;
+  background: var(--code-frame-header-bg, color-mix(in srgb, var(--surface-2) 60%, var(--surface)));
+  border-bottom: 1px solid var(--code-frame-border, var(--border));
 }
 
 .message-markdown .markdown-mermaid-title {
@@ -226,7 +230,7 @@
   min-width: 0;
   align-items: center;
   gap: 9px;
-  color: #c3ccd6;
+  color: var(--muted);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.8125rem;
   font-weight: 700;
@@ -238,7 +242,7 @@
   height: 18px;
   flex-shrink: 0;
   place-items: center;
-  color: #aeb8c3;
+  color: var(--muted);
 }
 
 .message-markdown .markdown-mermaid-actions {
@@ -256,9 +260,9 @@
   flex-shrink: 0;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
-  color: #aeb8c3;
+  color: var(--muted);
   padding: 0;
   transition:
     background-color 120ms ease,
@@ -267,8 +271,8 @@
 
 .message-markdown .markdown-mermaid-toggle:hover,
 .message-markdown .markdown-mermaid-copy:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #f2f6fb;
+  background: var(--surface-3);
+  color: var(--fg);
 }
 
 .message-markdown .markdown-mermaid-copy.copied {
@@ -280,7 +284,7 @@
 }
 
 .markdown-mermaid {
-  --pele-bg: var(--bg);
+  --pele-bg: transparent;
   --pele-fg: var(--fg);
   --pele-muted: var(--muted);
   --pele-line: var(--muted);
@@ -310,7 +314,7 @@
 .message-markdown .markdown-mermaid-error {
   justify-content: flex-start;
   padding: 14px 20px 18px;
-  color: #aeb8c3;
+  color: var(--muted);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.8125rem;
 }
@@ -325,7 +329,7 @@
   border-radius: 0;
   background: transparent;
   padding: 14px 20px 18px;
-  color: #d8dee9;
+  color: var(--fg);
   font-size: var(--font-size-chat);
   line-height: 1.65;
 }
@@ -380,7 +384,7 @@
   /* Reduce border radius to save screen space */
   .message-markdown .markdown-code-frame,
   .message-markdown .markdown-mermaid-frame {
-    border-radius: 10px;
+    border-radius: 8px;
     margin-bottom: 10px;
   }
 

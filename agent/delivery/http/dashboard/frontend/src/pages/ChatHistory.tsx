@@ -1,12 +1,14 @@
 import "@/styles/routes/history.css";
 
 import { A, useSearchParams } from "@solidjs/router";
-import { Download, Folder, Folders, FolderOpen, GitBranch, MessageSquare, Pencil, PlaySquare, Trash2 } from "lucide-solid";
+import { Download, Folder, Folders, FolderOpen, GitBranch, MessageSquare, MoreVertical, Pencil, PlaySquare, Trash2 } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 
 import { AppShell } from "@/components/AppShell";
 import { DashboardTable } from "@/components/DashboardTable";
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
+import { EmptyState } from "@/components/EmptyState";
 import { ExportChatDialog } from "@/components/ExportChatDialog";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { SelectControl } from "@/components/SelectControl";
@@ -301,7 +303,15 @@ export function ChatHistoryListPage() {
         {(payload) => (
           <Show
             when={payload().threads.length > 0}
-            fallback={<div class="empty">No conversation threads found.</div>}
+            fallback={
+              <EmptyState
+                icon={<MessageSquare size={24} />}
+                message="No conversation threads found."
+                hint="Start a new chat to begin interacting with the agent."
+                href="/chat"
+                action="New chat"
+              />
+            }
           >
             <div class="history-workspace-groups">
               <Show when={selectedCount() > 0}>
@@ -330,7 +340,15 @@ export function ChatHistoryListPage() {
               </Show>
               <For
                 each={pagination.visibleGroups()}
-                fallback={<div class="empty">No conversations in this workspace.</div>}
+                fallback={
+                  <EmptyState
+                    icon={<MessageSquare size={24} />}
+                    message="No conversations in this workspace."
+                    hint="Start a new conversation in this workspace to see history here."
+                    href="/chat"
+                    action="New chat"
+                  />
+                }
               >
                 {(group) => (
                   <section class="panel history-workspace-section">
@@ -418,32 +436,12 @@ export function ChatHistoryListPage() {
                             <span class="muted">{thread.checkpoint_count}</span>
                           </td>
                           <td>
-                            <div class="row-wrap">
-                              <A
-                                href={chatThreadHref(thread.thread_id)}
-                                class="btn btn-sm"
-                              >
-                                Chat
-                              </A>
-                              <button class="btn btn-sm" type="button" title="Export conversation" aria-label="Export conversation"
-                                onClick={() => setExportTarget(thread)}>
-                                <Download size={12} />
-                              </button>
-                              <button
-                                class="btn btn-sm"
-                                type="button"
-                                onClick={() => startRenameThread(thread)}
-                              >
-                                <Pencil size={12} />
-                              </button>
-                              <button
-                                class="btn btn-sm btn-danger"
-                                type="button"
-                                onClick={() => requestDeleteThread(thread)}
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
+                            <ThreadRowActions
+                              thread={thread}
+                              onExport={() => setExportTarget(thread)}
+                              onRename={() => startRenameThread(thread)}
+                              onDelete={() => requestDeleteThread(thread)}
+                            />
                           </td>
                         </tr>
                       )}
@@ -486,5 +484,114 @@ export function ChatHistoryListPage() {
         onConfirm={() => void confirmDeleteSelected()}
       />
     </AppShell>
+  );
+}
+
+function ThreadRowActions(props: {
+  thread: ThreadSummary;
+  onExport: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = createSignal(false);
+  const [pos, setPos] = createSignal({ top: 0, left: 0 });
+  let triggerRef: HTMLButtonElement | undefined;
+  let menuRef: HTMLDivElement | undefined;
+
+  const toggle = (e: MouseEvent) => {
+    e.stopPropagation();
+    if (open()) {
+      setOpen(false);
+      return;
+    }
+    const rect = triggerRef!.getBoundingClientRect();
+    const menuWidth = 140;
+    const left = Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8));
+    const top = rect.bottom + 4 > window.innerHeight - 150 ? rect.top - 120 : rect.bottom + 4;
+    setPos({ top, left });
+    setOpen(true);
+  };
+
+  createEffect(() => {
+    if (!open()) return;
+    const dismiss = (e: MouseEvent) => {
+      if (!menuRef?.contains(e.target as Node) && !triggerRef?.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onScrollOrResize = () => setOpen(false);
+    document.addEventListener("click", dismiss);
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
+    onCleanup(() => {
+      document.removeEventListener("click", dismiss);
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
+    });
+  });
+
+  return (
+    <div class="thread-row-actions">
+      <A href={chatThreadHref(props.thread.thread_id)} class="btn btn-sm">
+        Chat
+      </A>
+      <button
+        ref={triggerRef}
+        class="btn btn-sm btn-icon"
+        type="button"
+        title="More actions"
+        aria-label="More actions"
+        aria-expanded={open()}
+        onClick={toggle}
+      >
+        <MoreVertical size={14} />
+      </button>
+      <Show when={open()}>
+        <Portal>
+          <div
+            ref={menuRef}
+            class="thread-action-menu"
+            style={{
+              top: `${pos().top}px`,
+              left: `${pos().left}px`,
+            }}
+          >
+            <button
+              class="thread-action-item"
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                props.onExport();
+              }}
+            >
+              <Download size={13} />
+              <span>Export</span>
+            </button>
+            <button
+              class="thread-action-item"
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                props.onRename();
+              }}
+            >
+              <Pencil size={13} />
+              <span>Rename</span>
+            </button>
+            <button
+              class="thread-action-item danger-text"
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                props.onDelete();
+              }}
+            >
+              <Trash2 size={13} />
+              <span>Delete</span>
+            </button>
+          </div>
+        </Portal>
+      </Show>
+    </div>
   );
 }

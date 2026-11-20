@@ -3,7 +3,6 @@ import {
   Code,
   RefreshCw,
   RotateCcw,
-  Save,
   SearchX,
   Sparkles,
   TriangleAlert,
@@ -106,17 +105,6 @@ export function ConfigPage() {
     <SettingsLayout
       title="Server Runtime Configuration"
       breadcrumbLabel="Server Runtime"
-      actions={
-        <button
-          class="btn btn-primary"
-          type="button"
-          disabled={pendingChanges().length === 0}
-          onClick={() => setConfirmOpen(true)}
-        >
-          <Save size={14} />
-          Save {pendingChanges().length ? `(${pendingChanges().length})` : ""}
-        </button>
-      }
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (

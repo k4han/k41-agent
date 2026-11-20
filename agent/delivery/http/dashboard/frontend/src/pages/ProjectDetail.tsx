@@ -138,10 +138,20 @@ export function ProjectDetailPage() {
             </div>}</For>
           </section>
         </Show>
-        <nav class="project-resource-tabs" aria-label="Project resources">
-          <For each={RESOURCE_TABS}>{(item) => (
-            <A class="btn" classList={{ "btn-primary": tab() === item.id }} aria-current={tab() === item.id ? "page" : undefined} href={`/projects/${current().id}?tab=${item.id}`}>{item.label}</A>
-          )}</For>
+        <nav class="project-resource-tabs" aria-label="Project resources" role="tablist">
+          <For each={RESOURCE_TABS}>
+            {(item) => (
+              <A
+                class="project-resource-tab"
+                classList={{ active: tab() === item.id }}
+                role="tab"
+                aria-selected={tab() === item.id}
+                href={`/projects/${current().id}?tab=${item.id}`}
+              >
+                {item.label}
+              </A>
+            )}
+          </For>
         </nav>
         <Show when={tab() === "instructions"}>
           <ProjectInstructions projectId={current().id} workspaceId={current().workspace.project_workspace_id} />

@@ -24,7 +24,8 @@
 .provider-desk-table .badge { font-size: .625rem; white-space: nowrap; }
 .provider-desk-status { align-items: flex-start; gap: 6px; }
 .provider-desk-default { display: inline-flex; align-items: center; gap: 5px; font-size: .6875rem; color: var(--primary); }
-.provider-desk-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; white-space: nowrap; }
+.provider-desk-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+.provider-desk-row-actions .btn-danger { margin-inline: 4px; }
 .provider-desk-row-actions .btn[aria-pressed="true"] { color: var(--primary); }
 .provider-pagination { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: .75rem; }
 .provider-pagination .row-wrap { gap: 12px; }

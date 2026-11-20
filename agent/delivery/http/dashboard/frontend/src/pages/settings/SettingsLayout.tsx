@@ -109,7 +109,7 @@ type BreadcrumbSegment = {
   href?: string;
 };
 
-const SETTINGS_AUTO_COLLAPSE_BREAKPOINT = 1280;
+const SETTINGS_AUTO_COLLAPSE_BREAKPOINT = 1024;
 const SETTINGS_AUTO_COLLAPSE_QUERY = `(max-width: ${SETTINGS_AUTO_COLLAPSE_BREAKPOINT}px)`;
 let settingsNavScrollTop = 0;
 
@@ -118,7 +118,7 @@ export function SettingsLayout(props: {
   actions?: JSX.Element;
   breadcrumbLabel?: string;
   breadcrumbSegments?: BreadcrumbSegment[];
-  contentWidth?: "narrow" | "medium" | "wide";
+  contentWidth?: "narrow" | "medium" | "wide" | "form";
   hideHeading?: boolean;
   fillContent?: boolean;
   children: JSX.Element;
@@ -217,7 +217,7 @@ export function SettingsLayout(props: {
     document.removeEventListener("keydown", handleKeydown);
   });
 
-  const settingsHomeHref = "/settings/config";
+  const settingsHomeHref = "/settings/appearance";
   const homeHref = "/";
 
   const filteredGroups = createMemo<SettingsNavGroup[]>(() => {
@@ -263,6 +263,7 @@ export function SettingsLayout(props: {
                 type="button"
                 onClick={toggleSidebar}
                 title="Expand sidebar"
+                data-tooltip="Expand sidebar"
               >
                 <span class="brand-expand-icon"><ChevronsRight size={14} /></span>
                 <span class="brand-expand-default"><Bot size={16} /></span>
@@ -315,6 +316,7 @@ export function SettingsLayout(props: {
               class="nav-link settings-back-home"
               title="Back to home"
               aria-label="Back to home"
+              data-tooltip="Back to home"
             >
               <ArrowLeft size={15} />
               <Show when={!collapsed() || isMobileViewport()}>
@@ -371,6 +373,7 @@ export function SettingsLayout(props: {
                           href={item.href}
                           class={`nav-link ${isActive(item.href) ? "active" : ""}`}
                           title={item.description ? `${item.label} — ${item.description}` : item.label}
+                          data-tooltip={item.description ? `${item.label} — ${item.description}` : item.label}
                         >
                           {item.icon()}
                           <Show when={!collapsed() || isMobileViewport()}>

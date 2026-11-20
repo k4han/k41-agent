@@ -262,7 +262,7 @@ export function GoogleCalendarTab() {
                       <span class="toggle-track">
                         <span class="toggle-thumb" />
                       </span>
-                      <span class="toggle-label">{data().enabled ? "Enabled" : "Disabled"}</span>
+                      <span class="toggle-text">{data().enabled ? "Enabled" : "Disabled"}</span>
                     </button>
                   </div>
                 </Show>

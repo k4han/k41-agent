@@ -11,6 +11,7 @@ import {
 } from "lucide-solid";
 
 import { DashboardTable } from "@/components/DashboardTable";
+import { EmptyState } from "@/components/EmptyState";
 import { MetricGrid } from "@/components/Metrics";
 import { SelectControl } from "@/components/SelectControl";
 import { DataGate } from "@/components/State";
@@ -134,17 +135,13 @@ function tabCount(payload: UsagePayload, tab: UsageTab): number {
   return payload.threads?.length || 0;
 }
 
-function UsageEmpty(props: { message: string; hint?: string }) {
+function UsageEmpty(props: { message: string; hint?: string; icon?: JSX.Element }) {
   return (
-    <div class="usage-empty">
-      <div class="usage-empty-icon" aria-hidden="true">
-        <BarChart3 size={20} />
-      </div>
-      <div class="usage-empty-title">{props.message}</div>
-      <Show when={props.hint}>
-        <div class="usage-empty-hint">{props.hint}</div>
-      </Show>
-    </div>
+    <EmptyState
+      icon={props.icon || <BarChart3 size={24} />}
+      message={props.message}
+      hint={props.hint}
+    />
   );
 }
 
@@ -527,7 +524,7 @@ function UsageTable(props: { rows: UsageRow[]; displayTimezone?: string }) {
         rows={props.rows}
         tableClass="usage-table"
         emptyMessage="No usage recorded."
-        emptyFallback={<UsageEmpty message="No usage recorded." hint="Try widening the date range or clearing filters." />}
+        emptyFallback={<UsageEmpty icon={<BarChart3 size={24} />} message="No usage recorded." hint="Try widening the date range or clearing filters." />}
       >
         {(row) => (
           <tr>
@@ -569,7 +566,7 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[]; displayTimez
         rows={props.list}
         tableClass="usage-table"
         emptyMessage="No workspace usage recorded."
-        emptyFallback={<UsageEmpty message="No workspace usage recorded." hint="Workspaces appear here once an LLM call is made from one." />}
+        emptyFallback={<UsageEmpty icon={<Briefcase size={24} />} message="No workspace usage recorded." hint="Workspaces appear here once an LLM call is made from one." />}
       >
         {(row) => (
           <tr>
@@ -642,7 +639,7 @@ function ThreadUsageTable(props: { list: ThreadUsageDetail[]; displayTimezone?: 
         rows={props.list}
         tableClass="usage-table"
         emptyMessage="No conversation usage recorded."
-        emptyFallback={<UsageEmpty message="No conversation usage recorded." hint="Conversations show up here once a thread has any LLM usage." />}
+        emptyFallback={<UsageEmpty icon={<MessageCircle size={24} />} message="No conversation usage recorded." hint="Conversations show up here once a thread has any LLM usage." />}
       >
         {(row) => (
           <tr>

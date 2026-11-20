@@ -16,6 +16,7 @@ import {
 import { AppShell } from "@/components/AppShell";
 import { DataGate } from "@/components/State";
 import { Dialog } from "@/components/Dialog";
+import { EmptyState } from "@/components/EmptyState";
 import { IdentityPicker } from "@/components/IdentityPicker";
 import { ModelPicker } from "@/components/ModelPicker";
 import { SelectControl } from "@/components/SelectControl";
@@ -342,9 +343,17 @@ function RepositoryListPage() {
                 <For
                   each={filteredRepositories()}
                   fallback={
-                    <div class="empty">
-                      {query().trim() ? "No repositories found." : "No repositories synced."}
-                    </div>
+                    <EmptyState
+                      icon={<GitBranch size={24} />}
+                      message={query().trim() ? "No repositories found." : "No repositories synced."}
+                      hint={
+                        query().trim()
+                          ? "Try searching for a different name or adjust your filter."
+                          : "Sync your GitHub account to import repositories and automate tasks."
+                      }
+                      action={!query().trim() ? "Sync GitHub" : undefined}
+                      onAction={sync}
+                    />
                   }
                 >
                   {(repo) => {
@@ -772,7 +781,12 @@ function RepositoryOverview(props: {
         <div class="panel-body">
           <Show
             when={props.draft.repository_instructions.trim()}
-            fallback={<div class="empty">No repo-specific instructions.</div>}
+            fallback={
+              <EmptyState
+                message="No repository instructions configured."
+                hint="Add repo-specific conventions, test commands, or review preferences in the Optimization tab."
+              />
+            }
           >
             <p class="repository-instructions-preview">
               {truncateText(props.draft.repository_instructions, 480)}
@@ -1093,7 +1107,16 @@ function RepositoryActivity(props: { tasks: BackgroundTask[] }) {
         <div class="panel-title">Recent Activity</div>
       </div>
       <div class="panel-body stack">
-        <For each={props.tasks} fallback={<div class="empty">No tasks for this repository yet.</div>}>
+        <For
+          each={props.tasks}
+          fallback={
+            <EmptyState
+              icon={<MessageSquare size={24} />}
+              message="No tasks for this repository yet."
+              hint="Run a background task or trigger automation via GitHub events."
+            />
+          }
+        >
           {(task) => (
             <article class="repository-task-row">
               <div>

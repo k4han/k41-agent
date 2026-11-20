@@ -1314,4 +1314,120 @@
   }
 }
 
+/* Container query adaptations for when the composer column shrinks (e.g. Workspace Drawer open) */
+@container chat-composer (max-width: 600px) {
+  .chat-composer-toolbar {
+    gap: 6px;
+    padding: 6px 8px;
+  }
+
+  .chat-composer-tier-selectors {
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .agent-model-picker-wrapper {
+    min-width: 0;
+  }
+
+  .agent-model-badge {
+    padding: 0 8px;
+    gap: 4px;
+  }
+
+  .agent-model-badge-agent {
+    max-width: 80px;
+    font-size: 12px;
+  }
+
+  .agent-model-badge-model {
+    max-width: 80px;
+    font-size: 12px;
+  }
+
+  .agent-model-badge-effort {
+    display: none !important;
+  }
+
+  .chat-composer-shortcut-hint {
+    display: none !important;
+  }
+
+  .chat-agent-picker,
+  .chat-model-picker {
+    flex: 1 1 120px !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+}
+
+@container chat-composer (max-width: 420px) {
+  .chat-effort-button {
+    min-width: 80px;
+    max-width: 120px;
+    gap: 5px;
+    padding-inline: 6px;
+    font-size: var(--font-size-chat);
+  }
+
+  .agent-model-badge-icon {
+    display: grid !important;
+  }
+
+  .agent-model-badge-effort {
+    display: none !important;
+  }
+
+  .agent-model-badge-caret {
+    display: none !important;
+  }
+
+  .agent-model-badge-agent {
+    flex: 0 1 auto;
+    max-width: 46px;
+    min-width: 0;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .agent-model-badge-model {
+    flex: 0 1 auto;
+    max-width: 56px;
+    min-width: 0;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-trigger {
+    padding-inline: 20px 4px;
+    max-width: 72px;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-icon {
+    left: 4px;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-caret {
+    display: none !important;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-value--full {
+    display: none !important;
+  }
+
+  .chat-composer .permission-mode-picker .select-control-value--short {
+    display: inline-block !important;
+    font-size: 11px;
+    max-width: 42px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+
 

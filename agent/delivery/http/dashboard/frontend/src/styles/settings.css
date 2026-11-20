@@ -149,6 +149,49 @@
   display: none !important;
 }
 
+/* Flyout visual tooltips for collapsed settings sidebar items on hover */
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar,
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .settings-nav,
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .settings-nav-scroll {
+  overflow: visible;
+}
+
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .nav-link,
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .brand-expand-btn {
+  position: relative;
+}
+
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .nav-link[data-tooltip]::after,
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .brand-expand-btn[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%) translateX(-4px);
+  background: var(--surface-1, #1e2024);
+  color: var(--fg, #f0f0f0);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;
+  z-index: 1000;
+}
+
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .nav-link:hover::after,
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .brand-expand-btn:hover::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-50%) translateX(0);
+}
+
 .settings-topbar {
   min-height: 48px;
   backdrop-filter: blur(12px);
@@ -449,14 +492,28 @@
 
 .settings-content-narrow {
   width: min(100%, 680px);
+  max-width: 680px;
 }
 
+.settings-content-form,
 .settings-content-medium {
-  width: min(100%, 980px);
+  width: min(100%, 896px);
+  max-width: 896px;
 }
 
 .settings-content-wide {
   width: min(100%, 1280px);
+  max-width: 1280px;
+}
+
+/* Ensure focused form panels don't stretch excessively on ultrawide displays */
+.settings-content .settings-page-body > form,
+.settings-content .settings-page-body > .stack > form,
+.settings-content .settings-page-body > .form-card,
+.settings-content .settings-page-body > .stack > .form-card,
+.settings-content-medium .settings-page-body,
+.settings-content-form .settings-page-body {
+  max-width: 896px;
 }
 
 .settings-app-layout.settings-app-layout-fill {

@@ -190,10 +190,7 @@ export function AppearancePage() {
                 <div class="appearance-preview-body">
                   <div class="appearance-preview-mock">
                     <div class="appearance-mock-topbar">
-                      <span class="appearance-mock-dot" />
-                      <span class="appearance-mock-dot" />
-                      <span class="appearance-mock-dot" />
-                      <span class="appearance-mock-title">Kai Console</span>
+                      <span class="appearance-mock-title">Dashboard preview</span>
                     </div>
                     <div class="appearance-mock-content">
                       <div class="appearance-mock-card">
@@ -211,8 +208,7 @@ export function AppearancePage() {
                     </div>
                   </div>
                   <div class="appearance-preview-caption">
-                    Background <span class="mono" style={{ "font-size": "0.6875rem" }}>{dark() ? "#0a0a0a" : "#fafafa"}</span>
-                    {" · "} Surface <span class="mono" style={{ "font-size": "0.6875rem" }}>{dark() ? "#111" : "#fff"}</span>
+                    Theme mode: <strong>{resolvedLabel()}</strong> (tokens update adaptively across all views)
                   </div>
                 </div>
               </div>

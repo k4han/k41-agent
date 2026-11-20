@@ -984,6 +984,10 @@
   flex-wrap: wrap;
 }
 
+.model-pool-actions-secondary .btn-danger {
+  margin-left: 12px;
+}
+
 .model-pool-unsaved-badge {
   font-size: 0.6875rem;
   padding: 2px 8px;

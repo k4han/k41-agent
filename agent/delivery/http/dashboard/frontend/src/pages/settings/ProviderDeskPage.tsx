@@ -2,6 +2,7 @@ import { useLocation, useNavigate, useSearchParams } from "@solidjs/router";
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { ArrowRight, Plus, RefreshCw, Search, Sparkles, Star, Trash2 } from "lucide-solid";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { EmptyState } from "@/components/EmptyState";
 import { useToast } from "@/components/Toast";
 import { apiFetch, deleteJson, postJson, putJson } from "@/lib/api";
 import { buildDeskCatalog, buildDeskConnections, CONNECTION_KIND_LABELS, connectionEndpoint, filterDeskConnections, type DeskConnection, type DeskSources } from "@/lib/providerDesk";
@@ -153,14 +154,28 @@ export function ProviderDeskPage() {
                   </tr>}</For></tbody>
                 </table>
               </div>
-              <Show when={!total() && !KINDS.some((source) => loading()[source])}><div class="empty"><h3>No connections found</h3><p class="hint">Try another search or add a provider connection.</p><button class="btn" type="button" onClick={() => navigate("/settings/providers?tab=catalog")}>Browse provider catalog</button></div></Show>
+              <Show when={!total() && !KINDS.some((source) => loading()[source])}>
+                <EmptyState
+                  icon={<Search size={22} />}
+                  message="No connections found"
+                  hint="Try another search or add a provider connection."
+                  href="/settings/providers?tab=catalog"
+                  action="Browse provider catalog"
+                />
+              </Show>
             </section>
           }>
             <div class="provider-desk-catalog" data-provider-picker><For each={visibleCatalog()}>{(item) => <button class="provider-picker-card provider-catalog-tile" type="button" data-provider-id={item.providerId} data-provider-kind={item.kind} onClick={() => create(item.kind, item.providerId)}>
               <div class="provider-catalog-top"><ProviderLogo label={item.label} url={item.logoUrl} /><Show when={item.count} fallback={<Plus size={15} />}><span class="badge">{item.count} saved</span></Show></div>
               <strong>{item.label}</strong><span class="hint">{item.modelCount !== undefined ? `${item.modelCount} catalog models` : item.adapter}</span><span class="badge">{CONNECTION_KIND_LABELS[item.kind]}</span>
             </button>}</For></div>
-            <Show when={!total() && !KINDS.some((source) => loading()[source])}><p class="empty hint">No providers match your search.</p></Show>
+            <Show when={!total() && !KINDS.some((source) => loading()[source])}>
+              <EmptyState
+                icon={<Search size={20} />}
+                message="No providers match your search."
+                hint="Try searching with a different term."
+              />
+            </Show>
           </Show>
           <ProviderPagination page={page()} total={total()} size={pageSize()} onChange={(value) => setQuery({ page: String(value) })} />
           <p class="hint provider-desk-note">Each saved configuration keeps its own credentials. Catalog models describe provider offerings; account access is checked separately.</p>

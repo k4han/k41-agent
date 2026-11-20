@@ -144,6 +144,53 @@
   min-width: 600px;
 }
 
+.thread-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.thread-action-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 130px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.thread-action-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--fg);
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.thread-action-item:hover,
+.thread-action-item:focus-visible {
+  background: var(--surface-2);
+}
+
+.thread-action-item.danger-text {
+  color: var(--danger);
+}
+
+.thread-action-item.danger-text:hover {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+}
+
 @media (max-width: 640px) {
   .history-workspace-filter {
     width: 100%;
