@@ -37,14 +37,30 @@ const byLatest = (left, right) => Date.parse(right.updated_at || '1970-01-01T00:
 const sends = [];
 const navRequests = [];
 const projectThreadRequests = [];
+const recentHistoryRequests = [];
 let historyRequests = 0;
 let failNav = false;
 let failProjectThreads = false;
+let showManagedProject = false;
+let failRepositories = true;
+let releaseRepositoryPreview;
+const repositories = Array.from({ length: 8 }, (_, index) => ({
+  repository_id: 8 - index,
+  full_name: `team/repo-${8 - index}`,
+}));
+const scheduledJobs = [
+  ...Array.from({ length: 7 }, (_, index) => ({
+    id: String(7 - index), task: `Job ${7 - index}`, next_run_time: `2060-01-0${7 - index}T10:00:00Z`, paused: false,
+  })),
+  { id: 'paused', task: 'Paused job', next_run_time: '2060-01-01T00:00:00Z', paused: true },
+  { id: 'invalid', task: 'Invalid date', next_run_time: 'invalid', paused: false },
+];
 const fixtures = {
   '/dashboard-api/agents/cards': { cards: [{ name: 'default', display_name: 'Default', provider: 'test', model: 'demo-model', valid: true }] },
   '/dashboard-api/agents/providers': { provider_names: ['test'], default_provider: 'test', default_model: 'demo-model',
     model_catalogs: [{ provider: 'test', provider_type: 'openai', default_model: 'demo-model', models: [{ id: 'demo-model', label: 'Demo model', source: 'config' }] }] },
   '/dashboard-api/chat-history': { threads, has_more: false },
+  '/dashboard-api/scheduler': { jobs: scheduledJobs },
   '/dashboard-api/workspace/default': { workspace: null },
 };
 const server = http.createServer(async (req, res) => {
@@ -98,12 +114,31 @@ const server = http.createServer(async (req, res) => {
       const projects = [...groups.values()].map(group => {
         group.threads.sort(byLatest);
         const selected = new Set([...group.threads].sort((left, right) => Number(right.thread_id === active) - Number(left.thread_id === active)).slice(0, 4));
-        return { ...group, threads: group.threads.filter(thread => selected.has(thread)) };
+        const project = showManagedProject && group.key === 'github:42' ? { id: 42 } : {};
+        return { ...group, ...project, threads: group.threads.filter(thread => selected.has(thread)) };
       });
       res.end(JSON.stringify({ projects, has_more: false, next_cursor: null }));
       return;
     }
-    if (url.pathname === '/dashboard-api/chat-history') historyRequests++;
+    if (url.pathname === '/dashboard-api/chat-history') {
+      const limit = Number(url.searchParams.get('limit'));
+      if (limit > 0) {
+        recentHistoryRequests.push(limit);
+        res.end(JSON.stringify({ threads: [...threads].sort(byLatest).slice(0, limit), has_more: threads.length > limit }));
+        return;
+      }
+      historyRequests++;
+    }
+    if (url.pathname === '/dashboard-api/github') {
+      if (!releaseRepositoryPreview) await new Promise(resolve => { releaseRepositoryPreview = resolve; });
+      if (failRepositories) {
+        res.writeHead(503);
+        res.end(JSON.stringify({ detail: 'Repositories temporarily unavailable' }));
+      } else {
+        res.end(JSON.stringify({ repositories }));
+      }
+      return;
+    }
     const thread = threads.find(item => url.pathname === `/dashboard-api/chat-history/${item.thread_id}`);
     res.end(JSON.stringify(thread ? { ...thread, messages: [{ id: 'old-message', role: 'user', content: 'Existing conversation' }] }
       : fixtures[url.pathname] || { tools: [], agents: [], sessions: [], threads: [], packages: [],
@@ -136,8 +171,15 @@ async function until(callback, label, timeout = 15000) {
 let ws, call;
 try {
   const portFile = path.join(profile, 'DevToolsActivePort');
-  await until(() => fs.existsSync(portFile), 'browser debugger');
-  const port = Number(fs.readFileSync(portFile, 'utf8').split('\n')[0]);
+  let port;
+  await until(() => {
+    try {
+      port = Number(fs.readFileSync(portFile, 'utf8').split('\n')[0]);
+    } catch (error) {
+      if (error.code !== 'ENOENT' && error.code !== 'EBUSY') throw error;
+    }
+    return port > 0;
+  }, 'browser debugger');
   const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
   ws = new WebSocket(targets.find(target => target.type === 'page').webSocketDebuggerUrl);
   await new Promise(resolve => ws.addEventListener('open', resolve, { once: true }));
@@ -168,7 +210,28 @@ try {
     return result.result.value;
   };
   const viewport = (width, height = 1000) => call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width <= 980 });
-  const width = () => js('Math.round(document.querySelector(".sidebar").getBoundingClientRect().width)');
+  const width = () => js('Math.round(document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0)');
+  const box = selector => js(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().toJSON()`);
+  const center = async selector => {
+    const { x, y, width, height } = await box(selector);
+    return { x: x + width / 2, y: y + height / 2 };
+  };
+  const move = point => call('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+  const click = async selector => {
+    const target = `document.querySelector(${JSON.stringify(selector)})`;
+    await js(`${target}.scrollIntoView({ block: 'nearest' })`);
+    const point = await center(selector);
+    await move(point);
+    assert.ok(await js(`${target}.contains(document.elementFromPoint(${point.x}, ${point.y}))`), `Clickable ${selector}`);
+    await call('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, ...point });
+    await call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
+  };
+  const press = async (key, windowsVirtualKeyCode) => {
+    const details = { key, code: key, windowsVirtualKeyCode };
+    const text = key === 'Enter' ? '\r' : '';
+    await call('Input.dispatchKeyEvent', { type: text ? 'keyDown' : 'rawKeyDown', text, ...details });
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', ...details });
+  };
   const ready = () => until(() => js('document.querySelectorAll(".nav-history-workspace").length === 3 && !!document.querySelector(".chat-prompt-input") && !document.querySelector(".chat-prompt-input").disabled'), 'chat navigation');
   const key = value => js(`document.querySelector('.sidebar-resize-handle').dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(value)}, bubbles: true }))`);
   const draft = text => js(`{ const input = document.querySelector('.chat-prompt-input'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('input', { bubbles: true })); }`);
@@ -268,6 +331,12 @@ try {
   await until(() => js(`location.pathname === '/chat' && !document.querySelector('.chat-prompt-input').disabled`), 'new local chat');
   assert.equal(await js(`document.querySelector('.transcript').textContent.includes('Existing conversation')`), false);
   await send(local);
+  assert.ok((await box('.nav-new-chat')).bottom <= (await box('.nav-projects-header')).top, 'new chat is above Projects');
+  await draft('Draft from the project workspace');
+  await click('.nav-new-chat');
+  assert.equal(await js(`document.querySelector('.chat-prompt-input').value`), '', 'new chat opens a fresh draft on the same route');
+  await send(undefined);
+  await js(`document.querySelector('.nav-project-add[aria-label="New chat in flask test"]').click()`);
   await draft('Discard this draft');
   await js(`document.querySelector('.nav-project-add[aria-label="New chat in flask test"]').click()`);
   assert.equal(await js(`document.querySelector('.chat-prompt-input').value`), '', 'same-project action clears the previous draft');
@@ -300,12 +369,160 @@ try {
   await js(`window.dispatchEvent(new CustomEvent('k41:thread-stop-running', { detail: { threadId: 'local-26' } }))`);
   await js(`document.querySelector('.nav-history-all-btn').click()`);
   await until(() => js(`location.pathname === '/history' && !!document.querySelector('.select-control-trigger')`), 'global history remains accessible');
-  await until(() => js(`document.querySelectorAll('${localProject} .nav-history-item').length === 27`), 'expanded conversations survive navigation');
-  console.log('PASS: View all loads conversations inline, paginates, retries failures, preserves the current route, and keeps expanded rows across navigation.');
+  console.log('PASS: View all loads conversations inline, paginates, retries failures, and preserves the current route.');
 
-  await js(`document.querySelector('.brand-collapse-btn').click()`);
-  await viewport(390, 844);
+  const rail = '.app-shell-nav-rail';
+  const panel = '.app-shell-navigation-panel';
+  const toggle = `${rail} button`;
+  const railLink = href => `${rail} a[href="${href}"]`;
+  const homeLink = railLink('/');
+  const chatLink = railLink('/chat');
+  const previewRows = '.navigation-section-list > li';
+  const outside = { x: 650, y: 280 };
+  const panelVisible = () => js(`document.querySelector('${panel}')?.hidden === false`);
+  const savedPreference = () => js(`localStorage.getItem('k41-dashboard-sidebar')`);
+  const focusedInPanel = () => js(`document.querySelector('${panel}')?.contains(document.activeElement) ?? false`);
+  const sectionIs = section => js(`document.querySelector('${panel}')?.dataset.navigationSection === '${section}'`);
+  await until(() => sectionIs('history'), 'pinned panel follows history route');
+  await until(() => js(`document.querySelectorAll('${previewRows} a').length === 6`), 'recent history');
+  assert.equal(recentHistoryRequests.at(-1), 6);
+  await move(await center(homeLink));
+  assert.equal(await sectionIs('history'), true, 'hovering another item leaves the pinned section on the current route');
+  await click(chatLink);
+  await until(() => sectionIs('chat'), 'click changes the active route and pinned panel');
+  await until(() => js(`document.querySelectorAll('${localProject} .nav-history-item').length === 27`), 'expanded conversations survive navigation');
+  await click(railLink('/history'));
+  await until(() => sectionIs('history'), 'pinned panel follows navigation back to history');
+  assert.equal((await box(rail)).width, 52, 'pinned navigation has a 52px rail');
+  assert.equal(await js(`document.querySelector('${rail} a[aria-current="page"]').getAttribute('href')`), '/history');
+  const homeLinkX = (await box(homeLink)).x;
+  await click(toggle);
+  await until(async () => await width() === 52, '52px collapsed navigation');
+  assert.equal(await panelVisible(), false, 'unpinning closes the panel while the pointer is still on the rail');
+  assert.equal((await box(homeLink)).x, homeLinkX, 'primary icons keep their position');
+  assert.equal(await savedPreference(), 'collapsed');
+  const mainBox = await box('.main');
+  await move(outside);
+  await move(await center(homeLink));
+  await until(() => sectionIs('home'), 'home preview from the rail');
+  assert.equal(await js(`document.querySelector('${panel} .navigation-section-page-link').getAttribute('href')`), '/');
+  assert.equal((await box(panel)).x, 52);
+  assert.equal((await box(panel)).width, 238);
+  assert.deepEqual(await box('.main'), mainBox, 'hover preview overlays the current page');
+  assert.equal(await savedPreference(), 'collapsed');
+  await move({ x: 54, y: 75 });
+  await move({ x: 160, y: 100 });
+  await delay(200);
+  assert.equal(await panelVisible(), true, 'the panel stays open when the pointer crosses into it');
+
+  const repoLink = railLink('/repositories');
+  await move(await center(repoLink));
+  await until(() => sectionIs('repositories'), 'repository preview from its own icon');
+  await until(() => Boolean(releaseRepositoryPreview), 'repository request starts on hover');
+  assert.ok(await js(`document.querySelector('.navigation-section-panel [role="status"]').textContent.includes('Loading')`));
+  await move(await center(railLink('/scheduler')));
+  await until(() => sectionIs('scheduler'), 'scheduler preview while the repository request is still pending');
+  releaseRepositoryPreview();
+  await until(() => js(`document.querySelectorAll('${previewRows} .navigation-section-detail').length === 5`), 'five upcoming jobs');
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('${previewRows} .nav-label'), item => item.textContent)`),
+    ['Job 1', 'Job 2', 'Job 3', 'Job 4', 'Job 5']);
+  assert.equal(await sectionIs('scheduler'), true, 'the previous request cannot replace the current panel');
+
+  await move(await center(repoLink));
+  await until(() => js(`!!document.querySelector('.navigation-section-panel button')`), 'repository error and retry');
+  failRepositories = false;
+  await click('.navigation-section-panel button');
+  await until(() => js(`document.querySelectorAll('${previewRows} a').length === 6`), 'retry loads six repository links');
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('${previewRows} a'), item => item.getAttribute('href'))`),
+    [1, 2, 3, 4, 5, 6].map(id => `/repositories/${id}`));
+  await move(await center(railLink('/history')));
+  await until(() => sectionIs('history'), 'recent history preview');
+  await until(() => js(`document.querySelectorAll('${previewRows} a[href^="/c/"]').length === 6`), 'recent conversations have direct links');
+  assert.equal(await js('location.pathname'), '/history', 'hovering sections leaves the current route intact');
+
+  showManagedProject = true;
+  await move(await center(chatLink));
+  await until(() => sectionIs('chat'), 'chat preview from its own icon');
+  await js(`window.dispatchEvent(new CustomEvent('k41:threads-changed'))`);
+  await until(() => js(`!!document.querySelector('.project-actions-trigger')`), 'managed project');
+  assert.equal(await js(`document.querySelector('.nav-history-group').getBoundingClientRect().height > 0`), true);
+
+  await click('.project-actions-trigger');
+  await until(() => js(`!!document.querySelector('.project-menu')`), 'project actions in the preview');
+  await move(await center('.project-menu button'));
+  await delay(200);
+  assert.equal(await panelVisible(), true, 'portaled project actions keep their preview open');
+  await press('Escape', 27);
+  assert.equal(await js(`!!document.querySelector('.project-menu')`), false);
+  assert.equal(await panelVisible(), true, 'the first Escape closes the project menu');
+
+  await click('.nav-history-action');
+  await until(() => js(`!!document.querySelector('.nav-history-menu--portal')`), 'thread actions in the preview');
+  await move(await center('.nav-history-menu--portal button'));
+  await delay(200);
+  assert.equal(await panelVisible(), true, 'portaled thread actions keep their preview open');
+  await click('.nav-history-menu--portal button');
+  await until(() => js(`!!document.querySelector('.nav-history-rename-input')`), 'inline rename opens from the preview');
+  await move(outside);
+  await delay(200);
+  assert.equal(await panelVisible(), true, 'moving away keeps an inline rename active');
+  await press('Escape', 27);
+  await until(async () => !(await panelVisible()), 'preview closes after canceling the rename outside the panel');
+
+  await move(await center(chatLink));
+  await until(panelVisible, 'reopen preview');
+  await js(`document.querySelector('.nav-scroll').scrollTop = 70`);
+  const scrollTop = await js(`document.querySelector('.nav-scroll').scrollTop`);
+  assert.ok(scrollTop > 0, 'project history is scrollable');
+  await move(outside);
+  await until(async () => !(await panelVisible()), 'preview closes after leaving navigation');
+  await move(await center(chatLink));
+  await until(panelVisible, 'reopen scrolled preview');
+  assert.equal(await js(`document.querySelector('.nav-scroll').scrollTop`), scrollTop);
+
+  await move(outside);
+  await call('Page.reload');
+  await until(async () => await width() === 52, 'collapsed preference survives reload');
+  assert.equal(await panelVisible(), false);
+  const hasFocus = selector => js(`document.activeElement.matches(${JSON.stringify(selector)})`);
+  for (let steps = 0; steps < 10 && !(await hasFocus(homeLink)); steps++) {
+    await press('Tab', 9);
+  }
+  assert.equal(await hasFocus(homeLink), true, 'Tab reaches the Home icon');
+  assert.equal(await sectionIs('home'), true, 'keyboard focus opens the matching preview');
+  await press('ArrowRight', 39);
+  assert.equal(await focusedInPanel(), true, 'ArrowRight places focus in the matching panel');
+  await press('Escape', 27);
+  assert.equal(await panelVisible(), false);
+  assert.equal(await hasFocus(homeLink), true, 'Escape restores focus to the initiating icon');
+  await press('Tab', 9);
+  assert.equal(await hasFocus(chatLink), true, 'Tab moves to the next icon after Escape');
+  assert.equal(await sectionIs('chat'), true, 'the next focused icon opens its own preview');
+  await js(`document.querySelector('${toggle}').focus()`);
+  await press('Enter', 13);
+  assert.equal(await savedPreference(), 'expanded', 'Enter activates the focused toggle');
+  await until(async () => await width() === 290, 'keyboard pins the panel');
+  assert.equal(await sectionIs('history'), true, 'pinning opens the panel for the current page');
+  await call('Page.reload');
+  await until(async () => await width() === 290 && await panelVisible(), 'pinned preference survives reload');
+  await click(toggle);
+  await viewport(981, 800);
+  await until(async () => await width() === 52, '52px desktop navigation at 981px');
   await call('Emulation.setTouchEmulationEnabled', { enabled: true });
+  const touchToggle = await center(toggle);
+  const tapToggle = async () => {
+    await call('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [touchToggle] });
+    await call('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  };
+  await tapToggle();
+  await until(async () => await width() > 52 && await panelVisible(), 'touch opens the pinned desktop panel');
+  await tapToggle();
+  await until(async () => await width() === 52, 'touch collapses the desktop panel');
+  await viewport(980, 800);
+  await until(() => js(`!document.querySelector('${rail}') && !!document.querySelector('.topbar-menu-toggle')`), 'drawer layout at 980px');
+  console.log('PASS: 52px rail, overlay geometry, mouse and keyboard preview, submenu actions, scroll position, desktop touch, and saved preferences.');
+
+  await viewport(390, 844);
   await js(`document.querySelector('.topbar-menu-toggle').click()`);
   await until(() => js(`document.querySelector('.app-layout').classList.contains('app-layout--drawer-open') && document.querySelectorAll('.nav-history-workspace').length === 3`), 'mobile project drawer with saved desktop collapse');
   assert.equal(await js(`!!document.querySelector('.sidebar-resize-handle')`), false);
@@ -315,13 +532,17 @@ try {
   await until(() => js(`document.querySelectorAll('.nav-history-workspace[aria-label="No workspace"] .nav-history-item').length === 6`), 'mobile inline conversations');
   assert.equal(await js(`document.querySelector('.app-layout').classList.contains('app-layout--drawer-open')`), true, 'inline loading keeps the mobile drawer open');
   assert.equal(await js('location.pathname'), '/history');
-  await js(`document.querySelector('.nav-project-add').click()`);
+  await js(`document.querySelector('.nav-project-add[aria-label="New chat in flask test"]').click()`);
   await until(() => js(`location.pathname === '/chat' && !document.querySelector('.app-layout').classList.contains('app-layout--drawer-open')`), 'mobile project action closes drawer');
   await call('Page.reload');
   await until(() => js(`!!document.querySelector('.chat-header-menu-toggle')`), 'cold mobile chat');
   await js(`document.querySelector('.chat-header-menu-toggle').click()`);
   await until(() => js(`document.querySelectorAll('.nav-history-workspace').length === 3`), 'cold drawer loads project history with saved collapse');
   await js(`document.querySelector('.drawer-close-btn').click()`);
+  await js(`document.querySelector('.chat-header-menu-toggle').click()`);
+  await draft('Mobile draft');
+  await js(`document.querySelector('.nav-new-chat').click()`);
+  await until(() => js(`!document.querySelector('.app-layout--drawer-open') && document.querySelector('.chat-prompt-input').value === ''`), 'new chat resets the draft and closes the mobile drawer');
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: mobile projects remain accessible with collapsed desktop preferences and close after starting a chat.');
   if (process.env.NAVBAR_SCREENSHOT) {

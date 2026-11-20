@@ -35,6 +35,7 @@ import { unwrap } from "solid-js/store";
 
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { ExportChatDialog } from "@/components/ExportChatDialog";
+import { NavigationSectionPanel, type NavigationSection } from "@/components/NavigationSectionPanel";
 import { ProjectActions } from "@/components/ProjectActions";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { UpdateDialog } from "@/components/UpdateDialog";
@@ -55,6 +56,7 @@ import { updateDashboardFavicon } from "@/lib/favicon";
 import { STORAGE_KEYS } from "@/lib/uiConstants";
 import { navProjectsStore, navProjectThreads, newProjectWorkspace } from "@/lib/navProjectsStore";
 import { prepareProjectChatWorkspace } from "@/lib/projects";
+import { createMediaQuery } from "@/lib/useMediaQuery";
 import { useMobileDrawer } from "@/lib/useMobileDrawer";
 import { useSidebarResize } from "@/lib/useSidebarResize";
 import { useThreadWorkspaceGroups } from "@/lib/useThreadWorkspaceGroups";
@@ -65,17 +67,21 @@ import { useToast } from "@/components/Toast";
 import type { WorkspaceBinding, WorkspaceRef } from "@/types";
 
 type NavItem = {
+  section: NavigationSection;
   href: string;
   label: string;
   icon: () => JSX.Element;
 };
 
 const navItems: NavItem[] = [
-  { href: "/", label: "Home", icon: () => <Home size={15} /> },
-  { href: "/chat", label: "Chat", icon: () => <MessageSquare size={15} /> },
-  { href: "/repositories", label: "Repositories", icon: () => <GitPullRequest size={15} /> },
-  { href: "/scheduler", label: "Scheduler", icon: () => <CalendarClock size={15} /> },
+  { section: "home", href: "/", label: "Home", icon: () => <Home size={15} /> },
+  { section: "chat", href: "/chat", label: "Chat", icon: () => <MessageSquare size={15} /> },
+  { section: "repositories", href: "/repositories", label: "Repositories", icon: () => <GitPullRequest size={15} /> },
+  { section: "scheduler", href: "/scheduler", label: "Scheduler", icon: () => <CalendarClock size={15} /> },
 ];
+const historyNavItem: NavItem = { section: "history", href: "/history", label: "History", icon: () => <History size={15} /> };
+const navigationPanelId = "app-shell-navigation-panel";
+const PREVIEW_CLOSE_DELAY_MS = 150;
 
 type DeferredHistoryLoad = {
   kind: "idle" | "timeout";
@@ -99,7 +105,9 @@ export function AppShell(props: {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [menuOpen, setMenuOpen] = createSignal(false);
-  const [collapsed, setCollapsed] = createSignal(false);
+  const [collapsed, setCollapsed] = createSignal(window.localStorage.getItem(STORAGE_KEYS.SIDEBAR_COLLAPSED) === "collapsed");
+  const [previewSection, setPreviewSection] = createSignal<NavigationSection>();
+  const [projectMenuId, setProjectMenuId] = createSignal<string | null>(null);
   const {
     threads: historyThreads,
     error: historyError,
@@ -127,10 +135,39 @@ export function AppShell(props: {
     closeMobileDrawer,
     handleAppLayoutClick,
     handleNavClick,
-    handleKeydown,
+    handleKeydown: handleDrawerKeydown,
   } = useMobileDrawer({ sidebarId: "app-shell-sidebar" });
   const sidebar = useSidebarResize(() => !collapsed() && !isMobileViewport());
   const chatViewport = useVisualViewport(() => Boolean(props.noHeader) && isMobileViewport());
+  const hasHoverPointer = createMediaQuery("(any-hover: hover)");
+  const activeSection = createMemo<NavigationSection>(() => {
+    const segment = location.pathname.split("/", 2)[1];
+    switch (segment) {
+      case "c":
+      case "chat":
+      case "projects":
+        return "chat";
+      case "history":
+      case "repositories":
+      case "scheduler":
+        return segment;
+      default:
+        return "home";
+    }
+  });
+  const panelSection = () => isMobileViewport() ? undefined : collapsed() ? previewSection() : activeSection();
+  const projectsVisible = () => isMobileViewport() ? mobileDrawerOpen() : panelSection() === "chat";
+  const otherPanelSection = () => {
+    const section = panelSection();
+    return section === "chat" ? undefined : section;
+  };
+  let sidebarRef: HTMLElement | undefined;
+  let navigationPanel: HTMLDivElement | undefined;
+  let accountButton: HTMLButtonElement | undefined;
+  let previewTrigger: HTMLAnchorElement | undefined;
+  let pointerInNavigation = false;
+  let restoringPreviewFocus = false;
+  let previewCloseTimer: number | undefined;
   let disposed = false;
   let deferredHistoryLoad: DeferredHistoryLoad | null = null;
   let threadsChangedTimer: number | undefined;
@@ -291,14 +328,86 @@ export function AppShell(props: {
 
   createEffect(() => navProjectsStore.setActiveThreadId(selectedChatThreadId()));
 
-  const isActive = (href: string) => {
-    if (href === "/") {
-      return location.pathname === "/";
+  const clearPreviewClose = () => window.clearTimeout(previewCloseTimer);
+  const hasNavigationFocus = () => {
+    const focused = document.activeElement;
+    return sidebarRef?.contains(focused) && focused?.matches(":focus-visible");
+  };
+
+  const openPreview = (section: NavigationSection, trigger: HTMLAnchorElement) => {
+    if (!collapsed() || isMobileViewport() || restoringPreviewFocus) return;
+    if (section !== previewSection() && (historyMenuThreadId() || projectMenuId() || editingHistoryThreadId())) return;
+    clearPreviewClose();
+    previewTrigger = trigger;
+    setPreviewSection(section);
+  };
+
+  const dismissPreview = (restoreFocus = false) => {
+    clearPreviewClose();
+    if (restoreFocus && previewTrigger && navigationPanel?.contains(document.activeElement)) {
+      restoringPreviewFocus = true;
+      previewTrigger.focus({ preventScroll: true });
+      restoringPreviewFocus = false;
     }
-    if (href === "/chat") {
-      return location.pathname === "/chat";
+    previewTrigger = undefined;
+    setPreviewSection(undefined);
+  };
+
+  const schedulePreviewClose = () => {
+    clearPreviewClose();
+    if (!previewSection()) return;
+    previewCloseTimer = window.setTimeout(() => {
+      if (pointerInNavigation || hasNavigationFocus() || menuOpen()
+        || historyMenuThreadId() || projectMenuId() || editingHistoryThreadId()) return;
+      dismissPreview();
+    }, PREVIEW_CLOSE_DELAY_MS);
+  };
+
+  const isHoverPointer = (event: PointerEvent) => (
+    !isMobileViewport() && hasHoverPointer() && event.pointerType !== "touch" && event.buttons === 0
+  );
+
+  const handleNavigationPointerEnter = (event: PointerEvent) => {
+    if (!isHoverPointer(event)) return;
+    pointerInNavigation = true;
+    clearPreviewClose();
+  };
+
+  const handleNavigationPointerLeave = (event: PointerEvent) => {
+    if (event.pointerType === "touch") return;
+    pointerInNavigation = false;
+    schedulePreviewClose();
+  };
+
+  const handleNavigationFocusOut = (event: FocusEvent) => {
+    if (event.relatedTarget instanceof Node && sidebarRef?.contains(event.relatedTarget)) return;
+    schedulePreviewClose();
+  };
+
+  const handleOutsidePointerDown = (event: PointerEvent) => {
+    if (!previewSection() || editingHistoryThreadId() || !(event.target instanceof Element)) return;
+    if (sidebarRef?.contains(event.target) || historyMenuRef?.contains(event.target)) return;
+    const projectMenu = projectMenuId();
+    if (projectMenu && document.getElementById(projectMenu)?.contains(event.target)) return;
+    dismissPreview();
+  };
+
+  const handleNavigationKeydown = (event: KeyboardEvent) => {
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    if (document.querySelector('.dialog[aria-modal="true"]')) return;
+    if (projectMenuId()) return;
+    if (historyMenuThreadId()) {
+      closeHistoryMenu(true);
+    } else if (menuOpen()) {
+      setMenuOpen(false);
+      accountButton?.focus({ preventScroll: true });
+    } else if (previewSection()) {
+      dismissPreview(true);
+    } else {
+      handleDrawerKeydown(event);
+      return;
     }
-    return location.pathname.startsWith(href);
+    event.preventDefault();
   };
 
   const handleClickOutside = (event: MouseEvent) => {
@@ -306,8 +415,8 @@ export function AppShell(props: {
     if (!target.closest(".user-menu-wrapper")) {
       setMenuOpen(false);
     }
-    if (!target.closest(".nav-history-item-wrapper")) {
-      setHistoryMenuThreadId(null);
+    if (!target.closest(".nav-history-item-wrapper") && !historyMenuRef?.contains(target)) {
+      closeHistoryMenu();
     }
   };
 
@@ -316,7 +425,7 @@ export function AppShell(props: {
     threadsChangedTimer = window.setTimeout(() => {
       threadsChangedTimer = undefined;
       if (disposed) return;
-      if (!collapsed() || mobileDrawerOpen() || isHistoryActive()) {
+      if (projectsVisible() || selectedChatThreadId()) {
         void navProjectsStore.load(true, false);
       } else {
         applyHistoryState({ loaded: false });
@@ -324,30 +433,38 @@ export function AppShell(props: {
     }, 250);
   };
 
-  const setSidebarCollapsed = (next: boolean) => {
+  const toggleSidebar = () => {
+    const next = !collapsed();
+    dismissPreview();
     setCollapsed(next);
     window.localStorage.setItem(STORAGE_KEYS.SIDEBAR_COLLAPSED, next ? "collapsed" : "expanded");
-
-    if (!next && !historyLoaded()) {
-      void loadHistory(true);
-    }
   };
 
-  const toggleSidebar = () => {
-    setSidebarCollapsed(!collapsed());
+  const handleProjectMenuOpenChange = (id: string, open: boolean) => {
+    setProjectMenuId((current) => open ? id : current === id ? null : current);
   };
 
   const loadHistory = async (reset = false) => {
     if (!disposed) await navProjectsStore.load(reset);
   };
 
-  const isHistoryActive = () => (
-    location.pathname.startsWith("/history") || Boolean(selectedChatThreadId())
-  );
+  createEffect(on(projectsVisible, (visible) => {
+    cancelDeferredHistoryLoad();
+    if (visible && !historyLoaded() && !historyLoading()) {
+      void loadHistory(true);
+    }
+  }, { defer: true }));
 
-  createEffect(on(mobileDrawerOpen, (open) => {
-    if (open && !historyLoaded() && !historyLoading()) void loadHistory(true);
-  }));
+  createEffect(on(
+    [menuOpen, historyMenuThreadId, projectMenuId, editingHistoryThreadId],
+    schedulePreviewClose,
+    { defer: true },
+  ));
+  createEffect(on(() => location.pathname, () => dismissPreview(), { defer: true }));
+  createEffect(on(isMobileViewport, () => {
+    dismissPreview();
+    pointerInNavigation = false;
+  }, { defer: true }));
 
   const cancelDeferredHistoryLoad = () => {
     if (!deferredHistoryLoad) {
@@ -369,7 +486,7 @@ export function AppShell(props: {
       || historyLoaded()
       || historyLoading()
       || deferredHistoryLoad
-      || collapsed()
+      || !projectsVisible()
     ) {
       return;
     }
@@ -411,6 +528,17 @@ export function AppShell(props: {
   };
 
   const [openingProject, setOpeningProject] = createSignal("");
+  const openChatDraft = (context: {
+    projectId?: number | null;
+    workspaceBinding?: WorkspaceBinding;
+    workspace?: WorkspaceRef | null;
+  } = {}) => {
+    navigate("/chat", {
+      state: { newChatId: `${Date.now()}-${Math.random().toString(36).slice(2)}`, ...context },
+    });
+    closeMobileDrawer();
+  };
+
   const startProjectChat = async (group: ThreadWorkspaceGroup) => {
     if (openingProject()) return;
     let workspace = newProjectWorkspace(group);
@@ -423,15 +551,11 @@ export function AppShell(props: {
         workspace = "execution" in ready ? ready.execution : ready;
       }
       if (disposed) return;
-      navigate("/chat", {
-        state: {
-          newChatId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          projectId: group.id,
-          workspaceBinding: workspaceBinding ? cloneValue(unwrap(workspaceBinding)) : undefined,
-          workspace: workspace ? cloneValue(unwrap(workspace)) : null,
-        },
+      openChatDraft({
+        projectId: group.id,
+        workspaceBinding: workspaceBinding ? cloneValue(unwrap(workspaceBinding)) : undefined,
+        workspace: workspace ? cloneValue(unwrap(workspace)) : null,
       });
-      closeMobileDrawer();
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Workspace is unavailable.", "error");
     } finally { setOpeningProject(""); }
@@ -449,15 +573,42 @@ export function AppShell(props: {
     });
   });
 
-  const renderNavItem = (item: NavItem) => {
-    const live = () => item.href === "/scheduler" && schedulerRunning();
+  const renderNavItem = (item: NavItem, desktop = false) => {
+    const active = () => activeSection() === item.section;
+    const live = () => item.section === "scheduler" && schedulerRunning();
+    const label = () => live() ? `${item.label} - task running` : item.label;
     return (
       <A
         href={item.href}
         activeClass=""
         inactiveClass=""
-        class={`nav-link ${isActive(item.href) ? "active" : ""} ${live() ? "nav-link--live" : ""}`}
-        title={live() ? `${item.label} - task running` : item.label}
+        class={`nav-link ${active() ? "active" : ""} ${live() ? "nav-link--live" : ""}`}
+        aria-current={active() ? "page" : undefined}
+        aria-label={label()}
+        aria-controls={desktop && collapsed() ? navigationPanelId : undefined}
+        aria-expanded={desktop && collapsed() ? previewSection() === item.section : undefined}
+        title={label()}
+        onPointerEnter={desktop ? (event) => {
+          if (isHoverPointer(event) && !(navigationPanel?.contains(document.activeElement) && hasNavigationFocus())) {
+            openPreview(item.section, event.currentTarget);
+          }
+        } : undefined}
+        onFocus={desktop ? (event) => {
+          if (event.currentTarget.matches(":focus-visible")) openPreview(item.section, event.currentTarget);
+        } : undefined}
+        onKeyDown={desktop ? (event) => {
+          if (event.key !== "ArrowRight" || !collapsed() || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+          event.preventDefault();
+          openPreview(item.section, event.currentTarget);
+          queueMicrotask(() => {
+            if (previewSection() === item.section) {
+              navigationPanel?.querySelector<HTMLElement>("nav:not([hidden]) :is(a[href], button:not([disabled]))")?.focus();
+            }
+          });
+        } : undefined}
+        onClick={desktop ? (event) => {
+          if (event.button === 0 && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) dismissPreview();
+        } : undefined}
       >
         {item.icon()}
         <span class="nav-label">{item.label}</span>
@@ -546,8 +697,7 @@ export function AppShell(props: {
     if (!historyMenuAnchor || !historyMenuThreadId()) return;
     const targetRect = historyMenuAnchor.getBoundingClientRect();
     if (targetRect.bottom < 0 || targetRect.top > window.innerHeight) {
-      setHistoryMenuThreadId(null);
-      historyMenuAnchor = null;
+      closeHistoryMenu();
       return;
     }
     const menuWidth = 160;
@@ -565,6 +715,7 @@ export function AppShell(props: {
     setHistoryMenuPos({ top, left, opensUp });
   };
   const handleHistoryScroll = (event: Event) => {
+    if (!projectsVisible()) return;
     const target = event.currentTarget as HTMLElement;
     const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
 
@@ -576,19 +727,28 @@ export function AppShell(props: {
       void loadHistory();
     }
   };
+  const closeHistoryMenu = (restoreFocus = false) => {
+    const anchor = historyMenuAnchor;
+    setHistoryMenuThreadId(null);
+    historyMenuAnchor = null;
+    if (restoreFocus) anchor?.focus({ preventScroll: true });
+  };
+
   const toggleHistoryMenu = (threadId: string, event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
     setEditingHistoryThreadId(null);
     const current = historyMenuThreadId();
     if (current === threadId) {
-      setHistoryMenuThreadId(null);
-      historyMenuAnchor = null;
+      closeHistoryMenu();
       return;
     }
     historyMenuAnchor = event.currentTarget as HTMLElement;
     setHistoryMenuThreadId(threadId);
     positionHistoryMenu();
+    if (event.detail === 0) {
+      queueMicrotask(() => historyMenuRef?.querySelector("button")?.focus());
+    }
   };
   createEffect(() => {
     if (!historyMenuThreadId()) return;
@@ -600,28 +760,19 @@ export function AppShell(props: {
       const target = event.target as Node | null;
       if (target && historyMenuRef?.contains(target)) return;
       if (target && (target as Element).closest?.(".nav-history-action")) return;
-      setHistoryMenuThreadId(null);
-      historyMenuAnchor = null;
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setHistoryMenuThreadId(null);
-        historyMenuAnchor = null;
-      }
+      closeHistoryMenu();
     };
     document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
     onCleanup(() => {
       window.removeEventListener("scroll", handler, true);
       window.removeEventListener("resize", handler);
       document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
     });
   });
   const requestDeleteHistoryThread = (thread: ThreadSummary, event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    setHistoryMenuThreadId(null);
+    closeHistoryMenu();
     setDeleteTarget(thread);
   };
 
@@ -632,7 +783,7 @@ export function AppShell(props: {
   const stopThreadExecution = async (thread: ThreadSummary, event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    setHistoryMenuThreadId(null);
+    closeHistoryMenu();
     
     const threadId = thread.thread_id;
     optimisticLocks.set(threadId, { state: "stopped", timestamp: Date.now() });
@@ -683,7 +834,7 @@ export function AppShell(props: {
     event.preventDefault();
     event.stopPropagation();
 
-    setHistoryMenuThreadId(null);
+    closeHistoryMenu();
     setEditingHistoryThreadId(thread.thread_id);
     setEditingHistoryTitle(thread.title || thread.thread_id);
   };
@@ -736,15 +887,13 @@ export function AppShell(props: {
   };
 
   onMount(() => {
-    if (window.localStorage.getItem(STORAGE_KEYS.SIDEBAR_COLLAPSED) === "collapsed") {
-      setCollapsed(true);
-    }
     if (!historyLoaded()) {
-      if (isHistoryActive()) void loadHistory(true);
-      else if (!collapsed()) scheduleDeferredHistoryLoad(true);
+      if (selectedChatThreadId()) void loadHistory(true);
+      else scheduleDeferredHistoryLoad(true);
     }
     document.addEventListener("click", handleClickOutside);
-    document.addEventListener("keydown", handleKeydown);
+    document.addEventListener("pointerdown", handleOutsidePointerDown);
+    document.addEventListener("keydown", handleNavigationKeydown);
     window.addEventListener(CUSTOM_DOM_EVENTS.OPEN_MOBILE_NAV, handleOpenMobileNav);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleThreadsChanged);
     window.addEventListener(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, handleThreadStartRunning);
@@ -758,9 +907,11 @@ export function AppShell(props: {
   onCleanup(() => {
     disposed = true;
     window.clearTimeout(threadsChangedTimer);
+    clearPreviewClose();
     cancelDeferredHistoryLoad();
     document.removeEventListener("click", handleClickOutside);
-    document.removeEventListener("keydown", handleKeydown);
+    document.removeEventListener("pointerdown", handleOutsidePointerDown);
+    document.removeEventListener("keydown", handleNavigationKeydown);
     window.removeEventListener(CUSTOM_DOM_EVENTS.OPEN_MOBILE_NAV, handleOpenMobileNav);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREADS_CHANGED, handleThreadsChanged);
     window.removeEventListener(CUSTOM_DOM_EVENTS.THREAD_START_RUNNING, handleThreadStartRunning);
@@ -771,7 +922,7 @@ export function AppShell(props: {
 
   return (
     <div
-      class={`app-layout app-layout--resizable ${sidebar.resizing() ? "app-layout--resizing" : ""} ${collapsed() ? "sidebar-collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""} ${props.noHeader ? "app-layout-no-header" : ""}`}
+      class={`app-layout app-layout--resizable ${sidebar.resizing() ? "app-layout--resizing" : ""} ${collapsed() ? "app-shell--collapsed" : ""} ${isMobileViewport() && mobileDrawerOpen() ? "app-layout--drawer-open" : ""} ${props.noHeader ? "app-layout-no-header" : ""}`}
       style={{
         "--sidebar-width": `${sidebar.width()}px`,
         "--chat-viewport-height": chatViewport() ? `${chatViewport()!.height}px` : undefined,
@@ -779,21 +930,30 @@ export function AppShell(props: {
       }}
       onClick={handleAppLayoutClick}
     >
-      <aside id="app-shell-sidebar" class="sidebar">
-        <div class="brand">
-          <Show
-            when={!collapsed() || isMobileViewport()}
-            fallback={
-              <button
-                class="brand-mark brand-expand-btn"
-                type="button"
-                onClick={toggleSidebar}
-                title={
-                  versionInfo()?.has_update
-                    ? `Update available: v${versionInfo()?.latest_version} (click to expand)`
-                    : "Expand sidebar"
-                }
-              >
+      <aside
+        id="app-shell-sidebar"
+        class="sidebar app-shell-sidebar"
+        ref={sidebarRef}
+        onPointerEnter={handleNavigationPointerEnter}
+        onPointerLeave={handleNavigationPointerLeave}
+        on:focusout={handleNavigationFocusOut}
+      >
+        <Show when={!isMobileViewport()}>
+          <nav class="app-shell-nav-rail" aria-label="Main navigation">
+            <button
+              class={collapsed() ? "brand-mark brand-expand-btn" : "brand-collapse-btn"}
+              type="button"
+              onClick={toggleSidebar}
+              aria-controls={navigationPanelId}
+              aria-expanded={Boolean(panelSection())}
+              aria-label={collapsed() ? "Pin navigation panel" : "Collapse navigation panel"}
+              title={collapsed()
+                ? (versionInfo()?.has_update
+                  ? `Pin navigation panel · Update available: v${versionInfo()?.latest_version}`
+                  : "Pin navigation panel")
+                : "Collapse navigation panel"}
+            >
+              <Show when={collapsed()} fallback={<ChevronsLeft size={14} />}>
                 <span class="brand-expand-icon"><ChevronsRight size={14} /></span>
                 <span class="brand-expand-default">
                   <Bot size={16} />
@@ -801,12 +961,25 @@ export function AppShell(props: {
                     <span class="brand-collapsed-update-dot" />
                   </Show>
                 </span>
-              </button>
-            }
-          >
-            <div class="brand-mark">
-              <Bot size={16} />
-            </div>
+              </Show>
+            </button>
+            <For each={navItems}>{(item) => renderNavItem(item, true)}</For>
+            {renderNavItem(historyNavItem, true)}
+          </nav>
+        </Show>
+        <div
+          id={navigationPanelId}
+          class="app-shell-navigation-panel"
+          ref={navigationPanel}
+          hidden={!isMobileViewport() && !panelSection()}
+          data-navigation-section={panelSection()}
+        >
+          <div class="brand">
+            <Show when={isMobileViewport()}>
+              <div class="brand-mark" aria-hidden="true">
+                <Bot size={16} />
+              </div>
+            </Show>
             <div class="brand-text">
               <div class="brand-title">Kai Console</div>
               <button
@@ -828,19 +1001,7 @@ export function AppShell(props: {
                 </Show>
               </button>
             </div>
-            <Show
-              when={isMobileViewport()}
-              fallback={
-                <button
-                  class="brand-collapse-btn"
-                  type="button"
-                  onClick={toggleSidebar}
-                  title="Collapse sidebar"
-                >
-                  <ChevronsLeft size={14} />
-                </button>
-              }
-            >
+            <Show when={isMobileViewport()}>
               <button
                 class="drawer-close-btn"
                 type="button"
@@ -850,26 +1011,35 @@ export function AppShell(props: {
                 <X size={18} />
               </button>
             </Show>
+          </div>
+          <Show when={otherPanelSection()} keyed>
+            {(section) => <NavigationSectionPanel section={section} />}
           </Show>
-        </div>
-        <nav class="nav" onClick={handleNavClick}>
-          <For each={navItems.slice(0, 2)}>{renderNavItem}</For>
-          <div class="nav-scroll" onScroll={handleHistoryScroll}>
-            <For each={navItems.slice(2)}>{renderNavItem}</For>
-            <Show
-              when={!collapsed() || isMobileViewport()}
-              fallback={
-                <A
-                  href="/history"
-                  activeClass=""
-                  inactiveClass=""
-                  class={`nav-link ${location.pathname.startsWith("/history") ? "active" : ""}`}
-                  title="History"
-                >
-                  <History size={15} />
-                </A>
-              }
-            >
+          <nav
+            class="nav"
+            aria-label={isMobileViewport() ? "Main navigation" : "Projects and chat history"}
+            hidden={!isMobileViewport() && panelSection() !== "chat"}
+            onClick={handleNavClick}
+          >
+            <Show when={isMobileViewport()}>
+              <For each={navItems.slice(0, 2)}>{(item) => renderNavItem(item)}</For>
+            </Show>
+            <div class="nav-scroll" onScroll={handleHistoryScroll}>
+              <Show when={isMobileViewport()}>
+                <For each={navItems.slice(2)}>{(item) => renderNavItem(item)}</For>
+              </Show>
+              <button
+                type="button"
+                class="nav-link nav-new-chat"
+                disabled={Boolean(openingProject())}
+                onClick={() => {
+                  dismissPreview(true);
+                  openChatDraft();
+                }}
+              >
+                <Plus size={15} aria-hidden="true" />
+                New chat
+              </button>
               <div class="nav-history-group open">
                 <div class="nav-projects-header">
                   <span>Projects</span>
@@ -929,8 +1099,11 @@ export function AppShell(props: {
                               <Plus size={16} />
                             </button>
                             <Show when={group.id}>
-                              <ProjectActions project={{ id: group.id!, label: group.label,
-                                is_pinned: Boolean(group.is_pinned), status: group.status || "active" }} />
+                              <ProjectActions
+                                project={{ id: group.id!, label: group.label,
+                                  is_pinned: Boolean(group.is_pinned), status: group.status || "active" }}
+                                onMenuOpenChange={handleProjectMenuOpenChange}
+                              />
                             </Show>
                           </div>
                           <div id={groupId} class="nav-history-workspace-threads" hidden={!open()}>
@@ -993,19 +1166,22 @@ export function AppShell(props: {
                   </Show>
                 </div>
               </div>
-            </Show>
-          </div>
-        </nav>
+            </div>
+          </nav>
+        </div>
         <div class="sidebar-footer">
           <div class="sidebar-footer-row">
             <div class="user-menu-wrapper">
               <button
+                ref={accountButton}
                 class="user-avatar"
                 type="button"
                 onClick={() => setMenuOpen(!menuOpen())}
                 title="Account"
+                aria-label="Account"
+                aria-expanded={menuOpen()}
               >
-                A
+                <span class="user-avatar-initial" aria-hidden="true">A</span>
               </button>
               <Show when={menuOpen()}>
                 <div class="user-menu">
@@ -1023,7 +1199,7 @@ export function AppShell(props: {
                 </div>
               </Show>
             </div>
-            <A href="/settings" class="btn btn-icon" title="Settings">
+            <A href="/settings" class="btn btn-icon btn-ghost" title="Settings" aria-label="Settings">
               <Settings size={15} />
             </A>
           </div>
@@ -1110,8 +1286,7 @@ export function AppShell(props: {
               </button>
               <button class="nav-history-menu-item" type="button" onClick={() => {
                 setExportTarget(thread());
-                setHistoryMenuThreadId(null);
-                historyMenuAnchor = null;
+                closeHistoryMenu();
               }}>
                 <Download size={13} />
                 <span>Export</span>

@@ -388,7 +388,8 @@ try {
     if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
     return result.result.value;
   };
-  const clickText = text => js(`[...document.querySelectorAll('button')].find(button => button.textContent.trim() === ${JSON.stringify(text)})?.click()`);
+  const clickText = (text, selector = 'button') => js(`[...document.querySelectorAll(${JSON.stringify(selector)})].find(button => button.textContent.trim() === ${JSON.stringify(text)})?.click()`);
+  const clickProjectNewChat = () => clickText('New chat', '.main button');
   const input = (selector, value) => js(`(() => { const input = document.querySelector(${JSON.stringify(selector)}); input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   const filter = value => js(`(() => { const select = document.querySelector('[aria-label="Project status"]'); select.value = '${value}'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   const manage = label => js(`document.querySelector('.project-card[aria-label="${label}"] .project-actions-trigger').click()`);
@@ -446,7 +447,7 @@ try {
   await until(() => js(`document.querySelectorAll('.project-card').length === 1 && document.querySelector('.project-card h2').textContent.includes('Other')`), 'search projects');
   await input('[aria-label="Search projects"]', '');
   await until(() => js(`document.querySelectorAll('.project-card').length === 2`), 'clear search');
-  unavailable = true; await clickText('New chat');
+  unavailable = true; await clickProjectNewChat();
   await until(() => js(`document.body.textContent.includes('Workspace is unavailable.')`), 'unavailable workspace error');
   assert.equal(await js('location.pathname'), '/projects');
   assert.equal(projects.length, 2);
@@ -805,7 +806,7 @@ try {
   await call('Page.navigate', { url: `${base}/projects/1` });
   await until(() => js(`location.pathname === '/projects/1' && !!document.querySelector('.project-storage-status')`), 'project before delayed failure');
   delayRuntimeFailure = true;
-  await clickText('New chat');
+  await clickProjectNewChat();
   await until(() => !!failPendingRuntime, 'pending runtime request');
   await js(`history.pushState(null, '', '/projects/2'); dispatchEvent(new PopStateEvent('popstate'));`);
   await until(() => js(`location.pathname === '/projects/2' && document.querySelector('.page-title')?.textContent === 'Other project'`), 'switch project during runtime request');
@@ -817,6 +818,7 @@ try {
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: project details, instruction editing and conflicts, unsaved guards, read-only skills, resources, downloads, errors, and direct links.');
 
+  await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   for (const entry of ['catalog', 'detail', 'sidebar']) {
     const project = makeProject(1, 'Sandbox switch project');
     project.workspace = { ...project.workspace, project_id: 1, project_workspace_id: 51, runtime_generation: 1 };
@@ -832,7 +834,7 @@ try {
     if (entry === 'sidebar') {
       await until(() => js(`!!document.querySelector('[aria-label="New chat in Sandbox switch project"]')`), 'sidebar new chat');
       await js(`document.querySelector('[aria-label="New chat in Sandbox switch project"]').click()`);
-    } else await clickText('New chat');
+    } else await clickProjectNewChat();
     await until(() => js(`location.pathname === '/chat' && !!document.querySelector('.composer-workspace-trigger')`), `${entry} draft chat`);
     await js(`document.querySelector('.composer-workspace-trigger').click()`);
     await until(() => js(`!!document.querySelector('.composer-runtime-picker')`), `${entry} project runtime before first message`);
@@ -878,13 +880,13 @@ try {
   prepareLostProject();
   await call('Page.navigate', { url: `${base}/projects` });
   await until(() => js(`!!document.querySelector('.project-card[aria-label="Lost Modal project"]')`), 'lost Modal project catalog');
-  await clickText('New chat');
+  await clickProjectNewChat();
   await assertLocalChat();
 
   prepareLostProject(false);
   await call('Page.navigate', { url: `${base}/projects/1` });
   await until(() => js(`document.querySelector('.page-title')?.textContent === 'Lost Modal project'`), 'lost project detail');
-  await clickText('New chat');
+  await clickProjectNewChat();
   await assertLocalChat();
 
   prepareLostProject();

@@ -15,7 +15,10 @@ import type { ProjectSummary } from "@/types";
 
 type ActionProject = Pick<ProjectSummary, "id" | "label" | "is_pinned" | "status">;
 
-export function ProjectActions(props: { project: ActionProject }) {
+export function ProjectActions(props: {
+  project: ActionProject;
+  onMenuOpenChange?: (menuId: string, open: boolean) => void;
+}) {
   const navigate = useNavigate();
   const [open, setOpen] = createSignal(false);
   const [position, setPosition] = createSignal({ top: 0, left: 0 });
@@ -47,6 +50,8 @@ export function ProjectActions(props: { project: ActionProject }) {
 
   createEffect(() => {
     if (!open()) return;
+    const notifyMenuOpenChange = props.onMenuOpenChange;
+    notifyMenuOpenChange?.(menuId, true);
     queueMicrotask(() => menu?.querySelector<HTMLButtonElement>("button")?.focus());
     const outside = (event: PointerEvent) => {
       if (!menu?.contains(event.target as Node) && !trigger?.contains(event.target as Node)) setOpen(false);
@@ -56,6 +61,7 @@ export function ProjectActions(props: { project: ActionProject }) {
     window.addEventListener("resize", dismiss);
     window.addEventListener("scroll", dismiss, true);
     onCleanup(() => {
+      notifyMenuOpenChange?.(menuId, false);
       document.removeEventListener("pointerdown", outside);
       window.removeEventListener("resize", dismiss);
       window.removeEventListener("scroll", dismiss, true);
