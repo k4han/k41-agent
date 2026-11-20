@@ -1,3 +1,4 @@
+import { A } from "@solidjs/router";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { apiFetch, deleteJson, patchJson, postJson, putJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
@@ -129,7 +130,22 @@ export function BrowserProfiles() {
         <div>
           <For each={profiles()}>{profile => <div class="browser-profile-row">
             <Show when={renaming() === profile.profile_id} fallback={<>
-              <strong class="browser-profile-name">{profile.name}{profile.is_builtin ? " (built-in)" : ""}</strong>
+              <div class="browser-profile-info">
+                <strong class="browser-profile-name">{profile.name}{profile.is_builtin ? " (built-in)" : ""}</strong>
+                <Show when={profile.projects?.length}>
+                  <div class="row-wrap">
+                    <span>Used by:</span>
+                    <For each={profile.projects}>{(project) =>
+                      <A href={`/projects/${project.id}?tab=browser`}>{project.label}</A>
+                    }</For>
+                  </div>
+                </Show>
+                <Show when={profile.open_thread_ids?.length}>
+                  <For each={profile.open_thread_ids}>{(threadId) =>
+                    <span>Open in conversation {threadId}</span>
+                  }</For>
+                </Show>
+              </div>
               <Show when={!profile.is_builtin}><div class="row-wrap">
                 <button class="btn btn-secondary btn-sm" type="button" disabled={busy()} aria-label={`Rename ${profile.name}`} onClick={() => {
                   setRenamed(profile.name); setRenaming(profile.profile_id); setError("");

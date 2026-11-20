@@ -22,24 +22,24 @@ export function ChatThreadBadges(props: ChatThreadBadgesProps) {
 
   return (
     <Show when={visible()}>
-      <span class="row-wrap" style="gap: 6px; display: inline-flex; align-items: center; margin-left: 8px;">
+      <span class="chat-thread-badges row-wrap">
         <Show when={props.isBackgroundThread}>
-          <span class="badge badge-info" style="font-size: 0.625rem; padding: 2px 6px;">background</span>
+          <span class="badge badge-info chat-thread-badge">background</span>
         </Show>
         <Show when={props.backgroundTask}>
-          {(task) => <span class="badge" style="font-size: 0.625rem; padding: 2px 6px;">{task().status}</span>}
+          {(task) => <span class="badge chat-thread-badge">{task().status}</span>}
         </Show>
         <Show when={props.backgroundLive}>
-          <span class="badge badge-info" style="font-size: 0.625rem; padding: 2px 6px;">live</span>
+          <span class="badge badge-info chat-thread-badge">live</span>
         </Show>
         <Show when={props.backgroundSession}>
-          {(session) => <span class="badge" style="font-size: 0.625rem; padding: 2px 6px;">{session().elapsed_display}</span>}
+          {(session) => <span class="badge chat-thread-badge">{session().elapsed_display}</span>}
         </Show>
         <Show when={props.activeSession}>
           {(session) => (
             <>
-              <span class="badge badge-warning" style="font-size: 0.625rem; padding: 2px 6px;">running</span>
-              <span class="badge" style="font-size: 0.625rem; padding: 2px 6px;" title="Elapsed time">{session().elapsed_display}</span>
+              <span class="badge badge-warning chat-thread-badge">running</span>
+              <span class="badge chat-thread-badge" title="Elapsed time">{session().elapsed_display}</span>
             </>
           )}
         </Show>

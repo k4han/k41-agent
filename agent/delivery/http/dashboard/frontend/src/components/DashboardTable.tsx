@@ -37,7 +37,13 @@ export function DashboardTable<T>(props: DashboardTableProps<T>) {
           <For
             each={props.rows}
             fallback={
-              props.emptyFallback || (
+              props.emptyFallback ? (
+                <tr>
+                  <td colSpan={props.columns.length} class="empty-table-cell">
+                    {props.emptyFallback}
+                  </td>
+                </tr>
+              ) : (
                 <EmptyTableRow
                   colSpan={props.columns.length}
                   message={props.emptyMessage}

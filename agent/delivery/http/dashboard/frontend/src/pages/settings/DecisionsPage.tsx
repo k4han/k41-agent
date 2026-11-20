@@ -175,7 +175,7 @@ export function DecisionsPage() {
                     probabilities. In <strong>Cascade mode</strong>, queries with confidence above threshold are routed
                     immediately, cascading to the standard LLM when confidence is low or the decision provider fails.
                     <div class="mt-2">
-                      <A href="/settings/providers?kind=decision" class="text-primary hover:underline text-xs inline-flex items-center gap-1 font-semibold">
+                      <A href="/settings/providers?tab=decision" class="text-primary hover:underline text-xs inline-flex items-center gap-1 font-semibold">
                         Configure Google or Cloudflare in Decision Model Providers <ArrowRight size={12} />
                       </A>
                     </div>

@@ -30,7 +30,7 @@ export function ProviderSettingsLayout(props: Parameters<typeof SettingsLayout>[
   };
   return (
     <Show when={!isCreate()} fallback={<Dialog open title={props.title} size="lg" onClose={closeCreate}><div class="provider-create-dialog">{props.children}</div></Dialog>}>
-    <SettingsLayout {...props} hideHeading={props.hideHeading ?? location.pathname === "/settings/providers"} breadcrumbLabel="Providers" contentWidth="wide">
+    <SettingsLayout {...props} hideHeading={props.hideHeading ?? false} breadcrumbLabel="Providers" contentWidth="wide">
       <SettingsTabBar
         items={TABS}
         value={currentProviderSection(location.pathname, location.search)}

@@ -107,14 +107,11 @@ export function NotificationsPage() {
   }
 
   return (
-    <SettingsLayout title="Notifications" hideHeading>
+    <SettingsLayout
+      title="Notifications"
+      description="Choose who receives alerts, which events to send, and how long Kai waits for a response."
+    >
       <div class="notifications-overview">
-        <header class="settings-page-heading-text">
-          <h1 class="page-title">Notifications</h1>
-          <p class="settings-page-description">
-            Choose who receives alerts, which events to send, and how long Kai waits for a response.
-          </p>
-        </header>
         <Show when={data.loading} fallback={
           <Show when={settings()}>{current => (
             <form onSubmit={save} aria-busy={saving()}>

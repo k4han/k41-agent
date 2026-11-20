@@ -293,31 +293,37 @@ export function BrowserPanel(props: {
   };
 
   return <div class="browser-panel">
-      <Show when={childSessions().length}>
-        <label class="browser-session-select">Session
-          <select ref={sessionSelect} aria-label="Browser session" value={selection.threadId() || ""}
-            onChange={(event) => selection.select(event.currentTarget.value)}>
-            <option value={props.threadId || ""}>Main agent</option>
-            <For each={childSessions()}>{(item) => <option value={item.thread_id}>{childLabel(item.thread_id, item.agent_name)}</option>}</For>
-          </select>
-        </label>
-      </Show>
       <header class="browser-session-header">
-        <Show when={status()?.open}><span class="hint browser-lifecycle" role="status">
-          {status()?.source === "scheduler" ? "Scheduled task" : selection.isMain() ? "Conversation" : "Subagent"} · {lifecycleLabel()}
-        </span></Show>
-        <Show when={status()?.tabs.length}><div class="browser-page-tabs" role="tablist" aria-label="Browser pages">
-          <For each={status()?.tabs}>{(tab) => <button type="button" class="browser-page-tab" role="tab"
-            aria-selected={selectedTab() === tab.id} title={tab.url} disabled={!connected()}
-            onClick={() => {
-              if (!connected() || !connection) return;
-              resetFrame();
-              setControlAllowed(false);
-              setFollowAgent(false);
-              setSelectedTab(tab.id);
-              connection.selectTab(tab.id);
-            }}><Globe size={13} /><span>{tab.title || tab.url || "New tab"}</span></button>}</For>
-        </div></Show>
+        <div class="browser-header-left">
+          <Show when={childSessions().length}>
+            <label class="browser-session-select">Session
+              <select ref={sessionSelect} aria-label="Browser session" value={selection.threadId() || ""}
+                onChange={(event) => selection.select(event.currentTarget.value)}>
+                <option value={props.threadId || ""}>Main agent</option>
+                <For each={childSessions()}>{(item) => <option value={item.thread_id}>{childLabel(item.thread_id, item.agent_name)}</option>}</For>
+              </select>
+            </label>
+          </Show>
+          <Show when={status()?.tabs.length}>
+            <div class="browser-page-tabs" role="tablist" aria-label="Browser pages">
+              <For each={status()?.tabs}>{(tab) => <button type="button" class="browser-page-tab" role="tab"
+                aria-selected={selectedTab() === tab.id} title={tab.url} disabled={!connected()}
+                onClick={() => {
+                  if (!connected() || !connection) return;
+                  resetFrame();
+                  setControlAllowed(false);
+                  setFollowAgent(false);
+                  setSelectedTab(tab.id);
+                  connection.selectTab(tab.id);
+                }}><Globe size={13} /><span>{tab.title || tab.url || "New tab"}</span></button>}</For>
+            </div>
+          </Show>
+          <Show when={status()?.open}>
+            <span class="hint browser-lifecycle" role="status">
+              {status()?.source === "scheduler" ? "Scheduled task" : selection.isMain() ? "Conversation" : "Subagent"} · {lifecycleLabel()}
+            </span>
+          </Show>
+        </div>
         <div class="browser-actions">
           <Show when={status()?.open && status()?.mode === "agent"}>
             <button class="btn btn-sm" type="button" aria-label="Follow agent" aria-pressed={followAgent()}

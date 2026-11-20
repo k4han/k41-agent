@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ArrowUp,
   FileText,
   Image as ImageIcon,
@@ -260,7 +261,7 @@ export function ChatComposer(props: ChatComposerProps) {
       <Show when={props.recursionLimitReached}>
         <div class="chat-recursion-warning">
           <div class="chat-recursion-warning-left">
-            <span style="font-size: 1rem;">⚠️</span>
+            <AlertTriangle size={18} class="chat-recursion-warning-icon" />
             <span>Agent reached the step limit without completing the task. Do you want to continue running?</span>
           </div>
           <button
@@ -590,15 +591,7 @@ export function ChatComposer(props: ChatComposerProps) {
         <Show
           when={previewAttachment()?.kind === "image"}
           fallback={
-            <pre style={{
-              "white-space": "pre-wrap",
-              "word-break": "break-all",
-              "font-size": "var(--font-size-chat)",
-              "line-height": "1.5",
-              "margin": 0,
-              "max-height": "60vh",
-              "overflow-y": "auto",
-            }}>
+            <pre class="chat-attachment-preview-pre">
               {previewAttachment()?.content || "(empty)"}
             </pre>
           }
@@ -606,7 +599,7 @@ export function ChatComposer(props: ChatComposerProps) {
           <img
             src={previewAttachment()?.preview_url}
             alt={previewAttachment()?.name}
-            style={{ "max-width": "100%", "max-height": "60vh", "border-radius": "6px", display: "block", margin: "0 auto" }}
+            class="chat-attachment-preview-img"
           />
         </Show>
       </Dialog>

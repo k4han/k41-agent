@@ -557,14 +557,16 @@
   }
 
   .chat-composer .agent-model-badge-agent {
-    max-width: 48px;
+    max-width: 68px;
+    font-size: var(--font-size-xs, 0.75rem);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .chat-composer .agent-model-badge-model {
-    max-width: 58px;
+    max-width: 76px;
+    font-size: var(--font-size-xs, 0.75rem);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -627,14 +629,16 @@
     justify-content: center;
   }
 
-  .chat-composer .agent-model-badge-agent,
+  .chat-composer .agent-model-badge-agent {
+    max-width: 60px;
+    font-size: var(--font-size-xs, 0.75rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .chat-composer .agent-model-badge-model {
-    max-width: 0 !important;
-    width: 0 !important;
-    opacity: 0;
-    margin: 0;
-    padding: 0;
-    pointer-events: none;
+    display: none !important;
   }
 
   .chat-composer .permission-mode-picker .select-control-trigger {

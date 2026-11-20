@@ -62,6 +62,7 @@ const settingsNavGroups: SettingsNavGroup[] = [
     label: "Workspace",
     items: [
       { href: "/settings/connections", label: "Connections", icon: () => <Link2 size={15} />, description: "Repos, MCP & Calendar", keywords: "repositories mcp connections github google calendar" },
+      { href: "/settings/providers?tab=workspace", label: "Execution Environments", icon: () => <ServerCog size={15} />, description: "Local, Daytona, Modal, Instabox", keywords: "backends execution environments daytona modal instabox container docker runtime" },
       { href: "/settings/sandboxes", label: "Active Sandboxes", icon: () => <CloudCog size={15} />, description: "Live instances", keywords: "sandbox container live instances" },
     ],
   },
@@ -69,7 +70,7 @@ const settingsNavGroups: SettingsNavGroup[] = [
     id: "intelligence",
     label: "Intelligence",
     items: [
-      { href: "/settings/providers", label: "Providers", icon: () => <Workflow size={15} />, description: "Models, web, environments & decisions", keywords: "llm provider model openai anthropic web search firecrawl tavily brave bing google daytona modal instabox backend cloudflare" },
+      { href: "/settings/providers", label: "Providers", icon: () => <Workflow size={15} />, description: "Models, web & decisions", keywords: "llm provider model openai anthropic web search firecrawl tavily brave bing google decision cloudflare" },
       { href: "/settings/decisions", label: "Decisions & Routing", icon: () => <Route size={15} />, description: "Clef-flash & routing", keywords: "decision routing clef cloudflare model strategy cascade" },
       { href: "/settings/tools", label: "Tools", icon: () => <Wrench size={15} />, description: "Global tool config", keywords: "tool api key search image web config" },
       { href: "/settings/agents", label: "Agents", icon: () => <Users size={15} />, description: "Agent profiles", keywords: "agent persona" },
@@ -115,6 +116,7 @@ let settingsNavScrollTop = 0;
 
 export function SettingsLayout(props: {
   title: string;
+  description?: string;
   actions?: JSX.Element;
   breadcrumbLabel?: string;
   breadcrumbSegments?: BreadcrumbSegment[];
@@ -140,7 +142,32 @@ export function SettingsLayout(props: {
   let searchInputRef: HTMLInputElement | undefined;
   let settingsNavElement: HTMLDivElement | undefined;
 
-  const isActive = (href: string) => location.pathname === href || location.pathname.startsWith(href + "/");
+  const isActive = (href: string) => {
+    const [path, query] = href.split("?");
+    if (query) {
+      const searchParams = new URLSearchParams(query);
+      const currentParams = new URLSearchParams(location.search);
+      for (const [k, v] of searchParams.entries()) {
+        if (currentParams.get(k) !== v) return false;
+      }
+      return location.pathname === path || location.pathname.startsWith(path + "/");
+    }
+
+    if (href === "/settings/providers") {
+      const currentParams = new URLSearchParams(location.search);
+      if (currentParams.get("tab") === "workspace") return false;
+      if (location.pathname.startsWith("/settings/providers/workspace")) return false;
+    }
+
+    if (href === "/settings/backends" || href === "/settings/providers?tab=workspace") {
+      if (location.pathname === "/settings/backends" || location.pathname.startsWith("/settings/backends/")) return true;
+      if (location.pathname === "/settings/providers" && new URLSearchParams(location.search).get("tab") === "workspace") return true;
+      if (location.pathname.startsWith("/settings/providers/workspace")) return true;
+      return false;
+    }
+
+    return location.pathname === href || location.pathname.startsWith(href + "/");
+  };
 
   const toggleSidebar = () => {
     const next = !collapsed();
@@ -453,6 +480,9 @@ export function SettingsLayout(props: {
             <div class="settings-page-heading">
               <div class="settings-page-heading-text">
                 <h1 class="page-title">{props.title}</h1>
+                <Show when={props.description}>
+                  <p class="settings-page-description">{props.description}</p>
+                </Show>
               </div>
             </div>
           </Show>

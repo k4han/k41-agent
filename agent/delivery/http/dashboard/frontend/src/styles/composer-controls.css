@@ -281,7 +281,7 @@
   max-width: 160px;
   padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md, 8px);
   background: transparent;
   color: var(--fg);
   font: inherit;
@@ -374,7 +374,7 @@
   min-width: 0;
   min-height: 40px;
   height: 40px;
-  border-radius: 999px;
+  border-radius: var(--radius-md, 8px);
   font-weight: 600;
   flex: 0 1 auto;
 }
@@ -382,6 +382,7 @@
 .chat-agent-picker .select-control-trigger {
   min-height: 40px;
   height: 40px;
+  border-radius: var(--radius-md, 8px);
   background: var(--surface-2);
   border: 1px solid var(--border);
   font-size: var(--font-size-chat);
@@ -404,7 +405,7 @@
   grid-template-columns: minmax(0, 1fr) 40px;
   min-height: 40px;
   height: 40px;
-  border-radius: 999px;
+  border-radius: var(--radius-md, 8px);
   background: var(--surface-2);
   border: 1px solid var(--border);
   overflow: hidden;
@@ -418,7 +419,7 @@
   min-height: 40px;
   height: 40px;
   border: 0;
-  border-radius: 999px 0 0 999px;
+  border-radius: var(--radius-md, 8px) 0 0 var(--radius-md, 8px);
   background: transparent;
   padding: 4px 10px;
   color: var(--fg);
@@ -437,7 +438,7 @@
   width: 40px;
   height: 40px;
   border: 0;
-  border-radius: 0 999px 999px 0;
+  border-radius: 0 var(--radius-md, 8px) var(--radius-md, 8px) 0;
   background: transparent;
 }
 
@@ -454,7 +455,7 @@
   flex-shrink: 0;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md, 8px);
   background: transparent;
   color: var(--muted);
   padding: 0;
@@ -480,7 +481,7 @@
 .chat-composer-send {
   background: var(--fg);
   color: var(--bg);
-  border-radius: 6px;
+  border-radius: var(--radius-md, 8px);
   width: 40px;
   height: 40px;
   min-width: 40px;
@@ -517,7 +518,7 @@
   background: var(--fg);
   color: var(--bg);
   border: 1px solid var(--fg);
-  border-radius: 6px;
+  border-radius: var(--radius-md, 8px);
   width: 40px;
   height: 40px;
   min-width: 40px;
@@ -690,7 +691,7 @@
   padding: 0 10px;
   max-width: 100%;
   min-width: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md, 8px);
   border: 1px solid var(--border);
   background: transparent;
   color: var(--fg);
@@ -1211,9 +1212,9 @@
 
   .agent-model-badge-agent {
     flex: 0 1 auto;
-    max-width: 46px;
+    max-width: 68px;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs, 0.75rem);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1221,9 +1222,9 @@
 
   .agent-model-badge-model {
     flex: 0 1 auto;
-    max-width: 56px;
+    max-width: 76px;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs, 0.75rem);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1269,14 +1270,16 @@
     justify-content: center;
   }
 
-  .agent-model-badge-agent,
+  .agent-model-badge-agent {
+    max-width: 60px;
+    font-size: var(--font-size-xs, 0.75rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .agent-model-badge-model {
-    max-width: 0 !important;
-    width: 0 !important;
-    opacity: 0;
-    margin: 0;
-    padding: 0;
-    pointer-events: none;
+    display: none !important;
   }
 
   .chat-composer .permission-mode-picker .select-control-trigger {
@@ -1384,9 +1387,9 @@
 
   .agent-model-badge-agent {
     flex: 0 1 auto;
-    max-width: 46px;
+    max-width: 68px;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs, 0.75rem);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1394,9 +1397,9 @@
 
   .agent-model-badge-model {
     flex: 0 1 auto;
-    max-width: 56px;
+    max-width: 76px;
     min-width: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs, 0.75rem);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

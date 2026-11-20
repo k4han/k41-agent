@@ -28,6 +28,14 @@ import { SettingsLayout } from "./SettingsLayout";
 const PAGE_SIZE = 50;
 type UsageTab = "users" | "workspaces" | "threads";
 
+const CHART_COLORS = [
+  "var(--chart-1, #2563eb)",
+  "var(--chart-2, #10b981)",
+  "var(--chart-3, #8b5cf6)",
+  "var(--chart-4, #f59e0b)",
+  "var(--chart-5, #ec4899)",
+];
+
 type UsageTabItem = {
   value: UsageTab;
   label: string;
@@ -214,6 +222,8 @@ export function UsagePage() {
   };
 
   const clearFilters = () => {
+    setStartDate(defaultStartDate());
+    setEndDate(defaultEndDate());
     setPlatform("");
     setUserId("");
     setChannelId("");
@@ -222,7 +232,9 @@ export function UsagePage() {
     setModel("");
     setCallKind("");
     setInternalFilter("");
+    setThreadSearch("");
     setOffset(0);
+    void load(0);
   };
 
   const nextPage = async () => {
@@ -556,12 +568,12 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[]; displayTimez
       </div>
       <DashboardTable
         columns={[
-          { header: "Workspace", style: "width: 30%;" },
-          { header: "Threads", style: "width: 10%;" },
-          { header: "Calls", style: "width: 10%;" },
-          { header: "Total Tokens", style: "width: 15%;" },
-          { header: "Model Breakdown", style: "width: 20%;" },
-          { header: "Last used", style: "width: 15%;" },
+          { header: "Workspace" },
+          { header: "Threads" },
+          { header: "Calls" },
+          { header: "Total Tokens" },
+          { header: "Model Breakdown" },
+          { header: "Last used" },
         ]}
         rows={props.list}
         tableClass="usage-table"
@@ -571,44 +583,44 @@ function WorkspaceUsageTable(props: { list: WorkspaceUsageDetail[]; displayTimez
         {(row) => (
           <tr>
             <td>
-              <div style="font-weight: 600; color: var(--fg);">{row.label}</div>
-              <div class="mono hint" style="font-size: 0.625rem; color: var(--muted); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 280px;" title={row.key}>
+              <div class="usage-entity-title">{row.label}</div>
+              <div class="mono hint usage-entity-sub" title={row.key}>
                 {row.key}
               </div>
             </td>
             <td>{formatNumber(row.thread_count)}</td>
             <td>{formatNumber(row.event_count)}</td>
             <td>
-              <div style="font-weight: 600; color: #3b82f6;">{formatNumber(row.total_tokens)}</div>
-              <div class="hint" style="font-size: 0.625rem; color: var(--muted);">In: {formatNumber(row.input_tokens)} / Out: {formatNumber(row.output_tokens)}</div>
+              <div class="usage-tokens-total">{formatNumber(row.total_tokens)}</div>
+              <div class="hint usage-tokens-split">In: {formatNumber(row.input_tokens)} / Out: {formatNumber(row.output_tokens)}</div>
             </td>
             <td>
-              <div class="stack" style="gap: 4px; padding: 4px 0;">
-                <div class="row-wrap" style="height: 4px; border-radius: 2px; overflow: hidden; background: var(--surface-3); gap: 1px; width: 100%;">
+              <div class="usage-breakdown">
+                <div class="usage-breakdown-bar">
                   <For each={row.models}>
                     {(item, index) => {
-                      const colors = ["#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899"];
-                      const color = colors[index() % colors.length];
+                      const color = CHART_COLORS[index() % CHART_COLORS.length];
                       return (
                         <div
-                          style={`width: ${item.percentage}%; background-color: ${color}; height: 100%;`}
+                          class="usage-breakdown-segment"
+                          style={`width: ${item.percentage}%; background-color: ${color};`}
                           title={`${item.model}: ${item.percentage}%`}
                         />
                       );
                     }}
                   </For>
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 2px; font-size: 0.625rem; color: var(--fg-muted);">
+                <div class="usage-breakdown-list">
                   <For each={row.models.slice(0, 3)}>
                     {(item) => (
-                      <div class="row-wrap" style="justify-content: space-between;">
-                        <span style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 120px;" title={item.model}>{item.model}</span>
-                        <span style="font-weight: 600;">{item.percentage}%</span>
+                      <div class="usage-breakdown-item">
+                        <span class="usage-breakdown-model" title={item.model}>{item.model}</span>
+                        <span class="usage-breakdown-pct">{item.percentage}%</span>
                       </div>
                     )}
                   </For>
                   <Show when={row.models.length > 3}>
-                    <div style="color: var(--muted); font-size: 0.5625rem;">+ {row.models.length - 3} more models</div>
+                    <div class="usage-breakdown-more">+ {row.models.length - 3} more models</div>
                   </Show>
                 </div>
               </div>
@@ -629,12 +641,12 @@ function ThreadUsageTable(props: { list: ThreadUsageDetail[]; displayTimezone?: 
       </div>
       <DashboardTable
         columns={[
-          { header: "Conversation Thread", style: "width: 30%;" },
-          { header: "Agent", style: "width: 10%;" },
-          { header: "Calls", style: "width: 10%;" },
-          { header: "Total Tokens", style: "width: 15%;" },
-          { header: "Model Breakdown", style: "width: 20%;" },
-          { header: "Last used", style: "width: 15%;" },
+          { header: "Conversation Thread" },
+          { header: "Agent" },
+          { header: "Calls" },
+          { header: "Total Tokens" },
+          { header: "Model Breakdown" },
+          { header: "Last used" },
         ]}
         rows={props.list}
         tableClass="usage-table"
@@ -644,44 +656,44 @@ function ThreadUsageTable(props: { list: ThreadUsageDetail[]; displayTimezone?: 
         {(row) => (
           <tr>
             <td>
-              <div style="font-weight: 600; color: var(--fg); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 250px;" title={row.title}>
+              <div class="usage-thread-title" title={row.title}>
                 {row.title}
               </div>
-              <div class="mono hint" style="font-size: 0.625rem; color: var(--muted);">{row.thread_id}</div>
+              <div class="mono hint usage-thread-id">{row.thread_id}</div>
             </td>
-            <td><span class="badge" style="font-size: 0.625rem; padding: 2px 6px;">{row.agent_name}</span></td>
+            <td><span class="badge usage-agent-badge">{row.agent_name}</span></td>
             <td>{formatNumber(row.event_count)}</td>
             <td>
-              <div style="font-weight: 600; color: #3b82f6;">{formatNumber(row.total_tokens)}</div>
-              <div class="hint" style="font-size: 0.625rem; color: var(--muted);">In: {formatNumber(row.input_tokens)} / Out: {formatNumber(row.output_tokens)}</div>
+              <div class="usage-tokens-total">{formatNumber(row.total_tokens)}</div>
+              <div class="hint usage-tokens-split">In: {formatNumber(row.input_tokens)} / Out: {formatNumber(row.output_tokens)}</div>
             </td>
             <td>
-              <div class="stack" style="gap: 4px; padding: 4px 0;">
-                <div class="row-wrap" style="height: 4px; border-radius: 2px; overflow: hidden; background: var(--surface-3); gap: 1px; width: 100%;">
+              <div class="usage-breakdown">
+                <div class="usage-breakdown-bar">
                   <For each={row.models}>
                     {(item, index) => {
-                      const colors = ["#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899"];
-                      const color = colors[index() % colors.length];
+                      const color = CHART_COLORS[index() % CHART_COLORS.length];
                       return (
                         <div
-                          style={`width: ${item.percentage}%; background-color: ${color}; height: 100%;`}
+                          class="usage-breakdown-segment"
+                          style={`width: ${item.percentage}%; background-color: ${color};`}
                           title={`${item.model}: ${item.percentage}%`}
                         />
                       );
                     }}
                   </For>
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 2px; font-size: 0.625rem; color: var(--fg-muted);">
+                <div class="usage-breakdown-list">
                   <For each={row.models.slice(0, 3)}>
                     {(item) => (
-                      <div class="row-wrap" style="justify-content: space-between;">
-                        <span style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 120px;" title={item.model}>{item.model}</span>
-                        <span style="font-weight: 600;">{item.percentage}%</span>
+                      <div class="usage-breakdown-item">
+                        <span class="usage-breakdown-model" title={item.model}>{item.model}</span>
+                        <span class="usage-breakdown-pct">{item.percentage}%</span>
                       </div>
                     )}
                   </For>
                   <Show when={row.models.length > 3}>
-                    <div style="color: var(--muted); font-size: 0.5625rem;">+ {row.models.length - 3} more models</div>
+                    <div class="usage-breakdown-more">+ {row.models.length - 3} more models</div>
                   </Show>
                 </div>
               </div>

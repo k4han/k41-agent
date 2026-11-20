@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, on, onCleanup, Show } from "solid-js";
+import { EmptyState } from "@/components/EmptyState";
 import { Markdown } from "@/components/Markdown";
 import { apiFetch, putJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
@@ -80,8 +81,28 @@ export function ProjectInstructions(props: { projectId: number; workspaceId?: nu
     <Show when={saved()}><p role="status">Instructions saved.</p></Show>
     <Show when={document()?.saved_revision}><p role="status">Showing the last saved copy{document()?.last_saved_at ? ` from ${new Date(document()!.last_saved_at!).toLocaleString()}` : ""}. The execution workspace is unavailable.</p></Show>
     <Show when={document()}>{(current) => <Show when={editing()} fallback={
-      <Show when={current().exists} fallback={<p class="empty compact">This project has no AGENTS.md in its root directory.</p>}>
-        <Show when={current().content} fallback={<p class="empty compact">AGENTS.md is empty.</p>}>
+      <Show
+        when={current().exists}
+        fallback={
+          <EmptyState
+            message="This project has no AGENTS.md in its root directory."
+            hint="Define project-specific instructions, conventions, and operational guidelines for agent runs."
+            action="Create AGENTS.md"
+            onAction={() => { setEditing(true); setSaved(false); }}
+          />
+        }
+      >
+        <Show
+          when={current().content}
+          fallback={
+            <EmptyState
+              message="AGENTS.md is empty."
+              hint="Add instructions or conventions for the agent in this workspace."
+              action="Edit instructions"
+              onAction={() => { setEditing(true); setSaved(false); }}
+            />
+          }
+        >
           <Show when={source()} fallback={<Markdown text={current().content} class="message-markdown" />}>
             <pre class="project-resource-source">{current().content}</pre>
           </Show>

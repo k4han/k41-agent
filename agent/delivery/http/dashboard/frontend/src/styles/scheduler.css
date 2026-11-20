@@ -525,13 +525,13 @@
 
 .scheduler-job-menu {
   position: fixed;
-  z-index: 1000;
-  min-width: 140px;
+  z-index: var(--z-floating-menu, 1300);
+  min-width: 150px;
   padding: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md, 8px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow);
 }
 
 .scheduler-job-menu-item {
@@ -544,7 +544,7 @@
   border-radius: var(--radius-sm, 6px);
   background: transparent;
   color: var(--fg);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-sm, 0.8125rem);
   text-align: left;
   cursor: pointer;
   transition: background-color 120ms ease;
@@ -559,8 +559,9 @@
   color: var(--danger);
 }
 
-.scheduler-job-menu-item.danger-text:hover {
-  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+.scheduler-job-menu-item.danger-text:hover,
+.scheduler-job-menu-item.danger-text:focus-visible {
+  background: var(--danger-subtle, color-mix(in srgb, var(--danger) 10%, var(--surface)));
 }
 
 .scheduler-job-task {

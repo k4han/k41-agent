@@ -1,8 +1,7 @@
 import "@/styles/routes/scheduler.css";
 
 import { createEffect, createMemo, createSignal, For, type JSX, on, onCleanup, Show } from "solid-js";
-import { Portal } from "solid-js/web";
-import { Bot, CalendarClock, Clock, Edit3, History, MoreVertical, Pause, Play, Plus, Trash2 } from "lucide-solid";
+import { Bot, CalendarClock, Clock, Edit3, History, Pause, Play, Plus, Trash2 } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -784,113 +783,6 @@ function MetricTile(props: { value: JSX.Element; label: string; tone?: "info"; t
   );
 }
 
-function JobCardMenu(props: {
-  job: SchedulerJob;
-  onHistory: () => void;
-  onTogglePause: () => void;
-  onDelete: () => void;
-}) {
-  const [open, setOpen] = createSignal(false);
-  const [pos, setPos] = createSignal({ top: 0, left: 0 });
-  let triggerRef: HTMLButtonElement | undefined;
-  let menuRef: HTMLDivElement | undefined;
-
-  const toggle = (e: MouseEvent) => {
-    e.stopPropagation();
-    if (open()) {
-      setOpen(false);
-      return;
-    }
-    const rect = triggerRef!.getBoundingClientRect();
-    const menuWidth = 140;
-    const left = Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8));
-    const top = rect.bottom + 4 > window.innerHeight - 150 ? rect.top - 120 : rect.bottom + 4;
-    setPos({ top, left });
-    setOpen(true);
-  };
-
-  createEffect(() => {
-    if (!open()) return;
-    const dismiss = (e: MouseEvent) => {
-      if (!menuRef?.contains(e.target as Node) && !triggerRef?.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onScrollOrResize = () => setOpen(false);
-    document.addEventListener("click", dismiss);
-    window.addEventListener("scroll", onScrollOrResize, true);
-    window.addEventListener("resize", onScrollOrResize);
-    onCleanup(() => {
-      document.removeEventListener("click", dismiss);
-      window.removeEventListener("scroll", onScrollOrResize, true);
-      window.removeEventListener("resize", onScrollOrResize);
-    });
-  });
-
-  return (
-    <>
-      <button
-        ref={triggerRef}
-        class="btn btn-sm btn-ghost scheduler-job-action-btn"
-        type="button"
-        title="More actions"
-        aria-label="More actions"
-        aria-expanded={open()}
-        onClick={toggle}
-      >
-        <MoreVertical size={14} />
-      </button>
-      <Show when={open()}>
-        <Portal>
-          <div
-            ref={menuRef}
-            class="scheduler-job-menu"
-            style={{
-              top: `${pos().top}px`,
-              left: `${pos().left}px`,
-            }}
-          >
-            <button
-              class="scheduler-job-menu-item"
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                props.onHistory();
-              }}
-            >
-              <History size={13} />
-              <span>Run history</span>
-            </button>
-            <button
-              class="scheduler-job-menu-item"
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                props.onTogglePause();
-              }}
-            >
-              <Show when={props.job.paused} fallback={<><Pause size={13} /><span>Pause job</span></>}>
-                <Play size={13} /><span>Resume job</span>
-              </Show>
-            </button>
-            <button
-              class="scheduler-job-menu-item danger-text"
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                props.onDelete();
-              }}
-            >
-              <Trash2 size={13} />
-              <span>Delete job</span>
-            </button>
-          </div>
-        </Portal>
-      </Show>
-    </>
-  );
-}
-
 function JobCard(props: {
   job: SchedulerJob;
   running: boolean;
@@ -924,12 +816,35 @@ function JobCard(props: {
           >
             <Edit3 size={14} />
           </button>
-          <JobCardMenu
-            job={props.job}
-            onHistory={props.onHistory}
-            onTogglePause={props.onTogglePause}
-            onDelete={props.onDelete}
-          />
+          <button
+            class="btn btn-sm btn-ghost scheduler-job-action-btn"
+            type="button"
+            title="Run history"
+            aria-label="Run history"
+            onClick={props.onHistory}
+          >
+            <History size={14} />
+          </button>
+          <button
+            class="btn btn-sm btn-ghost scheduler-job-action-btn"
+            type="button"
+            title={props.job.paused ? "Resume job" : "Pause job"}
+            aria-label={props.job.paused ? "Resume job" : "Pause job"}
+            onClick={props.onTogglePause}
+          >
+            <Show when={props.job.paused} fallback={<Pause size={14} />}>
+              <Play size={14} />
+            </Show>
+          </button>
+          <button
+            class="btn btn-sm btn-ghost scheduler-job-delete scheduler-job-action-btn"
+            type="button"
+            title="Delete job"
+            aria-label="Delete job"
+            onClick={props.onDelete}
+          >
+            <Trash2 size={14} />
+          </button>
         </div>
       </header>
 

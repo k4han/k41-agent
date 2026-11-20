@@ -70,8 +70,13 @@ export function ProjectActions(props: { project: ActionProject }) {
       onClick={() => {
         if (open()) { close(); return; }
         const rect = trigger!.getBoundingClientRect();
-        setPosition({ top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 242)),
-          left: Math.max(8, Math.min(rect.right - 200, window.innerWidth - 208)) });
+        const menuWidth = 200;
+        const menuHeight = 220;
+        const left = Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8));
+        const top = rect.bottom + 4 + menuHeight > window.innerHeight
+          ? Math.max(8, rect.top - menuHeight - 4)
+          : rect.bottom + 4;
+        setPosition({ top, left });
         setOpen(true);
       }}><MoreVertical size={15} /></button>
     <Show when={open()}><Portal>

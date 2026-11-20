@@ -451,6 +451,30 @@
   flex: 1;
 }
 
+.chat-recursion-warning-icon {
+  flex-shrink: 0;
+  color: var(--warning);
+}
+
+.chat-attachment-preview-pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: var(--font-size-chat);
+  line-height: 1.5;
+  margin: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.chat-attachment-preview-img {
+  max-width: 100%;
+  max-height: 60vh;
+  border-radius: var(--radius-sm, 6px);
+  display: block;
+  margin: 0 auto;
+}
+
 .chat-recursion-warning-btn {
   background-color: var(--warning);
   border: 1px solid var(--warning);
@@ -458,12 +482,12 @@
   font-size: 0.75rem;
   font-weight: 600;
   padding: 8px 12px;
-  min-height: 40px;
+  min-height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-sm, 6px);
   flex-shrink: 0;
   transition: opacity 150ms ease;
 }

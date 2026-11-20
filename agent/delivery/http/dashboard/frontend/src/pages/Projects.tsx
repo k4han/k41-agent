@@ -1,13 +1,14 @@
 import "@/styles/routes/projects.css";
 
 import { A, useNavigate } from "@solidjs/router";
-import { Folder, GitBranch, MessageSquarePlus, Pin, Plus, RefreshCw } from "lucide-solid";
+import { Folder, GitBranch, MessageSquarePlus, Pin, Plus, RefreshCw, Search } from "lucide-solid";
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 
 import { AppShell } from "@/components/AppShell";
 import { EmptyState } from "@/components/EmptyState";
 import { ProjectActions } from "@/components/ProjectActions";
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog";
+import { StatusBadge } from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
@@ -119,15 +120,18 @@ export function ProjectsPage() {
     >
       <div class="projects-page">
         <div class="projects-toolbar">
-          <input
-            class="input"
-            aria-label="Search projects"
-            placeholder="Search name, folder, or repository"
-            value={search()}
-            onInput={(event) => setSearch(event.currentTarget.value)}
-          />
+          <div class="projects-search-wrap">
+            <Search size={15} class="projects-search-icon" aria-hidden="true" />
+            <input
+              class="input projects-search-input"
+              aria-label="Search projects"
+              placeholder="Search name, folder, or repository"
+              value={search()}
+              onInput={(event) => setSearch(event.currentTarget.value)}
+            />
+          </div>
           <select
-            class="input"
+            class="input projects-toolbar-select"
             aria-label="Project status"
             value={status()}
             onChange={(event) => setStatus(event.currentTarget.value)}
@@ -201,9 +205,10 @@ export function ProjectsPage() {
                       <p class="project-location" title={project.workspace.execution.locator}>
                         {project.workspace.execution.locator}
                       </p>
-                      <span class="project-status">
-                        {project.status} · {project.workspace.execution.backend}
-                      </span>
+                      <div class="project-card-status-line">
+                        <StatusBadge status={project.status} />
+                        <span class="badge">{project.workspace.execution.backend}</span>
+                      </div>
                     </div>
                     <ProjectActions project={project} />
                   </div>

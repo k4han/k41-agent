@@ -2283,9 +2283,19 @@ export function ChatPage() {
                         activeSession={activeSession()}
                       />
                     </Show>
-                    <Show when={asyncTasks.count() > 0}><span class="async-task-count">{asyncTasks.count()} background task(s)
-                      <button type="button" aria-label="Stop background tasks" onClick={() => void stopChat()}>Stop</button>
-                    </span></Show>
+                    <Show when={asyncTasks.count() > 0}>
+                      <span class="async-task-count">
+                        {asyncTasks.count()} background task(s)
+                        <button
+                          class="btn btn-sm btn-danger async-task-stop-btn"
+                          type="button"
+                          aria-label="Stop background tasks"
+                          onClick={() => void stopChat()}
+                        >
+                          Stop
+                        </button>
+                      </span>
+                    </Show>
                   </div>
                 </div>
                 <div class="chat-header-right">
@@ -2369,7 +2379,7 @@ export function ChatPage() {
                 </div>
               </Show>
               <Show when={threadData()?.has_more && threadData()?.thread_id === currentThreadId()}>
-                <div class="row-wrap chat-column" style={{ "justify-content": "center", padding: "8px" }}>
+                <div class="row-wrap chat-column chat-earlier-messages-wrap">
                   <button class="btn" type="button" disabled={conversationBusy() || compacting()}
                     onClick={() => void loadEarlierMessages()}>
                     {earlierMessagesLoading() ? "Loading earlier messages..." : "Load earlier messages"}
@@ -2527,76 +2537,55 @@ export function ChatPage() {
       size="xl"
       onClose={() => setViewingMessage(null)}
     >
-      <Show
-        when={viewingMessage()?.role === "assistant"}
-        fallback={
-          <div style={{ "max-height": "70vh", "overflow-y": "auto" }}>
-            <pre style={{
-              "white-space": "pre-wrap",
-              "word-break": "break-all",
-              "font-size": "var(--font-size-chat)",
-              "line-height": "1.6",
-              "margin": 0,
-            }}>
-              {viewingMessage()?.text}
-            </pre>
+      <div class="chat-inspect-body">
+        <Show
+          when={viewingMessage()?.role === "assistant"}
+          fallback={
+            <div class="chat-inspect-content">
+              <pre class="chat-inspect-pre">
+                {viewingMessage()?.text}
+              </pre>
+            </div>
+          }
+        >
+          <div class="chat-inspect-content">
+            <Markdown
+              text={viewingMessage()?.text || ""}
+              class="message-markdown"
+              threadId={currentThreadId()}
+            />
           </div>
-        }
-      >
-        <div style={{ "max-height": "70vh", "overflow-y": "auto" }}>
-          <Markdown
-            text={viewingMessage()?.text || ""}
-            class="message-markdown"
-            threadId={currentThreadId()}
-          />
-        </div>
-      </Show>
-      <Show when={viewingMessage()?.attachments?.length}>
-        <div style={{ "margin-top": "12px", "border-top": "1px solid var(--border)", "padding-top": "12px" }}>
-          <For each={viewingMessage()?.attachments || []}>
-            {(attachment) => (
-              <div style={{ "margin-bottom": "8px" }}>
-                <div style={{
-                  "font-size": "var(--font-size-chat)",
-                  "font-weight": 600,
-                  "color": "var(--muted)",
-                  "margin-bottom": "4px",
-                }}>
-                  {attachment.name}
+        </Show>
+        <Show when={viewingMessage()?.attachments?.length}>
+          <div class="chat-inspect-attachments">
+            <For each={viewingMessage()?.attachments || []}>
+              {(attachment) => (
+                <div class="chat-inspect-attachment-item">
+                  <div class="chat-inspect-attachment-name">
+                    {attachment.name}
+                  </div>
+                  <Show
+                    when={attachment.kind === "image" && attachment.preview_url}
+                    fallback={
+                      <Show when={attachment.content}>
+                        <pre class="chat-inspect-attachment-pre">
+                          {attachment.content}
+                        </pre>
+                      </Show>
+                    }
+                  >
+                    <img
+                      src={attachment.preview_url}
+                      alt={attachment.name}
+                      class="chat-inspect-attachment-img"
+                    />
+                  </Show>
                 </div>
-                <Show
-                  when={attachment.kind === "image" && attachment.preview_url}
-                  fallback={
-                    <Show when={attachment.content}>
-                      <pre style={{
-                        "white-space": "pre-wrap",
-                        "word-break": "break-all",
-                        "font-size": "var(--font-size-chat)",
-                        "line-height": "1.5",
-                        "margin": 0,
-                        "background": "var(--surface-2)",
-                        "border": "1px solid var(--border)",
-                        "border-radius": "6px",
-                        "padding": "8px",
-                        "max-height": "300px",
-                        "overflow-y": "auto",
-                      }}>
-                        {attachment.content}
-                      </pre>
-                    </Show>
-                  }
-                >
-                  <img
-                    src={attachment.preview_url}
-                    alt={attachment.name}
-                    style={{ "max-width": "100%", "border-radius": "6px" }}
-                  />
-                </Show>
-              </div>
-            )}
-          </For>
-        </div>
-      </Show>
+              )}
+            </For>
+          </div>
+        </Show>
+      </div>
     </Dialog>
     </>
   );

@@ -853,9 +853,17 @@
 .subagent-details {
   min-width: 0;
   max-width: 100%;
-  margin: 0.5rem 0 0.75rem 1rem;
-  padding: 0.65rem 0.85rem;
-  border-left: 2px solid var(--border);
+  margin: 0 0 14px;
+  padding: 0;
+  border: none;
+}
+
+.subagent-transcript {
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 6px 0 0 11px;
+  padding: 4px 8px 4px 18px;
+  border-left: 1px solid var(--border);
 }
 
 .subagent-summary {
@@ -948,4 +956,18 @@
   white-space: pre-wrap;
   max-height: 16rem;
   overflow: auto;
+}
+
+/* User message action floating position fix: anchor to top-right of bubble to prevent overlapping following turns */
+.message.user .message-actions {
+  position: absolute;
+  right: 8px;
+  top: -14px;
+  bottom: auto;
+  transform: translateY(-2px);
+}
+
+.message.user:hover .message-actions,
+.message.user:focus-within .message-actions {
+  transform: translateY(0);
 }

@@ -513,6 +513,9 @@ export function SettingRow(props: {
               <div class="setting-inline-actions">{props.actions}</div>
             </Show>
           </div>
+          <Show when={props.info.description && props.info.description !== label()}>
+            <span class="setting-description hint">{props.info.description}</span>
+          </Show>
         </div>
         <div class="setting-control-panel setting-row-controls">
           <div class="setting-control-wrapper">

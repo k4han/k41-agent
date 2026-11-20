@@ -119,7 +119,8 @@ export function AppearancePage() {
 
   return (
     <SettingsLayout
-      title="Appearance & Preferences"
+      title="Appearance"
+      description="Theme, display timezone, and interface preferences."
       breadcrumbLabel="Appearance"
       contentWidth="narrow"
     >

@@ -491,14 +491,14 @@
 }
 
 .settings-content-narrow {
-  width: min(100%, 680px);
-  max-width: 680px;
+  width: min(100%, 760px);
+  max-width: 760px;
 }
 
 .settings-content-form,
 .settings-content-medium {
-  width: min(100%, 896px);
-  max-width: 896px;
+  width: min(100%, 980px);
+  max-width: 980px;
 }
 
 .settings-content-wide {
@@ -513,7 +513,7 @@
 .settings-content .settings-page-body > .stack > .form-card,
 .settings-content-medium .settings-page-body,
 .settings-content-form .settings-page-body {
-  max-width: 896px;
+  max-width: 980px;
 }
 
 .settings-app-layout.settings-app-layout-fill {
@@ -972,18 +972,25 @@
 .setting-card-main,
 .setting-row-main {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(200px, 320px);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(220px, 380px);
+  gap: 16px;
   align-items: center;
-  min-height: 40px;
-  padding: 7px 14px 7px 16px;
+  min-height: 42px;
+  padding: 8px 14px 8px 16px;
 }
 
 .setting-copy,
 .setting-row-copy {
   min-width: 0;
   display: grid;
-  gap: 2px;
+  gap: 3px;
+}
+
+.setting-description {
+  font-size: 0.71875rem;
+  line-height: 1.4;
+  color: var(--muted);
+  max-width: 580px;
 }
 
 .setting-title-row {
@@ -1063,7 +1070,18 @@
 
 .setting-control-wrapper > * {
   width: 100%;
-  max-width: 280px;
+  max-width: 380px;
+}
+
+@media (min-width: 1200px) {
+  .setting-card-main,
+  .setting-row-main {
+    grid-template-columns: minmax(0, 1.2fr) minmax(240px, 440px);
+  }
+
+  .setting-control-wrapper > * {
+    max-width: 440px;
+  }
 }
 
 .setting-control-panel .input,

@@ -120,7 +120,7 @@ export function ProviderDeskPage() {
   const create = (source: ProviderConnectionKind, providerId: string) => navigate(`/settings/providers?tab=catalog&kind=${source}&new=${encodeURIComponent(providerId)}`);
 
   return (
-    <ProviderSettingsLayout createDialog={false} title={section() === "catalog" ? "Provider catalog" : section() === "defaults" ? "Defaults" : "Connections"}
+    <ProviderSettingsLayout createDialog={false} title={section() === "catalog" ? "Provider Catalog" : section() === "defaults" ? "Provider Defaults" : "Provider Connections"}
       actions={<Show when={section() !== "defaults"}><Show when={section() === "catalog"} fallback={<button class="btn btn-primary" type="button" onClick={() => navigate("/settings/providers?tab=catalog")}><Plus size={14} />Add connection</button>}>
         <button class="btn" type="button" disabled={syncing() || !sources().llm} onClick={() => void sync()}><RefreshCw size={14} class={syncing() ? "spin" : ""} />{syncing() ? "Syncing..." : "Sync Catalog"}</button>
         <button class="btn btn-primary" type="button" disabled={!sources().llm} onClick={() => create("llm", "custom")}><Plus size={14} />Custom endpoint</button>

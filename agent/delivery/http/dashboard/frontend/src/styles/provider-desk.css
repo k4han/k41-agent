@@ -24,9 +24,9 @@
 .provider-desk-table .badge { font-size: .625rem; white-space: nowrap; }
 .provider-desk-status { align-items: flex-start; gap: 6px; }
 .provider-desk-default { display: inline-flex; align-items: center; gap: 5px; font-size: .6875rem; color: var(--primary); }
-.provider-desk-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; }
-.provider-desk-row-actions .btn-danger { margin-inline: 4px; }
-.provider-desk-row-actions .btn[aria-pressed="true"] { color: var(--primary); }
+.provider-desk-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; white-space: nowrap; }
+.provider-desk-row-actions .btn-danger { margin-inline-start: 4px; }
+.provider-desk-row-actions .btn[aria-pressed="true"] { color: var(--accent, var(--primary)); }
 .provider-pagination { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: .75rem; }
 .provider-pagination .row-wrap { gap: 12px; }
 .provider-desk-catalog { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
@@ -53,8 +53,9 @@
 .provider-form-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .panel.provider-configuration-form { max-width: none; overflow: visible; }
 .provider-editor-tabs { display: flex; align-items: center; gap: 24px; border-bottom: 1px solid var(--border); overflow-x: auto; }
-.provider-editor-tab { padding: 12px 0; font: inherit; font-size: .8125rem; font-weight: 500; white-space: nowrap; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; }
-.provider-editor-tab[aria-selected="true"] { border-bottom-color: var(--primary); color: var(--fg); }
+.provider-editor-tab { padding: 12px 0; font: inherit; font-size: .8125rem; font-weight: 500; white-space: nowrap; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; transition: color 120ms ease, border-color 120ms ease; }
+.provider-editor-tab:hover { color: var(--fg); }
+.provider-editor-tab[aria-selected="true"] { border-bottom-color: var(--accent, var(--primary)); color: var(--fg); font-weight: 600; }
 .provider-editor-panel[hidden], .provider-field-section[hidden] { display: none !important; }
 .provider-field-section { display: grid; gap: 18px; }
 .provider-editor-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }

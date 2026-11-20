@@ -465,7 +465,7 @@ export function BackendsPage() {
                   onClick={() => navigate("/settings/providers?tab=workspace")}
                 >
                   <ArrowLeft size={14} />
-                  Back to Providers
+                  Back to Environments
                 </button>
                 <button
                   class="btn btn-sm btn-primary"
