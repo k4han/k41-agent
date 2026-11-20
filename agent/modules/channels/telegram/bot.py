@@ -68,11 +68,14 @@ def create_dispatcher():
     """Create an aiogram dispatcher and register handlers."""
 
     try:
-        from aiogram import Dispatcher
+        from aiogram import Dispatcher, F
     except ImportError as exc:
         raise ImportError("Install aiogram with uv before enabling Telegram.") from exc
 
     dp = Dispatcher()
+    from agent.modules.notifications.telegram import PREFIX, handle_callback
+
+    dp.callback_query.register(handle_callback, F.data.startswith(PREFIX))
     dp.message.register(handle_telegram_message)
 
     return dp
@@ -110,6 +113,7 @@ async def _run_webhook_bot(
             url=webhook_url,
             secret_token=webhook_secret,
             drop_pending_updates=False,
+            allowed_updates=dispatcher.resolve_used_update_types(),
         )
         set_telegram_webhook_runtime(
             TelegramWebhookRuntime(

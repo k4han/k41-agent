@@ -19,6 +19,12 @@ function load(path, dependencies = {}, globals = {}) {
 }
 
 const input = load('../src/lib/userInputRequest.ts');
+test('an ask-user timeout settles the request without a human answer', () => {
+  const result = input.parseAskUserToolResult({ type: 'ask_user_timeout', content: 'Continue with the default.' });
+  assert.equal(result.valid, true);
+  assert.equal(result.timedOut, true);
+  assert.deepEqual(Array.from(result.answers), []);
+});
 const asyncHelpers = load('../src/lib/asyncSubagents.ts', {
   '@/lib/userInputRequest': input,
 });

@@ -64,6 +64,7 @@ def browser_run_lifecycle(function):
     @wraps(function)
     async def wrapped(*args, **kwargs):
         from langgraph.errors import GraphDrained
+        from agent.modules.notifications.interruption import RunAdmissionConflict
 
         thread_id = kwargs.get("thread_id") or (args[1] if len(args) > 1 else None)
         outcome = "completed"
@@ -77,11 +78,14 @@ def browser_run_lifecycle(function):
         except GraphDrained:
             outcome = "interrupted"
             raise
+        except RunAdmissionConflict:
+            outcome = None
+            raise
         except Exception:
             outcome = "failed"
             raise
         finally:
-            if thread_id and kwargs.get("_execution") is None:
+            if outcome is not None and thread_id and kwargs.get("_execution") is None:
                 await finish_thread_browser(thread_id, outcome)
     return wrapped
 

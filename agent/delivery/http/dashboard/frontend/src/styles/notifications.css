@@ -1,0 +1,229 @@
+.notifications-overview {
+  container-type: inline-size;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.notifications-overview .page-title {
+  font-size: 1.5rem;
+  letter-spacing: -0.025em;
+}
+
+.notification-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.notification-panel-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  min-height: 64px;
+  padding-block: 10px;
+}
+
+.notification-panel-header .badge {
+  white-space: nowrap;
+}
+
+.notification-panel-header .hint {
+  margin-top: 2px;
+}
+
+.notification-panel-icon,
+.notification-row-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.notification-panel-icon {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--fg);
+}
+
+.notification-recipients,
+.notification-timeout-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.notification-channel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  min-height: 50px;
+  padding-block: 7px;
+}
+
+.notification-channel + .notification-channel,
+.notification-event + .notification-event {
+  border-top: 1px solid var(--border);
+}
+
+.notification-row-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.notification-row-title {
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--fg);
+}
+
+.notification-account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+  cursor: pointer;
+}
+
+.notification-account code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.notification-account input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--info);
+}
+
+.notification-recipients a {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.notification-dashboard-url {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.notification-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.notification-event {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  justify-content: stretch;
+  gap: 10px;
+  width: 100%;
+  min-height: 51px;
+  padding-block: 7px;
+  border-radius: 0;
+  text-align: start;
+  font-weight: 400;
+}
+
+.notification-event:enabled:hover {
+  background: var(--surface-2);
+}
+
+.notification-event:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: -2px;
+}
+
+.notification-timeout-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notification-timeout-input .input {
+  width: min(100%, 118px);
+}
+
+.notification-timeout-fields .textarea {
+  min-height: 68px;
+}
+
+.notification-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.notification-status,
+.notification-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.notification-actions {
+  flex-wrap: wrap;
+  margin-inline-start: auto;
+}
+
+.notification-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.notification-status-dirty::before {
+  background: var(--warning);
+}
+
+.notification-error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+@container (min-width: 680px) {
+  .notification-grid {
+    grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr);
+  }
+
+  .notification-timeout {
+    grid-column: 1 / -1;
+  }
+
+  .notification-timeout-fields {
+    grid-template-columns: minmax(160px, 0.28fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 16px;
+  }
+}
+
+@media (pointer: coarse) {
+  .notification-account,
+  .notification-actions .btn {
+    min-height: var(--touch-target);
+  }
+
+  .notification-field :is(.input, .textarea) {
+    font-size: 1rem;
+  }
+}

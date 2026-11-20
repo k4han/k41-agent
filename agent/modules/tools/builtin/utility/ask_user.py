@@ -196,6 +196,9 @@ def _ask_user(
             "submit_label": request.submit_label,
         }
     )
+    if isinstance(resume_value, dict) and resume_value.get("action") == "ask_user_timeout":
+        return json.dumps({"type": "ask_user_timeout", "content": resume_value["fallback_prompt"]},
+                          ensure_ascii=False)
     payload = _normalize_answer_payload(resume_value)
     _validate_answer_payload(request, payload)
     return _tool_result_payload(payload)

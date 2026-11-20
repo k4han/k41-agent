@@ -99,6 +99,7 @@ exclude = ["tests*", "tmp*", "data*"]
 
 [tool.setuptools.package-data]
 "agent.modules.agents" = ["_builtin/*.md", "examples/*.md"]
+"agent.modules.notifications" = ["messages.vi.json"]
 "agent.bootstrap" = ["resources/*"]
 "agent.delivery.http.dashboard" = ["static/**/*"]
 

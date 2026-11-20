@@ -106,6 +106,31 @@ class DiscordChannelAdapter:
         await discord_user.send(message.text)
         return True
 
+    async def send_to_channel(self, destination: str, message: OutboundMessage) -> bool:
+        client = self._client
+        if client is None:
+            logger.warning("No active Discord client to send a channel reply.")
+            return False
+        try:
+            channel_id = int(destination)
+        except (TypeError, ValueError):
+            logger.warning("Discord outbound destination must be a channel id: %s", destination)
+            return False
+        if channel_id <= 0:
+            return False
+        channel = client.get_channel(channel_id)
+        try:
+            if channel is None:
+                channel = await client.fetch_channel(channel_id)
+            send = getattr(channel, "send", None)
+            if not callable(send):
+                return False
+            await send(message.text)
+        except Exception as exc:
+            logger.warning("Could not send message to Discord channel %s: %s", channel_id, exc)
+            return False
+        return True
+
     async def test_connection(self):
         from agent.modules.channels.diagnostics import test_discord_connection
 

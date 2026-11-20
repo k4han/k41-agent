@@ -194,6 +194,7 @@ class AppContainer:
     _workspace_backends_registered: bool = field(default=False, repr=False)
     _background_task_repository: Any = field(default=None, repr=False)
     _async_subagents: Any = field(default=None, repr=False)
+    _interruption_timeout_manager: Any = field(default=None, repr=False)
     _chat_stream_manager: Any = field(default=None, repr=False)
     _active_session_registry: Any = field(default=None, repr=False)
     _usage_service: Any = field(default=None, repr=False)
@@ -733,6 +734,10 @@ class AppContainer:
         from agent.modules.workflows import close_checkpointer
         from agent.shared.config.service import detach_database_config_source
         from agent.shared.infrastructure.db.engine import close_async_engine
+
+        if self._interruption_timeout_manager is not None:
+            await self._interruption_timeout_manager.shutdown()
+            self._interruption_timeout_manager = None
 
         if self._async_subagents is not None:
             await self._async_subagents.shutdown()

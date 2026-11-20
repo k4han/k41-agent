@@ -45,6 +45,7 @@ export type UserInputRequestPayload = {
 
 export type ParsedAskUserToolResult = {
   valid: boolean;
+  timedOut?: boolean;
   summary: string;
   answers: UserQuestionAnswer[];
 };
@@ -156,6 +157,9 @@ export function parseAskUserToolResult(result: unknown): ParsedAskUserToolResult
   const record = asRecord(value);
   if (!record) {
     return { valid: false, summary: "", answers: [] };
+  }
+  if (record.type === "ask_user_timeout") {
+    return { valid: true, timedOut: true, summary: "Response timed out. The agent continued automatically.", answers: [] };
   }
   if (record.type !== "ask_user_answer") {
     return { valid: false, summary: "", answers: [] };

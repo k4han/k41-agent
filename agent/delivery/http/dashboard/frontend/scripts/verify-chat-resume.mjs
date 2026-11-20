@@ -150,7 +150,7 @@ try {
   const clickContinue = () => js(`${continueButton}.click()`);
   await call('Page.enable');
   await call('Runtime.enable');
-  await call('Page.navigate', { url: base + '/c/failed-turn' });
+  await call('Page.navigate', { url: base + '/chat?thread_id=failed-turn' });
   await until(() => js(`document.querySelector('.chat-prompt-input')?.disabled === false`), 'loaded conversation');
   await js(`(() => {
     const input = document.querySelector('.chat-prompt-input');

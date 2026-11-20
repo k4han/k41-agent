@@ -32,6 +32,7 @@ def load_orm_models() -> tuple[type[object], ...]:
     from agent.modules.users import User
     from agent.modules.google_calendar import GoogleCalendarAccount
     from agent.modules.instabox import InstaboxOperation, InstaboxPortToken
+    from agent.modules.notifications.models import InterruptionRecord, NotificationDelivery
     from agent.shared.infrastructure.db.runtime_settings import RuntimeSetting
     from agent.shared.infrastructure.db.user_preferences import UserPreferences
 
@@ -72,6 +73,8 @@ def load_orm_models() -> tuple[type[object], ...]:
         GoogleCalendarAccount,
         InstaboxOperation,
         InstaboxPortToken,
+        InterruptionRecord,
+        NotificationDelivery,
     )
 
 

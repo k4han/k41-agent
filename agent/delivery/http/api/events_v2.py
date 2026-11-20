@@ -13,6 +13,7 @@ from agent.delivery.http.common.streaming import ChatStreamingResponse, stream_c
 
 from agent.delivery.http.api.router import (
     STREAM_RESPONSE_HEADERS,
+    accept_chat_response,
     check_scheduled_chat,
     prepare_edit_params,
     prepare_run_params,
@@ -33,6 +34,7 @@ from agent.shared.thread_ids import resolve_thread_id
 from agent.modules.agent_runtime import get_async_subagent_service, active_async_subagent_service
 from agent.shared.async_subagents import request_key
 from agent.modules.tools import HumanResumePayload
+from agent.modules.notifications.interruption import ResponseConflict
 
 router = APIRouter(
     prefix="/v2/api", tags=["agent-events"], dependencies=[Depends(get_current_admin)]
@@ -74,6 +76,8 @@ async def chat_events(request: ChatRequest, http_request: Request, admin: str = 
             raise HTTPException(409, detail="This scheduled run is active. Resume its pending request or cancel it before starting another run.")
         payload = request.resume_payload.model_dump(exclude_none=True)
         interrupts = scheduled.get("interrupts", [])
+        if request.interrupt_id:
+            interrupts = [item for item in interrupts if item["id"] == request.interrupt_id]
         if payload.get("action") == "browser_handoff":
             interrupts = [item for item in interrupts if isinstance(item["value"], dict)
                 and item["value"].get("handoff_id") == payload.get("handoff_id")]
@@ -91,12 +95,17 @@ async def chat_events(request: ChatRequest, http_request: Request, admin: str = 
                 return stream_response(http_request, session)
             await asyncio.sleep(0.05)
         raise HTTPException(503, detail="The scheduled response was saved and is queued. Reconnect to follow its execution.")
-    subagents = active_async_subagent_service()
-    if request.checkpoint_id and subagents and await subagents.repository.has_work(thread_id):
+    handled = await accept_chat_response(request, thread_id, admin)
+    if handled is not None:
+        return stream_response(http_request, handled)
+    if request.checkpoint_id and managed and await managed.repository.has_work(thread_id):
         raise HTTPException(409, detail="Stop async tasks before rewinding this conversation.")
-    session = await get_chat_stream_manager().get_or_create_session(
-        thread_id, params, run_fn=run_agent_protocol_stream
-    )
+    try:
+        session = await get_chat_stream_manager().get_or_create_session(
+            thread_id, params, run_fn=run_agent_protocol_stream
+        )
+    except ResponseConflict as exc:
+        raise HTTPException(409, str(exc)) from None
     if request.new_thread and not request.thread_id:
         await session.push_event(
             protocol_event(
@@ -119,11 +128,12 @@ async def chat_events_edit(
     subagents = active_async_subagent_service()
     if subagents and await subagents.repository.has_work(str(params["thread_id"])):
         raise HTTPException(409, detail="Stop async tasks before editing this conversation.")
-    session = await get_chat_stream_manager().get_or_create_session(
-        str(params["thread_id"]),
-        params,
-        run_fn=run_agent_edit_protocol_stream,
-    )
+    try:
+        session = await get_chat_stream_manager().get_or_create_session(
+            str(params["thread_id"]), params, run_fn=run_agent_edit_protocol_stream,
+        )
+    except ResponseConflict as exc:
+        raise HTTPException(409, str(exc)) from None
     return stream_response(http_request, session)
 
 

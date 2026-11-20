@@ -5,6 +5,7 @@ import { A, useLocation } from "@solidjs/router";
 import {
   ArrowLeft,
   BarChart3,
+  Bell,
   BookOpen,
   Bot,
   Braces,
@@ -82,6 +83,7 @@ const settingsNavGroups: SettingsNavGroup[] = [
     label: "Integrations",
     items: [
       { href: "/settings/channels", label: "Channels", icon: () => <Network size={15} />, description: "Telegram / Discord / Zalo", keywords: "channel telegram discord zalo messaging" },
+      { href: "/settings/notifications", label: "Notifications", icon: () => <Bell size={15} />, description: "Alerts and response timeouts", keywords: "notifications timeout telegram discord zalo" },
     ],
   },
   {

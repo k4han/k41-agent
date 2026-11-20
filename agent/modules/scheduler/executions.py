@@ -62,13 +62,22 @@ async def settle_run(session, row, status, *, result="", error="", context=None)
             "status": status, "result": result, "error": error, **job_dict(row)["context"]["_scheduled"]}
 
 
-async def notify_run(value):
+async def notify_run(value, *, covered=False):
     """Deliver the outcome after persistence; notification failure cannot undo a run."""
     if value["status"] not in {"completed", "failed", "timed_out"}:
         return
     from agent.modules.scheduler.service import _send_notification, _task_title
 
+    if covered:
+        await _prune_history()
+        return
     content = value["result"] if value["status"] == "completed" else f"Error: {value['error']}"
+    if value["status"] != "completed":
+        from agent.modules.notifications.interruption import active_manager
+
+        manager = active_manager()
+        if manager and (link := manager.dashboard_link(value["thread_id"])):
+            content += f"\n\n{link}"
     try:
         await _send_notification(value["platform"], value["user_id"],
             f"**Scheduled task:** {_task_title(value['task'])}\n\n{content}", mode="markdown")
@@ -122,6 +131,15 @@ async def resume_run(service, run_id, interrupt_id, payload, owner_id):
         raise ValueError("A human response is required.")
     _validate_human_resume_payload(normalized)
     payload = normalized.model_dump(exclude_none=True)
+    from agent.modules.notifications.interruption import active_manager
+
+    manager = active_manager()
+    if manager and payload["action"] in {"answer", "browser_handoff"}:
+        await get_run(service, run_id, owner_id)
+        if await manager.accept_manual(thread_id="", interrupt_id=interrupt_id, payload=payload,
+                                       owner_id=owner_id, job_id=run_id):
+            job = await get_run(service, run_id, owner_id)
+            return {"run_id": run_id, "status": job["status"]}
     resume = {"interrupt_id": interrupt_id, "payload": payload}
     async with service._lock:
         job = await get_run(service, run_id, owner_id)

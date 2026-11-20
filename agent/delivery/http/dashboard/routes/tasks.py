@@ -88,6 +88,14 @@ async def submit_background_task(body: SubmitTaskBody) -> dict[str, Any]:
 async def cancel_background_task(task_id: str) -> dict[str, str]:
     """Cancel a currently running background task."""
     manager = get_background_task_manager()
+    task = manager.get(task_id)
+    if task and task["status"] == "waiting":
+        from agent.modules.notifications.interruption import active_manager
+
+        notifications = active_manager()
+        if notifications:
+            await notifications.cancel_thread(task["thread_id"])
+            return {"status": "cancelled", "task_id": task_id}
     result = manager.cancel(task_id)
     if result == "not_found":
         raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found.")

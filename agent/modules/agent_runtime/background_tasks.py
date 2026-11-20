@@ -27,6 +27,7 @@ from agent.modules.agent_runtime.active_sessions import (
 )
 from agent.modules.agent_runtime.protocol import EventSequence, application_event, protocol_event
 from agent.modules.notifications import send_notification as _send_notification
+from agent.modules.notifications.failures import background_scope, report_failure
 from agent.modules.workspaces import (
     WorkspaceRef,
     bind_workspace_ref,
@@ -61,6 +62,7 @@ def _parse_timestamp(value: float | str | None) -> float:
 class TaskStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
+    WAITING = "waiting"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -173,6 +175,13 @@ def _truncate_stored_text(text: str) -> str:
     return text[:MAX_STORED_TEXT_LENGTH] + "\n...[truncated]"
 
 
+def _apply_paused_outcome(task: BackgroundTask, status: str, *, result: str, error: str, completed_at: float) -> None:
+    task.status = TaskStatus(status) if status in {"completed", "cancelled"} else TaskStatus.FAILED
+    task.result = _truncate_stored_text(result)
+    task.error = _truncate_stored_text(error)
+    task.completed_at = completed_at
+
+
 def _task_usage_context(task: BackgroundTask) -> dict[str, str]:
     if task.thread_id:
         try:
@@ -204,9 +213,11 @@ class BackgroundTaskManager:
     async def restore_from_persistence(self) -> None:
         """Restore task history from the background task table."""
         from agent.modules.agent_runtime.repository import get_background_task_repository
+        from agent.modules.notifications.interruption import active_manager
 
         try:
             repository = get_background_task_repository()
+            notifications = active_manager()
             records = await repository.list(limit=MAX_COMPLETED_TASKS, offset=0)
             new_tasks: dict[str, BackgroundTask] = {}
             for record in records:
@@ -214,11 +225,22 @@ class BackgroundTaskManager:
                 if task.task_id in self._tasks:
                     continue
 
-                if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
-                    task.status = TaskStatus.FAILED
-                    task.error = "Interrupted by server restart"
-                    task.completed_at = time.time()
-                    await self._persist_task(task, repository=repository)
+                if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.WAITING):
+                    if notifications and await notifications.has_paused_run(task.thread_id):
+                        if task.status != TaskStatus.WAITING:
+                            task.status = TaskStatus.WAITING
+                            await self._persist_task(task, repository=repository)
+                    else:
+                        outcome = await notifications.paused_run_outcome(task.thread_id) if notifications else None
+                        if outcome is not None:
+                            _apply_paused_outcome(task, **outcome)
+                        else:
+                            task.status = TaskStatus.FAILED
+                            task.error = "Interrupted by server restart"
+                            task.completed_at = time.time()
+                        await self._persist_task(task, repository=repository)
+                        if outcome is None:
+                            await report_failure(task.task_id, "Background worker", task.thread_id)
 
                 new_tasks[task.task_id] = task
 
@@ -435,7 +457,10 @@ class BackgroundTaskManager:
         # dashboard running state stays stable through the agent run, the
         # completion hook (e.g. GitHub push/PR publishing), and cleanup.
         retrying = False
-        with track_active_session(task.thread_id, task.agent_name, usage_context=_task_usage_context(task)):
+        failure = None
+        with track_active_session(task.thread_id, task.agent_name, usage_context=_task_usage_context(task)), background_scope(
+            task.task_id, "Background worker", task.thread_id,
+        ):
             try:
                 await admission.enter_async_context(workspace_run({"workspace": task.workspace, "thread_id": task.thread_id}))
                 if task.task_timeout and task.task_timeout > 0:
@@ -446,6 +471,12 @@ class BackgroundTaskManager:
                 else:
                     result = await self._run_streamed_task(task, run_fn)
                 task.result = _truncate_stored_text(result)
+                from agent.modules.notifications.interruption import active_manager
+
+                manager = active_manager()
+                if manager and await manager.has_paused_run(task.thread_id):
+                    task.status = TaskStatus.WAITING
+                    return
                 if task.completion_hook is not None:
                     session_id = current_session_id_var.get()
                     if session_id:
@@ -456,7 +487,7 @@ class BackgroundTaskManager:
                     await task.completion_hook(task)
                 task.status = TaskStatus.COMPLETED
                 logger.info("Background task %s completed successfully.", task.task_id)
-            except asyncio.TimeoutError:
+            except asyncio.TimeoutError as exc:
                 task.retry_count += 1
                 if task.retry_count <= task.max_retries:
                     logger.warning(
@@ -472,6 +503,7 @@ class BackgroundTaskManager:
                     return
 
                 task.status = TaskStatus.FAILED
+                failure = exc
                 task.error = f"Task timed out after {task.task_timeout}s"
                 self._publish_error_event(task, {"type": "error", "content": task.error})
                 logger.error(
@@ -506,6 +538,7 @@ class BackgroundTaskManager:
                     return
 
                 task.status = TaskStatus.FAILED
+                failure = exc
                 task.error = _truncate_stored_text(error_message)
                 self._publish_error_event(
                     task,
@@ -529,6 +562,9 @@ class BackgroundTaskManager:
                         await self._persist_task(task)
                     except Exception:
                         pass
+                elif task.status == TaskStatus.WAITING:
+                    await self._persist_task(task)
+                    self._publish_done_event(task)
                 else:
                     task.completed_at = time.time()
                     try:
@@ -544,7 +580,15 @@ class BackgroundTaskManager:
                     except Exception as exc:
                         logger.warning("Failed to persist background task %s completion: %s", task.task_id, exc)
                     self._publish_done_event(task)
-                    await self._notify_completion(task)
+                    covered = False
+                    if failure is not None:
+                        destination = task.notify_channel
+                        covered = await report_failure(
+                            task.task_id, "Background worker", task.thread_id, error=failure,
+                            destination=(destination.platform, destination.external_id) if destination else None,
+                        )
+                    if not covered:
+                        await self._notify_completion(task)
                     if task.cleanup_hook is not None:
                         try:
                             await task.cleanup_hook(task)
@@ -565,6 +609,39 @@ class BackgroundTaskManager:
                     elif task._async_task is asyncio.current_task():
                         task._async_task = None
                 self._publish_task_event(task)
+
+    async def settle_paused(self, thread_id, status, *, result="", error="", failure=None) -> bool:
+        with self._lock:
+            task = next((value for value in self._tasks.values()
+                         if value.thread_id == thread_id and value.status == TaskStatus.WAITING), None)
+            if task is None or status == "waiting":
+                return False
+            _apply_paused_outcome(task, status, result=result, error=error, completed_at=time.time())
+        try:
+            if task.status == TaskStatus.COMPLETED and task.completion_hook is not None:
+                await task.completion_hook(task)
+        except Exception as exc:
+            task.status = TaskStatus.FAILED
+            task.error = str(exc)
+        finally:
+            try:
+                await self._persist_task(task)
+                self._publish_done_event(task)
+                self._publish_task_event(task)
+                destination = task.notify_channel
+                covered = task.status == TaskStatus.FAILED and await report_failure(
+                    task.task_id, "Background worker", task.thread_id, error=failure or RuntimeError(task.error),
+                    destination=(destination.platform, destination.external_id) if destination else None,
+                )
+                if not covered:
+                    await self._notify_completion(task)
+            finally:
+                if task.cleanup_hook is not None:
+                    try:
+                        await task.cleanup_hook(task)
+                    except Exception:
+                        logger.warning("Failed to clean up resumed background task %s.", task.task_id, exc_info=True)
+        return True
 
     async def _run_streamed_task(self, task: BackgroundTask, run_fn: Any) -> str:
         message_chunks: list[str] = []
@@ -738,7 +815,7 @@ class BackgroundTaskManager:
             task = self._tasks.get(task_id)
             if task is None:
                 return False
-            if task.status in (TaskStatus.RUNNING, TaskStatus.PENDING):
+            if task.status in (TaskStatus.RUNNING, TaskStatus.PENDING, TaskStatus.WAITING):
                 return False
             thread_id = task.thread_id
 

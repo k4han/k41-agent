@@ -362,11 +362,12 @@ async def stream_tab(websocket, browser, current, target_id, viewer_id, viewer_f
                     next_target = await target_selector(current, tabs, target_id)
                     if next_target != target_id:
                         return next_target, follow_agent
-                controller = ("agent" if not current.handoff_id else "available" if current.controller is None
+                human_control = bool(current.handoff_id and (current.handoff_expires_at or 0) > time.time())
+                controller = ("agent" if not human_control else "available" if current.controller is None
                               else "you" if current.controller == viewer_id else "other")
                 payload = {**data, "type": "status", "tabs": tabs, "tab_id": target_id,
-                    "follow_agent": follow_agent, "mode": "human" if current.handoff_id else "agent",
-                    "can_control": bool(current.handoff_id and current.controller in {None, viewer_id}),
+                    "follow_agent": follow_agent, "mode": "human" if human_control else "agent",
+                    "can_control": human_control and current.controller in {None, viewer_id},
                     "controller": controller, "paused": not state.visible or not state.streaming.is_set(),
                     "visibility_revision": state.visibility_revision}
                 if initial or payload != previous:
@@ -440,7 +441,8 @@ async def stream_tab(websocket, browser, current, target_id, viewer_id, viewer_f
                         output.put_json({"type": "error", "message": "Browser tab no longer exists."})
                         continue
                     async with current.lock:
-                        if current.handoff_id and current.controller in {None, viewer_id}:
+                        if (current.handoff_id and (current.handoff_expires_at or 0) > time.time()
+                                and current.controller in {None, viewer_id}):
                             current.controller = viewer_id
                             current.active_tab_id = tab_id
                             current.last_activity = time.monotonic()
@@ -448,6 +450,7 @@ async def stream_tab(websocket, browser, current, target_id, viewer_id, viewer_f
                     return tab_id, False
                 async with current.lock:
                     if (current.closed or not current.handoff_id or current.handoff_id != handoff_id
+                            or (current.handoff_expires_at or 0) <= time.time()
                             or event.get("handoff_id", handoff_id) != handoff_id
                             or current.controller not in {None, viewer_id} or not state.visible
                             or revision != state.visibility_revision):

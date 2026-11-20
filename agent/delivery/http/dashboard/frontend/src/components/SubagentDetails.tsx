@@ -1,6 +1,7 @@
 import { AlertCircle, Check, ChevronRight, CirclePause, Loader2 } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
+import { useSearchParams } from "@solidjs/router";
 import { TranscriptItemView, type SubagentActivity } from "@/components/Transcript";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { summarizeSubagent } from "@/lib/subagentSummary";
@@ -11,6 +12,7 @@ import { mergeSubagentTranscript, type SubagentTranscriptItem } from "@/lib/asyn
 
 export function SubagentDetails(props: { activity: SubagentActivity; itemId?: number }) {
   const [opened, setOpened] = createSignal(false);
+  const [query] = useSearchParams();
   const background = useAsyncSubagent(() => props.activity, opened);
   const history = useSubagentHistory(background.activity);
   const [transcript, setTranscript] = createStore<{ items: SubagentTranscriptItem[] }>({ items: [] });
@@ -24,7 +26,8 @@ export function SubagentDetails(props: { activity: SubagentActivity; itemId?: nu
     : history.error() ? "Tools unavailable" : "Loading tools...";
   const failed = () => ["failed", "timed_out"].includes(background.activity().status);
   const paused = () => ["interrupted", "stopped", "waiting", "cancelled"].includes(background.activity().status);
-  createEffect(on(() => props.activity.delegation_id, () => setOpened(false)));
+  createEffect(on([() => props.activity.delegation_id, () => query.task_id], ([delegation, target]) =>
+    setOpened(Boolean(target && target === (props.activity.task_id || delegation)))));
 
   return (
     <details class="subagent-details" open={opened()} data-transcript-item-id={props.itemId} onToggle={(event) => {

@@ -172,9 +172,15 @@ async def mark_interrupted_runs() -> int:
                 error="The application stopped before this run finished.",
                 finished_at=utcnow(),
             )
+            .returning(SchedulerJobRun.run_id, SchedulerJobRun.thread_id)
         )
+        interrupted = result.all()
         await session.commit()
-        return int(result.rowcount or 0)
+    from agent.modules.notifications.failures import report_failure
+
+    for run_id, thread_id in interrupted:
+        await report_failure(run_id, "Scheduler", thread_id)
+    return len(interrupted)
 
 
 async def _attach_used_models(runs: list[dict[str, Any]]) -> None:

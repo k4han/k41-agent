@@ -23,7 +23,10 @@ export function ChangePasswordPage() {
         old_password: currentPassword(),
         new_password: newPassword(),
       });
-      window.location.href = "/login?status=password-changed";
+      const next = new URLSearchParams(window.location.search).get("next");
+      const query = new URLSearchParams({ status: "password-changed" });
+      if (next) query.set("next", next);
+      window.location.href = "/login?" + query;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to change password");
     } finally {

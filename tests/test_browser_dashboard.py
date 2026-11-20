@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import struct
+import time
 from contextlib import asynccontextmanager
 from itertools import count
 from types import SimpleNamespace
@@ -440,6 +441,7 @@ def test_only_one_human_controller_and_disconnect_preserves_handoff(browser_clie
     ticket = client.post("/dashboard-api/browser/threads/chat/viewer-ticket").json()["ticket"]
     session = next(iter(browser.sessions.values()))
     session.handoff_id = "pending"
+    session.handoff_expires_at = time.time() + 60
     with client.websocket_connect("/dashboard-api/browser/viewer", headers={"Origin": "http://testserver"}) as first:
         first.send_json({"ticket": ticket})
         assert first.receive_json()["can_control"]
@@ -653,6 +655,7 @@ async def test_slow_input_does_not_block_acks_heartbeats_or_visibility(monkeypat
 
     current, viewer, socket = stream_fixture(monkeypatch, SlowViewer())
     current.handoff_id = "handoff"
+    current.handoff_expires_at = time.time() + 60
     state = routes.BrowserStreamState()
     task = asyncio.create_task(routes.view_tab(socket, None, current, "first", "viewer", False, state=state))
     try:
@@ -717,6 +720,7 @@ async def test_session_events_push_controller_and_tab_changes_without_polling(mo
     try:
         initial = await asyncio.wait_for(socket.messages.get(), 1)
         current.handoff_id = "handoff"
+        current.handoff_expires_at = time.time() + 60
         current.controller = "another-window"
         current.notify()
         changed = await asyncio.wait_for(socket.messages.get(), 0.5)
@@ -801,6 +805,7 @@ async def test_handoff_updates_capture_rate_without_reconnecting(monkeypatch):
         await stream_message(socket, "status", mode="agent")
 
         current.handoff_id = "handoff"
+        current.handoff_expires_at = time.time() + 60
         current.notify()
         configuration = await asyncio.wait_for(viewer.configurations.get(), 1)
         assert configuration["every_nth_frame"] == 1 and state.target_fps == 20
@@ -929,6 +934,7 @@ async def test_stalled_image_send_keeps_receiver_and_session_lock_available(monk
 
     current, viewer, _ = stream_fixture(monkeypatch, Viewer())
     current.handoff_id = "handoff"
+    current.handoff_expires_at = time.time() + 60
     socket = Socket()
     state = routes.BrowserStreamState()
     task = asyncio.create_task(routes.view_tab(socket, None, current, "first", "viewer", False, state=state))

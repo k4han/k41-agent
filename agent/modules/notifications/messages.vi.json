@@ -1,0 +1,17 @@
+{
+  "fallback": "Đã hết thời hạn chờ người dùng phản hồi ({timeout_minutes} phút). Agent hãy tự phân tích tình huống, sử dụng các giá trị mặc định hợp lý nhất hoặc bỏ qua an toàn để tiếp tục hoàn thành tác vụ.",
+  "timeout": "⏰ Đã hết thời gian chờ phản hồi ({timeout_minutes} phút). Agent đang tự động đưa ra quyết định để tiếp tục tác vụ.",
+  "dashboard": "Mở Dashboard",
+  "ask_user": "Agent đang chờ bạn trả lời.",
+  "browser_handoff": "Agent đang chờ bạn thao tác trên trình duyệt.",
+  "reply": "Dùng Trả lời trên tin nhắn này để nhập câu trả lời.",
+  "ambiguous_reply": "Có nhiều câu hỏi đang chờ. Hãy bấm Trả lời trên tin nhắn chứa câu hỏi bạn muốn trả lời.",
+  "submit": "Gửi câu trả lời",
+  "accepted": "✅ Đã ghi nhận câu trả lời.",
+  "selected": "✅ Bạn đã chọn: {selection}",
+  "saved": "Đã lưu vào bản nháp.",
+  "closed": "Yêu cầu đã được xử lý hoặc đã hết hạn.",
+  "unauthorized": "Tài khoản này không có quyền trả lời yêu cầu.",
+  "incomplete": "Hãy trả lời đủ các câu bắt buộc trước khi gửi.",
+  "unavailable": "Tạm thời chưa xử lý được. Hãy thử lại."
+}

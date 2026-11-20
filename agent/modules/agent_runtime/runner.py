@@ -1133,6 +1133,17 @@ def track_active_session(
         registry.release(session_id)
 
 
+async def _notification_context(context, workflow, usage_context, config):
+    from agent.modules.notifications.interruption import active_manager
+
+    manager = active_manager()
+    if manager is None:
+        return None, None
+    values = await manager.run_context(context, workflow, usage_context)
+    config.setdefault("metadata", {}).update(k41_notification_context=values)
+    return manager, values
+
+
 @browser_run_lifecycle
 @guard_workspace_run
 async def run_agent(
@@ -1236,6 +1247,9 @@ async def run_agent(
         browser_owner_id=browser_owner_id,
         acp_config_options=acp_config_options,
     )
+    notifications, notification_context = await _notification_context(context, resolved_workflow, usage_context, config)
+    if notifications and not resume:
+        await notifications.prepare_new_run(thread_id)
     if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
         await _update_thread_agent(thread_id, agent_name, graph_family_for(resolved_workflow))
     elif not resume and not checkpoint_id:
@@ -1290,6 +1304,8 @@ async def run_agent(
                         # Persisted ACP thoughts can follow the final visible answer.
                         continue
                 break
+        if notifications:
+            await notifications.observe(graph, thread_id, notification_context)
 
 
 @browser_run_lifecycle
@@ -1349,7 +1365,8 @@ async def run_agent_stream(
     from agent.modules.agents import get_catalog_service
 
     catalog = get_catalog_service()
-    normalized_resume_payload = _normalize_human_resume_payload(resume_payload)
+    internal_timeout = _execution is not None and (resume_payload or {}).get("action") == "ask_user_timeout"
+    normalized_resume_payload = _normalize_human_resume_payload(None if internal_timeout else resume_payload)
     _validate_human_resume_payload(normalized_resume_payload)
     source_agent_name = await _get_plan_resume_source_agent_name(
         thread_id,
@@ -1424,6 +1441,11 @@ async def run_agent_stream(
         _execution.agent_name, _execution.workflow = agent_name, resolved_workflow
     if _checkpoint_metadata:
         config["metadata"] = {**config.get("metadata", {}), **_checkpoint_metadata}
+    notifications, notification_context = (None, None)
+    if _execution is None:
+        notifications, notification_context = await _notification_context(context, resolved_workflow, usage_context, config)
+        if notifications and not resume:
+            await notifications.prepare_new_run(thread_id)
     conversation_title_task: asyncio.Task[dict[str, Any] | None] | None = None
     if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
         await _update_thread_agent(thread_id, agent_name, graph_family_for(resolved_workflow))
@@ -1661,6 +1683,8 @@ async def run_agent_stream(
             # Deliver titles already available without delaying stream completion.
             while not title_event_queue.empty():
                 yield title_event_queue.get_nowait()
+            if notifications:
+                await notifications.observe(graph, thread_id, notification_context)
     finally:
         if not title_watcher.done():
             title_watcher.cancel()
@@ -1753,6 +1777,9 @@ async def run_agent_edit_stream(
         permission_mode=permission_mode,
         browser_owner_id=browser_owner_id,
     )
+    notifications, notification_context = await _notification_context(context, resolved_workflow, usage_context, config)
+    if notifications:
+        await notifications.prepare_new_run(thread_id)
 
     seen_ids: set[str] = set()
     parent_values = getattr(source_state, "parent_config", None)
@@ -1908,6 +1935,10 @@ async def run_agent_edit_stream(
                             }
                 elif isinstance(message, ToolMessage):
                     yield _tool_result_event(message)
+
+        if notifications:
+            await notifications.observe(graph, thread_id, notification_context)
+
 
 async def run_agent_full(
     user_input: str,

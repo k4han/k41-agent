@@ -95,6 +95,7 @@ async def stream_agent_response(message: InboundMessage, params: dict[str, Any])
     total_tool_calls = 0
     final_response = ""
     message_chunks: list[str] = []
+    waiting_for_input = False
     last_status_edit_at = 0.0
 
     try:
@@ -134,6 +135,8 @@ async def stream_agent_response(message: InboundMessage, params: dict[str, Any])
                 content = event.get("content")
                 if isinstance(content, str):
                     final_response = content
+            elif event_type in {"user_input_request", "browser_handoff_request"}:
+                waiting_for_input = True
     except asyncio.CancelledError:
         raise
     except BaseException as exc:
@@ -152,7 +155,9 @@ async def stream_agent_response(message: InboundMessage, params: dict[str, Any])
 
     await message.reply(
         OutboundMessage(
-            final_response or "".join(message_chunks) or "No response.",
+            final_response or "".join(message_chunks) or (
+                "Waiting for your input." if waiting_for_input else "No response."
+            ),
             mode="markdown",
             update_target=status_target,
         )

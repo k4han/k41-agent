@@ -129,6 +129,7 @@ def is_platform_managed_key(key: str) -> bool:
 # Runtime configuration key patterns
 # These patterns define which keys can be updated at runtime
 RUNTIME_KEY_PATTERNS = [
+    r"^notifications\.(timeout_minutes|dashboard_notify_delay_seconds|fallback_prompt|dashboard_base_url|recipient_identity_ids|events)$",
     r"^web\.connections\.[A-Za-z0-9_-]+\.(type|api_key|cse_id|base_url)$",
     r"^web\.defaults\.(google|tavily|firecrawl|brave|bing)$",
     r"^tools\.(permission_mode|permissions|shell|storage_root)$",
@@ -166,6 +167,7 @@ RUNTIME_KEY_PATTERNS = [
 ]
 
 DATABASE_RUNTIME_KEY_PATTERNS = [
+    r"^notifications\.(timeout_minutes|dashboard_notify_delay_seconds|fallback_prompt|dashboard_base_url|recipient_identity_ids|events)$",
     r"^llm\.model_pools\.[a-z0-9][a-z0-9_-]{0,63}$",
     r"^web\.migration_version$",
     r"^web\.connections\.[A-Za-z0-9_-]+\.(type|api_key|cse_id|base_url)$",
@@ -529,7 +531,8 @@ SETTING_METADATA: dict[str, dict[str, Any]] = {
     },
     "browser.handoff_timeout_seconds": {
         "type": "number", "category": "browser", "label": "Human handoff timeout (seconds)",
-        "description": "Maximum time to wait for human browser interaction, independently of idle retention.",
+        "description": "Fallback deadline for handoffs outside the server notification runtime. "
+                       "Server handoffs use the response timeout in Notifications.",
         "min": 1, "step": 1,
     },
     "browser.max_sessions_per_owner": {

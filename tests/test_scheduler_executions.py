@@ -52,12 +52,12 @@ async def scheduled(runtime_environment, browser, monkeypatch, tmp_path):
     builder.add_edge("handoff", END)
     env.current_graph[0] = builder.compile(checkpointer=InMemorySaver())
 
-    async def admit(run_id="run-1", job_id="daily"):
+    async def admit(run_id="run-1", job_id="daily", *, platform="api", user_id="1"):
         from agent.modules.conversations import upsert_conversation_thread
         await upsert_conversation_thread(thread_id=f"scheduled-{run_id}", agent_name="scheduler-executor",
-            kind="scheduled", platform="bg", user_id="1", title="Sign in")
+            kind="scheduled", platform="bg", user_id=user_id, title="Sign in")
         return await admit_run(env.service, run_id=run_id, thread_id=f"scheduled-{run_id}",
-            job_id=job_id, task="Sign in", platform="api", user_id="1", trigger_source="schedule",
+            job_id=job_id, task="Sign in", platform=platform, user_id=user_id, trigger_source="schedule",
             workspace=WorkspaceRef(locator=str(tmp_path)), browser_owner_id="admin:1",
             executor={"provider": "test", "model": "test"})
 

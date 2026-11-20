@@ -389,13 +389,32 @@ print(json.dumps({"running": running}))
                     context.tool_call_id, len(approved), time.monotonic() - started)
         return approved
 
+    async def _call_worker(self, client, context, request=None):
+        from agent.modules.notifications.failures import report_failure
+        from agent.modules.providers.pool_errors import classify_pool_failure
+
+        try:
+            if request is None:
+                await client.ensure_started()
+                return None
+            return await client.call(request)
+        except Exception as exc:
+            failure = classify_pool_failure(exc)
+            rate = bool(failure and failure.code in {"rate_limit", "quota"})
+            if request is None or rate or getattr(exc, "code", None) in {"runtime_unavailable", "unknown_outcome"}:
+                event_key = context.tool_call_id or context.thread_id
+                await report_failure(event_key, "Sandbox coding worker", context.thread_id, error=exc, rate=rate)
+            raise
+
     async def authorize(self, client, name, values, context, *, allow_interrupt):
         cache = _prepared_permissions.get()
         key = self.preparation_key(name, values, context)
         prepared = cache.get(key) if cache is not None else None
         if prepared is None:
-            await client.ensure_started()
-            prepared = await client.call(self.request("prepare", name, values, context, workspace=client.backend.root))
+            await self._call_worker(client, context)
+            prepared = await self._call_worker(
+                client, context, self.request("prepare", name, values, context, workspace=client.backend.root),
+            )
         approved = self.approve_permissions(prepared, context, allow_interrupt=allow_interrupt)
         if cache is not None:
             cache[key] = prepared
@@ -408,8 +427,9 @@ print(json.dumps({"running": running}))
             client = await self.client(context)
             groups.setdefault(client, []).append((name, values, context))
         for client, items in groups.items():
-            await client.ensure_started()
-            response = await client.call({"operation": "prepare_batch", "requests": [
+            first_context = items[0][2]
+            await self._call_worker(client, first_context)
+            response = await self._call_worker(client, first_context, {"operation": "prepare_batch", "requests": [
                 self.request("prepare", name, values, context, workspace=client.backend.root)
                 for name, values, context in items
             ]})
@@ -442,7 +462,7 @@ print(json.dumps({"running": running}))
                 request["execution_secrets"] = execution_secrets
         try:
             async with self.activity_lease(context, request["request_id"]):
-                result = ToolResult.model_validate(await client.call(request))
+                result = ToolResult.model_validate(await self._call_worker(client, context, request))
         except asyncio.CancelledError:
             try:
                 await asyncio.shield(client.call({"operation": "cancel_call", "request_id": request["request_id"]}))

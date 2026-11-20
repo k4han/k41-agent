@@ -54,6 +54,7 @@ class ChatRequest(PoolSelectionValidation):
     reasoning_effort: ReasoningEffort | None = Field(default=None, description="Model-specific reasoning effort override; omit to inherit the agent card default, or use 'auto' for the model default.")
     acp_config_options: AcpConfigOptions | None = Field(default=None, max_length=32, description="ACP session option overrides for this turn, such as model or thinking level. Ignored by other agents.")
     resume_payload: Optional[HumanResumePayload] = Field(default=None, description="Payload to resume after a human-in-the-loop pause.")
+    interrupt_id: str | None = Field(default=None, min_length=1, max_length=128)
     attachments: list[ChatAttachment] = Field(default_factory=list, description="File or image attachments to include with the message.")
     resume: bool = Field(default=False, description="Whether this message is resuming a paused conversation.")
 

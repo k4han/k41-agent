@@ -125,6 +125,24 @@ def dashboard_client(make_dashboard_client):
     return make_dashboard_client()
 
 
+def test_notification_settings_save_and_validate(make_dashboard_client):
+    service, _ = _db_config_service("")
+    client = make_dashboard_client(service)
+    route = "/dashboard-api/notifications"
+    saved = client.put(route, json={
+        "timeout_minutes": 12, "fallback_prompt": "Continue after {timeout_minutes} minutes.",
+        "dashboard_base_url": "https://agent.example/", "events": ["interruption_timeout"],
+    })
+    assert saved.status_code == 200
+    assert saved.json()["settings"]["dashboard_base_url"] == "https://agent.example"
+    assert service.get("notifications.timeout_minutes") == 12
+    assert service.get("notifications.events") == ["interruption_timeout"]
+    assert client.put(route, json={"timeout_minutes": True}).status_code == 422
+    assert client.put(route, json={"dashboard_base_url": "//remote.example"}).status_code == 422
+    assert client.put(route, json={"recipient_identity_ids": [1]}).status_code == 422
+    assert service.get("notifications.timeout_minutes") == 12
+
+
 def test_browser_stream_settings_defaults_save_and_reset(make_dashboard_client):
     service, _ = _db_config_service("")
     client = make_dashboard_client(service)

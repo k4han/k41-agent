@@ -148,6 +148,9 @@ render(
         <Route path="/settings/connections" component={ConnectionsPage} />
         <Route path="/settings/connections/:subpage" component={ConnectionsPage} />
         <Route path="/settings/channels" component={ChannelsPage} />
+        <Route path="/settings/notifications" component={lazy(() =>
+          import("@/pages/settings/NotificationsPage").then(({ NotificationsPage }) => ({ default: NotificationsPage }))
+        )} />
         <Route path="/settings/channels/:channelName" component={ChannelsPage} />
         <Route path="/settings/pairing" component={() => <Navigate href="/settings/channels?tab=pairing" />} />
         <Route path="/settings/agents" component={AgentsPage} preload={() => preloadDashboardData(API_PATHS.agentCards)} />

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import logging
 import secrets
+from urllib.parse import urlencode
 
 import jwt
 from fastapi import HTTPException, Request, status
@@ -49,7 +50,7 @@ async def get_current_admin(request: Request) -> str:
                 detail="Not authenticated",
             )
         raise HTTPException(
-            status_code=status.HTTP_302_FOUND, headers={"Location": "/login"}
+            status_code=status.HTTP_302_FOUND, headers={"Location": _auth_location(request, "/login")}
         )
 
     try:
@@ -76,7 +77,7 @@ async def get_current_admin(request: Request) -> str:
                 detail="Could not validate credentials",
             )
         raise HTTPException(
-            status_code=status.HTTP_302_FOUND, headers={"Location": "/login"}
+            status_code=status.HTTP_302_FOUND, headers={"Location": _auth_location(request, "/login")}
         )
 
     if payload.get("password_change_required") and request.url.path not in {
@@ -92,6 +93,12 @@ async def get_current_admin(request: Request) -> str:
             )
         raise HTTPException(
             status_code=status.HTTP_302_FOUND,
-            headers={"Location": "/change-password"},
+            headers={"Location": _auth_location(request, "/change-password")},
         )
     return str(admin_id)
+
+
+def _auth_location(request: Request, destination: str) -> str:
+    if request.url.path == "/chat" and request.query_params.get("thread_id"):
+        return destination + "?" + urlencode({"next": f"/chat?{request.url.query}"})
+    return destination

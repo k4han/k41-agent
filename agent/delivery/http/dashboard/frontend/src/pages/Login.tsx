@@ -4,7 +4,10 @@ import { Bot, LogIn } from "lucide-solid";
 import { readError } from "@/lib/api";
 
 export function LoginPage() {
-  const passwordChanged = new URLSearchParams(window.location.search).get("status") === "password-changed";
+  const query = new URLSearchParams(window.location.search);
+  const passwordChanged = query.get("status") === "password-changed";
+  const next = query.get("next");
+  const chatLocation = next?.startsWith("/chat?") && new URLSearchParams(next.slice(6)).has("thread_id") ? next : "/";
   const [password, setPassword] = createSignal("");
   const [error, setError] = createSignal("");
   const [loading, setLoading] = createSignal(false);
@@ -27,7 +30,9 @@ export function LoginPage() {
         throw new Error(await readError(response));
       }
       const result = await response.json() as { password_change_required?: boolean };
-      window.location.href = result.password_change_required ? "/change-password" : "/";
+      window.location.href = result.password_change_required
+        ? "/change-password?" + new URLSearchParams({ next: chatLocation })
+        : chatLocation;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {

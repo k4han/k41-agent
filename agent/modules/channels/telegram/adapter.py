@@ -122,6 +122,10 @@ class TelegramChannelAdapter:
     def set_bot(self, bot: Any | None) -> None:
         self._bot = bot
 
+    @property
+    def bot(self):
+        return self._bot
+
     async def send(self, destination: str, message: OutboundMessage) -> bool:
         if self._bot is None:
             logger.warning("No active Telegram bot to send outbound message.")
@@ -176,6 +180,11 @@ def _is_private_chat(event: Any) -> bool:
 
 async def handle_telegram_message(message: Any) -> None:
     if not getattr(message, "text", None) or not getattr(message, "from_user", None):
+        return
+
+    from agent.modules.notifications.telegram import handle_reply
+
+    if await handle_reply(message):
         return
 
     async def reply(outbound: OutboundMessage) -> Any:

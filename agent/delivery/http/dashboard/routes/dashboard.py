@@ -521,6 +521,11 @@ async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
     acp_service = peek_acp_service()
     acp_thread_id = resolved_thread_id or (str(thread_id) if thread_id else None)
     if acp_service is not None and acp_thread_id and await acp_service.stop_thread(acp_thread_id):
+        from agent.modules.notifications.interruption import active_manager
+
+        notifications = active_manager()
+        if notifications:
+            await notifications.invalidate(acp_thread_id)
         return {"success": True}
 
     success = False
@@ -537,10 +542,17 @@ async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
     # the chat stream session directly guarantees the LLM stream actually stops.
     target_thread_id = resolved_thread_id or (str(thread_id) if thread_id else None)
     if target_thread_id:
-        from agent.modules.agent_runtime import active_async_subagent_service
-        subagents = active_async_subagent_service()
-        if subagents is not None:
-            success = await subagents.cancel_tree(target_thread_id) or success
+        from agent.modules.notifications.interruption import active_manager
+
+        notifications = active_manager()
+        if notifications:
+            success = await notifications.cancel_thread(target_thread_id) or success
+        else:
+            from agent.modules.agent_runtime import active_async_subagent_service
+
+            subagents = active_async_subagent_service()
+            if subagents is not None:
+                success = await subagents.cancel_tree(target_thread_id) or success
         try:
             manager = get_chat_stream_manager()
             session = await manager.get_session(target_thread_id)

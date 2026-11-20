@@ -235,15 +235,18 @@ async def execute_scheduled_task(
                 job_id=scheduler_job_id, task=task, platform=platform, user_id=user_id,
                 trigger_source=trigger_source, workspace=workspace, browser_owner_id=owner_id, executor=executor)
         outcome = "completed"
+        from agent.modules.notifications.failures import background_scope
+
         try:
-            response_text = await run_agent_full(
-                user_input=task,
-                thread_id=background_thread_id,
-                agent_name=AGENT_NAME,
-                workspace=workspace,
-                browser_owner_id=owner_id,
-                usage_context={"platform": BACKGROUND_THREAD_PREFIX, "user_id": user_id, "channel_id": run_id},
-            )
+            with background_scope(run_id, "Scheduler", background_thread_id):
+                response_text = await run_agent_full(
+                    user_input=task,
+                    thread_id=background_thread_id,
+                    agent_name=AGENT_NAME,
+                    workspace=workspace,
+                    browser_owner_id=owner_id,
+                    usage_context={"platform": BACKGROUND_THREAD_PREFIX, "user_id": user_id, "channel_id": run_id},
+                )
         except asyncio.CancelledError:
             outcome = "cancelled"
             raise
@@ -268,10 +271,20 @@ async def execute_scheduled_task(
                 agent_name=AGENT_NAME, provider=executor["provider"], model=executor["model"])
         if recorded and not agent_finished:
             await _record_run_finish(run_id, status=RUN_STATUS_FAILED, error=str(e) or type(e).__name__)
+        from agent.modules.notifications.failures import report_failure
+
+        if await report_failure(run_id, "Scheduler", background_thread_id, error=e,
+                                destination=(platform, str(user_id))):
+            return
+        from agent.modules.notifications.interruption import active_manager
+
+        manager = active_manager()
         error_msg = (
             f"<b>Scheduled task failed:</b>\n{escape_html(task)}\n\n"
             f"Error: {escape_html(str(e))}"
         )
+        if manager and (link := manager.dashboard_link(background_thread_id)):
+            error_msg += f"\n\n{escape_html(link)}"
         await _send_notification(platform, user_id, error_msg)
 
 
@@ -370,6 +383,23 @@ async def initialize_scheduler(container=None):
         jobstores={"default": SQLAlchemyJobStore(engine=sync_engine)},
         timezone=scheduler_tz,
     )
+    notifications = active._interruption_timeout_manager
+    if notifications:
+        from apscheduler.events import EVENT_JOB_ERROR
+
+        loop = asyncio.get_running_loop()
+
+        async def report_scheduler_error(event):
+            try:
+                await notifications.publish_error(f"{event.job_id}:{event.scheduled_run_time}", "Scheduler", "",
+                                                  error=event.exception)
+            except Exception:
+                logger.warning("Could not enqueue a scheduler error notification.", exc_info=True)
+
+        def on_job_error(event):
+            loop.call_soon_threadsafe(lambda: asyncio.create_task(report_scheduler_error(event)))
+
+        scheduler.add_listener(on_job_error, EVENT_JOB_ERROR)
     scheduler.start()
     _backfill_job_ids(scheduler)
     active._scheduler = scheduler

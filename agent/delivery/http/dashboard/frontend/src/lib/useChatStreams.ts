@@ -328,7 +328,7 @@ export function useChatStreams(params: UseChatStreamsParams) {
         return current;
       }
       const shouldAppendSummary = Boolean(parsed.summary) && (
-        !target || target.status !== "answered" || target.summary !== parsed.summary
+        !target || target.status !== parsed.status || target.summary !== parsed.summary
       );
       const nextItems = target
         ? current.map((item) =>
@@ -342,7 +342,7 @@ export function useChatStreams(params: UseChatStreamsParams) {
               id: allocItemId(),
               ...createTranscriptUserInputRequest({
                 toolCallId,
-                status: "answered",
+                status: parsed.status,
                 answers: parsed.answers,
                 summary: parsed.summary,
                 result,
@@ -357,7 +357,7 @@ export function useChatStreams(params: UseChatStreamsParams) {
         {
           id: allocItemId(),
           type: "message",
-          role: "user",
+          role: parsed.status === "timed_out" ? "assistant" : "user",
           text: parsed.summary,
         } satisfies ChatTranscriptItem,
       ];

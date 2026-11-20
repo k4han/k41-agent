@@ -204,7 +204,8 @@ export function ChatPage() {
   const location = useLocation<NewChatNavigationState>();
   const params = useParams<{ threadId?: string }>();
   const [searchParams] = useSearchParams();
-  const routeThreadId = () => (params.threadId ? decodeURIComponent(params.threadId) : "");
+  const routeThreadId = () => params.threadId ? decodeURIComponent(params.threadId)
+    : typeof searchParams.thread_id === "string" ? searchParams.thread_id : "";
 
   const { showToast } = useToast();
 
@@ -1301,6 +1302,10 @@ export function ChatPage() {
       payload.resume = true;
       payload.message = "";
       if (resumePayload) payload.resume_payload = resumePayload;
+      if (resumePayload?.action === "answer") {
+        const request = items().slice().reverse().find((item) => item.type === "user_input_request");
+        if (request?.type === "user_input_request") payload.interrupt_id = request.interrupt_id || undefined;
+      }
     } else if (payload.thread_id && activeCheckpointId()) {
       payload.checkpoint_id = activeCheckpointId();
     }
@@ -1998,6 +2003,35 @@ export function ChatPage() {
 
   // A memo so refreshing the same thread's payload does not refetch sessions.
   const readyThreadId = createMemo(() => threadData()?.thread_id || "");
+  createEffect(on([currentThreadId, () => searchParams.checkpoint_id], ([threadId, checkpoint]) => {
+    if (!threadId || threadId.startsWith("__pending__") || checkpoint) return;
+    const tabId = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+    const report = (visible: boolean, keepalive = false) => {
+      void fetchWithCsrf("/dashboard-api/chat-presence", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ thread_id: threadId, tab_id: tabId, visible }), keepalive,
+      }).catch(() => undefined);
+    };
+    const heartbeat = () => report(document.visibilityState === "visible");
+    const hide = () => report(false, true);
+    heartbeat();
+    const timer = window.setInterval(heartbeat, 15000);
+    document.addEventListener("visibilitychange", heartbeat);
+    window.addEventListener("pagehide", hide);
+    onCleanup(() => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", heartbeat);
+      window.removeEventListener("pagehide", hide);
+      hide();
+    });
+  }));
+  createEffect(on([readyThreadId, () => searchParams.browser_thread_id], ([threadId, browserThreadId]) => {
+    if (!threadId || typeof browserThreadId !== "string") return;
+    const frame = requestAnimationFrame(() => window.dispatchEvent(new CustomEvent("k41-browser-handoff", {
+      detail: { threadId, browserThreadId },
+    })));
+    onCleanup(() => cancelAnimationFrame(frame));
+  }));
   createEffect(on(
     [currentThreadId, readyThreadId, canReconnectStream],
     ([threadId, readyThreadId]) => {

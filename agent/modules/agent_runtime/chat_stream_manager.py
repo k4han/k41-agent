@@ -212,12 +212,18 @@ class ChatStreamSession:
                 logger.exception(
                     "Error running background agent stream for thread %s", self.thread_id
                 )
+                from agent.modules.providers import ModelPoolExhausted
+
                 agent_error = classify_agent_error(exc)
-                await self._push_error_event({
+                error = {
                     "type": "error",
                     "code": agent_error.code,
                     "content": agent_error.message,
-                })
+                }
+                exhausted = _find_exception(exc, ModelPoolExhausted)
+                if exhausted is not None:
+                    error.update(pool_name=exhausted.pool_name, retry_at=exhausted.retry_at)
+                await self._push_error_event(error)
             if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 raise
         finally:
@@ -366,6 +372,11 @@ class ChatStreamManager:
         self._ensure_open()
         async with self._lock_thread(thread_id):
             self._ensure_open()
+            from agent.modules.notifications.interruption import active_manager
+
+            notifications = active_manager()
+            if notifications and not (params.get("resume") or params.get("resume_payload")):
+                await notifications.prepare_new_run(thread_id)
             existing = self._sessions.get(thread_id)
             if existing and existing.task and not existing.task.done():
                 logger.info("Cancelling existing stream session for thread %s to start new message", thread_id)

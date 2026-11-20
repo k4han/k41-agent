@@ -51,6 +51,7 @@ export type ChatPayload = {
   attachments?: ChatAttachmentPayload[];
   resume?: boolean;
   resume_payload?: ChatResumePayload;
+  interrupt_id?: string;
 };
 
 export type PlanResumePayload =

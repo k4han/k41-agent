@@ -177,7 +177,7 @@ export type TranscriptPlanReview = {
   result?: unknown;
 };
 
-export type TranscriptUserInputRequestStatus = "pending" | "answered";
+export type TranscriptUserInputRequestStatus = "pending" | "answered" | "timed_out";
 
 export type TranscriptUserInputRequest = {
   type: "user_input_request";
@@ -360,11 +360,11 @@ export function parsePlanReviewToolResult(
 
 export function parseUserInputRequestToolResult(
   result: unknown,
-): Partial<TranscriptUserInputRequest> & ParsedAskUserToolResult {
+): Partial<TranscriptUserInputRequest> & ParsedAskUserToolResult & { status: "answered" | "timed_out" } {
   const parsed = parseAskUserToolResult(result);
   return {
     valid: parsed.valid,
-    status: "answered",
+    status: parsed.timedOut ? "timed_out" : "answered",
     answers: parsed.answers,
     summary: parsed.summary,
     result,

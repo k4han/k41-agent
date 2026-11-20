@@ -40,8 +40,9 @@ async def send_notification(
     message: str,
     *,
     mode: NotificationFormat = "html",
+    channel_id: str | None = None,
 ) -> bool:
-    """Send a push notification via the appropriate channel client.
+    """Send a push notification to a user or a reply to an originating channel.
 
     Returns True if the message was sent successfully, False otherwise.
     """
@@ -55,11 +56,11 @@ async def send_notification(
         platform_name = str(getattr(platform, "value", platform) or "").strip().lower()
         register_builtin_channel_adapters()
         adapter = load_channel_adapter(platform_name)
-
-        return await adapter.send(
-            external_id,
-            OutboundMessage(text=message, mode=mode),
-        )
+        outbound = OutboundMessage(text=message, mode=mode)
+        send_to_channel = getattr(adapter, "send_to_channel", None)
+        if channel_id and send_to_channel is not None:
+            return await send_to_channel(channel_id, outbound)
+        return await adapter.send(channel_id or external_id, outbound)
     except Exception as exc:
         logger.error(
             "Failed to send notification to %s user %s: %s",

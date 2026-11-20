@@ -26,6 +26,7 @@ from agent.delivery.http.dashboard.routes import (
     sandboxes as sandboxes_routes,
     scheduler as scheduler_routes,
     settings as settings_routes,
+    notifications as notifications_routes,
     skills as skills_routes,
     skill_packages as skill_packages_routes,
     spa as spa_routes,
@@ -38,6 +39,7 @@ from agent.delivery.http.dashboard.routes import (
 )
 
 router = APIRouter(tags=["dashboard"], dependencies=[Depends(get_current_admin)])
+router.include_router(notifications_routes.router)
 
 for child_router in (
     catalog_routes.router,

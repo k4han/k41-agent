@@ -7,7 +7,7 @@ import time
 import uuid
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
@@ -51,6 +51,22 @@ def job_dict(row: Execution) -> dict:
 def notification_dict(row: Notification) -> dict:
     return {"event_id": row.event_id, "task_id": row.task_id, "version": row.version,
             "parent_thread_id": row.parent_thread_id, "payload": json.loads(row.payload_json)}
+
+
+def _execution_blocked(now: float):
+    def priority(row):
+        # A wakeup without an answer can wait for other work to clear the checkpoint.
+        return case((and_(row.kind == "wakeup", row.resume_json.is_(None), or_(
+            row.status == "pending", and_(row.status == "running", row.lease_until <= now),
+        )), 1), else_=0)
+
+    other = aliased(Execution)
+    current_priority, other_priority = priority(Execution), priority(other)
+    return select(other.id).where(
+        other.thread_id == Execution.thread_id, other.status.in_(LIVE_STATUSES),
+        or_(other_priority < current_priority,
+            and_(other_priority == current_priority, other.id < Execution.id)),
+    ).exists()
 
 
 class AsyncSubagentRepository:
@@ -214,12 +230,10 @@ class AsyncSubagentRepository:
             return task_dict(row)
 
     async def candidates(self, *, limit=100) -> list[dict]:
+        now = time.time()
         async with await self._session_factory() as session:
-            earlier = aliased(Execution)
-            blocked = select(earlier.id).where(earlier.thread_id == Execution.thread_id,
-                earlier.id < Execution.id, earlier.status.in_(LIVE_STATUSES)).exists()
             rows = (await session.scalars(select(Execution).where(or_(Execution.status == "pending",
-                and_(Execution.status == "running", Execution.lease_until < time.time())), ~blocked)
+                and_(Execution.status == "running", Execution.lease_until <= now)), ~_execution_blocked(now))
                 .order_by(Execution.id).limit(limit))).all()
             return [job_dict(row) for row in rows]
 
@@ -235,7 +249,8 @@ class AsyncSubagentRepository:
                 if task.deleted_at or task.status == "cancelled":
                     return None
             result = await session.execute(update(Execution).where(Execution.job_id == job_id,
-                or_(Execution.status == "pending", and_(Execution.status == "running", Execution.lease_until < now)))
+                or_(Execution.status == "pending", and_(Execution.status == "running", Execution.lease_until <= now)),
+                ~_execution_blocked(now))
                 .values(status="running", lease_owner=owner, lease_until=now + lease_seconds,
                         attempt=Execution.attempt + 1, updated_at=now))
             if result.rowcount != 1:
@@ -274,10 +289,32 @@ class AsyncSubagentRepository:
                 Execution.attempt == job["attempt"]).with_for_update())
             if row is None:
                 return None
+            if status == "waiting":
+                from agent.modules.notifications.interruption import active_manager
+
+                manager = active_manager()
+                if manager and not (task and (task.status == "cancelled" or task.deleted_at)):
+                    notification_context = {**job["context"], **(context or {})}
+                    if task:
+                        notification_context.update(_notification_task_id=task.task_id,
+                                                    _notification_parent=task.parent_thread_id)
+                    await manager.register(
+                        session, thread_id=row.thread_id, root_thread_id=row.root_thread_id,
+                        checkpoint_id=checkpoint_id, interrupts=interrupts, context=notification_context,
+                        job_id=row.job_id,
+                    )
             row.status, row.error, row.lease_until, row.updated_at = status, error, 0, time.time()
+            if status == "waiting":
+                row.resume_json = None
             if row.kind == "scheduled":
                 from agent.modules.scheduler import settle_run
                 return await settle_run(session, row, status, result=result, error=error, context=context)
+            if row.kind == "notification_resume" and status == "completed" and checkpoint_id:
+                context = {**(context or {}), "_notification_checkpoint_id": checkpoint_id}
+            if context and row.kind in {"notification_resume", "wakeup"}:
+                row.context_json = encode({**job["context"], **context})
+            if row.kind == "notification_resume":
+                return {"execution_kind": row.kind}
             if not row.task_id:
                 return None
             if task.status == "cancelled" or task.deleted_at:
@@ -314,7 +351,7 @@ class AsyncSubagentRepository:
             return
         async with await self._session_factory() as session, session.begin():
             jobs = (await session.scalars(select(Execution).where(Execution.thread_id == parent_thread_id,
-                Execution.kind == "wakeup", Execution.status.in_(["pending", "waiting"]))
+                Execution.kind == "wakeup", Execution.status == "pending", Execution.resume_json.is_(None))
                 .order_by(Execution.id).with_for_update())).all()
             for task_id, version in cursors.items():
                 await session.execute(update(Notification).where(Notification.parent_thread_id == parent_thread_id,
@@ -399,9 +436,9 @@ class AsyncSubagentRepository:
                 Task.status.in_(LIVE_STATUSES), Task.deleted_at.is_(None)).limit(1))
             pending = await session.scalar(select(Notification.id).where(Notification.parent_thread_id == thread_id,
                 Notification.status == "pending").limit(1))
-            scheduled = await session.scalar(select(Execution.id).where(Execution.thread_id == thread_id,
-                Execution.kind == "scheduled", Execution.status.in_(LIVE_STATUSES)).limit(1))
-            return live is not None or pending is not None or scheduled is not None
+            managed = await session.scalar(select(Execution.id).where(Execution.thread_id == thread_id,
+                Execution.kind.in_(["scheduled", "notification_resume"]), Execution.status.in_(LIVE_STATUSES)).limit(1))
+            return live is not None or pending is not None or managed is not None
 
     async def child_thread_ids(self, thread_id: str) -> list[str]:
         async with await self._session_factory() as session:

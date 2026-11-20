@@ -268,6 +268,10 @@ class ModelPoolService:
                         failure = classify_pool_failure(exc)
                         if failure is None:
                             raise
+                        if failure.code in {"rate_limit", "quota"}:
+                            from agent.modules.notifications.failures import report_provider_limit
+
+                            await report_provider_limit(exc)
                         delay = failure.retry_after if failure.retry_after is not None else float(min(2 ** retry, 10))
                         if not guard.started and failure.retryable and retry < pool.retry_count and delay <= 10:
                             await self._sleep(max(0, delay))

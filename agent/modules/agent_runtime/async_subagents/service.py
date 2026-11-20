@@ -37,7 +37,7 @@ def _run_context(context) -> dict:
     """Persist references and effective restrictions, never live service objects."""
     keys = ("agent_name", "provider", "model", "reasoning_effort", "permission_mode",
             "allowed_tool_names", "allowed_skill_names", "context_compact_threshold",
-            "channel_context_trim_threshold", "browser_owner_id")
+            "channel_context_trim_threshold", "browser_owner_id", "acp_config_options")
     if isinstance(context, dict):
         values = {key: context.get(key) for key in keys}
         workspace = context.get("workspace")
@@ -182,6 +182,15 @@ class AsyncSubagentService:
         if normalized is None:
             raise ValueError("A human response is required.")
         _validate_human_resume_payload(normalized)
+        payload = normalized.model_dump(exclude_none=True)
+        from agent.modules.notifications.interruption import active_manager
+
+        manager = active_manager()
+        if manager and await manager.accept_manual(thread_id=parent, interrupt_id=interrupt_id, payload=payload,
+                                                   owner_id=browser_owner_id, job_id=run_id, task_id=task_id):
+            result = await self.get(parent, task_id)
+            self._publish(result)
+            return result
         context = None
         if normalized.action == "browser_handoff":
             task = await self.get(parent, task_id, private=True)
@@ -196,7 +205,7 @@ class AsyncSubagentService:
                            "workflow": self.container.agent_catalog_service.get_agent(selected).graph_type}
         async with self._lock:
             result = await self.repository.resume_task(parent, task_id, run_id, interrupt_id,
-                normalized.model_dump(exclude_none=True), context=context)
+                payload, context=context)
         self._publish(result)
         self._signal.set()
         return result
@@ -243,11 +252,36 @@ class AsyncSubagentService:
             return
         self.container.active_session_registry.publish("subagent_task_updated", task_reference(task))
 
-    async def _finish_job(self, job, status, **values):
+    async def _finish_job(self, job, status, *, failure=None, **values):
         result = await self.repository.finish(job, status, **values)
+        if result and job["kind"] == "notification_resume":
+            if status == "waiting":
+                return None
+            text = values.get("result", "")
+            try:
+                settled = await self.container.task_manager.settle_paused(
+                    job["thread_id"], status, result=text, error=values.get("error", ""), failure=failure,
+                )
+            except Exception:
+                logger.warning("Could not update background task history after resume.", exc_info=True)
+                return None
+            if not settled and status == "completed" and text:
+                from agent.modules.notifications.service import send_notification
+                from agent.modules.notifications.settings import CHANNELS
+
+                usage = job["context"].get("usage_context") or {}
+                destination = usage.get("user_id") or usage.get("channel_id")
+                if destination and usage.get("platform") in CHANNELS:
+                    await send_notification(
+                        usage["platform"], destination, text, channel_id=usage.get("channel_id"), mode="markdown",
+                    )
+            return None
+        covered = False
+        if result and status in {"failed", "timed_out"}:
+            covered = await self._report_job_failure(job, failure, destination=self._scheduled_destination(result))
         if result and result.get("execution_kind") == "scheduled":
             from agent.modules.scheduler import notify_run
-            await notify_run(result)
+            await notify_run(result, covered=covered)
         return result
 
     async def model_updates(self, state: dict, config: dict) -> dict:
@@ -323,6 +357,8 @@ class AsyncSubagentService:
                         continue
                     job = await self.repository.claim(candidate["job_id"], self._owner)
                     if job:
+                        if candidate["status"] == "running" and candidate["lease_until"] > 0:
+                            await self._report_job_failure(job)
                         if job["task_id"]:
                             self._publish(await self.repository.get_task_for_execution(job["task_id"]))
                         running = asyncio.create_task(self._execute(job), name=f"async-job-{job['job_id']}")
@@ -352,6 +388,8 @@ class AsyncSubagentService:
             return False
         if any(item["thread_id"] == job["thread_id"] for item in self.container.active_session_registry.list_active()):
             return False
+        if job.get("resume"):
+            return True
         from agent.modules.workflows import get_workflow_graph
 
         try:
@@ -360,14 +398,29 @@ class AsyncSubagentService:
         except (KeyError, ValueError):
             # Let the managed stream persist and display a removed graph's error.
             return True
-        return not any(task.interrupts for task in snapshot.tasks)
+        execution_id = (snapshot.metadata or {}).get("k41_execution_id")
+        return ((execution_id is not None and execution_id == job.get("job_id"))
+                or not any(task.interrupts for task in snapshot.tasks))
+
+    @staticmethod
+    async def _report_job_failure(job, error=None, *, destination=None):
+        from agent.modules.notifications.failures import report_failure
+
+        if job["kind"] != "notification_resume":
+            source = "Scheduler" if job["kind"] == "scheduled" else "Background subagent"
+            return await report_failure(job["job_id"], source, job["root_thread_id"],
+                                        error=error, destination=destination)
+        return False
 
     async def _execute(self, job: dict):
         async def run(**params):
             from agent.modules.agent_runtime.runner import track_active_session
+            from agent.modules.notifications.failures import background_scope
 
+            source = "Scheduler" if job["kind"] == "scheduled" else "Background subagent"
             with track_active_session(job["thread_id"], job["context"]["agent_name"],
-                                      usage_context=job["context"].get("usage_context")):
+                                      usage_context=job["context"].get("usage_context")), background_scope(
+                                          job["job_id"], source, job["root_thread_id"]):
                 try:
                     async with aclosing(self._job_stream(job, params.get("_run_id"))) as events:
                         async for event in events:
@@ -375,14 +428,16 @@ class AsyncSubagentService:
                 except (asyncio.CancelledError, GraphDrained):
                     raise
                 except Exception as exc:
-                    result = await self._finish_job(job, "failed", error=str(exc))
+                    result = await self._finish_job(job, "failed", failure=exc, error=str(exc))
                     if result:
                         self._publish(result)
                     raise
 
         session = None
         try:
-            session = await self.container.chat_stream_manager.start_if_idle(job["thread_id"], {}, run_fn=run)
+            session = await self.container.chat_stream_manager.start_if_idle(
+                job["thread_id"], {"_execution_id": job["job_id"]}, run_fn=run,
+            )
             if session is None:
                 await self.repository.heartbeat(job, release=True)
                 return
@@ -394,7 +449,7 @@ class AsyncSubagentService:
             await self.repository.heartbeat(job, release=True)
             raise
         except Exception as exc:
-            result = await self._finish_job(job, "failed", error=str(exc))
+            result = await self._finish_job(job, "failed", failure=exc, error=str(exc))
             if result:
                 self._publish(result)
             raise
@@ -406,8 +461,8 @@ class AsyncSubagentService:
         from agent.modules.browser import finish_thread_browser
         from agent.modules.workflows import get_workflow_graph
 
-        context = {key: value for key, value in job["context"].items()
-                   if key not in {"routed_agent_name", "delegated_agent_name", "_scheduled"}}
+        context = {key: value for key, value in job["context"].items() if not key.startswith("_notification_")
+                   and key not in {"routed_agent_name", "delegated_agent_name", "_scheduled"}}
         graph = get_workflow_graph(context["workflow"])
         config = {"configurable": {"thread_id": job["thread_id"]}}
         snapshot = await graph.aget_state(config)
@@ -420,10 +475,21 @@ class AsyncSubagentService:
             await self.repository.refresh_context(job, job["context"])
         same_job = metadata.get("k41_execution_id") == job["job_id"]
         pending = [interrupt for task in snapshot.tasks for interrupt in task.interrupts]
+        resume_payload, interrupt_id = None, ""
+        resume = job.get("resume")
+        checkpoint_id = snapshot.config["configurable"].get("checkpoint_id")
+        resume_checkpoint = resume.get("checkpoint_id") if resume else None
+        can_resume = (resume is not None and resume["interrupt_id"] in {item.id for item in pending}
+                      and (not resume_checkpoint or resume_checkpoint == checkpoint_id))
+        if resume_checkpoint and not same_job and not can_resume:
+            await self._finish_job(job, "cancelled", error="The paused checkpoint was replaced.")
+            return
         if job["kind"] == "wakeup" and pending and not same_job:
             await self.repository.heartbeat(job, release=True)
             return
-        resume_payload, interrupt_id = None, ""
+        if job["kind"] == "notification_resume" and not same_job and not resume:
+            await self._finish_job(job, "cancelled", error="The paused response is missing.")
+            return
         if same_job and not snapshot.next and not pending:
             text = self._saved_result(snapshot)
             result = await self._finish_job(job, "completed", result=text,
@@ -432,9 +498,8 @@ class AsyncSubagentService:
                 self._publish(result)
             await self.reconcile(job["thread_id"], graph, config)
             return
-        if same_job and pending:
-            resume = job.get("resume")
-            if resume and resume["interrupt_id"] in {item.id for item in pending}:
+        if (same_job or job["kind"] == "notification_resume") and pending:
+            if can_resume:
                 interrupt_id, resume_payload = resume["interrupt_id"], resume["payload"]
                 input_data = Command(resume={interrupt_id: resume_payload})
             else:
@@ -478,9 +543,11 @@ class AsyncSubagentService:
         final = ""
         status = "running"
         try:
-            timeout = max(0, self.container.config_service.get_int("subagents.run_timeout_seconds", 0))
+            timeout = (0 if job["kind"] == "notification_resume"
+                       else max(0, self.container.config_service.get_int("subagents.run_timeout_seconds", 0)))
             async with asyncio.timeout(timeout or None), aclosing(run_agent_protocol_stream(
-                **context, user_input=job["input"].get("text", ""), thread_id=job["thread_id"], resume=same_job,
+                **context, user_input=job["input"].get("text", ""), thread_id=job["thread_id"],
+                resume=same_job or bool(interrupt_id),
                 resume_payload=resume_payload, _checkpoint_metadata=checkpoint_metadata,
                 _execution=execution, _run_id=stream_run_id,
                 _async_wakeup=wakeup,
@@ -507,15 +574,15 @@ class AsyncSubagentService:
         except asyncio.CancelledError:
             await self.repository.heartbeat(job, release=True)
             raise
-        except TimeoutError:
+        except TimeoutError as exc:
             status = "timed_out"
-            result = await self._finish_job(job, status, error="Async task execution timed out.")
+            result = await self._finish_job(job, status, failure=exc, error="Async task execution timed out.")
             if result:
                 self._publish(result)
             raise
         except Exception as exc:
             status = "failed"
-            result = await self._finish_job(job, status, error=str(exc))
+            result = await self._finish_job(job, status, failure=exc, error=str(exc))
             if result:
                 self._publish(result)
             raise
@@ -523,6 +590,12 @@ class AsyncSubagentService:
             self._controls.pop(job["job_id"], None)
             if status != "waiting":
                 await finish_thread_browser(job["thread_id"], "interrupted" if status == "running" else status)
+
+    @staticmethod
+    def _scheduled_destination(result):
+        if result.get("execution_kind") == "scheduled":
+            return result["platform"], str(result["user_id"])
+        return None
 
     @staticmethod
     def _saved_result(snapshot) -> str:

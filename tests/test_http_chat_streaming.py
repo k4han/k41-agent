@@ -22,6 +22,47 @@ def connected_request():
 
 
 @pytest.mark.asyncio
+async def test_v1_resume_stream_delivers_text_before_the_final_event(monkeypatch):
+    manager = ChatStreamManager()
+    proceed = asyncio.Event()
+
+    async def run(**params):
+        updates = [
+            {"type": "thinking", "content": "private reasoning"},
+            {"type": "message", "content": "Live ", "message_id": "reply"},
+            {"type": "message", "content": "text", "message_id": "reply"},
+            {"type": "final", "content": "Live text", "message_id": "lc_run--reply"},
+            {"type": "final", "content": " and a final-only message", "message_id": "another-reply"},
+        ]
+        for index, update in enumerate(updates):
+            yield protocol_event("custom:k41", {**update, "projection": "ui"})
+            if index == 1:
+                await proceed.wait()
+
+    session = await manager.get_or_create_session("resuming", {}, run_fn=run)
+
+    async def prepare(*args, **kwargs):
+        return {"thread_id": session.thread_id}
+
+    async def accept(*args, **kwargs):
+        return session
+
+    monkeypatch.setattr(api, "prepare_run_params", prepare)
+    monkeypatch.setattr(api, "accept_chat_response", accept)
+    request = ChatRequest(message="", resume_payload={"action": "browser_handoff", "handoff_id": "test", "decision": "return"})
+    try:
+        response = await api.chat_stream(request, connected_request(), admin="test")
+        async with aclosing(response.body_iterator) as chunks:
+            assert await asyncio.wait_for(anext(chunks), 1) == "Live "
+            assert not session.done
+            proceed.set()
+            assert [chunk async for chunk in chunks] == ["text", " and a final-only message"]
+    finally:
+        proceed.set()
+        await manager.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_idle_ndjson_heartbeats_preserve_slow_run_and_replay(monkeypatch):
     monkeypatch.setattr(streaming, "STREAM_HEARTBEAT_SECONDS", 0.01)
     manager = ChatStreamManager()

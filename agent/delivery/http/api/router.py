@@ -30,9 +30,12 @@ from agent.modules.agent_runtime import (
     run_agent,
     run_agent_full,
 )
+from agent.modules.agent_runtime.protocol import application_event
 from agent.modules.conversations import create_thread_id
+from agent.modules.notifications.interruption import RunAdmissionConflict, active_manager
 from agent.shared.thread_ids import resolve_thread_id
 from agent.modules.providers import (
+    ModelPoolExhausted,
     list_provider_model_catalog,
     list_provider_model_catalogs,
     list_providers,
@@ -76,9 +79,66 @@ async def _stream_agent_chunks(params: dict[str, object]):
         async with aclosing(run_agent(**params)) as chunks:
             async for chunk in chunks:
                 yield chunk
+    except RunAdmissionConflict as exc:
+        yield json.dumps({"type": "error", "code": "response_conflict", "content": str(exc)}) + "\n"
     except Exception as exc:
         logger.exception("Failed to stream agent response")
         yield json.dumps(_agent_error_event(exc), ensure_ascii=False) + "\n"
+
+
+async def accept_chat_response(request: ChatRequest, thread_id: str, admin: str):
+    from agent.modules.agent_runtime import get_chat_stream_manager
+
+    notifications = active_manager()
+    if notifications is None or request.resume_payload is None:
+        return None
+    streams = get_chat_stream_manager()
+    previous = await streams.get_session(thread_id)
+    try:
+        job_id = await notifications.accept_manual(
+            thread_id=thread_id, interrupt_id=request.interrupt_id,
+            payload=request.resume_payload.model_dump(exclude_none=True), owner_id=f"admin:{admin}",
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+    if job_id is None:
+        return None
+    for _ in range(100):
+        session = await streams.get_session(thread_id)
+        if session is not None and session is not previous and session.params.get("_execution_id") == job_id:
+            return session
+        await asyncio.sleep(0.05)
+    raise HTTPException(503, "The response was saved and is queued. Reconnect to follow its execution.")
+
+
+async def _resume_chunks(session, *, stream_messages=False, raise_errors=False):
+    streamed_ids = set()
+    async with aclosing(session.subscribe()) as events:
+        async for event in events:
+            update = application_event(event)
+            if not update:
+                continue
+            event_type = update.get("type")
+            if event_type in {"message", "final"}:
+                content = str(update.get("content") or "")
+                message_id = str(update.get("message_id") or "").removeprefix("lc_run--")
+                if event_type == "message" and stream_messages and content:
+                    streamed_ids.add(message_id)
+                    yield content
+                elif event_type == "final":
+                    if message_id not in streamed_ids:
+                        yield content
+                    streamed_ids.discard(message_id)
+            elif event_type == "error":
+                if raise_errors:
+                    message = update.get("content") or "Chat execution failed."
+                    if update.get("code") == ModelPoolExhausted.code:
+                        raise HTTPException(503, detail={
+                            "code": update["code"], "message": message,
+                            "pool_name": update.get("pool_name"), "retry_at": update.get("retry_at"),
+                        })
+                    raise HTTPException(500, detail=message)
+                yield json.dumps(update, ensure_ascii=False) + "\n"
 
 
 router = APIRouter(
@@ -270,10 +330,20 @@ async def chat_sync(request: ChatRequest, admin: str = Depends(get_current_admin
     """Send a chat message and return the full agent response synchronously."""
     await check_scheduled_chat(request.thread_id, f"admin:{admin}")
     params = await prepare_run_params(request, browser_owner_id=f"admin:{admin}")
-    from agent.modules.providers import ModelPoolExhausted
 
     try:
-        response = await run_agent_full(**params)
+        session = None
+        if request.resume_payload is not None:
+            session = await accept_chat_response(request, str(params["thread_id"]), admin)
+        if session is None:
+            response = await run_agent_full(**params)
+        else:
+            response = ""
+            async with aclosing(_resume_chunks(session, raise_errors=True)) as chunks:
+                async for chunk in chunks:
+                    response = chunk
+    except RunAdmissionConflict as exc:
+        raise HTTPException(409, str(exc)) from None
     except ModelPoolExhausted as exc:
         raise HTTPException(503, {"code": exc.code, "message": str(exc), "pool_name": exc.pool_name,
                                   "retry_at": exc.retry_at}) from exc
@@ -290,8 +360,17 @@ async def chat_stream(request: ChatRequest, http_request: Request, admin: str = 
     await check_scheduled_chat(request.thread_id, f"admin:{admin}")
     params = await prepare_run_params(request, browser_owner_id=f"admin:{admin}")
 
+    session = None
+    if request.resume_payload is not None:
+        session = await accept_chat_response(request, str(params["thread_id"]), admin)
+    elif not request.resume and (notifications := active_manager()) is not None:
+        try:
+            await notifications.prepare_new_run(str(params["thread_id"]), check_only=True)
+        except RunAdmissionConflict as exc:
+            raise HTTPException(409, str(exc)) from None
+    chunks = _resume_chunks(session, stream_messages=True) if session else _stream_agent_chunks(params)
     return ChatStreamingResponse(
-        stream_chat_chunks(_stream_agent_chunks(params), http_request),
+        stream_chat_chunks(chunks, http_request),
         media_type="text/plain",
         headers=STREAM_RESPONSE_HEADERS,
     )

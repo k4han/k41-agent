@@ -66,6 +66,7 @@ def storage_root(base: Path, database_url: str) -> Path:
 
 # Waiting past the deadline by this much guarantees the record counts as expired.
 HANDOFF_EXPIRY_GRACE_SECONDS = 1.0
+HANDOFF_RESUME_GRACE_SECONDS = 5.0
 DISCARDED_PREFIX = ".discarded-"
 HANDOFF_CANCELLED ={"handoff_status": "cancelled", "snapshot_status": "skipped",
                      "content": "HANDOFF CANCELLED: Browser handoff was cancelled by the user. The manual interaction was aborted. Browser control is now with you (the agent). Acknowledge that the user cancelled this browser task and do not continue the cancelled action. Ask the user what they would like to do next. Do not say you failed to transfer control."}
@@ -843,9 +844,11 @@ class BrowserService:
         if result is not None:
             return result
 
+        handoff_id = payload["handoff_id"]
+
         async def settle(decision):
             async with self.thread_scope(thread_id), self.operation_scope(key):
-                await self._expire_handoffs(thread_id)
+                await self._expire_handoffs(thread_id, force_handoff_id=handoff_id if decision is None else None)
                 recorded = await self._recorded_handoff(thread_id, call_id, reason)
                 if recorded is None:
                     return {"handoff_status": "session_lost", "snapshot_status": "skipped",
@@ -858,9 +861,26 @@ class BrowserService:
                     return expired_receipt
                 return await self._settle_handoff(thread_id, call_id, reason, payload, expired_receipt, decision or "cancel", authorize_snapshot)
 
+        waiting = asyncio.ensure_future(wait_for_human(payload))
         try:
-            # The caller holds a request open meanwhile, so the wait must end with the handoff.
-            decision = await asyncio.wait_for(wait_for_human(payload), payload["expires_at"] - time.time() + HANDOFF_EXPIRY_GRACE_SECONDS)
+            try:
+                deadline = payload["expires_at"] - time.time() + HANDOFF_EXPIRY_GRACE_SECONDS
+                done, _ = await asyncio.wait((waiting,), timeout=deadline)
+                if done:
+                    decision = waiting.result()
+                else:
+                    from agent.modules.notifications.interruption import active_manager
+
+                    manager = active_manager() if payload.get("timeout_minutes") else None
+                    # Give the notification worker time to resume the paused ACP turn.
+                    async with asyncio.timeout(HANDOFF_RESUME_GRACE_SECONDS):
+                        if manager is None or not await manager.browser_status(thread_id, handoff_id):
+                            raise TimeoutError
+                        decision = await waiting
+            finally:
+                if not waiting.done():
+                    waiting.cancel()
+                    await asyncio.gather(waiting, return_exceptions=True)
         except TimeoutError:
             return await settle(None)
         except asyncio.CancelledError:
@@ -902,16 +922,22 @@ class BrowserService:
         if recorded is not None:
             return recorded
         current = await self._ensure(thread_id, owner_id)
+        from agent.modules.notifications.interruption import active_manager
+
+        manager = active_manager()
+        minutes = manager.settings.timeout_minutes if manager else None
         async with current.lock:
             self.assert_agent(current)
             current.handoff_id = uuid4().hex
-            current.handoff_expires_at = time.time() + self.handoff_ttl
+            current.handoff_expires_at = time.time() + (minutes * 60 if minutes else self.handoff_ttl)
             current.active_tab_id = None
             current.last_activity = time.monotonic()
             payload = {"type": "browser_handoff_request", "handoff_id": current.handoff_id,
                        "generation": current.generation, "reason": reason,
                        "expires_at": current.handoff_expires_at,
                        "tool_call_id": call_id, "thread_id": thread_id}
+            if minutes:
+                payload["timeout_minutes"] = minutes
             try:
                 await self.repository.record(thread_id, call_id, self._handoff_fingerprint(reason), "handoff", payload)
             except BaseException:
@@ -961,6 +987,13 @@ class BrowserService:
                               "content": "Browser session was lost while returning control. Start a new session and inspect it before continuing."}
                 else:
                     result = await self._handoff_snapshot(current, authorize_snapshot)
+        from agent.modules.notifications.interruption import active_manager
+
+        manager = active_manager()
+        if manager and await manager.browser_status(thread_id, payload["handoff_id"]) == "timed_out":
+            result = {**result, "timed_out": True,
+                      "content": "The handoff timed out. Inspect the current page, or reopen the browser "
+                                 "if the session was lost, and choose the next safe step."}
         await self.repository.record(thread_id, call_id, self._handoff_fingerprint(reason), "completed", result)
         if current:
             current.notify()
@@ -1065,7 +1098,16 @@ class BrowserService:
 
         await asyncio.gather(*(reap(thread_id) for thread_id in targets))
 
-    async def _expire_handoffs(self, thread_id):
+    async def _expire_handoffs(self, thread_id, *, force_handoff_id=None):
+        from agent.modules.notifications.interruption import active_manager
+
+        manager = active_manager()
+        if manager:
+            pending = await self.repository.pending_handoff(thread_id)
+            if (pending and pending["handoff_id"] != force_handoff_id
+                    and pending.get("expires_at", 0) <= time.time()):
+                if await manager.browser_status(thread_id, pending["handoff_id"]):
+                    return
         expired = await self.repository.expire_handoffs(thread_id)
         if expired:
             self._notify_session(thread_id)

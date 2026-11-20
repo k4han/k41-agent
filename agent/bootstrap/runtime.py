@@ -149,6 +149,9 @@ class AppRuntime:
             cleanup_started_at = datetime.now(timezone.utc)
             cleanup_paths = await asyncio.to_thread(self._snapshot_cleanup_paths)
 
+            from agent.modules.notifications.interruption import InterruptionTimeoutManager
+
+            self.container._interruption_timeout_manager = InterruptionTimeoutManager(self.container)
             logger.info("Restoring background task history...")
             await self.container.task_manager.restore_from_persistence()
 
@@ -162,6 +165,7 @@ class AppRuntime:
             from agent.modules.scheduler import initialize_scheduler
 
             await initialize_scheduler()
+            self.container._interruption_timeout_manager.start()
 
             logger.info("Starting workspace background services...")
             from agent.modules.workspaces import start_enabled_workspace_background_services
@@ -191,6 +195,9 @@ class AppRuntime:
         errors: list[BaseException] = []
         try:
             await self._attempt(errors, "stop startup maintenance", self._stop_startup_maintenance_step)
+            notifications = self.container._interruption_timeout_manager
+            if notifications:
+                await self._attempt(errors, "stop notifications", notifications.shutdown)
             await self._attempt(errors, "stop managed channels", self._stop_channels_step)
             await self._attempt(errors, "stop background scheduler", self._stop_scheduler_step)
             if self.container._async_subagents is not None:

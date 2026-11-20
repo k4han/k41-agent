@@ -279,7 +279,7 @@ export function toThreadTranscript(
             key: `user-input-result-${messageIndex}-${msg.tool_call_id || "unknown"}`,
             ...createTranscriptUserInputRequest({
               toolCallId: msg.tool_call_id,
-              status: "answered",
+              status: parsed.status,
               answers: parsed.answers,
               summary: parsed.summary,
               result: msg.content,
@@ -290,7 +290,7 @@ export function toThreadTranscript(
           items.push({
             key: `user-input-summary-${messageIndex}-${msg.tool_call_id || "unknown"}`,
             type: "message",
-            role: "user",
+            role: parsed.status === "timed_out" ? "assistant" : "user",
             text: parsed.summary,
           });
         }

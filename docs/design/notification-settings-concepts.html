@@ -1,0 +1,830 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Kai Console · Notification settings layouts</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --background: light-dark(#fafafa, #0a0a0a);
+      --foreground: light-dark(#0a0a0a, #fafafa);
+      --muted: light-dark(#595959, #a3a3a3);
+      --surface: light-dark(#fff, #111);
+      --surface-2: light-dark(#f5f5f5, #171717);
+      --surface-3: light-dark(#ededed, #262626);
+      --border: light-dark(#e5e5e5, rgb(255 255 255 / 10%));
+      --border-strong: light-dark(#d4d4d4, rgb(255 255 255 / 16%));
+      --accent: light-dark(#0a0a0a, #fff);
+      --accent-foreground: light-dark(#fff, #0a0a0a);
+      --accent-hover: light-dark(#262626, #e5e5e5);
+      --info: light-dark(#2563eb, #60a5fa);
+      --success: light-dark(#047857, #34d399);
+      --warning: light-dark(#b45309, #f59e0b);
+      --shadow: 0 1px 2px rgb(0 0 0 / 6%);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body {
+      margin: 0;
+      background: var(--surface-2);
+      color: var(--foreground);
+      font: 400 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    h1, h2, h3, p, fieldset { margin: 0; }
+    h1 { font-size: 24px; line-height: 1.2; font-weight: 700; letter-spacing: -.025em; }
+    h2 { font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
+    h3 { font-size: 13px; font-weight: 650; }
+    fieldset { min-width: 0; padding: 0; border: 0; }
+    :is(button, input, select, textarea) { font: inherit; color: inherit; }
+    :is(button, select, summary, input[type="checkbox"]) { cursor: pointer; }
+    :is(button, input, select, textarea, summary):focus-visible {
+      outline: 2px solid var(--info);
+      outline-offset: 2px;
+    }
+    button:disabled { cursor: default; opacity: .5; }
+    svg {
+      display: block;
+      width: 16px;
+      height: 16px;
+      flex: none;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      clip-path: inset(50%);
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .muted { color: var(--muted); }
+    .hint { color: var(--muted); font-size: 12px; }
+
+    .preview { width: min(100% - 40px, 1360px); margin: 22px auto; }
+    .preview-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px 24px;
+      margin-bottom: 14px;
+    }
+    .preview-heading { display: grid; gap: 2px; }
+    .preview-heading strong { font-weight: 650; }
+    .preview-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .layout-picker, .tabs {
+      display: flex;
+      gap: 3px;
+      padding: 3px;
+      width: fit-content;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+    .layout-choice, .tab {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 30px;
+      padding: 4px 10px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .layout-choice:hover, .tab:hover { background: var(--surface-2); color: var(--foreground); }
+    .layout-choice:has(:checked) { background: var(--accent); color: var(--accent-foreground); }
+    .layout-choice:has(:focus-visible) { outline: 2px solid var(--info); outline-offset: 2px; }
+    .layout-choice svg, .tab svg { width: 14px; height: 14px; }
+    .theme-picker {
+      min-height: 36px;
+      padding: 5px 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      font-size: 12px;
+    }
+
+    .console {
+      display: grid;
+      grid-template-columns: 216px minmax(0, 1fr);
+      min-height: 770px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--background);
+      box-shadow: var(--shadow);
+      overflow: clip;
+    }
+    .sidebar { border-inline-end: 1px solid var(--border); background: var(--surface); }
+    .brand, .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 52px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .brand-mark, .icon-tile {
+      display: grid;
+      place-items: center;
+      flex: none;
+      width: 32px;
+      height: 32px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-2);
+    }
+    .brand-mark { background: var(--accent); color: var(--accent-foreground); }
+    .brand-name { font-weight: 650; line-height: 1.25; }
+    .nav-groups { display: grid; gap: 10px; padding: 12px 10px; }
+    .nav-group { display: grid; gap: 2px; }
+    .nav-caption {
+      padding: 4px 8px 3px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: .045em;
+      text-transform: uppercase;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 31px;
+      padding: 0 8px;
+      border-radius: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 550;
+      white-space: nowrap;
+    }
+    .nav-item[aria-current="page"] { background: var(--surface-3); color: var(--foreground); font-weight: 650; }
+    .nav-item svg { width: 15px; height: 15px; }
+    .breadcrumb { padding-inline: 20px; color: var(--muted); font-size: 13px; }
+    .breadcrumb svg { width: 13px; height: 13px; }
+    .breadcrumb [aria-current] { color: var(--foreground); font-weight: 650; }
+
+    .content { width: min(100%, 990px); margin-inline: auto; padding: 24px 24px 32px; }
+    .content[data-layout="tabs"], .content[data-layout="compact"] { max-width: 820px; }
+    .page-heading { display: grid; gap: 5px; margin-bottom: 18px; }
+    .page-heading p { color: var(--muted); font-size: 13px; }
+    .overview { display: grid; grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+    .overview > :last-child { grid-column: 1 / -1; }
+    .overview > :not(:last-child) { align-self: stretch; }
+    .overview > :not(:last-child) > .settings-group { height: 100%; }
+    .settings-group, .disclosure {
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .group-heading, .disclosure > summary {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 64px;
+      padding: 12px 14px;
+    }
+    .group-heading { border-bottom: 1px solid var(--border); }
+    .group-title { flex: 1; min-width: 0; }
+    .group-heading p { margin-top: 2px; }
+    .group-body { display: grid; gap: 12px; padding: 12px 14px 14px; }
+    .count {
+      flex: none;
+      padding: 3px 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .channel-list, .event-list { min-width: 0; }
+    .channel-row, .event-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 48px;
+      padding-block: 7px;
+    }
+    .channel-row + .channel-row, .event-row + .event-row { border-top: 1px solid var(--border); }
+    .channel-icon, .event-icon {
+      display: grid;
+      place-items: center;
+      flex: none;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: var(--surface-2);
+      color: var(--muted);
+    }
+    .channel-icon svg, .event-icon svg { width: 14px; height: 14px; }
+    .channel-copy, .event-copy { flex: 1; min-width: 0; }
+    .channel-copy code { overflow-wrap: anywhere; }
+    .channel-row:has(input) { cursor: pointer; }
+    .account-check { width: 16px; height: 16px; margin: 0 2px 0 0; accent-color: var(--info); }
+    .event-row { cursor: pointer; }
+    .event-title { display: block; font-size: 13px; font-weight: 600; }
+    .event-copy .hint { display: block; margin-top: 1px; }
+    .switch {
+      appearance: none;
+      width: 36px;
+      height: 20px;
+      margin: 0;
+      padding: 3px;
+      flex: none;
+      border-radius: 999px;
+      background: var(--surface-3);
+    }
+    .switch::before {
+      display: block;
+      width: 14px;
+      height: 14px;
+      border: 1px solid var(--border-strong);
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 2px rgb(0 0 0 / 18%);
+      content: "";
+    }
+    .switch:checked { background: var(--info); }
+    .switch:checked::before { translate: 16px; }
+    @media (forced-colors: active) { .switch { appearance: auto; } }
+    .url-field { border-top: 1px solid var(--border); padding-top: 12px; }
+    .field { min-width: 0; }
+    .field > label { display: inline-block; margin-bottom: 5px; font-size: 13px; font-weight: 600; }
+    .field .hint { margin-top: 5px; }
+    .field-input {
+      display: block;
+      width: 100%;
+      min-height: 35px;
+      padding: 6px 9px;
+      border: 1px solid var(--border-strong);
+      border-radius: 7px;
+      background: var(--surface);
+      font-size: 13px;
+    }
+    .unit-input { display: flex; align-items: center; gap: 8px; }
+    .unit-input input { width: min(100%, 108px); }
+    textarea.field-input { min-height: 68px; resize: vertical; }
+    .timeout-fields { grid-template-columns: minmax(126px, .28fr) minmax(0, 1fr); gap: 16px; }
+    code { font-size: .92em; }
+
+    .tabbed { display: grid; gap: 12px; }
+    .tabs { background: var(--surface-2); }
+    .tab { min-height: 31px; padding-inline: 12px; }
+    .tab[aria-selected="true"] { background: var(--surface); color: var(--foreground); box-shadow: var(--shadow); }
+    .tabbed .group-body { padding-inline: 16px; }
+    .tabbed .timeout-fields { grid-template-columns: minmax(0, 1fr); }
+    .compact { display: grid; gap: 8px; }
+    .disclosure > summary { list-style: none; border-radius: 9px; min-height: 60px; }
+    .disclosure > summary::-webkit-details-marker { display: none; }
+    .disclosure > summary:hover { background: var(--surface-2); }
+    .disclosure[open] > summary { border-bottom: 1px solid var(--border); border-radius: 9px 9px 0 0; }
+    .disclosure-chevron { width: 14px; height: 14px; color: var(--muted); }
+    .disclosure[open] .disclosure-chevron { rotate: 180deg; }
+    .disclosure .settings-group { border: 0; border-radius: 0 0 9px 9px; box-shadow: none; }
+    .disclosure .group-heading { display: none; }
+
+    .form-footer {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 14px;
+      padding-block: 10px 0;
+      border-top: 1px solid var(--border);
+    }
+    .form-status { display: flex; align-items: center; gap: 7px; min-height: 18px; }
+    .status-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--success); }
+    .form-footer[data-dirty="true"] .status-dot { background: var(--warning); }
+    .form-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 34px;
+      padding: 5px 11px;
+      border: 1px solid var(--border-strong);
+      border-radius: 7px;
+      background: var(--surface);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .button:not(:disabled):hover { background: var(--surface-2); }
+    .button-primary { background: var(--accent); border-color: transparent; color: var(--accent-foreground); }
+    .button-primary:not(:disabled):hover { background: var(--accent-hover); }
+
+    @media (max-width: 1280px) {
+      .console { grid-template-columns: 56px minmax(0, 1fr); }
+      .brand { justify-content: center; padding-inline: 0; }
+      .brand-copy, .nav-caption, .nav-item > span { display: none; }
+      .nav-groups { gap: 6px; padding: 8px 7px; }
+      .nav-group + .nav-group { padding-top: 6px; border-top: 1px solid var(--border); }
+      .nav-item { justify-content: center; padding-inline: 0; }
+    }
+    @media (max-width: 800px) {
+      .preview { width: min(100% - 24px, 1360px); margin-block: 12px; }
+      .console { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+      .sidebar { display: none; }
+      .content { padding: 20px 16px 24px; }
+      .breadcrumb { padding-inline: 16px; }
+    }
+    @media (max-width: 660px) { .overview { grid-template-columns: minmax(0, 1fr); } }
+    @media (max-width: 460px) {
+      .preview { width: calc(100% - 16px); }
+      .content { padding-inline: 10px; }
+      .group-heading, .group-body, .disclosure > summary { padding-inline: 10px; }
+      .layout-choice { gap: 5px; }
+      .tab { padding-inline: 8px; }
+      .tab svg { display: none; }
+      .timeout-fields { grid-template-columns: minmax(0, 1fr); }
+      .field-input { font-size: 16px; }
+      .disclosure > summary { gap: 7px; }
+      .disclosure .icon-tile { width: 28px; height: 28px; }
+    }
+    @media (pointer: coarse) {
+      :is(.layout-choice, .theme-picker, .tab, .button, .field-input) { min-height: 44px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Lucide icons
+ISC License
+
+Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2023 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2025.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+--------------------------------
+
+The MIT License (MIT) (for portions derived from Feather)
+
+Copyright (c) 2013-2023 Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+  -->
+  <svg hidden aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="icon-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></symbol>
+    <symbol id="icon-book-open" viewBox="0 0 24 24"><path d="M12 7v14"></path><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"></path></symbol>
+    <symbol id="icon-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></symbol>
+    <symbol id="icon-braces" viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"></path><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"></path></symbol>
+    <symbol id="icon-chart-no-axes-column" viewBox="0 0 24 24"><path d="M5 21v-6"></path><path d="M12 21V3"></path><path d="M19 21V9"></path></symbol>
+    <symbol id="icon-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></symbol>
+    <symbol id="icon-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></symbol>
+    <symbol id="icon-clock" viewBox="0 0 24 24"><path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="10"></circle></symbol>
+    <symbol id="icon-cloud-cog" viewBox="0 0 24 24"><path d="m10.852 19.772-.383.924"></path><path d="m13.148 14.228.383-.923"></path><path d="M13.148 19.772a3 3 0 1 0-2.296-5.544l-.383-.923"></path><path d="m13.53 20.696-.382-.924a3 3 0 1 1-2.296-5.544"></path><path d="m14.772 15.852.923-.383"></path><path d="m14.772 18.148.923.383"></path><path d="M4.2 15.1a7 7 0 1 1 9.93-9.858A7 7 0 0 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.2"></path><path d="m9.228 15.852-.923-.383"></path><path d="m9.228 18.148-.923.383"></path></symbol>
+    <symbol id="icon-cog" viewBox="0 0 24 24"><path d="M11 10.27 7 3.34"></path><path d="m11 13.73-4 6.93"></path><path d="M12 22v-2"></path><path d="M12 2v2"></path><path d="M14 12h8"></path><path d="m17 20.66-1-1.73"></path><path d="m17 3.34-1 1.73"></path><path d="M2 12h2"></path><path d="m20.66 17-1.73-1"></path><path d="m20.66 7-1.73 1"></path><path d="m3.34 17 1.73-1"></path><path d="m3.34 7 1.73 1"></path><circle cx="12" cy="12" r="2"></circle><circle cx="12" cy="12" r="8"></circle></symbol>
+    <symbol id="icon-columns-2" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M12 3v18"></path></symbol>
+    <symbol id="icon-file-text" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"></path><path d="M14 2v5a1 1 0 0 0 1 1h5"></path><path d="M10 9H8"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></symbol>
+    <symbol id="icon-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4"></path><path d="M3.34 19a10 10 0 1 1 17.32 0"></path></symbol>
+    <symbol id="icon-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></symbol>
+    <symbol id="icon-key-round" viewBox="0 0 24 24"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"></path><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"></circle></symbol>
+    <symbol id="icon-link-2" viewBox="0 0 24 24"><path d="M9 17H7A5 5 0 0 1 7 7h2"></path><path d="M15 7h2a5 5 0 1 1 0 10h-2"></path><line x1="8" x2="16" y1="12" y2="12"></line></symbol>
+    <symbol id="icon-list" viewBox="0 0 24 24"><path d="M3 5h.01"></path><path d="M3 12h.01"></path><path d="M3 19h.01"></path><path d="M8 5h13"></path><path d="M8 12h13"></path><path d="M8 19h13"></path></symbol>
+    <symbol id="icon-message-circle-question-mark" viewBox="0 0 24 24"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"></path><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></symbol>
+    <symbol id="icon-message-square" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"></path></symbol>
+    <symbol id="icon-messages-square" viewBox="0 0 24 24"><path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"></path></symbol>
+    <symbol id="icon-mouse-pointer-2" viewBox="0 0 24 24"><path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"></path></symbol>
+    <symbol id="icon-network" viewBox="0 0 24 24"><rect x="16" y="16" width="6" height="6" rx="1"></rect><rect x="2" y="16" width="6" height="6" rx="1"></rect><rect x="9" y="2" width="6" height="6" rx="1"></rect><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"></path><path d="M12 12V8"></path></symbol>
+    <symbol id="icon-palette" viewBox="0 0 24 24"><path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"></path><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle></symbol>
+    <symbol id="icon-panel-top" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path></symbol>
+    <symbol id="icon-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"></circle><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"></path><circle cx="18" cy="5" r="3"></circle></symbol>
+    <symbol id="icon-send" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"></path><path d="m21.854 2.147-10.94 10.939"></path></symbol>
+    <symbol id="icon-timer" viewBox="0 0 24 24"><line x1="10" x2="14" y1="2" y2="2"></line><line x1="12" x2="15" y1="14" y2="11"></line><circle cx="12" cy="14" r="8"></circle></symbol>
+    <symbol id="icon-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></symbol>
+    <symbol id="icon-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><path d="M16 3.128a4 4 0 0 1 0 7.744"></path><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><circle cx="9" cy="7" r="4"></circle></symbol>
+    <symbol id="icon-workflow" viewBox="0 0 24 24"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></symbol>
+    <symbol id="icon-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"></path></symbol>
+  </svg>
+  <div class="preview">
+    <header class="preview-toolbar">
+      <div class="preview-heading">
+        <strong>Notification settings layouts</strong>
+        <p class="hint">Interactive preview · sample data</p>
+      </div>
+      <div class="preview-controls">
+        <fieldset class="layout-picker">
+          <legend class="sr-only">Preview layout</legend>
+          <label class="layout-choice">
+            <input class="sr-only" type="radio" name="layout" value="overview" checked>
+            <svg aria-hidden="true"><use href="#icon-columns-2"/></svg> Overview
+          </label>
+          <label class="layout-choice">
+            <input class="sr-only" type="radio" name="layout" value="tabs">
+            <svg aria-hidden="true"><use href="#icon-panel-top"/></svg> Tabs
+          </label>
+          <label class="layout-choice">
+            <input class="sr-only" type="radio" name="layout" value="compact">
+            <svg aria-hidden="true"><use href="#icon-list"/></svg> Compact
+          </label>
+        </fieldset>
+        <select id="theme" class="theme-picker" aria-label="Preview appearance">
+          <option value="light dark">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </div>
+    </header>
+
+    <div class="console">
+      <aside class="sidebar" aria-label="Settings navigation preview">
+        <div class="brand" title="Kai Console Settings">
+          <span class="brand-mark"><svg aria-hidden="true"><use href="#icon-bot"/></svg></span>
+          <div class="brand-copy"><p class="brand-name">Kai Console</p><p class="hint">Settings</p></div>
+        </div>
+        <div class="nav-groups" aria-hidden="true">
+          <div class="nav-group">
+            <div class="nav-caption">Preferences</div>
+            <div class="nav-item" title="Appearance"><svg><use href="#icon-palette"/></svg><span>Appearance</span></div>
+            <div class="nav-item" title="Security"><svg><use href="#icon-key-round"/></svg><span>Security</span></div>
+          </div>
+          <div class="nav-group">
+            <div class="nav-caption">Workspace</div>
+            <div class="nav-item" title="Connections"><svg><use href="#icon-link-2"/></svg><span>Connections</span></div>
+            <div class="nav-item" title="Active Sandboxes"><svg><use href="#icon-cloud-cog"/></svg><span>Active Sandboxes</span></div>
+          </div>
+          <div class="nav-group">
+            <div class="nav-caption">Intelligence</div>
+            <div class="nav-item" title="Providers"><svg><use href="#icon-workflow"/></svg><span>Providers</span></div>
+            <div class="nav-item" title="Decisions &amp; Routing"><svg><use href="#icon-route"/></svg><span>Decisions &amp; Routing</span></div>
+            <div class="nav-item" title="Tools"><svg><use href="#icon-wrench"/></svg><span>Tools</span></div>
+            <div class="nav-item" title="Agents"><svg><use href="#icon-users"/></svg><span>Agents</span></div>
+            <div class="nav-item" title="ACP Agents"><svg><use href="#icon-bot"/></svg><span>ACP Agents</span></div>
+            <div class="nav-item" title="Skills"><svg><use href="#icon-book-open"/></svg><span>Skills</span></div>
+            <div class="nav-item" title="Prompt Variables"><svg><use href="#icon-braces"/></svg><span>Prompt Variables</span></div>
+          </div>
+          <div class="nav-group">
+            <div class="nav-caption">Integrations</div>
+            <div class="nav-item" title="Channels"><svg><use href="#icon-network"/></svg><span>Channels</span></div>
+            <div class="nav-item" title="Notifications" aria-current="page"><svg><use href="#icon-bell"/></svg><span>Notifications</span></div>
+          </div>
+          <div class="nav-group">
+            <div class="nav-caption">System</div>
+            <div class="nav-item" title="Logs"><svg><use href="#icon-file-text"/></svg><span>Logs</span></div>
+            <div class="nav-item" title="Browser"><svg><use href="#icon-globe"/></svg><span>Browser</span></div>
+            <div class="nav-item" title="Server Runtime"><svg><use href="#icon-cog"/></svg><span>Server Runtime</span></div>
+          </div>
+          <div class="nav-group">
+            <div class="nav-caption">Insights</div>
+            <div class="nav-item" title="Usage"><svg><use href="#icon-chart-no-axes-column"/></svg><span>Usage</span></div>
+          </div>
+        </div>
+      </aside>
+
+      <main>
+        <nav class="breadcrumb" aria-label="Breadcrumb">
+          <span>Settings</span>
+          <svg aria-hidden="true"><use href="#icon-chevron-right"/></svg>
+          <span aria-current="page">Notifications</span>
+        </nav>
+        <div class="content" data-layout="overview">
+          <header class="page-heading">
+            <h1>Notifications</h1>
+            <p>Choose who receives alerts, which events to send, and how long Kai waits for a response.</p>
+          </header>
+
+          <form id="notification-form" novalidate>
+            <div class="overview" data-layout-view="overview">
+              <div data-slot="recipients">
+                <section class="settings-group" data-section="recipients">
+                  <header class="group-heading">
+                    <span class="icon-tile"><svg aria-hidden="true"><use href="#icon-users"/></svg></span>
+                    <div class="group-title"><h2>Recipients</h2></div>
+                    <span class="count" data-count="recipients">2 selected</span>
+                  </header>
+                  <div class="group-body">
+                    <div class="channel-list">
+                      <label class="channel-row">
+                        <span class="channel-icon"><svg aria-hidden="true"><use href="#icon-send"/></svg></span>
+                        <span class="channel-copy"><strong class="event-title">Telegram</strong><code class="hint">@kai-ops</code></span>
+                        <input class="account-check" type="checkbox" name="recipient" value="telegram-ops" checked>
+                      </label>
+                      <label class="channel-row">
+                        <span class="channel-icon"><svg aria-hidden="true"><use href="#icon-message-square"/></svg></span>
+                        <span class="channel-copy"><strong class="event-title">Discord</strong><code class="hint">kai-operator</code></span>
+                        <input class="account-check" type="checkbox" name="recipient" value="discord-operator" checked>
+                      </label>
+                      <div class="channel-row">
+                        <span class="channel-icon"><svg aria-hidden="true"><use href="#icon-messages-square"/></svg></span>
+                        <div class="channel-copy"><h3>Zalo</h3><p class="hint">No paired accounts</p></div>
+                      </div>
+                    </div>
+                    <p class="hint">Manage paired accounts in Settings → Channels.</p>
+                    <div class="field url-field">
+                      <label for="dashboard-url">Dashboard URL</label>
+                      <input class="field-input" id="dashboard-url" name="dashboard_base_url" type="url" spellcheck="false"
+                        maxlength="2048" placeholder="https://agent.example.com" value="https://agent.example.com"
+                        aria-describedby="dashboard-url-hint" required>
+                      <p class="hint" id="dashboard-url-hint">Used in notification links. Required when a recipient is selected.</p>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div data-slot="events">
+                <section class="settings-group" data-section="events">
+                  <header class="group-heading">
+                    <span class="icon-tile"><svg aria-hidden="true"><use href="#icon-bell"/></svg></span>
+                    <div class="group-title"><h2>Events</h2><p class="hint">Send alerts for the selected events.</p></div>
+                    <span class="count" data-count="events">4 of 5 on</span>
+                  </header>
+                  <div class="group-body">
+                    <div class="event-list">
+                      <label class="event-row">
+                        <span class="event-icon"><svg aria-hidden="true"><use href="#icon-triangle-alert"/></svg></span>
+                        <span class="event-copy"><span class="event-title" id="event-failure">Background failures and crashes</span><span class="hint" id="failure-hint">A background task fails or the agent crashes.</span></span>
+                        <input class="switch" type="checkbox" role="switch" name="event" value="background_failure" aria-labelledby="event-failure" aria-describedby="failure-hint" checked>
+                      </label>
+                      <label class="event-row">
+                        <span class="event-icon"><svg aria-hidden="true"><use href="#icon-gauge"/></svg></span>
+                        <span class="event-copy"><span class="event-title" id="event-limit">Provider limits and quota</span><span class="hint" id="limit-hint">A provider hits a rate limit or runs out of quota.</span></span>
+                        <input class="switch" type="checkbox" role="switch" name="event" value="rate_limit" aria-labelledby="event-limit" aria-describedby="limit-hint" checked>
+                      </label>
+                      <label class="event-row">
+                        <span class="event-icon"><svg aria-hidden="true"><use href="#icon-message-circle-question-mark"/></svg></span>
+                        <span class="event-copy"><span class="event-title" id="event-question">Questions from the agent</span><span class="hint" id="question-hint">Kai pauses to ask for your input.</span></span>
+                        <input class="switch" type="checkbox" role="switch" name="event" value="ask_user" aria-labelledby="event-question" aria-describedby="question-hint" checked>
+                      </label>
+                      <label class="event-row">
+                        <span class="event-icon"><svg aria-hidden="true"><use href="#icon-mouse-pointer-2"/></svg></span>
+                        <span class="event-copy"><span class="event-title" id="event-browser">Browser handoffs</span><span class="hint" id="browser-hint">Kai needs you to take over the browser.</span></span>
+                        <input class="switch" type="checkbox" role="switch" name="event" value="browser_handoff" aria-labelledby="event-browser" aria-describedby="browser-hint" checked>
+                      </label>
+                      <label class="event-row">
+                        <span class="event-icon"><svg aria-hidden="true"><use href="#icon-clock"/></svg></span>
+                        <span class="event-copy"><span class="event-title" id="event-expired">Expired requests</span><span class="hint" id="expired-hint">An unanswered request reaches its deadline.</span></span>
+                        <input class="switch" type="checkbox" role="switch" name="event" value="interruption_timeout" aria-labelledby="event-expired" aria-describedby="expired-hint">
+                      </label>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div data-slot="timeout">
+                <section class="settings-group" data-section="timeout">
+                  <header class="group-heading">
+                    <span class="icon-tile"><svg aria-hidden="true"><use href="#icon-timer"/></svg></span>
+                    <div class="group-title"><h2>Response timeout</h2><p class="hint">Set what Kai does when a reply is overdue.</p></div>
+                  </header>
+                  <div class="group-body timeout-fields">
+                    <div class="field">
+                      <label for="timeout-minutes">Wait time</label>
+                      <div class="unit-input">
+                        <input class="field-input" id="timeout-minutes" name="timeout_minutes" type="number"
+                          min="1" max="2147483647" step="1" value="30" aria-describedby="timeout-unit" required>
+                        <span class="hint" id="timeout-unit">minutes</span>
+                      </div>
+                    </div>
+                    <div class="field">
+                      <label for="fallback-prompt">Fallback prompt</label>
+                      <textarea class="field-input" id="fallback-prompt" name="fallback_prompt" rows="2" maxlength="16000"
+                        placeholder="Default prompt" aria-describedby="prompt-hint">No response arrived within {timeout_minutes} minutes. Continue using a reasonable default or skip the step safely.</textarea>
+                      <p class="hint" id="prompt-hint">Use <code>{timeout_minutes}</code> to insert the deadline. Leave blank to restore the default.</p>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            <div class="tabbed" data-layout-view="tabs" hidden>
+              <div class="tabs" role="tablist" aria-label="Notification settings sections">
+                <button class="tab" type="button" role="tab" id="recipients-tab" aria-controls="recipients-panel" aria-selected="true">
+                  <svg aria-hidden="true"><use href="#icon-users"/></svg> Recipients
+                </button>
+                <button class="tab" type="button" role="tab" id="events-tab" aria-controls="events-panel" aria-selected="false" tabindex="-1">
+                  <svg aria-hidden="true"><use href="#icon-bell"/></svg> Events
+                </button>
+                <button class="tab" type="button" role="tab" id="timeout-tab" aria-controls="timeout-panel" aria-selected="false" tabindex="-1">
+                  <svg aria-hidden="true"><use href="#icon-timer"/></svg> Response timeout
+                </button>
+              </div>
+              <div data-slot="recipients" role="tabpanel" id="recipients-panel" aria-labelledby="recipients-tab"></div>
+              <div data-slot="events" role="tabpanel" id="events-panel" aria-labelledby="events-tab" hidden></div>
+              <div data-slot="timeout" role="tabpanel" id="timeout-panel" aria-labelledby="timeout-tab" hidden></div>
+            </div>
+
+            <div class="compact" data-layout-view="compact" hidden>
+              <details class="disclosure">
+                <summary>
+                  <span class="icon-tile"><svg aria-hidden="true"><use href="#icon-users"/></svg></span>
+                  <span class="group-title"><strong>Recipients</strong></span>
+                  <span class="count" data-count="recipients">2 selected</span>
+                  <svg class="disclosure-chevron" aria-hidden="true"><use href="#icon-chevron-down"/></svg>
+                </summary>
+                <div data-slot="recipients"></div>
+              </details>
+              <details class="disclosure" open>
+                <summary>
+                  <span class="icon-tile"><svg aria-hidden="true"><use href="#icon-bell"/></svg></span>
+                  <span class="group-title"><strong>Events</strong></span>
+                  <span class="count" data-count="events">4 of 5 on</span>
+                  <svg class="disclosure-chevron" aria-hidden="true"><use href="#icon-chevron-down"/></svg>
+                </summary>
+                <div data-slot="events"></div>
+              </details>
+              <details class="disclosure">
+                <summary>
+                  <span class="icon-tile"><svg aria-hidden="true"><use href="#icon-timer"/></svg></span>
+                  <span class="group-title"><strong>Response timeout</strong></span>
+                  <span class="count" data-count="timeout">30 min</span>
+                  <svg class="disclosure-chevron" aria-hidden="true"><use href="#icon-chevron-down"/></svg>
+                </summary>
+                <div data-slot="timeout"></div>
+              </details>
+            </div>
+
+            <footer class="form-footer">
+              <div class="form-status hint" role="status"><span class="status-dot" aria-hidden="true"></span><span id="save-status">All changes saved</span></div>
+              <div class="form-actions">
+                <button class="button" type="button" id="discard" disabled>Discard</button>
+                <button class="button button-primary" type="submit" id="save" disabled>Save settings</button>
+              </div>
+            </footer>
+          </form>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('notification-form');
+    const content = form.closest('.content');
+    const layoutPicker = document.querySelector('.layout-picker');
+    const themePicker = document.getElementById('theme');
+    const views = [...form.querySelectorAll('[data-layout-view]')];
+    const sections = [...form.querySelectorAll('[data-section]')];
+    const tabs = [...form.querySelectorAll('[role="tab"]')];
+    const controls = [...form.querySelectorAll('input, textarea')];
+    const recipients = controls.filter(control => control.name === 'recipient');
+    const events = controls.filter(control => control.name === 'event');
+    const dashboardUrl = document.getElementById('dashboard-url');
+    const timeout = document.getElementById('timeout-minutes');
+    const fallbackPrompt = document.getElementById('fallback-prompt');
+    const footer = form.querySelector('.form-footer');
+    const status = document.getElementById('save-status');
+    const discard = document.getElementById('discard');
+    const save = document.getElementById('save');
+    const readValues = () => controls.map(control => control.type === 'checkbox' ? control.checked : control.value);
+    let savedValues = readValues();
+
+    function changeLayout(layout) {
+      const activeView = views.find(view => view.dataset.layoutView === layout);
+      views.forEach(view => { view.hidden = view !== activeView; });
+      for (const section of sections) {
+        activeView.querySelector(`[data-slot="${section.dataset.section}"]`).append(section);
+      }
+      content.dataset.layout = layout;
+    }
+
+    function selectTab(activeTab, focus = false) {
+      for (const tab of tabs) {
+        const active = tab === activeTab;
+        tab.setAttribute('aria-selected', String(active));
+        tab.tabIndex = active ? 0 : -1;
+        document.getElementById(tab.getAttribute('aria-controls')).hidden = !active;
+      }
+      if (focus) activeTab.focus();
+    }
+
+    function updateCounts() {
+      const recipientCount = recipients.filter(input => input.checked).length;
+      const eventCount = events.filter(input => input.checked).length;
+      const countdown = timeout.validity.valid ? `${timeout.value} min` : 'Set wait time';
+      const counts = { recipients: `${recipientCount} selected`, events: `${eventCount} of ${events.length} on`, timeout: countdown };
+      for (const badge of form.querySelectorAll('[data-count]')) badge.textContent = counts[badge.dataset.count];
+      dashboardUrl.required = recipientCount > 0;
+    }
+
+    function updateStatus(message = 'All changes saved') {
+      const dirty = readValues().some((value, index) => value !== savedValues[index]);
+      footer.dataset.dirty = String(dirty);
+      status.textContent = dirty ? 'Unsaved changes' : message;
+      save.disabled = !dirty;
+      discard.disabled = !dirty;
+    }
+
+    function validateDashboardUrl() {
+      const value = dashboardUrl.value.trim().replace(/\/+$/, '');
+      dashboardUrl.setCustomValidity('');
+      if (!value) return;
+
+      let valid = false;
+      try {
+        const url = new URL(value);
+        valid = /^https?:\/\/[^/\s\\?#@]+$/i.test(value) && url.port !== '0';
+      } catch {
+        valid = false;
+      }
+      if (!valid) dashboardUrl.setCustomValidity('Enter a dashboard HTTP or HTTPS origin.');
+    }
+
+    layoutPicker.addEventListener('change', event => changeLayout(event.target.value));
+    function updateTheme() {
+      document.documentElement.style.colorScheme = themePicker.value;
+    }
+    themePicker.addEventListener('change', updateTheme);
+
+    for (const tab of tabs) {
+      tab.addEventListener('click', () => selectTab(tab));
+      tab.addEventListener('keydown', event => {
+        const index = tabs.indexOf(tab);
+        const targets = {
+          ArrowLeft: (index + tabs.length - 1) % tabs.length,
+          ArrowRight: (index + 1) % tabs.length,
+          Home: 0,
+          End: tabs.length - 1,
+        };
+        if (!Object.hasOwn(targets, event.key)) return;
+        event.preventDefault();
+        selectTab(tabs[targets[event.key]], true);
+      });
+    }
+
+    form.addEventListener('input', () => {
+      dashboardUrl.setCustomValidity('');
+      updateCounts();
+      updateStatus();
+    });
+
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      validateDashboardUrl();
+      const invalid = controls.find(control => !control.validity.valid);
+      if (invalid) {
+        const panel = invalid.closest('[role="tabpanel"]');
+        if (panel) selectTab(document.getElementById(panel.getAttribute('aria-labelledby')));
+        const disclosure = invalid.closest('details');
+        if (disclosure) disclosure.open = true;
+        invalid.reportValidity();
+        return;
+      }
+      dashboardUrl.value = dashboardUrl.value.trim().replace(/\/+$/, '');
+      timeout.value = timeout.valueAsNumber;
+      fallbackPrompt.value = fallbackPrompt.value.trim() || fallbackPrompt.defaultValue;
+      savedValues = readValues();
+      updateCounts();
+      updateStatus('Settings saved in this preview.');
+    });
+
+    discard.addEventListener('click', () => {
+      controls.forEach((control, index) => {
+        if (control.type === 'checkbox') control.checked = savedValues[index];
+        else control.value = savedValues[index];
+      });
+      dashboardUrl.setCustomValidity('');
+      updateCounts();
+      updateStatus('Changes discarded.');
+    });
+
+    changeLayout(layoutPicker.querySelector(':checked').value);
+    updateTheme();
+    updateCounts();
+    updateStatus();
+  </script>
+</body>
+</html>
