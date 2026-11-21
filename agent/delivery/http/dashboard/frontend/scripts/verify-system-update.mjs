@@ -131,17 +131,18 @@ try {
     return result.result.value;
   };
   const updateButton = `Array.from(document.querySelectorAll('.dialog-footer button')).find(button => button.textContent.includes('Update to'))`;
+  const versionButton = `document.querySelector('.sidebar-footer .brand-version-btn')`;
   const open = async mode => {
     scenario = mode; posts = 0; probes = 0; currentVersion = '0.1.2';
     await call('Page.navigate', { url: base + '/history' });
     try {
-      await until(() => js(`document.querySelector('.brand-version-btn')?.textContent.includes('0.1.2')`), 'version button');
+      await until(() => js(`${versionButton}?.textContent.includes('0.1.2')`), 'version button in the sidebar footer');
     } catch (error) {
       console.log(await js('document.body.textContent.slice(0, 2000)'));
       console.log(JSON.stringify(exceptions));
       throw error;
     }
-    await js(`document.querySelector('.brand-version-btn').click()`);
+    await js(`${versionButton}.click()`);
     await until(() => js(`!!document.querySelector('[role="dialog"]')`), 'update dialog');
   };
   await open('check-error');
@@ -174,7 +175,7 @@ try {
   await until(() => js(`document.querySelector('.update-dialog-progress-title')?.textContent.includes('Completed')`), 'update success');
   assert.equal(await js(`document.querySelector('.update-dialog-progress-desc').textContent.includes('0.1.3')`), true);
   await until(() => pages > pagesBefore, 'automatic reload');
-  await until(() => js(`document.querySelector('.brand-version-btn')?.textContent.includes('0.1.3')`), 'new version after reload');
+  await until(() => js(`${versionButton}?.textContent.includes('0.1.3')`), 'new version after reload');
   assert.equal(posts, 1);
   assert.deepEqual(exceptions, []);
   console.log('PASS: real update clicks, CSRF, lookup failure, development mode, launch failure, download failure, rollback, duplicate clicks, success and reload.');

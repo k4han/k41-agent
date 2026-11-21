@@ -37,7 +37,7 @@ function NavigationList<T>(props: {
 
   return (
     <nav class="navigation-section-panel" aria-label={props.label}>
-      <A class="nav-link navigation-section-page-link" href={props.href}>
+      <A class="nav-link navigation-section-page-link" href={props.href} activeClass="" inactiveClass="">
         <span>{props.label}</span>
         <ChevronRight size={14} aria-hidden="true" />
       </A>
@@ -84,11 +84,7 @@ export function NavigationSectionPanel(props: {
   return (
     <Switch>
       <Match when={props.section === "home"}>
-        <nav class="navigation-section-panel" aria-label="Home">
-          <A class="nav-link navigation-section-page-link" href="/">
-            <span>Open Home</span>
-            <ChevronRight size={14} aria-hidden="true" />
-          </A>
+        <nav class="navigation-section-panel" aria-label="Chat actions">
           <button
             type="button"
             class="nav-link nav-new-chat"

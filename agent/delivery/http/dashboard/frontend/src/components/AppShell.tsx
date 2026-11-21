@@ -1,13 +1,10 @@
 import "@/styles/routes/shell.css";
 
-import { A, useLocation, useNavigate } from "@solidjs/router";
+import { A, useHref, useLocation, useNavigate, useResolvedPath } from "@solidjs/router";
 import {
-  Bot,
   CalendarClock,
   ChevronDown,
   ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
   Download,
   Folder,
   GitBranch,
@@ -20,6 +17,7 @@ import {
   MoreVertical,
   Pencil,
   Pin,
+  PinOff,
   PlaySquare,
   Plus,
   RefreshCw,
@@ -30,7 +28,7 @@ import {
   Trash2,
   X,
 } from "lucide-solid";
-import { createEffect, createMemo, createSignal, For, JSX, on, onCleanup, onMount, Show } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, For, JSX, on, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import { unwrap } from "solid-js/store";
 
@@ -147,9 +145,16 @@ export function AppShell(props: {
     return segment === "repositories" || segment === "scheduler" ? segment : "home";
   });
   const panelSection = () => isMobileViewport() ? "home" : collapsed() ? previewSection() : activeSection();
+  const sidebarTitle = () => {
+    const section = isMobileViewport() ? activeSection() : panelSection();
+    return navItems.find((item) => item.section === section)?.label;
+  };
   const projectsVisible = () => isMobileViewport() ? mobileDrawerOpen() : Boolean(panelSection());
+  const availableUpdateTitle = () => {
+    const info = versionInfo();
+    return info?.has_update ? `Update available: v${info.latest_version}` : undefined;
+  };
   let sidebarRef: HTMLElement | undefined;
-  let sidebarToggle: HTMLButtonElement | undefined;
   let navigationPanel: HTMLDivElement | undefined;
   let projectsPanel: HTMLElement | undefined;
   let accountButton: HTMLButtonElement | undefined;
@@ -323,7 +328,7 @@ export function AppShell(props: {
     return sidebarRef?.contains(focused) && focused?.matches(":focus-visible");
   };
 
-  const openPreview = (section: NavigationSection, trigger: HTMLElement | undefined = sidebarToggle) => {
+  const openPreview = (section: NavigationSection, trigger: HTMLElement | undefined) => {
     if (!collapsed() || isMobileViewport() || restoringPreviewFocus) return;
     if (section !== previewSection() && (historyMenuThreadId() || projectMenuId() || editingHistoryThreadId())) return;
     clearPreviewClose();
@@ -334,7 +339,9 @@ export function AppShell(props: {
   const dismissPreview = (restoreFocus = false) => {
     clearPreviewClose();
     const focused = document.activeElement;
-    if (restoreFocus && previewTrigger && (navigationPanel?.contains(focused) || projectsPanel?.contains(focused))) {
+    if (restoreFocus && previewTrigger && (
+      navigationPanel?.contains(focused) || projectsPanel?.contains(focused) || focused?.matches(".brand-version-btn")
+    )) {
       restoringPreviewFocus = true;
       previewTrigger.focus({ preventScroll: true });
       restoringPreviewFocus = false;
@@ -364,7 +371,9 @@ export function AppShell(props: {
   };
 
   const previewActiveSection = (event: PointerEvent) => {
-    if (isHoverPointer(event) && !previewSection()) openPreview(activeSection());
+    if (!isHoverPointer(event) || previewSection()) return;
+    const activeLink = sidebarRef?.querySelector<HTMLElement>('.app-shell-nav-rail [aria-current="location"]');
+    openPreview(activeSection(), activeLink ?? undefined);
   };
 
   const handleNavigationPointerLeave = (event: PointerEvent) => {
@@ -434,11 +443,43 @@ export function AppShell(props: {
     }, 250);
   };
 
-  const toggleSidebar = () => {
+  const toggleSidebar = (event: MouseEvent) => {
+    const pinHadFocus = document.activeElement === event.currentTarget;
     const next = !collapsed();
-    dismissPreview();
-    setCollapsed(next);
+    batch(() => {
+      dismissPreview();
+      setCollapsed(next);
+    });
     window.localStorage.setItem(STORAGE_KEYS.SIDEBAR_COLLAPSED, next ? "collapsed" : "expanded");
+    if (pinHadFocus) {
+      queueMicrotask(() => {
+        sidebarRef?.querySelector<HTMLButtonElement>(".app-shell-sidebar-pin")?.focus({ preventScroll: true });
+      });
+    }
+  };
+
+  const renderSidebarPin = () => {
+    const label = () => collapsed() ? "Pin navigation panel" : "Unpin navigation panel";
+    const updateTitle = () => projectsVisible() ? undefined : availableUpdateTitle();
+    return (
+      <button
+        class="btn btn-icon btn-ghost app-shell-sidebar-pin"
+        type="button"
+        onClick={toggleSidebar}
+        aria-controls={`${navigationPanelId} ${projectsPanelId}`}
+        aria-expanded={projectsVisible()}
+        aria-label={label()}
+        aria-description={updateTitle()}
+        title={updateTitle() ? `${label()} · ${updateTitle()}` : label()}
+      >
+        <Show when={collapsed()} fallback={<PinOff size={16} aria-hidden="true" />}>
+          <Pin size={16} aria-hidden="true" />
+        </Show>
+        <Show when={updateTitle()}>
+          <span class="sidebar-pin-update-dot" aria-hidden="true" />
+        </Show>
+      </button>
+    );
   };
 
   const handleProjectMenuOpenChange = (id: string, open: boolean) => {
@@ -579,16 +620,16 @@ export function AppShell(props: {
   });
 
   const renderNavItem = (item: NavItem, desktop = false) => {
+    const href = useHref(useResolvedPath(() => item.href));
     const active = () => activeSection() === item.section;
     const live = () => item.section === "scheduler" && schedulerRunning();
     const label = () => live() ? `${item.label} - task running` : item.label;
     return (
-      <A
-        href={item.href}
-        activeClass=""
-        inactiveClass=""
+      <a
+        href={href() ?? item.href}
+        link
         class={`nav-link ${active() ? "active" : ""} ${live() ? "nav-link--live" : ""}`}
-        aria-current={active() ? "page" : undefined}
+        aria-current={active() ? "location" : undefined}
         aria-label={label()}
         aria-controls={desktop && collapsed() ? navigationPanelId : undefined}
         aria-expanded={desktop && collapsed() ? previewSection() === item.section : undefined}
@@ -620,7 +661,7 @@ export function AppShell(props: {
             <span class="nav-live-text">Running</span>
           </span>
         </Show>
-      </A>
+      </a>
     );
   };
 
@@ -970,31 +1011,6 @@ export function AppShell(props: {
                 if (event.target === event.currentTarget) previewActiveSection(event);
               }}
             >
-              <button
-                ref={sidebarToggle}
-                class={collapsed() ? "brand-mark brand-expand-btn" : "brand-collapse-btn"}
-                type="button"
-                onClick={toggleSidebar}
-                onPointerEnter={previewActiveSection}
-                aria-controls={`${navigationPanelId} ${projectsPanelId}`}
-                aria-expanded={Boolean(panelSection())}
-                aria-label={collapsed() ? "Pin navigation panel" : "Collapse navigation panel"}
-                title={collapsed()
-                  ? (versionInfo()?.has_update
-                    ? `Pin navigation panel · Update available: v${versionInfo()?.latest_version}`
-                    : "Pin navigation panel")
-                  : "Collapse navigation panel"}
-              >
-                <Show when={collapsed()} fallback={<ChevronsLeft size={14} aria-hidden="true" />}>
-                  <span class="brand-expand-icon" aria-hidden="true"><ChevronsRight size={14} /></span>
-                  <span class="brand-expand-default" aria-hidden="true">
-                    <Bot size={16} />
-                    <Show when={versionInfo()?.has_update}>
-                      <span class="brand-collapsed-update-dot" />
-                    </Show>
-                  </span>
-                </Show>
-              </button>
               <For each={navItems}>{(item) => renderNavItem(item, true)}</For>
               {renderSearchButton()}
             </nav>
@@ -1006,34 +1022,9 @@ export function AppShell(props: {
             hidden={!panelSection()}
             data-navigation-section={panelSection()}
           >
-            <div class="brand">
-              <Show when={isMobileViewport()}>
-                <div class="brand-mark" aria-hidden="true">
-                  <Bot size={16} />
-                </div>
-              </Show>
-              <div class="brand-text">
-                <div class="brand-title">Kai Console</div>
-                <button
-                  type="button"
-                  class={`brand-subtitle brand-version-btn ${versionInfo()?.has_update ? "has-update" : ""}`}
-                  onClick={openUpdateDialog}
-                  title={
-                    versionInfo()?.has_update
-                      ? `Update available: v${versionInfo()?.latest_version}`
-                      : `Version v${versionInfo()?.current_version || ""}`
-                  }
-                >
-                  <span>v{versionInfo()?.current_version || "..."}</span>
-                  <Show when={versionInfo()?.has_update}>
-                    <span class="brand-update-badge">
-                      <Sparkles size={11} />
-                      <span>Update: v{versionInfo()?.latest_version}</span>
-                    </span>
-                  </Show>
-                </button>
-              </div>
-              <Show when={isMobileViewport()}>
+            <header class="app-shell-navigation-heading">
+              <h2 class="app-shell-navigation-title">{sidebarTitle()}</h2>
+              <Show when={isMobileViewport()} fallback={projectsVisible() && renderSidebarPin()}>
                 <button
                   class="drawer-close-btn"
                   type="button"
@@ -1043,7 +1034,7 @@ export function AppShell(props: {
                   <X size={18} />
                 </button>
               </Show>
-            </div>
+            </header>
             <Show when={panelSection()} keyed>
               {(section) => (
                 <NavigationSectionPanel
@@ -1064,7 +1055,7 @@ export function AppShell(props: {
         >
           <div class="nav-scroll" onScroll={handleHistoryScroll}>
             <Show when={isMobileViewport()}>
-              <For each={navItems.filter((item) => item.section !== "home")}>{(item) => renderNavItem(item)}</For>
+              <For each={navItems}>{(item) => renderNavItem(item)}</For>
               {renderSearchButton()}
             </Show>
             <div class="nav-history-group open">
@@ -1225,6 +1216,31 @@ export function AppShell(props: {
                 </div>
               </Show>
             </div>
+            <Show
+              when={!isMobileViewport() && !projectsVisible()}
+              fallback={
+                <div class="sidebar-footer-brand">
+                  <div class="brand-title">Kai Console</div>
+                  <button
+                    type="button"
+                    class="brand-subtitle brand-version-btn"
+                    classList={{ "has-update": versionInfo()?.has_update }}
+                    onClick={openUpdateDialog}
+                    title={availableUpdateTitle() ?? `Version v${versionInfo()?.current_version || ""}`}
+                  >
+                    <span>v{versionInfo()?.current_version || "..."}</span>
+                    <Show when={versionInfo()?.has_update}>
+                      <span class="brand-update-badge">
+                        <Sparkles size={11} aria-hidden="true" />
+                        <span>Update: v{versionInfo()?.latest_version}</span>
+                      </span>
+                    </Show>
+                  </button>
+                </div>
+              }
+            >
+              {renderSidebarPin()}
+            </Show>
             <A href="/settings" class="btn btn-icon btn-ghost" title="Settings" aria-label="Settings">
               <Settings size={15} />
             </A>

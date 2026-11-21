@@ -59,8 +59,10 @@ const fixtures = {
   '/dashboard-api/agents/providers': { provider_names: ['test'], default_provider: 'test', default_model: 'demo-model',
     model_catalogs: [{ provider: 'test', provider_type: 'openai', default_model: 'demo-model', models: [{ id: 'demo-model', label: 'Demo model', source: 'config' }] }] },
   '/dashboard-api/chat-history': { threads, has_more: false },
-  '/dashboard-api/scheduler': { jobs: scheduledJobs },
+  '/dashboard-api/scheduler': { jobs: scheduledJobs, identities: [], scheduler_timezone: 'UTC' },
+  '/dashboard-api/system/version': { current_version: '0.1.2', latest_version: '0.1.3', has_update: true },
   '/dashboard-api/workspace/default': { workspace: null },
+  '/scheduler/runs': { runs: [], total: 0 },
 };
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -83,7 +85,7 @@ const server = http.createServer(async (req, res) => {
     res.write('event: snapshot\ndata: {"sessions":[]}\n\n');
     return;
   }
-  if (url.pathname.startsWith('/dashboard-api')) {
+  if (url.pathname.startsWith('/dashboard-api') || url.pathname === '/scheduler/runs') {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'navbar-test-csrf');
     if (url.pathname === '/dashboard-api/nav-projects/threads') {
@@ -230,11 +232,10 @@ try {
   };
   const ready = () => until(() => js('document.querySelectorAll(".nav-history-workspace").length === 3 && !!document.querySelector(".chat-prompt-input") && !document.querySelector(".chat-prompt-input").disabled'), 'chat navigation');
   const panel = '.app-shell-navigation-panel';
-  const openHome = `${panel} a[href="/"]`;
   const newChat = `${panel} .nav-new-chat`;
   const assertHomeActions = async () => {
     assert.deepEqual(await js(`Array.from(document.querySelectorAll('${panel} nav .nav-link'), item => item.textContent.trim())`),
-      ['Open Home', 'New chat'], 'New chat follows Open Home in the Home panel');
+      ['New chat'], 'the Home panel shows the New chat action');
   };
   const key = value => js(`document.querySelector('.sidebar-resize-handle').dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(value)}, bubbles: true }))`);
   const draft = text => js(`{ const input = document.querySelector('.chat-prompt-input'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('input', { bubbles: true })); }`);
@@ -335,7 +336,6 @@ try {
   assert.equal(await js(`document.querySelector('.transcript').textContent.includes('Existing conversation')`), false);
   await send(local);
   await assertHomeActions();
-  assert.ok((await box(newChat)).top >= (await box(openHome)).bottom, 'New chat appears directly below Open Home');
   await draft('Draft from the project workspace');
   await click(newChat);
   assert.equal(await js(`document.querySelector('.chat-prompt-input').value`), '', 'new chat opens a fresh draft on the same route');
@@ -378,7 +378,10 @@ try {
   const rail = '.app-shell-nav-rail';
   const projects = '#app-shell-projects';
   const footer = '.app-shell-sidebar .sidebar-footer-row';
-  const toggle = `${rail} button:first-child`;
+  const toggle = '.app-shell-sidebar-pin';
+  const navTitle = '.app-shell-navigation-title';
+  const headerPin = `.app-shell-navigation-heading ${toggle}`;
+  const footerPin = `${footer} ${toggle}`;
   const searchButton = '.app-shell-sidebar .nav-search';
   const searchDialog = '.conversation-search-dialog';
   const searchInput = `${searchDialog} input[type="search"]`;
@@ -387,21 +390,33 @@ try {
   const railLink = href => `${rail} a[href="${href}"]`;
   const homeLink = railLink('/');
   const repoLink = railLink('/repositories');
-  const previewRows = '.navigation-section-list > li';
+  const previewNav = `${panel} .navigation-section-panel`;
+  const previewRows = `${previewNav} .navigation-section-list > li`;
+  const previewOverflows = () => js(`(() => {
+    const nav = document.querySelector('${previewNav}');
+    return nav.scrollHeight > nav.clientHeight + 1;
+  })()`);
   const outside = { x: 650, y: 280 };
   const panelVisible = () => js(`document.querySelector('${panel}')?.hidden === false`);
   const savedPreference = () => js(`localStorage.getItem('k41-dashboard-sidebar')`);
   const footerDirection = () => js(`getComputedStyle(document.querySelector('${footer}')).flexDirection`);
-  const focusedInPanel = () => js(`document.querySelector('${panel}')?.contains(document.activeElement) ?? false`);
+  const currentNav = scope => js(`Array.from(document.querySelectorAll('${scope} a.nav-link:is(.active, [aria-current])'),
+    item => [item.getAttribute('href'), item.classList.contains('active'), item.getAttribute('aria-current')])`);
   const sectionIs = section => js(`document.querySelector('${panel}')?.dataset.navigationSection === '${section}'`);
+  const titleText = () => js(`document.querySelector('${navTitle}')?.textContent`);
   await until(() => sectionIs('home'), 'the pinned panel uses Home shortcuts on the history page');
+  assert.equal(await titleText(), 'Home');
+  assert.equal(await js(`document.querySelector('${rail}').firstElementChild.getAttribute('href')`), '/', 'Home starts the rail');
   assert.deepEqual(await js(`Array.from(document.querySelectorAll('${rail} a'), item => item.getAttribute('href'))`),
     ['/', '/repositories', '/scheduler']);
+  assert.ok((await box(headerPin)).left >= (await box(navTitle)).right, 'the pin sits to the right of the title');
+  assert.equal(await js(`document.querySelector('${headerPin}').getAttribute('aria-label')`), 'Unpin navigation panel');
   await assertHomeActions();
   assert.equal((await box(projects)).width, 290, 'Projects spans the whole pinned sidebar');
-  assert.equal((await box(projects)).top, (await box(panel)).bottom, 'Projects sits below the shortcut area');
-  const projectsGap = (await box(projects)).top - (await box(searchButton)).bottom;
-  assert.ok(projectsGap >= 0 && projectsGap <= 12, 'Projects starts just below the search icon');
+  const homePanel = await box(panel);
+  const homeProjectsTop = (await box(projects)).top;
+  assert.equal(homeProjectsTop, homePanel.bottom, 'Projects sits below the shortcut area');
+  assert.equal(homeProjectsTop - homePanel.top, 258, 'Home reserves space above Projects');
   assert.equal(await footerDirection(), 'row');
   await move(await center(repoLink));
   assert.equal(await sectionIs('home'), true, 'hovering another item leaves the pinned section on the current route');
@@ -414,9 +429,11 @@ try {
   const homeLinkX = (await box(homeLink)).x;
   await click(toggle);
   await until(async () => await width() === 52, '52px collapsed navigation');
-  assert.equal(await panelVisible(), false, 'unpinning closes the panel while the pointer is still on the rail');
+  assert.equal(await panelVisible(), false, 'unpinning closes the panel');
   assert.equal((await box(projects)).height, 0, 'Projects is hidden while the rail is closed');
   assert.equal(await footerDirection(), 'column');
+  assert.equal(await js(`document.querySelector('${footerPin}').getAttribute('aria-label')`), 'Pin navigation panel');
+  await until(() => js(`!!document.querySelector('${footerPin} .sidebar-pin-update-dot')`), 'update indicator on the footer pin');
   assert.equal((await box(homeLink)).x, homeLinkX, 'primary icons keep their position');
   assert.equal(await savedPreference(), 'collapsed');
   const mainBox = await box('.main');
@@ -425,7 +442,7 @@ try {
   await until(() => sectionIs('home'), 'hovering the rail background opens Home shortcuts on the history page');
   assert.equal(await width(), 290, 'hover expands the whole sidebar');
   assert.equal((await box(projects)).width, 290);
-  assert.equal((await box(projects)).top - (await box(searchButton)).bottom, projectsGap, 'hover uses the same compact header as pinned navigation');
+  assert.equal((await box(projects)).top, homeProjectsTop, 'hover and pinned Home use the same divider position');
   assert.equal(await footerDirection(), 'row');
   assert.deepEqual(await box('.main'), mainBox, 'opening the full sidebar leaves the page in place');
   await move({ x: 160, y: 400 });
@@ -445,6 +462,21 @@ try {
   await delay(200);
   assert.equal(await panelVisible(), true, 'the panel stays open when the pointer crosses into it');
 
+  const pinBounds = await js(`(() => {
+    const sidebar = document.querySelector('.app-shell-sidebar');
+    const before = sidebar.getBoundingClientRect().toJSON();
+    document.querySelector('${headerPin}').click();
+    return { before, after: sidebar.getBoundingClientRect().toJSON() };
+  })()`);
+  assert.deepEqual(pinBounds.after, pinBounds.before, 'pinning keeps the already open sidebar in place');
+  await until(async () => (await box('.main')).left === pinBounds.before.right, 'the page reflows beside the pinned sidebar');
+  assert.equal((await box('.main')).right, mainBox.right, 'the page fits in the remaining width');
+  await click(headerPin);
+  await move(outside);
+  await until(async () => await width() === 52, 'unpinning restores the rail');
+  await move(await center(homeLink));
+  await until(panelVisible, 'reopen Home preview before searching');
+
   const requestsBeforeSearch = historyRequests;
   await click(searchButton);
   await until(() => js(`document.activeElement.matches('${searchInput}')`), 'search focuses the query field');
@@ -463,14 +495,19 @@ try {
 
   await move(await center(repoLink));
   await until(() => sectionIs('repositories'), 'repository preview from its own icon');
+  assert.equal(await titleText(), 'Repositories');
+  assert.deepEqual(await currentNav(rail), [['/', true, 'location']], 'Home remains the current section during preview');
+  assert.equal(await js(`document.querySelector('${headerPin}').getAttribute('aria-label')`), 'Pin navigation panel');
   await until(() => Boolean(releaseRepositoryPreview), 'repository request starts on hover');
   assert.ok(await js(`document.querySelector('.navigation-section-panel [role="status"]').textContent.includes('Loading')`));
   await move(await center(railLink('/scheduler')));
   await until(() => sectionIs('scheduler'), 'scheduler preview while the repository request is still pending');
+  assert.equal(await titleText(), 'Scheduler');
   releaseRepositoryPreview();
   await until(() => js(`document.querySelectorAll('${previewRows} .navigation-section-detail').length === 5`), 'five upcoming jobs');
   assert.deepEqual(await js(`Array.from(document.querySelectorAll('${previewRows} .nav-label'), item => item.textContent)`),
     ['Job 1', 'Job 2', 'Job 3', 'Job 4', 'Job 5']);
+  assert.equal(await previewOverflows(), false, 'all five upcoming jobs fit in the scheduler preview');
   assert.equal(await sectionIs('scheduler'), true, 'the previous request cannot replace the current panel');
 
   await move(await center(repoLink));
@@ -480,7 +517,15 @@ try {
   await until(() => js(`document.querySelectorAll('${previewRows} a').length === 6`), 'retry loads six repository links');
   assert.deepEqual(await js(`Array.from(document.querySelectorAll('${previewRows} a'), item => item.getAttribute('href'))`),
     [1, 2, 3, 4, 5, 6].map(id => `/repositories/${id}`));
+  assert.equal(await previewOverflows(), false, 'all six repositories fit in the preview');
   assert.equal(await js('location.pathname'), '/history', 'hovering sections leaves the current route intact');
+
+  await viewport(1600, 320);
+  await until(previewOverflows, 'repository preview scrolls on a short viewport');
+  assert.ok((await box(panel)).height <= 192, 'the header fits within 60% of the short viewport');
+  assert.ok((await box(projects)).height > 0, 'Projects remains visible below the short preview');
+  await viewport(1600);
+  await until(async () => !(await previewOverflows()), 'repository rows fit again when the viewport grows');
 
   showManagedProject = true;
   await move(await center(homeLink));
@@ -533,43 +578,67 @@ try {
   assert.equal(await hasFocus(homeLink), true, 'Tab reaches the Home icon');
   assert.equal(await sectionIs('home'), true, 'keyboard focus opens the matching preview');
   await press('ArrowRight', 39);
-  assert.equal(await focusedInPanel(), true, 'ArrowRight places focus in the matching panel');
-  await press('Tab', 9);
-  assert.equal(await hasFocus(newChat), true, 'New chat follows Open Home in keyboard order');
+  assert.equal(await hasFocus(newChat), true, 'ArrowRight focuses New chat in the Home preview');
   await press('Escape', 27);
   assert.equal(await panelVisible(), false);
   assert.equal(await hasFocus(homeLink), true, 'Escape restores focus to the initiating icon');
   await press('Tab', 9);
   assert.equal(await hasFocus(repoLink), true, 'Tab moves to the next icon after Escape');
   assert.equal(await sectionIs('repositories'), true, 'the next focused icon opens its own preview');
-  await js(`document.querySelector('${toggle}').focus()`);
+  for (let steps = 0; steps < 4 && !(await hasFocus(headerPin)); steps++) await press('Tab', 9);
+  assert.equal(await hasFocus(headerPin), true, 'Tab reaches the pin in the preview heading');
   await press('Enter', 13);
   assert.equal(await savedPreference(), 'expanded', 'Enter activates the focused toggle');
   await until(async () => await width() === 290, 'keyboard pins the panel');
   assert.equal(await sectionIs('home'), true, 'pinning opens Home shortcuts on the history page');
+  assert.equal(await titleText(), 'Home');
+  await press('Enter', 13);
+  await until(() => hasFocus(footerPin), 'unpinning moves keyboard focus to the footer pin');
+  await press('Enter', 13);
+  await until(() => hasFocus(headerPin), 'pinning moves keyboard focus to the heading pin');
   await call('Page.reload');
   await until(async () => await width() === 290 && await panelVisible(), 'pinned preference survives reload');
-  await click(toggle);
+  await click(repoLink);
+  await until(async () => await titleText() === 'Repositories' && await sectionIs('repositories'), 'title follows the active repository page');
+  assert.equal(await js(`document.querySelector('${panel} .navigation-section-page-link').classList.contains('active')`), false,
+    'the repositories shortcut uses the action style on its own page');
+  await click(headerPin);
   await viewport(981, 800);
   await until(async () => await width() === 52, '52px desktop navigation at 981px');
   await call('Emulation.setTouchEmulationEnabled', { enabled: true });
-  const touchToggle = await center(toggle);
-  const tapToggle = async () => {
+  const tapToggle = async selector => {
+    const touchToggle = await center(selector);
     await call('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [touchToggle] });
     await call('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   };
-  await tapToggle();
-  await until(async () => await width() > 52 && await panelVisible(), 'touch opens the pinned desktop panel');
-  await tapToggle();
+  await tapToggle(footerPin);
+  await until(async () => await width() === 245 && await panelVisible(), 'touch opens the pinned desktop panel');
+  await tapToggle(headerPin);
   await until(async () => await width() === 52, 'touch collapses the desktop panel');
   await viewport(980, 800);
   await until(() => js(`!document.querySelector('${rail}') && !!document.querySelector('.topbar-menu-toggle')`), 'drawer layout at 980px');
   console.log('PASS: 52px rail, overlay geometry, mouse and keyboard preview, submenu actions, scroll position, desktop touch, and saved preferences.');
 
   await viewport(390, 844);
+  const mobileNav = '.app-shell-sidebar';
+  await js(`document.querySelector('.topbar-menu-toggle').click()`);
+  await until(() => js(`document.querySelector('.app-layout--drawer-open ${navTitle}')?.textContent === 'Repositories'`), 'mobile title follows the active page');
+  assert.equal(await js(`!!document.querySelector('.app-shell-navigation-heading .drawer-close-btn')`), true);
+  assert.equal(await js(`!!document.querySelector('${toggle}')`), false);
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('${mobileNav} a.nav-link'), item => item.getAttribute('href'))`),
+    ['/', '/repositories', '/scheduler'], 'all three primary destinations appear once in the mobile drawer');
+  assert.deepEqual(await currentNav(mobileNav), [['/repositories', true, 'location']]);
+  await js(`document.querySelector('${mobileNav} a.nav-link[href="/scheduler"]').click()`);
+  await until(() => js(`location.pathname === '/scheduler' && document.querySelector('${navTitle}')?.textContent === 'Scheduler'
+    && !document.querySelector('.app-layout--drawer-open')`), 'the Scheduler link opens the route and closes the drawer');
+  await js(`document.querySelector('.topbar-menu-toggle').click()`);
+  assert.deepEqual(await currentNav(mobileNav), [['/scheduler', true, 'location']]);
+  await js(`document.querySelector('.nav-history-all-btn').click()`);
+  await until(() => js(`location.pathname === '/history' && !!document.querySelector('.select-control-trigger')`), 'return to the history page');
   await js(`document.querySelector('.topbar-menu-toggle').click()`);
   await until(() => js(`document.querySelector('.app-layout').classList.contains('app-layout--drawer-open') && document.querySelectorAll('.nav-history-workspace').length === 3`), 'mobile project drawer with saved desktop collapse');
   await assertHomeActions();
+  assert.deepEqual(await currentNav(mobileNav), [['/', true, 'location']], 'history belongs to the Home section');
   assert.equal(await js(`document.querySelectorAll('.app-shell-sidebar a.nav-link:is([href="/chat"], [href="/history"])').length`), 0);
   assert.equal(await js(`!!document.querySelector('.sidebar-resize-handle')`), false);
   await until(() => js(`getComputedStyle(document.querySelector('.nav-project-add')).opacity === '1'`), 'visible mobile project action');
@@ -604,8 +673,8 @@ try {
 
   if (process.env.NAVBAR_SCREENSHOT) {
     await viewport(1600);
-    await until(() => js(`!!document.querySelector('.brand-expand-btn')`), 'desktop sidebar toggle');
-    await js(`document.querySelector('.brand-expand-btn').click()`);
+    await until(() => js(`!!document.querySelector('${footerPin}')`), 'desktop sidebar pin');
+    await js(`document.querySelector('${footerPin}').click()`);
     await delay(250);
     const screenshot = await call('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(process.env.NAVBAR_SCREENSHOT, Buffer.from(screenshot.data, 'base64'));

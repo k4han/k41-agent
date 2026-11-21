@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Kai Console · Hover navigation</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: light-dark(#fafafa, #0a0a0a);
+      --fg: light-dark(#0a0a0a, #fafafa);
+      --muted: light-dark(#595959, #a3a3a3);
+      --muted-2: light-dark(#6b6b6b, #949494);
+      --surface: light-dark(#ffffff, #111111);
+      --surface-2: light-dark(#f5f5f5, #171717);
+      --surface-3: light-dark(#ededed, #262626);
+      --border: light-dark(#e5e5e5, rgb(255 255 255 / .10));
+      --border-strong: light-dark(#d4d4d4, rgb(255 255 255 / .16));
+      --accent: light-dark(#0a0a0a, #ffffff);
+      --accent-fg: light-dark(#ffffff, #0a0a0a);
+      --info: light-dark(#2563eb, #60a5fa);
+      --shadow: 0 20px 50px light-dark(rgb(0 0 0 / .08), rgb(0 0 0 / .50));
+      --rail-width: 52px;
+      --sidebar-width: 370px;
+      font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    body, h1, h2, p { margin: 0; }
+    button, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    [hidden] { display: none !important; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .icon {
+      display: block;
+      width: 15px;
+      height: 15px;
+      flex: none;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: var(--rail-width) minmax(0, 1fr);
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+    }
+
+    .sidebar-slot { position: relative; z-index: 1; min-height: 0; }
+    .sidebar {
+      position: absolute;
+      inset: 0 auto 0 0;
+      display: flex;
+      flex-direction: column;
+      width: var(--rail-width);
+      background: var(--surface);
+    }
+
+    .sidebar::after {
+      position: absolute;
+      inset: 0 0 0 auto;
+      border-inline-end: 1px solid var(--border);
+      pointer-events: none;
+      content: "";
+    }
+
+    .sidebar[data-open] {
+      width: min(var(--sidebar-width), 100vw);
+      border-radius: 0 10px 10px 0;
+      box-shadow: var(--shadow);
+    }
+    .sidebar::after { border-radius: inherit; }
+
+    .rail {
+      position: relative;
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+      gap: 3px;
+      padding: 9px 8px;
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+
+    .sidebar[data-open] .rail { flex: none; }
+    .sidebar[data-open] .rail::after {
+      position: absolute;
+      inset: 0 auto 0 calc(var(--rail-width) - 1px);
+      border-inline-start: 1px solid var(--border);
+      pointer-events: none;
+      content: "";
+    }
+
+    .icon-button {
+      position: relative;
+      display: grid;
+      flex: none;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+    }
+
+    .icon-button:hover { background: var(--surface-2); color: var(--fg); }
+
+    .rail-button {
+      display: flex;
+      width: 100%;
+      height: 36px;
+      align-items: center;
+      text-align: left;
+    }
+    .rail-icon {
+      display: grid;
+      flex: 0 0 36px;
+      place-items: center;
+    }
+    .rail-label {
+      display: none;
+      min-width: 0;
+      padding-inline: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sidebar[data-open] .rail-label { display: block; }
+    .rail-button[aria-current] { background: var(--surface-3); color: var(--fg); }
+    .rail-button[aria-current]::before {
+      position: absolute;
+      inset: 7px auto 7px 0;
+      width: 3px;
+      border-radius: 0 2px 2px 0;
+      background: var(--accent);
+      content: "";
+    }
+
+    .nav-link, .thread-link, .page-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      min-width: 0;
+      min-height: 34px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+    }
+
+    .nav-link:hover, .thread-link:hover, .page-row:hover { background: var(--surface-2); color: var(--fg); }
+    .nav-link > span, .thread-link > span, .project-name, .chat-title, .workspace-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nav-link .trailing, .page-row .trailing { margin-inline-start: auto; color: var(--muted-2); }
+    .scheduled-entry { display: grid; min-width: 0; gap: 2px; padding-block: 5px; }
+    .scheduled-entry > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .scheduled-time { color: var(--muted-2); font-size: .75rem; font-variant-numeric: tabular-nums; }
+
+    .projects { display: flex; flex: 1; flex-direction: column; min-height: 0; border-top: 1px solid var(--border); }
+    .projects-header { display: flex; flex: none; align-items: center; gap: 2px; padding: 8px 16px 6px 18px; color: var(--muted-2); }
+    .projects-header h2 { margin-inline-end: auto; font-size: inherit; font-weight: 400; }
+    .projects-header .icon-button, .project-add { width: 28px; height: 28px; }
+    .manage {
+      padding: 4px 6px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted-2);
+      font-size: .75rem;
+    }
+
+    .manage:hover { background: var(--surface-2); color: var(--fg); }
+    .project-list { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 10px 10px; scrollbar-width: thin; }
+    .project-group + .project-group { margin-top: 4px; }
+    .project-heading { display: flex; align-items: center; gap: 2px; min-width: 0; border-radius: 7px; }
+    .project-heading:is(:hover, :focus-within) { background: var(--surface-2); }
+    .project-toggle { gap: 9px; color: var(--fg); font-weight: 500; }
+    .project-toggle .caret, .project-pin { width: 12px; height: 12px; color: var(--muted-2); }
+    .project-toggle[aria-expanded="true"] .caret { transform: rotate(90deg); }
+    .project-add { margin-inline-end: 3px; opacity: 0; pointer-events: none; }
+    .project-heading:is(:hover, :focus-within) .project-add { opacity: 1; pointer-events: auto; }
+    .project-add:hover { background: var(--surface-3); }
+    .project-threads { display: grid; gap: 2px; margin: 2px 0 8px 15px; padding-inline-start: 12px; border-inline-start: 1px solid var(--border); }
+    .thread-link { gap: 6px; padding: 0 5px 0 8px; border-radius: 7px; }
+    .thread-link .icon { width: 12px; height: 12px; }
+    .thread-link[aria-current="page"] { background: var(--surface-3); color: var(--fg); }
+
+    .sidebar-footer {
+      display: flex;
+      flex: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 9px 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    .sidebar:not([data-open]) .sidebar-footer { flex-direction: column; padding: 8px 0; }
+    .sidebar:not([data-open]) .footer-brand, .sidebar-toggle { display: none; }
+    .footer-brand { display: grid; flex: 1; min-width: 0; text-align: center; line-height: 1.25; }
+    .brand-title { font-weight: 650; }
+    .brand-version { color: var(--muted); font-size: .75rem; }
+    .avatar {
+      display: grid;
+      place-items: center;
+      width: 26px;
+      height: 26px;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      background: var(--surface-2);
+      font-size: .75rem;
+      font-weight: 600;
+    }
+
+    .workspace { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
+    .chat-header { display: flex; flex: none; min-height: 48px; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 14px; }
+    .chat-title { flex: 0 1 auto; font-size: inherit; font-weight: 650; line-height: 1.2; }
+    .workspace-context { display: flex; align-items: center; gap: 5px; min-width: 0; max-width: 42%; color: var(--muted); white-space: nowrap; }
+    .workspace-name { color: var(--fg); font-weight: 650; }
+    .workspace-kind { flex: none; font-size: .75rem; }
+    .workspace-view { flex: 1; min-height: 0; overflow: auto; }
+    .workspace-content { width: min(960px, 100% - 32px); margin: 20px auto 24px; }
+    .messages { display: grid; gap: 24px; }
+    .user-message {
+      justify-self: end;
+      max-width: min(100%, 650px);
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--surface-3);
+      overflow-wrap: anywhere;
+    }
+
+    .agent-message { max-width: 720px; padding-inline: 3px; line-height: 1.65; }
+    .new-chat-heading { margin-top: 12vh; text-align: center; font-size: 1.25rem; font-weight: 650; }
+    .view-detail { margin-bottom: 10px; color: var(--muted); }
+    .view-list { display: grid; gap: 5px; padding: 0; margin: 0; list-style: none; }
+    .page-row { padding: 9px 12px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); overflow-wrap: anywhere; }
+
+    .composer {
+      flex: none;
+      width: min(960px, 100% - 32px);
+      margin: 0 auto 14px;
+      padding: 10px 10px 7px;
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      background: light-dark(var(--surface), var(--surface-2));
+    }
+
+    .composer:focus-within { border-color: color-mix(in srgb, var(--info) 55%, var(--border-strong)); }
+    .composer textarea { display: block; width: 100%; resize: none; padding: 4px 6px; border: 0; outline: 0; background: transparent; }
+    .composer textarea::placeholder { color: var(--muted); }
+    .composer-footer { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding-inline-start: 6px; }
+    .composer-agent { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: .8125rem; }
+    .composer-footer button { border: 1px solid var(--border); background: var(--accent); color: var(--accent-fg); }
+    .composer-footer button:hover { background: var(--muted); color: var(--surface); }
+    .composer-footer button:disabled { cursor: default; background: var(--surface-2); color: var(--muted-2); }
+
+    .search-dialog {
+      width: min(480px, 100% - 32px);
+      max-height: 80dvh;
+      padding: 14px;
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      background: var(--surface);
+      color: var(--fg);
+      box-shadow: var(--shadow);
+    }
+    .search-dialog::backdrop { background: rgb(0 0 0 / .5); }
+    .search-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .search-heading h2 { font-size: 1rem; }
+    .search-input {
+      width: 100%;
+      margin: 8px 0 10px;
+      padding: 8px 10px;
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      background: var(--surface-2);
+      color: var(--fg);
+      font: inherit;
+    }
+
+    @media (max-width: 760px) {
+      .chat-header { gap: 8px; padding-inline: 10px; }
+      .workspace-kind { display: none; }
+      .workspace-content, .composer { width: calc(100% - 20px); }
+    }
+
+    @media (hover: none), (pointer: coarse) {
+      .rail { padding-inline: 4px; }
+      .rail-button { height: 44px; }
+      .rail-icon { flex-basis: 44px; }
+      .rail-label { padding-inline: 8px; }
+      .sidebar-toggle { display: grid; width: 44px; height: 44px; }
+      .project-add { opacity: 1; pointer-events: auto; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <symbol id="icon-bot" viewBox="0 0 24 24"><path d="M12 8V4H8m8 8v2m-8-2v2M2 14h2m16 0h2"/><rect x="4" y="8" width="16" height="12" rx="2"/></symbol>
+    <symbol id="icon-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="icon-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm6 11v-7h6v7"/></symbol>
+    <symbol id="icon-chat" viewBox="0 0 24 24"><path d="M21 15a3 3 0 0 1-3 3H8l-5 3V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3z"/></symbol>
+    <symbol id="icon-repositories" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v10m12 0V8a3 3 0 0 0-3-3h-1m2-2-2 2 2 2"/></symbol>
+    <symbol id="icon-scheduler" viewBox="0 0 24 24"><path d="M10 21H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3M3 10h12m-7-7v4m8-4v4"/><circle cx="17" cy="17" r="5"/><path d="M17 14.5V17l1.5 1"/></symbol>
+    <symbol id="icon-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 1 2.5 6.2M3 6v6h6m3-5v5l3 2"/></symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></symbol>
+    <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3 18V6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="icon-pin" viewBox="0 0 24 24"><path d="M15 4h4l-2 4v5l2 2v1H5v-1l2-2V8L5 4zm-3 12v6"/></symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m9 3-.6 2.7-2 .9L4 5.8l-2 3.5 2 1.8v1.8l-2 1.8 2 3.5 2.4-.8 2 .9L9 21h4l.7-2.7 2-.9 2.4.8 2-3.5-2-1.8v-1.8l2-1.8-2-3.5-2.4.8-2-.9L13 3z"/></symbol>
+    <symbol id="icon-up" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+  </svg>
+
+  <div class="layout" id="layout">
+    <div class="sidebar-slot">
+      <aside class="sidebar" id="sidebar" aria-label="Dashboard sidebar">
+        <nav class="rail" id="nav-rail" aria-label="Main navigation"></nav>
+        <section class="projects" id="projects" aria-labelledby="projects-title" hidden>
+          <div class="projects-header">
+            <h2 id="projects-title">Projects</h2>
+            <button class="manage" type="button" data-view="projects">Manage</button>
+            <button class="icon-button" id="conversation-search" type="button" aria-haspopup="dialog" aria-label="Search conversations" title="Search conversations">
+              <svg class="icon" aria-hidden="true"><use href="#icon-search"/></svg>
+            </button>
+            <button class="icon-button" type="button" data-view="history" aria-label="View all history" title="View all history"><svg class="icon" aria-hidden="true"><use href="#icon-history"/></svg></button>
+          </div>
+          <div class="project-list" id="project-list"></div>
+        </section>
+
+        <footer class="sidebar-footer">
+          <button class="icon-button" type="button" data-view="account" aria-label="Account" title="Account"><span class="avatar" aria-hidden="true">A</span></button>
+          <div class="footer-brand">
+            <span class="brand-title">Kai Console</span>
+            <span class="brand-version">v0.1.48</span>
+          </div>
+          <button class="icon-button sidebar-toggle" id="sidebar-toggle" type="button" aria-controls="nav-rail projects" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+            <svg class="icon" aria-hidden="true"><use href="#icon-panel"/></svg>
+          </button>
+          <button class="icon-button" type="button" data-view="settings" aria-label="Settings" title="Settings"><svg class="icon" aria-hidden="true"><use href="#icon-settings"/></svg></button>
+        </footer>
+      </aside>
+    </div>
+
+    <main class="workspace" aria-labelledby="workspace-title">
+      <header class="chat-header">
+        <h1 class="chat-title" id="workspace-title" tabindex="-1"></h1>
+        <div class="workspace-context" id="workspace-context"></div>
+      </header>
+      <div class="workspace-view" id="workspace-view">
+        <div class="workspace-content" id="workspace-content"></div>
+      </div>
+      <form class="composer" id="composer">
+        <textarea rows="2" aria-label="Message" placeholder="Reply…"></textarea>
+        <div class="composer-footer">
+          <span class="composer-agent"><svg class="icon" aria-hidden="true"><use href="#icon-bot"/></svg>Default</span>
+          <button class="icon-button" type="submit" aria-label="Send sample message" title="Send sample message" disabled><svg class="icon" aria-hidden="true"><use href="#icon-up"/></svg></button>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <dialog class="search-dialog" id="search-dialog" aria-labelledby="search-title">
+    <header class="search-heading">
+      <h2 id="search-title">Search conversations</h2>
+      <form method="dialog">
+        <button class="icon-button" type="submit" aria-label="Close search" title="Close search">
+          <svg class="icon" aria-hidden="true"><use href="#icon-close"/></svg>
+        </button>
+      </form>
+    </header>
+    <input class="search-input" id="search-input" type="search" aria-label="Search by title or project" placeholder="Search by title or project" autofocus>
+    <ul class="view-list" id="search-results" aria-label="Conversations"></ul>
+  </dialog>
+
+  <script>
+    const navItems = [
+      { view: "home", label: "Home", icon: "home" },
+      { view: "new", label: "New chat", icon: "plus" },
+      { view: "scheduler", label: "Scheduler", icon: "scheduler" },
+      { view: "repositories", label: "Repositories", icon: "repositories" },
+    ];
+
+    const projects = [
+      {
+        name: "kaka-agent-v2", pinned: true, open: true, threads: [
+          { id: "providers", title: "Refine provider connection settings", prompt: "Review the provider connection screen and suggest where to show empty states.", reply: "Keep the connection list in place when there are no providers. Show the add action directly under its heading so it stays in the same spot when a connection is added." },
+          { id: "queue", title: "Review the message queue", prompt: "Check where queued messages appear in a conversation.", reply: "Show pending messages next to the composer so users can edit or remove them before sending." },
+          { id: "layout", title: "Review responsive workspace layout", prompt: "Check the console layout at tablet width.", reply: "Give the transcript the available space and open navigation in a drawer at narrow widths." },
+        ],
+      },
+      { name: "dashboard-lab", icon: "repositories", open: true, threads: [{ id: "charts", title: "Check the activity charts", prompt: "Review the activity chart labels.", reply: "Use the same date format on both axes and reserve the full timestamp for the tooltip." }] },
+      { name: "release-notes", threads: [{ id: "release", title: "Draft the next release summary", prompt: "Draft a summary of the latest navigation changes.", reply: "Group the notes by workspace, navigation, and chat so readers can find changes that affect their workflow." }] },
+      { name: "ops-sandbox", threads: [{ id: "jobs", title: "Review scheduled runs", prompt: "Check which scheduled jobs run before the nightly build.", reply: "The health check runs first, followed by the repository sync." }] },
+      { name: "No workspace", threads: [{ id: "scratch", title: "Collect onboarding ideas", prompt: "Suggest the first step for a new workspace.", reply: "Start with a sample project and one conversation so the user can see how chats are grouped." }] },
+    ];
+
+    const conversations = projects.flatMap(project => project.threads.map(thread => ({ ...thread, project: project.name })));
+    const historyItems = conversations.map(thread => ({ label: thread.title, icon: "chat", thread: thread.id }));
+    const repositories = [
+      { label: "kai/kaka-agent-v2", icon: "repositories", project: "kaka-agent-v2" },
+      { label: "kai/dashboard-lab", icon: "repositories", project: "dashboard-lab" },
+    ];
+    const jobs = [
+      { label: "Workspace health check", time: "09:00 · Nov 22, 2026", view: "health-check" },
+      { label: "Repository sync", time: "18:00 · Nov 22, 2026", view: "repository-sync" },
+    ];
+    const views = {
+      home: { title: "Home", items: [{ label: "New chat", icon: "plus", view: "new" }, { label: "Manage projects", icon: "folder", view: "projects" }] },
+      repositories: { title: "Repositories", items: repositories },
+      scheduler: { title: "Scheduler", detail: "Upcoming jobs", items: jobs },
+      "health-check": { title: "Workspace health check", section: "scheduler", detail: "Runs daily at 09:00." },
+      "repository-sync": { title: "Repository sync", section: "scheduler", detail: "Runs daily at 18:00." },
+      history: { title: "Chat history", section: "home", items: historyItems },
+      projects: { title: "Projects", section: "home", items: projects.map(project => ({ label: project.name, icon: project.icon ?? "folder", project: project.name })) },
+      settings: { title: "Settings", detail: "Workspace preferences" },
+      account: { title: "Account", detail: "Alex Morgan" },
+      new: { title: "New chat", section: "home" },
+    };
+
+    const layout = document.getElementById("layout");
+    const sidebar = document.getElementById("sidebar");
+    const rail = document.getElementById("nav-rail");
+    const sidebarToggle = document.getElementById("sidebar-toggle");
+    const projectsPanel = document.getElementById("projects");
+    const projectList = document.getElementById("project-list");
+    const searchDialog = document.getElementById("search-dialog");
+    const searchInput = document.getElementById("search-input");
+    const searchResults = document.getElementById("search-results");
+    const workspaceTitle = document.getElementById("workspace-title");
+    const workspaceContext = document.getElementById("workspace-context");
+    const workspaceView = document.getElementById("workspace-view");
+    const workspaceContent = document.getElementById("workspace-content");
+    const composer = document.getElementById("composer");
+    const draft = composer.querySelector("textarea");
+    const sendButton = composer.querySelector("button");
+    const hoverPointer = matchMedia("(any-hover: hover)");
+
+    let activeSection = "home";
+    let sidebarOpen = false;
+    let sidebarTrigger;
+    let closeTimer;
+    let openedByToggle = false;
+    let restoringFocus = false;
+
+    function icon(name, className = "") {
+      return `<svg class="icon ${className}" aria-hidden="true"><use href="#icon-${name}"/></svg>`;
+    }
+
+    function action(item, className = "nav-link", trailing = "") {
+      const destination = item.thread ? `data-thread="${item.thread}"`
+        : item.project ? `data-project="${item.project}"` : `data-view="${item.view}"`;
+      const leading = item.icon ? icon(item.icon) : "";
+      const label = item.time
+        ? `<span class="scheduled-entry"><span>${item.label}</span><span class="scheduled-time">${item.time}</span></span>`
+        : `<span>${item.label}</span>`;
+      return `<button type="button" class="${className}" ${destination} title="${item.label}">${leading}${label}${trailing}</button>`;
+    }
+
+    rail.innerHTML = navItems.map(item => `
+      <button class="icon-button rail-button" type="button" data-view="${item.view}" aria-label="${item.label}" title="${item.label}">
+        <span class="rail-icon">${icon(item.icon)}</span><span class="rail-label">${item.label}</span>
+      </button>
+    `).join("");
+    const navButtons = [...rail.querySelectorAll(".rail-button")];
+
+    projectList.innerHTML = projects.map((project, index) => `
+      <div class="project-group">
+        <div class="project-heading">
+          <button class="nav-link project-toggle" type="button" aria-expanded="${Boolean(project.open)}" aria-controls="project-threads-${index}" title="${project.name}">
+            ${icon(project.icon ?? "folder")}<span class="project-name">${project.name}</span>${icon("chevron", "caret")}${project.pinned ? icon("pin", "project-pin") : ""}
+          </button>
+          <button class="icon-button project-add" type="button" data-new-project="${project.name}" aria-label="New chat in ${project.name}" title="New chat in ${project.name}">${icon("plus")}</button>
+        </div>
+        <div class="project-threads" id="project-threads-${index}" ${project.open ? "" : "hidden"}>
+          ${project.threads.map(thread => action({ label: thread.title, icon: "chat", thread: thread.id }, "thread-link")).join("")}
+        </div>
+      </div>
+    `).join("");
+
+    function setProjectOpen(button, open) {
+      button.setAttribute("aria-expanded", String(open));
+      document.getElementById(button.getAttribute("aria-controls")).hidden = !open;
+    }
+
+    function renderSidebar() {
+      sidebar.toggleAttribute("data-open", sidebarOpen);
+      projectsPanel.hidden = !sidebarOpen;
+
+      const toggleLabel = sidebarOpen ? "Collapse sidebar" : "Expand sidebar";
+      sidebarToggle.setAttribute("aria-label", toggleLabel);
+      sidebarToggle.setAttribute("aria-expanded", String(sidebarOpen));
+      sidebarToggle.title = toggleLabel;
+      for (const button of navButtons) {
+        if (button.dataset.view === activeSection) button.setAttribute("aria-current", "location");
+        else button.removeAttribute("aria-current");
+      }
+    }
+
+    function openSidebar(trigger = navButtons.find(button => button.dataset.view === activeSection) ?? navButtons[0]) {
+      clearTimeout(closeTimer);
+      if (sidebarOpen) return;
+      sidebarOpen = true;
+      sidebarTrigger = trigger;
+      renderSidebar();
+    }
+
+    function closeSidebar(restoreFocus = false) {
+      clearTimeout(closeTimer);
+      if (!sidebarOpen) return;
+      const trigger = restoreFocus && projectsPanel.contains(document.activeElement) ? sidebarTrigger : undefined;
+      sidebarOpen = false;
+      sidebarTrigger = undefined;
+      openedByToggle = false;
+      renderSidebar();
+      if (trigger) {
+        restoringFocus = true;
+        trigger.focus({ preventScroll: true });
+        restoringFocus = false;
+      }
+    }
+
+    function isHover(event) {
+      return hoverPointer.matches && event.pointerType !== "touch" && event.buttons === 0;
+    }
+
+    function scheduleClose() {
+      clearTimeout(closeTimer);
+      if (!sidebarOpen) return;
+      closeTimer = setTimeout(() => {
+        if (!openedByToggle && !searchDialog.open && !sidebar.matches(":hover") && !sidebar.querySelector(":focus-visible")) closeSidebar();
+      }, 150);
+    }
+
+    sidebar.addEventListener("pointerenter", () => clearTimeout(closeTimer));
+    sidebar.addEventListener("pointerleave", event => {
+      if (event.pointerType !== "touch") scheduleClose();
+    });
+    rail.addEventListener("pointerenter", event => {
+      if (isHover(event) && !searchDialog.open) openSidebar();
+    });
+    rail.addEventListener("focusin", event => {
+      if (!restoringFocus && event.target.matches(":focus-visible")) openSidebar(event.target);
+    });
+    sidebar.addEventListener("focusout", event => {
+      if (!sidebar.contains(event.relatedTarget)) scheduleClose();
+    });
+
+    document.addEventListener("pointerdown", event => {
+      if (!searchDialog.open && !sidebar.contains(event.target)) closeSidebar();
+    });
+
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Escape" || !sidebarOpen || searchDialog.open) return;
+      event.preventDefault();
+      closeSidebar(true);
+    });
+
+    sidebarToggle.addEventListener("click", () => {
+      if (sidebarOpen) closeSidebar();
+      else {
+        openedByToggle = true;
+        openSidebar(sidebarToggle);
+      }
+    });
+
+    function showWorkspace(view, thread, project, focus = false) {
+      const page = thread ? { title: thread.title, section: "home" } : views[view];
+      const context = thread?.project ?? project;
+      const chat = Boolean(thread) || view === "new";
+      activeSection = page.section ?? view;
+      renderSidebar();
+
+      workspaceTitle.title = workspaceTitle.textContent = page.title;
+      workspaceContext.innerHTML = context
+        ? `${icon("folder")}<span class="workspace-name">${context}</span><span class="workspace-kind">· Local</span>` : "";
+      workspaceContent.innerHTML = chat
+        ? `<div class="messages" id="messages" aria-live="polite">${thread
+          ? `<p class="user-message">${thread.prompt}</p><p class="agent-message">${thread.reply}</p>`
+          : '<h2 class="new-chat-heading">Start a conversation</h2>'}</div>`
+        : `${page.detail ? `<p class="view-detail">${page.detail}</p>` : ""}
+           ${page.items ? `<ul class="view-list">${page.items.map(item => `<li>${action(item, "page-row", icon("chevron", "trailing"))}</li>`).join("")}</ul>` : ""}`;
+
+      for (const link of projectList.querySelectorAll(".thread-link")) {
+        if (link.dataset.thread === thread?.id) {
+          link.setAttribute("aria-current", "page");
+          setProjectOpen(link.closest(".project-group").querySelector(".project-toggle"), true);
+        } else {
+          link.removeAttribute("aria-current");
+        }
+      }
+      composer.hidden = !chat;
+      draft.value = "";
+      sendButton.disabled = true;
+      workspaceView.scrollTop = 0;
+      if (focus) workspaceTitle.focus({ preventScroll: true });
+    }
+
+    layout.addEventListener("click", event => {
+      const projectToggle = event.target.closest(".project-toggle");
+      if (projectToggle) {
+        setProjectOpen(projectToggle, projectToggle.getAttribute("aria-expanded") === "false");
+        return;
+      }
+      const target = event.target.closest("button[data-view], button[data-thread], button[data-project], button[data-new-project]");
+      if (!target) return;
+      const { view, thread, project, newProject } = target.dataset;
+      const conversation = conversations.find(item => item.id === thread || item.project === project);
+      showWorkspace(newProject ? "new" : view, conversation, newProject, event.detail === 0);
+    });
+
+    function renderSearchResults() {
+      const query = searchInput.value.trim().toLowerCase();
+      const matches = conversations.filter(thread => `${thread.title} ${thread.project}`.toLowerCase().includes(query));
+      searchResults.innerHTML = matches.map(thread => `
+        <li>${action({ label: thread.title, icon: "chat", thread: thread.id }, "page-row")}</li>
+      `).join("") || "<li>No matching conversations</li>";
+    }
+
+    document.getElementById("conversation-search").addEventListener("click", () => {
+      searchInput.value = "";
+      renderSearchResults();
+      searchDialog.showModal();
+    });
+    searchDialog.addEventListener("close", scheduleClose);
+    searchInput.addEventListener("input", renderSearchResults);
+    searchResults.addEventListener("click", event => {
+      const result = event.target.closest("[data-thread]");
+      if (!result) return;
+      const thread = conversations.find(item => item.id === result.dataset.thread);
+      searchDialog.close();
+      showWorkspace(undefined, thread, undefined, event.detail === 0);
+    });
+
+    draft.addEventListener("input", () => { sendButton.disabled = !draft.value.trim(); });
+    composer.addEventListener("submit", event => {
+      event.preventDefault();
+      if (sendButton.disabled) return;
+      const message = document.createElement("p");
+      message.className = "user-message";
+      message.textContent = draft.value.trim();
+      document.querySelector(".new-chat-heading")?.remove();
+      document.getElementById("messages").append(message);
+      draft.value = "";
+      sendButton.disabled = true;
+      workspaceView.scrollTop = workspaceView.scrollHeight;
+      draft.focus();
+    });
+
+    showWorkspace(undefined, conversations[0]);
+  </script>
+</body>
+</html>

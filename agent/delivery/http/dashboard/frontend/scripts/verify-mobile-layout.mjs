@@ -35,6 +35,9 @@ const fixtures = {
   '/dashboard-api/prompt-variables': { variables: [variable] },
   '/dashboard-api/chat-history': { threads: [], has_more: false, next_offset: null },
   '/dashboard-api/sessions': { sessions: [] },
+  '/dashboard-api/system/version': {
+    current_version: '0.1.2', latest_version: '0.1.3-rc.20261121+build.with.a.long.version.identifier', has_update: true,
+  },
   '/dashboard-api/agents/cards': { cards: [{ name: 'team-agent', display_name: 'Team agent',
     description: 'Long description '.repeat(20), provider: 'provider', model: 'model', valid: true, editable: true }] },
   '/dashboard-api/sandboxes': { sandboxes: [{ sandbox_id: 'sandbox-with-a-long-identifier', backend: 'daytona',
@@ -211,16 +214,28 @@ try {
         assert.equal(await js('getComputedStyle(document.querySelector(".sidebar")).visibility'), 'visible');
         assert.equal(await js(`Array.from(document.querySelectorAll('.sidebar .nav-link .nav-label')).every(el =>
           getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().width > 0)`), true, 'Drawer labels must remain visible');
-        assert.equal(await js(`(() => {
-          const gear = document.querySelector('.sidebar-footer .btn-icon');
-          const footer = document.querySelector('.sidebar-footer');
-          // Settings pages use a different sidebar footer without the gear.
-          if (!gear || !footer) return true;
-          const gearRect = gear.getBoundingClientRect();
-          const footerRect = footer.getBoundingClientRect();
-          return gearRect.right <= footerRect.right + 1
-            && gearRect.left >= footerRect.left + footerRect.width / 2;
-        })()`), true, 'Settings button must stay on the right edge of the drawer footer');
+        if (!isSettings) {
+          await until(() => js(`!!document.querySelector('.sidebar-footer-brand .brand-update-badge')`), 'footer update badge');
+          assert.equal(await js(`(() => {
+            const footer = document.querySelector('.sidebar-footer');
+            const avatar = footer.querySelector('.user-avatar').getBoundingClientRect();
+            const gear = footer.querySelector('a[href="/settings"]').getBoundingClientRect();
+            const bounds = footer.getBoundingClientRect();
+            const versionButton = footer.querySelector('.brand-version-btn');
+            const version = versionButton.getBoundingClientRect();
+            const badge = versionButton.querySelector('.brand-update-badge');
+            return version.left >= avatar.right && version.right <= gear.left
+              && gear.right <= bounds.right + 1 && gear.left >= bounds.left + bounds.width / 2
+              && versionButton.scrollWidth <= versionButton.clientWidth + 1
+              && badge.scrollWidth <= badge.clientWidth + 1;
+          })()`), true, 'the version and update badge fit between the avatar and Settings');
+          if (width === 320 && preference === 'collapsed') {
+            await tap('.sidebar-footer .brand-version-btn');
+            await until(() => js(`!!document.querySelector('.update-dialog-header-title')`), 'version opens update dialog');
+            await tap('.dialog-close-btn');
+            await until(() => js(`!document.querySelector('.update-dialog-header-title')`), 'update dialog closes');
+          }
+        }
         await tap('.sidebar a.nav-link');
         await until(() => js('!document.querySelector(".app-layout--drawer-open")'), 'navigation closes drawer');
         await tap('.topbar-menu-toggle');

@@ -31,6 +31,46 @@
   display: none;
 }
 
+.app-shell-navigation-heading {
+  display: flex;
+  min-height: 48px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 6px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.app-shell-navigation-title {
+  margin: 0;
+  font-size: var(--font-size-base);
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.app-shell-sidebar-pin {
+  position: relative;
+}
+
+@media (pointer: coarse) {
+  .app-shell-sidebar-pin {
+    width: var(--touch-target);
+    min-height: var(--touch-target);
+  }
+}
+
+.sidebar-pin-update-dot {
+  position: absolute;
+  inset-block-start: 3px;
+  inset-inline-end: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 5px var(--accent);
+}
+
 .navigation-section-panel {
   display: flex;
   min-height: 0;
@@ -957,6 +997,19 @@ body.sidebar-resizing * {
   justify-content: space-between;
 }
 
+.app-shell-sidebar .sidebar-footer-row {
+  gap: 8px;
+}
+
+.sidebar-footer-brand {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
 .user-menu-wrapper {
   position: relative;
 }
@@ -1388,13 +1441,16 @@ body.sidebar-resizing * {
 /* --- Brand Version & Subtitle ------------------------------------------ */
 .brand-version-btn {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 3px 6px;
   background: transparent;
   border: 0;
   padding: 0;
   cursor: pointer;
-  text-align: left;
+  text-align: center;
+  overflow-wrap: anywhere;
   transition: opacity 120ms ease;
   max-width: 100%;
 }
@@ -1409,6 +1465,7 @@ body.sidebar-resizing * {
 
 .brand-update-badge {
   display: inline-flex;
+  max-width: 100%;
   align-items: center;
   gap: 3.5px;
   font-size: 0.59375rem;
@@ -1419,22 +1476,14 @@ body.sidebar-resizing * {
   color: var(--accent-fg, #fff);
   letter-spacing: 0.02em;
   line-height: 1.25;
-  white-space: nowrap;
+}
+
+.brand-update-badge svg {
+  flex-shrink: 0;
 }
 
 .brand-update-badge:hover {
   filter: brightness(1.12);
-}
-
-.brand-collapsed-update-dot {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 5px var(--accent);
 }
 
 /* --- Sidebar Footer Version Badge -------------------------------------- */
