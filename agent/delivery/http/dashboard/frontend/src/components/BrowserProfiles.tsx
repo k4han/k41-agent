@@ -68,6 +68,15 @@ export function BrowserProfiles() {
       return `Renamed to ${name}.`;
     })) setRenaming(null);
   };
+  const resetData = (profile: BrowserProfile) => {
+    if (!window.confirm(`Reset browser data for ${profile.name}? This clears cookies, saved logins, and site data for every project and conversation using this profile. You will need to sign in again.`)) return;
+    void mutate(async () => {
+      const result = await postJson<{ saved_data_removed: boolean }>(`${API_PATHS.browserProfiles}/${profile.profile_id}/reset-data`);
+      return result.saved_data_removed
+        ? `Reset browser data for ${profile.name}.`
+        : `Reset browser data for ${profile.name}. K41 will remove any files still in use once they are released.`;
+    });
+  };
   const remove = (profile: BrowserProfile) => {
     if (window.confirm(`Delete ${profile.name}? Its saved logins are removed for every project and conversation that uses it.`)) {
       void mutate(async () => {
@@ -146,14 +155,21 @@ export function BrowserProfiles() {
                   }</For>
                 </Show>
               </div>
-              <Show when={!profile.is_builtin}><div class="row-wrap">
-                <button class="btn btn-secondary btn-sm" type="button" disabled={busy()} aria-label={`Rename ${profile.name}`} onClick={() => {
-                  setRenamed(profile.name); setRenaming(profile.profile_id); setError("");
-                }}>Rename</button>
-                <button class="btn btn-secondary btn-sm" type="button" disabled={busy() || isProfileInUse(profile)} aria-label={`Delete ${profile.name}`}
-                  title={isProfileInUse(profile) ? "Close every conversation using this profile before deleting it." : undefined}
-                  onClick={() => remove(profile)}>Delete</button>
-              </div></Show>
+              <div class="row-wrap">
+                <Show when={!profile.is_builtin}>
+                  <button class="btn btn-secondary btn-sm" type="button" disabled={busy()} aria-label={`Rename ${profile.name}`} onClick={() => {
+                    setRenamed(profile.name); setRenaming(profile.profile_id); setError("");
+                  }}>Rename</button>
+                </Show>
+                <button class="btn btn-secondary btn-sm" type="button" disabled={busy() || isProfileInUse(profile)} aria-label={`Reset data for ${profile.name}`}
+                  title={isProfileInUse(profile) ? "Close every browser session using this profile before resetting its data." : undefined}
+                  onClick={() => resetData(profile)}>Reset data</button>
+                <Show when={!profile.is_builtin}>
+                  <button class="btn btn-secondary btn-sm" type="button" disabled={busy() || isProfileInUse(profile)} aria-label={`Delete ${profile.name}`}
+                    title={isProfileInUse(profile) ? "Close every conversation using this profile before deleting it." : undefined}
+                    onClick={() => remove(profile)}>Delete</button>
+                </Show>
+              </div>
             </>}>
               <form class="row-wrap" autocomplete="off" onSubmit={(event) => void rename(event, profile)}>
                 <input class="input" aria-label={`New name for ${profile.name}`} maxlength={100} value={renamed()} disabled={saving()}

@@ -118,18 +118,90 @@ def test_browser_profile_api_enforces_authentication_csrf_and_ownership(browser_
     assert client.post("/dashboard-api/browser/profiles", json={"name": "Personal"}).status_code == 403
     client.headers["X-CSRF-Token"] = client.cookies["csrf_token"]
     profile = client.post("/dashboard-api/browser/profiles", json={"name": "Personal"}).json()
+    reset_url = f"/dashboard-api/browser/profiles/{profile['profile_id']}/reset-data"
     assert client.put("/dashboard-api/browser/threads/first", json={"profile_id": profile["profile_id"]}).status_code == 200
     assert client.post("/dashboard-api/browser/threads/first").status_code == 200
     assert client.delete(f"/dashboard-api/browser/profiles/{profile['profile_id']}").status_code == 409
+    reset = client.post(reset_url)
+    assert reset.status_code == 409 and reset.json()["detail"]["code"] == "profile_busy"
+    client.headers.pop("X-CSRF-Token")
+    assert client.post(reset_url).status_code == 403
+    client.headers["X-CSRF-Token"] = client.cookies["csrf_token"]
     client.headers["X-Test-Admin"] = "2"
     profiles = client.get("/dashboard-api/browser/profiles").json()["profiles"]
     assert len(profiles) == 1 and profiles[0]["is_builtin"]
     assert profiles[0]["profile_id"] != profile["profile_id"]
     assert client.get("/dashboard-api/browser/threads/first").status_code == 403
     assert client.post("/dashboard-api/browser/threads/first/viewer-ticket").status_code == 403
+    assert client.post(reset_url).status_code == 403
     assert client.get("/dashboard-api/browser/artifacts/missing").status_code == 404
     client.headers.pop("X-Test-Admin")
     assert client.get("/dashboard-api/browser/profiles").status_code == 401
+    assert client.post(reset_url).status_code == 401
+
+
+@pytest.mark.parametrize("reset_builtin", [True, False])
+def test_reset_profile_data_clears_only_selected_profile_and_keeps_assignments(browser_client, reset_builtin):
+    client, browser = browser_client
+    base = "/dashboard-api/browser"
+    builtin = browser.repository.builtin_profile_id("admin:1")
+    work = client.post(f"{base}/profiles", json={"name": "Work"}).json()["profile_id"]
+    target, other = (builtin, work) if reset_builtin else (work, builtin)
+    for profile_id in (target, other):
+        directory = browser.root / "profiles" / profile_id / "Default"
+        directory.mkdir(parents=True)
+        (directory / "Cookies").write_text(profile_id, encoding="utf-8")
+
+    async def add_project():
+        async with browser.repository.session() as session:
+            project = Project(key="local:reset-example", label="Reset example", workspace_json="{}")
+            session.add(project)
+            await session.commit()
+            return project.id
+
+    project_id = client.portal.call(add_project)
+    assignments = (f"{base}/default-profile", f"{base}/temporary-profile", f"{base}/projects/{project_id}/profile", f"{base}/threads/first")
+    for path in assignments:
+        assert client.put(path, json={"profile_id": target}).status_code == 200
+    listed_before = client.get(f"{base}/profiles").json()
+    assignments_before = [client.get(path).json() for path in assignments]
+
+    reset_url = f"{base}/profiles/{target}/reset-data"
+    assert client.post(reset_url).json() == {"reset": True, "saved_data_removed": True}
+    assert client.post(reset_url).json() == {"reset": True, "saved_data_removed": True}
+    assert client.get(f"{base}/profiles").json() == listed_before
+    assert [client.get(path).json() for path in assignments] == assignments_before
+    opened = client.post(f"{base}/threads/first").json()
+    assert opened["open"] and opened["profile_id"] == target
+    assert not (browser.root / "profiles" / target / "Default" / "Cookies").exists()
+    assert (browser.root / "profiles" / other / "Default" / "Cookies").read_text(encoding="utf-8") == other
+
+
+def test_reset_profile_data_reports_leftovers_from_previous_reset(browser_client, monkeypatch):
+    client, browser = browser_client
+    url = "/dashboard-api/browser/profiles"
+    profile_id = client.post(url, json={"name": "Work"}).json()["profile_id"]
+    other_id = client.post(url, json={"name": "Other"}).json()["profile_id"]
+    profiles = browser.root / "profiles"
+    directory = profiles / profile_id
+    directory.mkdir()
+    (directory / "Cookies").write_text("saved", encoding="utf-8")
+
+    def locked(path, *args, **kwargs):
+        raise PermissionError(32, "in use", str(path))
+
+    reset_url = f"{url}/{profile_id}/reset-data"
+    pending = {"reset": True, "saved_data_removed": False}
+    removed = {"reset": True, "saved_data_removed": True}
+    with monkeypatch.context() as patch:
+        patch.setattr("agent.modules.browser.service.shutil.rmtree", locked)
+        assert client.post(reset_url).json() == pending
+        assert not directory.exists() and any(profiles.glob(".discarded-*/Cookies"))
+        assert client.post(reset_url).json() == pending
+        assert client.post(f"{url}/{other_id}/reset-data").json() == removed
+
+    assert client.post(reset_url).json() == removed
+    assert not any(profiles.glob(".discarded-*/Cookies"))
 
 
 def test_browser_profile_delete_reports_whether_saved_data_is_gone(browser_client, monkeypatch):

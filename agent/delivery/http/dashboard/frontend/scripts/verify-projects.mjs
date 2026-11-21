@@ -58,6 +58,7 @@ const secretRequests = [];
 const projectSecrets = new Map();
 const builtinBrowserProfile = { profile_id: 'd'.repeat(32), name: 'Default', is_builtin: true, open_thread_ids: [] };
 const browserProfiles = [builtinBrowserProfile];
+const browserProfileResets = [];
 const browserProjectProfiles = new Map();
 const browserProjectModes = new Map();
 let defaultBrowserProfile = builtinBrowserProfile.profile_id;
@@ -159,6 +160,11 @@ const server = http.createServer(async (req, res) => {
       send({ mode, profile_id, default_profile_id: defaultBrowserProfile,
         effective_profile_id: mode === 'inherit' ? defaultBrowserProfile : profile_id });
       return;
+    }
+    const resetBrowserProfile = url.pathname.match(/^\/dashboard-api\/browser\/profiles\/([a-f0-9]+)\/reset-data$/);
+    if (req.method === 'POST' && resetBrowserProfile) {
+      browserProfileResets.push(resetBrowserProfile[1]);
+      send({ reset: true, saved_data_removed: true }); return;
     }
     const browserProfileRoute = url.pathname.match(/^\/dashboard-api\/browser\/profiles(?:\/([a-f0-9]+))?$/);
     if (browserProfileRoute) {
@@ -681,6 +687,14 @@ try {
   assert.equal(await js(`!!document.querySelector('[aria-label="Delete Default"]')`), false, 'built-in profile cannot be deleted');
   assert.equal(await js(`!!document.querySelector('[aria-label="Rename Default"]')`), false, 'built-in profile cannot be renamed');
   assert.equal(await js('location.pathname'), '/settings/browser');
+  const resetDefault = `document.querySelector('[aria-label="Reset data for Default"]')`;
+  await until(() => js(`${resetDefault} && !${resetDefault}.disabled`), 'built-in profile can be reset');
+  await js(`window.confirm = message => { window.resetConfirmation = message; return false; }; ${resetDefault}.click()`);
+  assert.match(await js('window.resetConfirmation'), /cookies, saved logins, and site data/);
+  assert.deepEqual(browserProfileResets, [], 'declining confirmation leaves data alone');
+  await js(`window.confirm = () => true; ${resetDefault}.click()`);
+  await until(() => js(`${profilePanel}.textContent.includes('Reset browser data for Default.') && !${resetDefault}.disabled`), 'built-in profile was reset and reloaded');
+  assert.deepEqual(browserProfileResets, [builtinBrowserProfile.profile_id]);
   await input('[aria-label="New profile name"]', 'Work');
   await clickText('Create profile');
   await until(() => js(`!!document.querySelector('[aria-label="Rename Work"]')`), 'login profile created');
@@ -734,6 +748,7 @@ try {
   workProfile.open_thread_ids = ['open-conversation', 'another-conversation'];
   await clickText('Reload profiles');
   await until(() => js(`${profilePanel}.textContent.includes('Open in conversation open-conversation') && document.querySelector('[aria-label="Delete Office"]').disabled`), 'open profile cannot be deleted');
+  assert.equal(await js(`document.querySelector('[aria-label="Reset data for Office"]').disabled`), true, 'open profile data cannot be reset');
   assert.ok(await js(`${profilePanel}.textContent.includes('Open in conversation another-conversation')`), 'all conversations sharing the browser are listed');
   workProfile.open_thread_ids = [];
   await clickText('Reload profiles');

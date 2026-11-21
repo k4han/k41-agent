@@ -456,6 +456,14 @@ class BrowserService:
         async with self.operation_scope(f"profile:{profile_id}"), self._available_profile_name(owner_id, name, profile_id):
             return await self.repository.rename_profile(owner_id, profile_id, name)
 
+    async def reset_profile_data(self, owner_id: str, profile_id: str) -> bool:
+        """Discard local Chrome data while retaining the profile and its bindings."""
+        async with self.operation_scope(f"profile:{profile_id}"):
+            await self.repository.profile(profile_id, owner_id)
+            if any(item.profile_key == profile_id for item in self.sessions.values()):
+                raise BrowserError("profile_busy", "Close every browser session using this profile before resetting its data.")
+            return await self._remove_directory("profiles", profile_id)
+
     async def delete_profile(self, owner_id, profile_id) -> bool:
         """Delete a profile and report whether its saved logins have already left the disk."""
         async with self.operation_scope(f"profile:{profile_id}"):
@@ -579,10 +587,12 @@ class BrowserService:
     async def _remove_directory(self, directory: str, key: str) -> bool:
         """Return False while the removed data is still on disk waiting to be purged."""
         discarded = await self._discard(directory, key)
-        if discarded is None:
+        parent = self.root / directory
+        discarded_pattern = f"{DISCARDED_PREFIX}{key}-*"
+        if discarded is None and not any(parent.glob(discarded_pattern)):
             return True
         await self.purge_discarded()
-        return not discarded.exists()
+        return not any(parent.glob(discarded_pattern))
 
     async def _discard(self, directory: str, key: str) -> Path | None:
         """Set a managed directory aside for purging and return its new location, if it existed."""
@@ -602,7 +612,8 @@ class BrowserService:
     @staticmethod
     def _discard_directory(parent: Path, target: Path) -> Path:
         # Moving first means a file still in use leaves the directory complete instead of half deleted.
-        discarded = parent / f"{DISCARDED_PREFIX}{uuid4().hex}"
+        # Keep the storage key so retries can find data discarded by earlier operations.
+        discarded = parent / f"{DISCARDED_PREFIX}{target.name}-{uuid4().hex}"
         try:
             target.rename(discarded)
         except OSError as exc:

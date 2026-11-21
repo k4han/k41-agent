@@ -144,6 +144,12 @@ async def rename_profile(profile_id: str, body: ProfileBody, admin: str = Depend
     return await checked(browser.rename_profile(owner(admin), profile_id, profile_name(body)))
 
 
+@router.post("/profiles/{profile_id}/reset-data")
+async def reset_profile_data(profile_id: str, admin: str = Depends(get_current_admin), browser=Depends(service)):
+    removed = await checked(browser.reset_profile_data(owner(admin), profile_id))
+    return {"reset": True, "saved_data_removed": removed}
+
+
 @router.delete("/profiles/{profile_id}")
 async def delete_profile(profile_id: str, admin: str = Depends(get_current_admin), browser=Depends(service)):
     removed = await checked(browser.delete_profile(owner(admin), profile_id))
