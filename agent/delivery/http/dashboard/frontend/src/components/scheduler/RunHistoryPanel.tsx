@@ -149,7 +149,7 @@ export function RunHistoryPanel(props: {
 
   const cancelRun = async (run: SchedulerRun) => {
     try {
-      await apiFetch(`/dashboard-api/scheduler/runs/${encodeURIComponent(run.run_id)}/cancel`, { method: "POST" });
+      await apiFetch(API_PATHS.schedulerRun(run.run_id, "cancel"), { method: "POST" });
       await load("refresh");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to cancel run", "error");

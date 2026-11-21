@@ -198,38 +198,57 @@ async def test_lease_recovery_preserves_a_checkpointed_scheduler_handoff(schedul
 
 
 @pytest.mark.asyncio
-async def test_scheduler_http_controls_discover_and_resume_only_the_owned_run(scheduled):
+@pytest.mark.parametrize("decision", ["return", "cancel", None], ids=["continue", "cancel-handoff", "cancel-run"])
+async def test_scheduler_http_controls_resolve_only_the_owned_expired_run(scheduled, decision, monkeypatch):
+    import time
+
     import httpx
     from fastapi import FastAPI
+    from agent.delivery.http.dashboard.router import router
     from agent.delivery.http.dashboard.routes import browser as browser_routes
-    from agent.delivery.http.dashboard.routes.scheduler import router
     from agent.modules.admin_auth import get_current_admin
 
     f = scheduled
     await f.admit()
     await f.execute()
     app = FastAPI()
-    app.include_router(router, prefix="/dashboard-api")
-    app.include_router(browser_routes.router)
+    app.include_router(router)
     admin = ["1"]
     app.dependency_overrides[get_current_admin] = lambda: admin[0]
     app.dependency_overrides[browser_routes.service] = lambda: f.browser
-    endpoint = "/dashboard-api/scheduler/runs/run-1"
+    endpoint = "/scheduler/runs/run-1"
+    browser_endpoint = "/dashboard-api/browser/threads/scheduled-run-1"
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        status = (await client.get("/dashboard-api/browser/threads/scheduled-run-1")).json()
+        status = (await client.get(browser_endpoint)).json()
         assert status["state"] == "waiting_for_human" and status["source"] == "scheduler"
+        deadline = status["handoff"]["expires_at"]
+        with monkeypatch.context() as patch:
+            patch.setattr(time, "time", lambda: deadline + 1)
+            status = (await client.get(browser_endpoint)).json()
+        assert not status["open"] and status["handoff"]["expired"]
+        assert status["scheduled_run"]["status"] == "waiting"
         pending = status["scheduled_run"]["interrupts"][0]
         body = {"interrupt_id": pending["id"], "payload": {"action": "browser_handoff",
-            "handoff_id": pending["value"]["handoff_id"], "decision": "return"}}
+            "handoff_id": pending["value"]["handoff_id"], "decision": decision or "return"}}
         assert (await client.post(endpoint + "/resume", json={**body, "interrupt_id": "stale"})).status_code == 409
         admin[0] = "2"
         assert (await client.post(endpoint + "/resume", json=body)).status_code == 404
         assert (await client.post(endpoint + "/cancel")).status_code == 404
         admin[0] = "1"
-        assert (await client.post(endpoint + "/resume", json=body)).status_code == 202
-        assert (await client.post(endpoint + "/resume", json=body)).status_code == 202
-        assert (await client.post(endpoint + "/cancel")).status_code == 202
-        assert (await client.post(endpoint + "/cancel")).status_code == 202
+        if decision is None:
+            for _ in range(2):
+                assert (await client.post(endpoint + "/cancel")).status_code == 202
+        else:
+            for _ in range(2):
+                assert (await client.post(endpoint + "/resume", json=body)).status_code == 202
+            await f.execute()
+        run = (await client.get("/scheduler/runs")).json()["runs"][0]
+        assert run["status"] == ("cancelled" if decision is None else "completed")
+        assert run["finished_at"]
+        if decision:
+            receipt = json.loads(run["response"])
+            assert receipt["handoff_status"] == ("expired" if decision == "return" else "cancelled")
+        assert (await client.get(browser_endpoint)).json()["handoff"] is None
     assert not f.browser.sessions
 
 

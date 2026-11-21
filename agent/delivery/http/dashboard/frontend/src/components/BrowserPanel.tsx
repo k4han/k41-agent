@@ -261,12 +261,13 @@ export function BrowserPanel(props: {
     if (!pending || resumeDisabled()) return;
     const payload: BrowserHandoffResume = { action: "browser_handoff", handoff_id: pending.handoff_id, decision };
     const scheduled = status()?.scheduled_run;
-    if (scheduled && scheduledHandoff()) {
+    const interrupt = scheduledHandoff();
+    if (scheduled && interrupt) {
       setWorking(true);
       setError("");
       try {
-        await apiFetch(`/dashboard-api/scheduler/runs/${encodeURIComponent(scheduled.run_id)}/resume`, {
-          method: "POST", json: { interrupt_id: scheduledHandoff()!.id, payload },
+        await apiFetch(API_PATHS.schedulerRun(scheduled.run_id, "resume"), {
+          method: "POST", json: { interrupt_id: interrupt.id, payload },
         });
         await session().refresh(true);
       } catch (cause) {

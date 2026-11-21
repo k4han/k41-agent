@@ -56,10 +56,15 @@ const fixtures = {
   '/dashboard-api/browser/threads/browser-test': status,
   '/dashboard-api/browser/profiles': { profiles: [] },
   '/dashboard-api/browser/threads/browser-test/viewer-ticket': { ticket: 'ticket' },
+  '/dashboard-api/scheduler': { jobs: [], identities: [], scheduler_timezone: 'UTC' },
 };
 const inputs = [], resumes = [], viewers = new Set();
 const childResumes = [];
 const scheduledResumes = [];
+const waitingRun = { run_id: 'waiting-run', job_id: 'job', thread_id: 'scheduled-history',
+  status: 'waiting', task: 'Waiting for a browser handoff', platform: 'api', user_id: 'dashboard',
+  trigger_source: 'schedule', provider: 'test', model: 'demo', models_used: [], total_tokens: 0,
+  started_at: '2026-01-01T00:00:00', finished_at: null, duration_ms: null };
 const childStatuses = new Map();
 const profiles = [], checkpointLoads = [], invalidThreadRequests = [];
 let profileLoads = 0, rejectProfileSelection = false;
@@ -101,12 +106,22 @@ function sendStatus(socket, reset = false) {
 }
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  if (url.pathname === '/dashboard-api/scheduler/runs/scheduled-run/resume' && req.method === 'POST') {
+  if (url.pathname === '/scheduler/runs/scheduled-run/resume' && req.method === 'POST') {
     let raw = ''; for await (const data of req) raw += data;
     scheduledResumes.push(JSON.parse(raw));
-    Object.assign(status, { handoff: null, mode: 'agent', state: 'idle', scheduled_run: null, expires_at: Date.now() / 1000 + 600 });
+    Object.assign(status, { handoff: null, handoff_expired: false, mode: 'agent',
+      state: status.open ? 'idle' : 'closed', scheduled_run: null, expires_at: status.open ? Date.now() / 1000 + 600 : null });
     for (const socket of viewers) sendStatus(socket);
     res.writeHead(202, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ status: 'pending' })); return;
+  }
+  if (url.pathname === '/scheduler/runs' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ runs: [waitingRun], total: 1, limit: 25, offset: 0 })); return;
+  }
+  if (url.pathname === `/scheduler/runs/${waitingRun.run_id}/cancel` && req.method === 'POST') {
+    waitingRun.status = 'cancelled';
+    res.writeHead(202, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ run_id: waitingRun.run_id, status: waitingRun.status })); return;
   }
   if (url.pathname === '/v2/api/chat/events/reconnect') {
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
@@ -700,8 +715,23 @@ try {
   await until(() => scheduledResumes.length === 1 && js('!document.querySelector(".browser-handoff")'), 'scheduled handoff resumes through the scheduler endpoint');
   assert.deepEqual(scheduledResumes[0], { interrupt_id: 'scheduled-interrupt',
     payload: { action: 'browser_handoff', handoff_id: 'scheduled-handoff', decision: 'return' } });
-  assert.equal(resumes.length, resumesBeforeScheduled, 'scheduled resume does not create an unmanaged chat run');
   await until(() => js('document.querySelector(".browser-lifecycle").textContent.includes("Kept for review")'), 'completed scheduled browser remains available with an idle countdown');
+  for (const decision of ['return', 'cancel']) {
+    const handoff = { ...scheduledHandoff, handoff_id: `expired-scheduled-${decision}`, expired: true };
+    const interruptId = `expired-interrupt-${decision}`;
+    Object.assign(status, { open: false, generation: null, mode: 'agent', state: 'closed', expires_at: null,
+      handoff, handoff_expired: true,
+      scheduled_run: { run_id: 'scheduled-run', status: 'waiting', interrupts: [{ id: interruptId, value: handoff }] } });
+    await announce(history.thread_id);
+    await until(() => js('document.querySelector(".browser-handoff")?.textContent.includes("Browser handoff timed out")'), 'expired scheduled handoff stays visible');
+    const label = decision === 'return' ? 'Continue after timeout' : 'Cancel browser task';
+    const count = scheduledResumes.length;
+    await js(`[...document.querySelectorAll('.browser-handoff button')].find(button => button.textContent.includes('${label}')).click()`);
+    await until(() => scheduledResumes.length === count + 1 && js('!document.querySelector(".browser-handoff")'), 'expired handoff is resolved through the scheduler endpoint');
+    assert.deepEqual(scheduledResumes.at(-1), { interrupt_id: interruptId,
+      payload: { action: 'browser_handoff', handoff_id: handoff.handoff_id, decision } });
+  }
+  assert.equal(resumes.length, resumesBeforeScheduled, 'scheduled resume does not create an unmanaged chat run');
   await js(`document.querySelector('[aria-label="Login profiles"][aria-expanded="false"]')?.click()`);
   await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
   const loadsBeforeThreadChange = profileLoads;
@@ -719,8 +749,13 @@ try {
   assert.equal(await js(`document.querySelector('.browser-panel a[href="/settings/browser#login-profiles"]')?.textContent`), 'Manage login profiles', 'new chats link to account profile management');
   assert.deepEqual(invalidThreadRequests, [], 'profile operations must not fetch an empty thread endpoint');
   assert.equal(await js('document.querySelector(".browser-panel [role=alert]")?.textContent || ""'), '');
+  await call('Page.navigate', { url: `${base}/scheduler` });
+  const cancelRun = `[...document.querySelectorAll('#scheduler-run-history button')].find(button => button.textContent === 'Cancel task')`;
+  await until(() => js(`!!(${cancelRun})`), 'run history offers cancellation for a waiting run');
+  await js(`(${cancelRun}).click()`);
+  await until(() => js('document.querySelector("#scheduler-run-history tbody")?.textContent.toLowerCase().includes("cancelled")'), 'run history shows the task as cancelled');
   assert.deepEqual(exceptions, []);
-  console.log('Browser dashboard: viewing, input, recovery, profiles, session selection, async handoff while the parent runs, exact child resumption, retry, cancellation, timeout and session-loss recovery passed.');
+  console.log('Browser dashboard: viewing, input, profiles, session selection, async and scheduled handoffs, timeout and session-loss recovery, and scheduler cancellation passed.');
 } finally {
   parentReconnect?.end();
   if (ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
