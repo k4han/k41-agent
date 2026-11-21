@@ -62,11 +62,11 @@ Next, [connect a model and start a conversation](./getting-started).
 
 ## Install a specific release
 
-For example, to install `v0.1.47` on Windows:
+For example, to install `v0.1.48` on Windows:
 
 ```powershell
 Invoke-WebRequest -Uri "https://k41.bot.cd/install.ps1" -OutFile ".\install.ps1"
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.47
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -ReleaseTag v0.1.48
 ```
 
 On macOS or Linux:
@@ -74,7 +74,7 @@ On macOS or Linux:
 ```sh
 curl -fsSL https://k41.bot.cd/install.sh -o install.sh
 chmod +x install.sh
-./install.sh --release-tag v0.1.47
+./install.sh --release-tag v0.1.48
 ```
 
 ## Optional browser support

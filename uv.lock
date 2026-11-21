@@ -1055,7 +1055,7 @@ wheels = [
 
 [[package]]
 name = "k41-agent"
-version = "0.1.47"
+version = "0.1.48"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
