@@ -88,6 +88,7 @@ export function NavigationSectionPanel(props: {
           <button
             type="button"
             class="nav-link nav-new-chat"
+            data-shortcut-action="new-session"
             disabled={props.newChatDisabled}
             onClick={props.onNewChat}
           >

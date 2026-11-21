@@ -17,6 +17,7 @@ import { ChatActionsMenu } from "@/components/ChatActionsMenu";
 import { ComposerWorkspacePicker } from "@/components/ComposerWorkspacePicker";
 import { Dialog } from "@/components/Dialog";
 import { ExportChatDialog } from "@/components/ExportChatDialog";
+import { useShortcutAction } from "@/components/KeyboardShortcutsProvider";
 import { RenameChatDialog } from "@/components/RenameChatDialog";
 import { Markdown } from "@/components/Markdown";
 import { ChatThreadBadges } from "@/components/ChatThreadBadges";
@@ -39,7 +40,8 @@ import {
   threadApiPath,
   toThreadTranscript,
 } from "@/lib/chatThreads";
-import type { NewChatNavigationState, ThreadMessagesPayload } from "@/lib/chatThreads";
+import type { NewChatNavigationState } from "@/lib/chatNavigation";
+import type { ThreadMessagesPayload } from "@/lib/chatThreads";
 import { fetchEarlierThreadPage, fetchThreadForRegeneration } from "@/lib/threadHistory";
 import type { ChatExportTarget } from "@/lib/chatExport";
 import {
@@ -95,6 +97,7 @@ import {
 import { ACTIVE_TASK_STATUSES, DRAWER_MEDIA_QUERY, MOBILE_MEDIA_QUERY } from "@/lib/uiConstants";
 import { createMediaQuery } from "@/lib/useMediaQuery";
 import { useChatScroll } from "@/lib/useChatScroll";
+import { closeMobileDrawer } from "@/lib/useMobileDrawer";
 import { useChatStreams } from "@/lib/useChatStreams";
 import { createReplayCallbacks, preserveTranscriptIds } from "@/lib/chatStreamReplay";
 import { useAsyncTasks } from "@/lib/useAsyncSubagent";
@@ -274,11 +277,11 @@ export function ChatPage() {
 
   let transcriptRef: HTMLDivElement | undefined;
   let chatShellRef: HTMLDivElement | undefined;
-  let chatPromptRef: HTMLTextAreaElement | undefined;
+  const [chatPromptRef, setChatPromptRef] = createSignal<HTMLTextAreaElement>();
 
   const handleSelectPrompt = (promptText: string) => {
     setPrompt(promptText);
-    chatPromptRef?.focus();
+    chatPromptRef()?.focus();
   };
   let loadedThreadId: string | null = null;
   let loadedNewChatId = "";
@@ -686,7 +689,7 @@ export function ChatPage() {
     setWorkingDir(workspaceSelectionLocator(selection));
   };
 
-  const draftProjectId = () => !currentThreadId() ? location.state?.projectId : undefined;
+  const draftProjectId = () => !currentThreadId() ? location.state?.projectId ?? undefined : undefined;
   const workspaceRuntime = useWorkspaceRuntime(currentThreadId, setWorkspace, draftProjectId, explorer.open);
 
   const runtimeDecision = () => workspaceRuntime.payload().runtime?.decision || null;
@@ -996,6 +999,16 @@ export function ChatPage() {
   const inputDisabled = createMemo(() => (
     threadLoading() || hasPendingInterrupt() || compacting() || workspaceRuntime.busy()
   ));
+  useShortcutAction("focus-message-input", {
+    enabled: () => {
+      const promptInput = chatPromptRef();
+      return Boolean(promptInput?.isConnected) && !inputDisabled();
+    },
+    run: () => {
+      closeMobileDrawer();
+      queueMicrotask(() => chatPromptRef()?.focus());
+    },
+  });
   const queueing = createMemo(() => {
     if (inputDisabled() || earlierMessagesLoading() || forking() || !canReconnectStream()) return false;
     if (searchParams.checkpoint_id && !streaming()) return false;
@@ -2382,6 +2395,7 @@ export function ChatPage() {
                         window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.OPEN_MOBILE_NAV));
                       }}
                       aria-label="Open navigation"
+                      data-shortcut-action="toggle-sidebar"
                     >
                       <Menu size={16} />
                     </button>
@@ -2548,8 +2562,7 @@ export function ChatPage() {
               />
               <ChatComposer
                 workspace={workspaceRef() || localWorkspaceRef(workingDir())}
-                setChatPromptRef={(el) => (chatPromptRef = el)}
-                chatPromptRef={(el) => (chatPromptRef = el)}
+                setChatPromptRef={setChatPromptRef}
                 prompt={prompt()}
                 onPromptChange={setPrompt}
                 onSend={submitComposer}

@@ -6,6 +6,7 @@ import { ToastProvider } from "@/components/Toast";
 import { AppBoundary } from "@/components/AppBoundary";
 import { preloadDashboardData } from "@/lib/dashboardData";
 import { API_PATHS } from "@/lib/endpoints";
+import { SHORTCUT_SETTINGS_PATH } from "@/lib/keyboardShortcuts";
 import "@/styles.css";
 
 const ChatHistoryListPage = lazy(() =>
@@ -42,6 +43,9 @@ const AppearancePage = lazy(() =>
   import("@/pages/settings/AppearancePage").then((module) => ({
     default: module.AppearancePage,
   })),
+);
+const KeyboardShortcutsPage = lazy(() =>
+  import("@/pages/settings/KeyboardShortcutsPage").then((module) => ({ default: module.KeyboardShortcutsPage })),
 );
 const InstaboxMachinePage = lazy(() =>
   import("@/pages/settings/InstaboxMachine").then((module) => ({
@@ -161,6 +165,7 @@ render(
         <Route path="/settings/security" component={SecurityPage} />
         <Route path="/settings/usage" component={UsagePage} />
         <Route path="/settings/appearance" component={AppearancePage} />
+        <Route path={SHORTCUT_SETTINGS_PATH} component={KeyboardShortcutsPage} />
         <Route path="/settings/logs" component={LogsPage} />
         {/* Legacy redirects */}
         <Route path="/tasks" component={() => <Navigate href="/chat" />} />

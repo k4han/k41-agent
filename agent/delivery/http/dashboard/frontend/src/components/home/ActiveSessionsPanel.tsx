@@ -51,6 +51,7 @@ export function ActiveSessionsPanel(props: { initial: ActiveSession[] }) {
               hint="Start a conversation to see live activity here."
               href="/chat"
               action="Start a chat"
+              shortcutAction="new-session"
             />
           }
         >

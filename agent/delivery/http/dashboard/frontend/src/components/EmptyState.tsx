@@ -1,12 +1,15 @@
 import { Show, createMemo, type JSX } from "solid-js";
 import { A } from "@solidjs/router";
 
+import type { ShortcutAction } from "@/lib/keyboardShortcuts";
+
 export function EmptyState(props: {
   icon?: JSX.Element;
   message: string;
   hint?: string;
   href?: string;
   action?: string;
+  shortcutAction?: ShortcutAction;
   onAction?: () => void;
   children?: JSX.Element;
 }) {
@@ -27,7 +30,7 @@ export function EmptyState(props: {
       </Show>
       <Show when={cta()}>
         {(ctaValue) => (
-          <A class="btn btn-sm empty-state-action" href={ctaValue().href}>
+          <A class="btn btn-sm empty-state-action" href={ctaValue().href} data-shortcut-action={props.shortcutAction}>
             {ctaValue().label}
           </A>
         )}
@@ -37,6 +40,7 @@ export function EmptyState(props: {
           class="btn btn-sm btn-primary empty-state-action"
           type="button"
           onClick={props.onAction}
+          data-shortcut-action={props.shortcutAction}
         >
           {props.action}
         </button>

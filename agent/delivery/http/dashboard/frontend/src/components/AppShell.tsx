@@ -32,15 +32,16 @@ import { batch, createEffect, createMemo, createSignal, For, JSX, on, onCleanup,
 import { Portal } from "solid-js/web";
 import { unwrap } from "solid-js/store";
 
-import { ConversationSearchDialog } from "@/components/ConversationSearchDialog";
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { ExportChatDialog } from "@/components/ExportChatDialog";
+import { CommandPaletteButton, useKeyboardShortcuts, useShortcutAction } from "@/components/KeyboardShortcutsProvider";
 import { NavigationSectionPanel, type NavigationSection } from "@/components/NavigationSectionPanel";
 import { ProjectActions } from "@/components/ProjectActions";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { UpdateDialog } from "@/components/UpdateDialog";
 import { deleteJson, patchJson, postJson } from "@/lib/api";
 import { checkForUpdates, openUpdateDialog, versionInfo } from "@/lib/versionStore";
+import { newChatNavigationState, type NewChatNavigationState } from "@/lib/chatNavigation";
 import {
   chatThreadHref,
   sortWorkspaceGroups,
@@ -103,8 +104,8 @@ export function AppShell(props: {
   const location = useLocation();
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const shortcuts = useKeyboardShortcuts();
   const [menuOpen, setMenuOpen] = createSignal(false);
-  const [searchOpen, setSearchOpen] = createSignal(false);
   const [collapsed, setCollapsed] = createSignal(window.localStorage.getItem(STORAGE_KEYS.SIDEBAR_COLLAPSED) === "collapsed");
   const [previewSection, setPreviewSection] = createSignal<NavigationSection>();
   const [projectMenuId, setProjectMenuId] = createSignal<string | null>(null);
@@ -443,8 +444,13 @@ export function AppShell(props: {
     }, 250);
   };
 
-  const toggleSidebar = (event: MouseEvent) => {
-    const pinHadFocus = document.activeElement === event.currentTarget;
+  const toggleSidebar = () => {
+    if (isMobileViewport()) {
+      setMobileDrawerOpen(!mobileDrawerOpen());
+      return;
+    }
+    const focused = document.activeElement;
+    const pinHadFocus = focused?.matches(".app-shell-sidebar-pin") && sidebarRef?.contains(focused);
     const next = !collapsed();
     batch(() => {
       dismissPreview();
@@ -457,6 +463,7 @@ export function AppShell(props: {
       });
     }
   };
+  useShortcutAction("toggle-sidebar", { run: toggleSidebar });
 
   const renderSidebarPin = () => {
     const label = () => collapsed() ? "Pin navigation panel" : "Unpin navigation panel";
@@ -470,7 +477,8 @@ export function AppShell(props: {
         aria-expanded={projectsVisible()}
         aria-label={label()}
         aria-description={updateTitle()}
-        title={updateTitle() ? `${label()} · ${updateTitle()}` : label()}
+        data-shortcut-action="toggle-sidebar"
+        data-shortcut-label={updateTitle() ? `${label()} · ${updateTitle()}` : undefined}
       >
         <Show when={collapsed()} fallback={<PinOff size={16} aria-hidden="true" />}>
           <Pin size={16} aria-hidden="true" />
@@ -502,10 +510,7 @@ export function AppShell(props: {
     schedulePreviewClose,
     { defer: true },
   ));
-  createEffect(on(() => location.pathname, () => {
-    dismissPreview();
-    setSearchOpen(false);
-  }, { defer: true }));
+  createEffect(on(() => location.pathname, () => dismissPreview(), { defer: true }));
   createEffect(on(isMobileViewport, () => {
     dismissPreview();
     pointerInNavigation = false;
@@ -573,17 +578,15 @@ export function AppShell(props: {
   };
 
   const [openingProject, setOpeningProject] = createSignal("");
-  const openChatDraft = (context: {
-    projectId?: number | null;
-    workspaceBinding?: WorkspaceBinding;
-    workspace?: WorkspaceRef | null;
-  } = {}) => {
+  const openChatDraft = (context: Omit<NewChatNavigationState, "newChatId"> = {}) => {
     dismissPreview(true);
-    navigate("/chat", {
-      state: { newChatId: `${Date.now()}-${Math.random().toString(36).slice(2)}`, ...context },
-    });
+    navigate("/chat", { state: newChatNavigationState(context) });
     closeMobileDrawer();
   };
+  useShortcutAction("new-session", {
+    run: () => openChatDraft(),
+    enabled: () => !openingProject(),
+  });
 
   const startProjectChat = async (group: ThreadWorkspaceGroup) => {
     if (openingProject()) return;
@@ -671,11 +674,11 @@ export function AppShell(props: {
       type="button"
       aria-label="Search conversations"
       aria-haspopup="dialog"
-      title="Search conversations"
+      data-shortcut-action="search-sessions"
       onPointerEnter={previewActiveSection}
       onClick={() => {
         dismissPreview();
-        setSearchOpen(true);
+        shortcuts.run("search-sessions");
       }}
     >
       <Search size={15} aria-hidden="true" />
@@ -1013,6 +1016,7 @@ export function AppShell(props: {
             >
               <For each={navItems}>{(item) => renderNavItem(item, true)}</For>
               {renderSearchButton()}
+              <CommandPaletteButton beforeOpen={dismissPreview} />
             </nav>
           </Show>
           <div
@@ -1030,6 +1034,7 @@ export function AppShell(props: {
                   type="button"
                   onClick={closeMobileDrawer}
                   aria-label="Close navigation"
+                  data-shortcut-action="toggle-sidebar"
                 >
                   <X size={18} />
                 </button>
@@ -1057,6 +1062,7 @@ export function AppShell(props: {
             <Show when={isMobileViewport()}>
               <For each={navItems}>{(item) => renderNavItem(item)}</For>
               {renderSearchButton()}
+              <CommandPaletteButton />
             </Show>
             <div class="nav-history-group open">
               <div class="nav-projects-header">
@@ -1277,6 +1283,7 @@ export function AppShell(props: {
                   setMobileDrawerOpen(true);
                 }}
                 aria-label="Open navigation"
+                data-shortcut-action="toggle-sidebar"
                 aria-expanded={mobileDrawerOpen()}
                 aria-controls="app-shell-sidebar"
               >
@@ -1345,14 +1352,6 @@ export function AppShell(props: {
           </Portal>
         )}
       </Show>
-      <ConversationSearchDialog
-        open={searchOpen()}
-        onClose={() => setSearchOpen(false)}
-        onSelect={() => {
-          setSearchOpen(false);
-          closeMobileDrawer();
-        }}
-      />
       <ExportChatDialog target={exportTarget()} onClose={() => setExportTarget(null)} />
       <DeleteThreadDialog
         open={deleteTarget() !== null}

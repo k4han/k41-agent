@@ -1,6 +1,7 @@
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { navProjectsStore } from "@/lib/navProjectsStore";
 import { apiFetch, postJson } from "@/lib/api";
+import { newChatNavigationState } from "@/lib/chatNavigation";
 import { API_PATHS } from "@/lib/endpoints";
 import type { WorkspaceBinding, WorkspaceRef } from "@/types";
 
@@ -10,10 +11,11 @@ export function notifyProjectsChanged() {
 }
 
 export function projectChatState(workspace: WorkspaceRef | WorkspaceBinding) {
-  return { newChatId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  return newChatNavigationState({
     projectId: "execution" in workspace ? workspace.project_id : undefined,
     workspaceBinding: "execution" in workspace ? workspace : undefined,
-    workspace: "execution" in workspace ? workspace.execution : workspace };
+    workspace: "execution" in workspace ? workspace.execution : workspace,
+  });
 }
 
 export async function prepareProjectChatWorkspace(workspace: WorkspaceRef, projectId?: number): Promise<WorkspaceRef | WorkspaceBinding> {

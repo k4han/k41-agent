@@ -161,8 +161,7 @@
   position: relative;
 }
 
-.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .nav-link[data-tooltip]::after,
-.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .brand-expand-btn[data-tooltip]::after {
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .nav-link[data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
   left: calc(100% + 10px);
@@ -185,8 +184,7 @@
   z-index: 1000;
 }
 
-.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .nav-link:hover::after,
-.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .brand-expand-btn:hover::after {
+.sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .nav-link[data-tooltip]:hover::after {
   opacity: 1;
   visibility: visible;
   transform: translateY(-50%) translateX(0);

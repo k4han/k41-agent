@@ -156,7 +156,7 @@ export function HomePage() {
       title="Home"
       subtitle="Command center for the Kai Agent runtime."
       actions={
-        <A class="btn btn-primary" href="/chat">
+        <A class="btn btn-primary" href="/chat" data-shortcut-action="new-session">
           <MessageSquarePlus size={14} />
           New chat
         </A>

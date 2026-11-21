@@ -1,6 +1,6 @@
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String
 
-from agent.shared.infrastructure.db.base import BaseModel, utcnow
+from agent.shared.infrastructure.db.base import Base, BaseModel, utcnow
 
 
 class AdminCredential(BaseModel):
@@ -14,4 +14,14 @@ class AdminCredential(BaseModel):
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
 
-__all__ = ["AdminCredential"]
+class AdminKeyboardShortcuts(Base):
+    __tablename__ = "admin_keyboard_shortcuts"
+
+    admin_id = Column(
+        Integer, ForeignKey("admin_credentials.id", ondelete="CASCADE"), primary_key=True
+    )
+    revision = Column(Integer, nullable=False)
+    overrides = Column(JSON, nullable=False)
+
+
+__all__ = ["AdminCredential", "AdminKeyboardShortcuts"]

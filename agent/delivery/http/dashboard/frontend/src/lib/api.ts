@@ -4,6 +4,12 @@ type ApiInit = RequestInit & {
   json?: unknown;
 };
 
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 const CSRF_HEADER_NAME = "X-CSRF-Token";
 const CSRF_BOOTSTRAP_PATH = "/dashboard-api/catalog";
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -118,7 +124,7 @@ export async function apiFetch<T>(path: string, init: ApiInit = {}): Promise<T> 
   }
 
   if (!response.ok) {
-    throw new Error(await readError(response));
+    throw new ApiError(await readError(response), response.status);
   }
 
   if (UNSAFE_METHODS.has(requestMethod(path, init))) invalidateDashboardCache();

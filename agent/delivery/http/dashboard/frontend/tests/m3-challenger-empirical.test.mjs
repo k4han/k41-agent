@@ -102,14 +102,14 @@ async function runM3ChallengerEmpiricalSuite() {
     );
   });
 
-  harness.test('SettingsLayout.tsx supports keyboard shortcuts ("/" or Ctrl+K/Cmd+K) to expand and search', () => {
+  harness.test('SettingsLayout.tsx uses "/" to expand and focus settings search', () => {
     assert(
-      settingsLayoutCode.includes('e.key === "/"') || settingsLayoutCode.includes("e.key === '/'"),
+      settingsLayoutCode.includes('event.key !== "/"'),
       'SettingsLayout must listen for "/" key'
     );
     assert(
-      settingsLayoutCode.includes('e.key === "k"') || settingsLayoutCode.includes("e.key === 'k'"),
-      'SettingsLayout must listen for "k" key with ctrl/cmd'
+      settingsLayoutCode.includes('ignoreGlobalShortcut(event)'),
+      'Settings search must respect active inputs and dialogs'
     );
     assert(
       settingsLayoutCode.includes('searchInputRef?.focus()'),

@@ -15,4 +15,5 @@
 @import "./styles/forms.css" layer(dashboard-forms);
 @import "./styles/utilities.css" layer(dashboard-utilities);
 @import "./styles/controls.css" layer(dashboard-controls);
+@import "./styles/keyboard-shortcuts.css" layer(dashboard-controls);
 

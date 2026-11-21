@@ -388,7 +388,7 @@ export function BrowserPanel(props: {
           <button class="workspace-icon-btn" type="submit" title="Navigate" aria-label="Navigate" disabled={!canControl() || !url().trim()}><ArrowRight size={16} /></button>
         </form>
       </div>
-      <div ref={viewport} class="browser-viewport" aria-label="Live browser viewport" aria-description={connectionLabel()} aria-busy={Boolean(status()?.open && !frameFresh())}>
+      <div ref={viewport} class="browser-viewport" data-remote-keyboard aria-label="Live browser viewport" aria-description={connectionLabel()} aria-busy={Boolean(status()?.open && !frameFresh())}>
       <Show when={!hasFrame()}><div class="browser-empty">
         <div class="browser-empty-icon"><Show when={status()?.open} fallback={<Globe size={28} />}><LoaderCircle size={28} class="browser-spinner" /></Show></div>
         <strong>{!props.threadId ? "Start a conversation to browse" : status()?.open ? "Connecting to your browser" : "A browser for your agent"}</strong>

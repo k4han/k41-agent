@@ -1,6 +1,7 @@
 import { ErrorBoundary, Suspense, type ParentProps } from "solid-js";
 
 import { ErrorPanel, LoadingPanel } from "@/components/State";
+import { KeyboardShortcutsProvider } from "@/components/KeyboardShortcutsProvider";
 
 export function AppBoundary(props: ParentProps) {
   return (
@@ -15,9 +16,11 @@ export function AppBoundary(props: ParentProps) {
         </button>
       </div>
     )}>
-      <Suspense fallback={<div class="content" role="status" aria-live="polite"><LoadingPanel /></div>}>
-        {props.children}
-      </Suspense>
+      <KeyboardShortcutsProvider>
+        <Suspense fallback={<div class="content" role="status" aria-live="polite"><LoadingPanel /></div>}>
+          {props.children}
+        </Suspense>
+      </KeyboardShortcutsProvider>
     </ErrorBoundary>
   );
 }

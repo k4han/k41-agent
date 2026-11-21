@@ -15,6 +15,7 @@ export const API_PATHS = {
   projects: "/dashboard-api/projects",
   catalog: "/dashboard-api/catalog",
   config: "/dashboard-api/config",
+  keyboardShortcuts: "/dashboard-api/keyboard-shortcuts",
   tools: "/dashboard-api/tools",
   providers: "/dashboard-api/providers",
   backends: "/dashboard-api/backends",

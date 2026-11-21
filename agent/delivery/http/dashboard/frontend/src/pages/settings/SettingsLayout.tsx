@@ -18,6 +18,7 @@ import {
   KeyRound,
   Link2,
   Globe,
+  Keyboard,
   Menu,
   Network,
   Palette,
@@ -31,6 +32,8 @@ import {
 } from "lucide-solid";
 import { createMemo, createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 
+import { CommandPaletteButton, useShortcutAction } from "@/components/KeyboardShortcutsProvider";
+import { hasOpenDialog, ignoreGlobalShortcut, SHORTCUT_SETTINGS_PATH } from "@/lib/keyboardShortcuts";
 import { STORAGE_KEYS } from "@/lib/uiConstants";
 import { useMobileDrawer } from "@/lib/useMobileDrawer";
 
@@ -54,6 +57,7 @@ const settingsNavGroups: SettingsNavGroup[] = [
     label: "Preferences",
     items: [
       { href: "/settings/appearance", label: "Appearance", icon: () => <Palette size={15} />, description: "Theme & display", keywords: "theme dark light system appearance timezone display preferences" },
+      { href: SHORTCUT_SETTINGS_PATH, label: "Keyboard Shortcuts", icon: () => <Keyboard size={15} />, description: "Customize key combinations", keywords: "keyboard keys hotkeys keybindings command palette" },
       { href: "/settings/security", label: "Security", icon: () => <KeyRound size={15} />, description: "Password & access", keywords: "security password auth credentials" },
     ],
   },
@@ -170,11 +174,16 @@ export function SettingsLayout(props: {
   };
 
   const toggleSidebar = () => {
+    if (isMobileViewport()) {
+      setMobileDrawerOpen(!mobileDrawerOpen());
+      return;
+    }
     const next = !collapsed();
     setCollapsed(next);
     setUserLocked(true);
     window.localStorage.setItem(STORAGE_KEYS.SETTINGS_SIDEBAR_COLLAPSED, next ? "collapsed" : "expanded");
   };
+  useShortcutAction("toggle-sidebar", { run: toggleSidebar });
 
   onMount(() => {
     if (settingsNavElement) {
@@ -218,30 +227,21 @@ export function SettingsLayout(props: {
       onCleanup(() => mql.removeEventListener("change", handleMediaChange));
     }
 
-    document.addEventListener("keydown", handleKeydown);
+    const onGlobalKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !hasOpenDialog()) handleKeydown(event);
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
+        || isMobileViewport() || ignoreGlobalShortcut(event)) return;
 
-    // Global keyboard search handler: auto-expand and focus search on '/' or 'Ctrl+K'
-    const onGlobalKey = (e: KeyboardEvent) => {
-      if ((e.key === "/" || (e.key === "k" && (e.ctrlKey || e.metaKey))) && !isMobileViewport()) {
-        const target = e.target as HTMLElement;
-        if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
-        e.preventDefault();
-        if (collapsed()) {
-          setCollapsed(false);
-          setUserLocked(true);
-          window.localStorage.setItem(STORAGE_KEYS.SETTINGS_SIDEBAR_COLLAPSED, "expanded");
-          setTimeout(() => searchInputRef?.focus(), 50);
-        } else {
-          searchInputRef?.focus();
-        }
+      event.preventDefault();
+      if (collapsed()) {
+        toggleSidebar();
+        queueMicrotask(() => searchInputRef?.focus());
+      } else {
+        searchInputRef?.focus();
       }
     };
     document.addEventListener("keydown", onGlobalKey);
     onCleanup(() => document.removeEventListener("keydown", onGlobalKey));
-  });
-
-  onCleanup(() => {
-    document.removeEventListener("keydown", handleKeydown);
   });
 
   const settingsHomeHref = "/settings/appearance";
@@ -289,8 +289,8 @@ export function SettingsLayout(props: {
                 class="brand-mark brand-expand-btn"
                 type="button"
                 onClick={toggleSidebar}
-                title="Expand sidebar"
-                data-tooltip="Expand sidebar"
+                aria-label="Expand sidebar"
+                data-shortcut-action="toggle-sidebar"
               >
                 <span class="brand-expand-icon"><ChevronsRight size={14} /></span>
                 <span class="brand-expand-default"><Bot size={16} /></span>
@@ -311,8 +311,8 @@ export function SettingsLayout(props: {
                   class="brand-collapse-btn"
                   type="button"
                   onClick={toggleSidebar}
-                  title="Collapse sidebar"
                   aria-label="Collapse sidebar"
+                  data-shortcut-action="toggle-sidebar"
                 >
                   <ChevronsLeft size={14} />
                 </button>
@@ -323,6 +323,7 @@ export function SettingsLayout(props: {
                 type="button"
                 onClick={closeMobileDrawer}
                 aria-label="Close navigation"
+                data-shortcut-action="toggle-sidebar"
               >
                 <X size={18} />
               </button>
@@ -350,6 +351,7 @@ export function SettingsLayout(props: {
                 <span class="nav-label">Back to home</span>
               </Show>
             </A>
+            <CommandPaletteButton />
 
             <Show when={!collapsed() || isMobileViewport()}>
               <div class="settings-nav-search">
@@ -442,6 +444,7 @@ export function SettingsLayout(props: {
                 setMobileDrawerOpen(true);
               }}
               aria-label="Open navigation"
+              data-shortcut-action="toggle-sidebar"
               aria-expanded={mobileDrawerOpen()}
               aria-controls="settings-layout-sidebar"
             >

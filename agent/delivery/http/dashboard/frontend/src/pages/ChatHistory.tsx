@@ -310,6 +310,7 @@ export function ChatHistoryListPage() {
                 hint="Start a new chat to begin interacting with the agent."
                 href="/chat"
                 action="New chat"
+                shortcutAction="new-session"
               />
             }
           >
@@ -347,6 +348,7 @@ export function ChatHistoryListPage() {
                     hint="Start a new conversation in this workspace to see history here."
                     href="/chat"
                     action="New chat"
+                    shortcutAction="new-session"
                   />
                 }
               >

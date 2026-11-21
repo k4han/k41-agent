@@ -73,6 +73,7 @@ export async function writeToClipboard(text: string): Promise<void> {
     return;
   }
 
+  const focused = document.activeElement;
   const textarea = document.createElement("textarea");
   textarea.value = text;
   textarea.setAttribute("readonly", "");
@@ -81,9 +82,10 @@ export async function writeToClipboard(text: string): Promise<void> {
   document.body.appendChild(textarea);
   textarea.select();
   try {
-    document.execCommand("copy");
+    if (!document.execCommand("copy")) throw new Error("Could not copy to the clipboard.");
   } finally {
     document.body.removeChild(textarea);
+    if (focused instanceof HTMLElement) focused.focus({ preventScroll: true });
   }
 }
 

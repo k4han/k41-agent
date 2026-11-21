@@ -29,6 +29,7 @@ export function RecentThreadsPanel(props: { threads: ThreadSummary[] }) {
               hint="Start your first conversation with an agent."
               href="/chat"
               action="New chat"
+              shortcutAction="new-session"
             />
           }
         >

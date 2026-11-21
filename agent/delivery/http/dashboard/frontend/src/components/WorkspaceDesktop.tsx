@@ -249,7 +249,7 @@ export function WorkspaceDesktop(props: { backend: string; locator: string; acti
       <Show when={error()}>
         <p class="workspace-desktop-error" role="alert">{error()}</p>
       </Show>
-      <div class={`workspace-desktop-screen ${controlling() ? "is-controlling" : ""}`} ref={screen} />
+      <div class={`workspace-desktop-screen ${controlling() ? "is-controlling" : ""}`} data-remote-keyboard ref={screen} />
     </div>
   );
 }

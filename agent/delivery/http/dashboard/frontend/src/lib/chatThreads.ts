@@ -23,13 +23,6 @@ import { NO_WORKSPACE_KEY, NO_WORKSPACE_LABEL } from "@/lib/workspaceConstants";
 import { isNoWorkspace } from "@/lib/workspace";
 import type { ProjectSummary, WorkspaceBinding, WorkspaceRef } from "@/types";
 
-export type NewChatNavigationState = {
-  newChatId: string;
-  projectId?: number;
-  workspace: WorkspaceRef | null;
-  workspaceBinding?: WorkspaceBinding;
-};
-
 export type ThreadSummary = {
   thread_id: string;
   latest_checkpoint_id?: string;

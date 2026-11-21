@@ -43,6 +43,23 @@ let failProjectThreads = false;
 let showManagedProject = false;
 let failRepositories = true;
 let releaseRepositoryPreview;
+const shortcutPath = '/dashboard-api/keyboard-shortcuts';
+let rejectShortcutSave = false;
+let shortcutSettings = {
+  defaults: {
+    'new-session': ['Mod+Alt+KeyO'],
+    back: ['Mod+Shift+ArrowLeft'],
+    forward: ['Mod+Shift+ArrowRight'],
+    'copy-link': ['Alt+Shift+KeyL'],
+    'command-palette': ['Mod+KeyK', 'Mod+Shift+Space'],
+    'show-keyboard-shortcuts': ['Shift+Slash'],
+    'search-sessions': ['Mod+Alt+KeyA'],
+    'toggle-sidebar': ['Mod+Alt+KeyS'],
+    'focus-message-input': ['Slash', 'Mod+Shift+Period'],
+  },
+  overrides: {},
+  revision: 0,
+};
 const repositories = Array.from({ length: 8 }, (_, index) => ({
   repository_id: 8 - index,
   full_name: `team/repo-${8 - index}`,
@@ -88,6 +105,27 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.startsWith('/dashboard-api') || url.pathname === '/scheduler/runs') {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'navbar-test-csrf');
+    if (url.pathname === shortcutPath) {
+      if (req.method === 'PUT') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { revision, overrides } = JSON.parse(body);
+        assert.equal(req.headers['x-csrf-token'], 'navbar-test-csrf');
+        if (rejectShortcutSave) {
+          res.writeHead(503);
+          res.end(JSON.stringify({ detail: 'Keyboard shortcut storage is unavailable.' }));
+          return;
+        }
+        if (revision !== shortcutSettings.revision) {
+          res.writeHead(409);
+          res.end(JSON.stringify({ detail: 'Keyboard shortcuts changed in another tab or device. Try your edit again.' }));
+          return;
+        }
+        shortcutSettings = { ...shortcutSettings, overrides, revision: revision + 1 };
+      }
+      res.end(JSON.stringify(shortcutSettings));
+      return;
+    }
     if (url.pathname === '/dashboard-api/nav-projects/threads') {
       projectThreadRequests.push(url);
       if (failProjectThreads) {
@@ -224,9 +262,9 @@ try {
     await call('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, ...point });
     await call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
   };
-  const press = async (key, windowsVirtualKeyCode) => {
-    const details = { key, code: key, windowsVirtualKeyCode };
-    const text = key === 'Enter' ? '\r' : '';
+  const press = async (key, windowsVirtualKeyCode, options = {}) => {
+    const details = { key, code: key, windowsVirtualKeyCode, ...options };
+    const text = options.text ?? (key === 'Enter' ? '\r' : '');
     await call('Input.dispatchKeyEvent', { type: text ? 'keyDown' : 'rawKeyDown', text, ...details });
     await call('Input.dispatchKeyEvent', { type: 'keyUp', ...details });
   };
@@ -668,7 +706,6 @@ try {
   await click(`${searchResults}[href="/c/local-18"]`);
   await until(() => js(`location.pathname === '/c/local-18' && !document.querySelector('${searchDialog}, .app-layout--drawer-open')
     && document.querySelector('.transcript')?.textContent.includes('Existing conversation')`), 'search loads the selected conversation and closes the mobile drawer');
-  assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: search opens from both navigation layouts, filters by title or project, and opens the selected conversation.');
 
   if (process.env.NAVBAR_SCREENSHOT) {
@@ -679,6 +716,239 @@ try {
     const screenshot = await call('Page.captureScreenshot', { format: 'png' });
     fs.writeFileSync(process.env.NAVBAR_SCREENSHOT, Buffer.from(screenshot.data, 'base64'));
   }
+
+  await viewport(1440, 900);
+  await call('Emulation.setTouchEmulationEnabled', { enabled: false });
+  const alt = 1;
+  const shift = 8;
+  const mod = await js('/^Mac/i.test(navigator.platform)') ? 4 : 2;
+  const primaryKey = mod === 4 ? 'Cmd' : 'Ctrl';
+  const altKey = mod === 4 ? 'Option' : 'Alt';
+  const chord = (key, code, modifiers, virtualKey) => press(key, virtualKey, { code, modifiers });
+  const blur = () => js('document.activeElement.blur()');
+  const paletteInput = '[aria-label="Search commands or pages"]';
+  const modal = '[aria-modal="true"]';
+  const launcher = '.settings-nav .shortcut-launcher';
+  const shortcutsRoute = '/settings/keyboard-shortcuts';
+  const settingsReady = () => until(() => js(`location.pathname === '${shortcutsRoute}'
+    && document.querySelectorAll('.settings-page-body .shortcut-row').length === 9`), 'shortcut settings');
+  const runPalette = async (query, alternate = false) => {
+    await blur();
+    if (alternate) await chord(' ', 'Space', mod | shift, 32);
+    else await chord('k', 'KeyK', mod, 75);
+    await until(() => js(`document.activeElement.matches('${paletteInput}')`), 'palette input focus');
+    await js(`{ const input = document.activeElement; input.value = ${JSON.stringify(query)};
+      input.dispatchEvent(new Event('input', { bubbles: true })); }`);
+    await press('Enter', 13);
+  };
+  const captureFor = async (action) => {
+    await click(`button[aria-label="Add shortcut for ${action}"]`);
+    await until(() => js("document.activeElement.matches('.shortcut-recorder')"), 'shortcut recorder focus');
+  };
+  const saveShortcut = async () => {
+    await click('.shortcut-editor-actions .btn-primary');
+    await until(() => js(`!document.querySelector('${modal}')`), 'finish shortcut edit');
+  };
+  const copyBindings = () => js(`Array.from(document.querySelectorAll('[aria-label^="Edit Copy link:"]'), el => el.getAttribute('aria-label'))`);
+  const expectTooltip = (label, binding) => until(() => js(`(() => {
+    const tooltip = document.querySelector('.shortcut-tooltip');
+    return tooltip && getComputedStyle(tooltip).visibility === 'visible'
+      && tooltip.querySelector('span').textContent === ${JSON.stringify(label)}
+      && (tooltip.querySelector('kbd')?.textContent ?? '') === ${JSON.stringify(binding)};
+  })()`), `tooltip for ${label} with ${binding || 'no binding'}`);
+  const hoverTooltip = async (selector, label, binding) => {
+    await move(await center(selector));
+    await expectTooltip(label, binding);
+    assert.equal(await js(`(() => {
+      const rect = document.querySelector('.shortcut-tooltip').getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight;
+    })()`), true, 'tooltip fits the viewport');
+  };
+
+  await until(() => js(`!!document.querySelector('${rail} .nav-search')`), 'desktop nav search');
+  await hoverTooltip(searchButton, 'Search conversations', `${primaryKey}+${altKey}+A`);
+  await move(await center(homeLink));
+  await until(() => js(`document.querySelector('${newChat}')?.getBoundingClientRect().width > 0`), 'new chat control');
+  await hoverTooltip(newChat, 'New chat', `${primaryKey}+${altKey}+O`);
+
+  await call('Page.navigate', { url: base + shortcutsRoute });
+  await settingsReady();
+  await hoverTooltip(launcher, 'Command palette', `${primaryKey}+K`);
+  await move(outside);
+  await until(() => js('!document.querySelector(".shortcut-tooltip")'), 'leaving a button hides its tooltip');
+  await press('Tab', 9);
+  await js(`document.querySelector('${launcher}').focus()`);
+  await expectTooltip('Command palette', `${primaryKey}+K`);
+  assert.equal(await js(`document.querySelector('${launcher}').getAttribute('aria-describedby')
+    === document.querySelector('.shortcut-tooltip').id`), true);
+  await press('Escape', 27);
+  assert.equal(await js('!document.querySelector(".shortcut-tooltip")'), true);
+  await blur();
+  await press('/', 191, { code: 'Slash' });
+  assert.equal(await js('document.activeElement.getAttribute("aria-label")'), 'Search settings');
+  await click(launcher);
+  await until(() => js(`document.activeElement.matches('${paletteInput}')`), 'mouse opens command palette');
+  await press('ArrowDown', 40);
+  assert.equal(await js('document.querySelector("[role=option][aria-selected=true]")?.textContent.trim().startsWith("Back")'), true);
+  await press('Escape', 27);
+  assert.equal(await js(`document.activeElement.matches('${launcher}')`), true);
+  await runPalette('show keyboard shortcuts');
+  await until(() => js("document.querySelectorAll('.dialog .shortcut-row').length === 9"), 'palette opens shortcut help');
+  assert.equal(await js(`document.querySelectorAll('${modal}').length`), 1);
+  await press('Escape', 27);
+  await blur();
+  await chord('?', 'Slash', shift, 191);
+  await until(() => js("document.querySelectorAll('.dialog .shortcut-row').length === 9"), 'shortcut help default');
+  await press('Escape', 27);
+
+  const collapsed = () => js('document.querySelector(".settings-app-layout").classList.contains("sidebar-collapsed")');
+  const wasCollapsed = await collapsed();
+  await blur();
+  await chord('s', 'KeyS', mod | alt, 83);
+  assert.equal(await collapsed(), !wasCollapsed);
+  await chord('s', 'KeyS', mod | alt, 83);
+  assert.equal(await collapsed(), wasCollapsed);
+
+  await captureFor('Copy link');
+  await chord('k', 'KeyK', mod, 75);
+  assert.match(await js('document.querySelector(".shortcut-conflict").textContent'), /Command palette/);
+  assert.equal(await js('document.querySelector(".shortcut-editor-actions .btn-primary").disabled'), true);
+  await chord('7', 'Digit7', mod | alt, 55);
+  rejectShortcutSave = true;
+  await click('.shortcut-editor-actions .btn-primary');
+  await until(() => js('Array.from(document.querySelectorAll(".toast.error")).some(el => el.textContent.includes("storage is unavailable"))'), 'shortcut save error');
+  assert.deepEqual(shortcutSettings.overrides, {}, 'a failed request keeps the saved shortcuts');
+  assert.equal(await js('document.querySelector(".shortcut-recorder kbd:last-child").textContent'), '7');
+  rejectShortcutSave = false;
+  await saveShortcut();
+  assert.deepEqual(shortcutSettings.overrides['copy-link'], ['Alt+Shift+KeyL', 'Mod+Alt+Digit7']);
+  await call('Page.reload');
+  await settingsReady();
+  assert.equal((await copyBindings()).length, 2, 'both bindings survive a reload');
+  await click('[aria-label^="Edit Copy link:"][aria-label$="+7"]');
+  await until(() => js("document.activeElement.matches('.shortcut-recorder')"), 'edit shortcut focus');
+  await chord('8', 'Digit8', mod | alt, 56);
+  await saveShortcut();
+  assert.deepEqual(shortcutSettings.overrides['copy-link'], ['Alt+Shift+KeyL', 'Mod+Alt+Digit8']);
+
+  await js(`history.replaceState(history.state, '', '${shortcutsRoute}?filter=copy#link');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText(value) {
+      window.copiedLink = value; return Promise.resolve();
+    } } });`);
+  await blur();
+  await chord('L', 'KeyL', alt | shift, 76);
+  await until(() => js('window.copiedLink === location.href'), 'copy link default');
+  await js('window.copiedLink = null');
+  await chord('8', 'Digit8', mod | alt, 56);
+  await until(() => js(`window.copiedLink === location.href && location.hash === '#link'`), 'copy current URL with query and hash');
+  await click('[aria-label^="Remove Copy link:"][aria-label$="+8"]');
+  await until(() => shortcutSettings.overrides['copy-link']?.length === 1, 'remove custom binding');
+  await until(async () => (await copyBindings()).length === 1, 'update list after removal');
+  await click('[aria-label^="Remove Copy link:"]');
+  await until(async () => (await copyBindings()).length === 0, 'remove last binding');
+  assert.deepEqual(shortcutSettings.overrides['copy-link'], []);
+  await click('[aria-label="Reset Copy link to default"]');
+  await until(async () => (await copyBindings()).length === 1, 'reset individual action');
+  assert.equal(shortcutSettings.overrides['copy-link'], undefined);
+
+  await captureFor('Copy link');
+  shortcutSettings = { ...shortcutSettings, revision: shortcutSettings.revision + 1, overrides: { 'copy-link': [] } };
+  await chord('8', 'Digit8', mod | alt, 56);
+  await saveShortcut();
+  assert.equal((await copyBindings()).length, 0, 'refresh after a concurrent save');
+  await click('.settings-topbar-actions .btn');
+  await until(async () => (await copyBindings()).length === 1, 'reset all shortcuts');
+  assert.deepEqual(shortcutSettings.overrides, {});
+  shortcutSettings = { ...shortcutSettings, revision: shortcutSettings.revision + 1, overrides: { 'copy-link': [] } };
+  await js('window.dispatchEvent(new Event("focus"))');
+  await until(async () => (await copyBindings()).length === 0, 'refresh preference on returning to the tab');
+
+  const sidebarButton = (await collapsed()) ? '.brand-expand-btn' : '.brand-collapse-btn';
+  const sidebarLabel = await js(`document.querySelector('${sidebarButton}').getAttribute('aria-label')`);
+  await hoverTooltip(sidebarButton, sidebarLabel, `${primaryKey}+${altKey}+S`);
+  for (const [bindings, text] of [
+    [['Mod+Shift+KeyS'], `${primaryKey}+Shift+S`],
+    [[], ''],
+    [undefined, `${primaryKey}+${altKey}+S`],
+  ]) {
+    const overrides = { ...shortcutSettings.overrides };
+    if (bindings) overrides['toggle-sidebar'] = bindings;
+    else delete overrides['toggle-sidebar'];
+    shortcutSettings = { ...shortcutSettings, overrides, revision: shortcutSettings.revision + 1 };
+    await js('window.dispatchEvent(new Event("focus"))');
+    await expectTooltip(sidebarLabel, text);
+  }
+  await move(outside);
+  console.log('PASS: action tooltips show saved bindings, respond to keyboard focus, and update when bindings change.');
+
+  await blur();
+  await chord('a', 'KeyA', mod | alt, 65);
+  await until(() => js(`document.activeElement.matches('${searchInput}')`), 'search sessions on settings route');
+  await press('Escape', 27);
+  await runPalette('new session', true);
+  await until(() => js('location.pathname === "/chat" && document.querySelector(".chat-prompt-input")?.disabled === false'), 'palette opens a blank chat');
+  await blur();
+  const pressSlash = () => press('/', 191, { code: 'Slash', text: '/' });
+  await pressSlash();
+  await until(() => js('document.activeElement.matches(".chat-prompt-input")'), 'slash focuses the chat composer');
+  assert.equal(await js('document.activeElement.value'), '', 'the focus shortcut does not type a slash');
+  await pressSlash();
+  assert.equal(await js('document.activeElement.value'), '/', 'slash can still be typed in the composer');
+  const draftId = await js('history.state.newChatId');
+  await draft('Keep this draft while typing');
+  await js('document.querySelector(".chat-prompt-input").focus()');
+  await chord('o', 'KeyO', mod | alt, 79);
+  assert.equal(await js('history.state.newChatId'), draftId, 'shortcuts skip the focused composer');
+  await blur();
+  await js(`document.body.dispatchEvent(new KeyboardEvent('keydown', {
+    bubbles: true, code: 'KeyO', key: 'o', ctrlKey: ${mod === 2}, metaKey: ${mod === 4}, altKey: true, isComposing: true,
+  }));`);
+  assert.equal(await js('history.state.newChatId'), draftId, 'shortcuts skip IME composition');
+  await chord('o', 'KeyO', mod | alt, 79);
+  await until(() => js(`location.pathname === '/chat' && history.state.newChatId !== ${JSON.stringify(draftId)}
+    && document.querySelector('.chat-prompt-input')?.value === ''`), 'new session from /chat creates a new draft');
+  await chord('>', 'Period', mod | shift, 190);
+  await until(() => js('document.activeElement.matches(".chat-prompt-input")'), 'focus message input');
+  const countBeforeEnter = sends.length;
+  await draft('Send with Enter');
+  await press('Enter', 13);
+  await until(() => sends.length > countBeforeEnter, 'Enter still sends from the focused composer');
+
+  await runPalette('chat history');
+  await until(() => js('location.pathname === "/history"'), 'palette navigates to chat history');
+  await blur();
+  assert.equal(await js(`document.body.dispatchEvent(new KeyboardEvent('keydown', {
+    bubbles: true, cancelable: true, code: 'Slash', key: '/',
+  }))`), true, 'slash is not consumed outside chat');
+  await chord('ArrowLeft', 'ArrowLeft', mod | shift, 37);
+  await until(() => js('location.pathname.startsWith("/c/") || location.pathname === "/chat"'), 'history back shortcut');
+  await chord('ArrowRight', 'ArrowRight', mod | shift, 39);
+  await until(() => js('location.pathname === "/history"'), 'history forward shortcut');
+  await viewport(375, 812);
+  await until(() => js('!!document.querySelector(".topbar-menu-toggle")'), 'mobile dashboard shell');
+  await chord('s', 'KeyS', mod | alt, 83);
+  await until(() => js('!!document.querySelector(".app-layout--drawer-open")'), 'toggle mobile drawer from keyboard');
+  await chord('s', 'KeyS', mod | alt, 83);
+  await until(() => js('!document.querySelector(".app-layout--drawer-open")'), 'close mobile drawer from keyboard');
+  await js('localStorage.setItem("k41-dashboard-theme", "dark")');
+  await viewport(320, 568);
+  await call('Page.addScriptToEvaluateOnNewDocument', {
+    source: 'Object.defineProperty(navigator, "platform", { value: "MacIntel" });',
+  });
+  await call('Page.navigate', { url: base + shortcutsRoute });
+  await settingsReady();
+  assert.equal(await js('document.documentElement.classList.contains("dark")'), true);
+  assert.equal(await js('document.querySelector(\'[aria-label^="Edit Command palette:"] kbd\').textContent'), 'Cmd');
+  assert.equal(await js('document.documentElement.scrollWidth <= innerWidth'), true, 'shortcut settings fit a small viewport');
+  await captureFor('Copy link');
+  assert.equal(await js('document.querySelector(".dialog").getBoundingClientRect().right <= innerWidth'), true);
+  await press('Escape', 27);
+  await blur();
+  await chord('k', 'KeyK', 4, 75);
+  await until(() => js(`document.activeElement.matches('${paletteInput}')`), 'Command key opens the palette on Mac');
+  await press('Escape', 27);
+  assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
+  console.log('PASS: account-synced shortcut settings, conflicts, command palette, all keyboard actions, and mobile dialogs.');
 } finally {
   if (call && ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
   ws?.close();

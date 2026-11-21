@@ -350,12 +350,12 @@ async function runM3ChallengerStressSuite() {
   // =========================================================================
   harness.setFeature('M3-STRESS-05: SettingsLayout Keyboard Shortcuts & State Machine');
 
-  harness.test('SettingsLayout source wires "/" and "Ctrl+K" / "Cmd+K" with input element guards', () => {
+  harness.test('SettingsLayout wires plain "/" to desktop settings search', () => {
     const code = ast.readSrcFile('pages/settings/SettingsLayout.tsx');
-    assertIncludes(code, 'e.key === "/"', 'SettingsLayout must listen for "/" key');
-    assertIncludes(code, 'e.ctrlKey || e.metaKey', 'SettingsLayout must listen for Ctrl+K or Cmd+K');
-    assertIncludes(code, '["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)', 'Must not intercept form inputs');
-    assertIncludes(code, '!isMobileViewport()', 'Must not trigger shortcut when on mobile viewport');
+    assertIncludes(code, 'event.key !== "/"', 'SettingsLayout must listen for "/" key');
+    assertIncludes(code, 'event.ctrlKey || event.metaKey', 'SettingsLayout must leave modified keys available');
+    assertIncludes(code, 'ignoreGlobalShortcut(event)', 'Must honor the shortcut context guards');
+    assertIncludes(code, 'isMobileViewport() || ignoreGlobalShortcut(event)', 'Must use desktop settings search');
   });
 
   harness.test('SettingsLayout state machine simulation for keyboard expand & search focus', () => {
@@ -373,7 +373,7 @@ async function runM3ChallengerStressSuite() {
     const isMobileViewport = () => false;
 
     const handleKey = (e) => {
-      if ((e.key === '/' || (e.key === 'k' && (e.ctrlKey || e.metaKey))) && !isMobileViewport()) {
+      if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !isMobileViewport()) {
         const target = e.target;
         if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
         e.preventDefaultCalled = true;
@@ -406,13 +406,14 @@ async function runM3ChallengerStressSuite() {
     assertEqual(focused, false, 'Search input should not refocus');
     assertEqual(eventInputSlash.preventDefaultCalled, false, 'preventDefault must NOT be called in INPUT');
 
-    // Case 3: Press "Ctrl+K" on body -> expands and focuses
+    // Case 3: The global command palette handles "Ctrl+K".
     collapsed = true;
     focused = false;
     const eventCtrlK = { key: 'k', ctrlKey: true, target: { tagName: 'BODY' }, preventDefaultCalled: false };
     handleKey(eventCtrlK);
-    assertEqual(collapsed, false, 'Sidebar must expand when Ctrl+K pressed');
-    assertEqual(focused, true, 'Search input must receive focus');
+    assertEqual(collapsed, true, 'Ctrl+K leaves the settings sidebar collapsed');
+    assertEqual(focused, false, 'Ctrl+K leaves settings search unfocused');
+    assertEqual(eventCtrlK.preventDefaultCalled, false, 'Settings search leaves Ctrl+K available');
   });
 
   harness.test('SettingsLayout state machine simulation for auto-collapse vs userLocked preference', () => {
