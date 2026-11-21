@@ -14,12 +14,9 @@ from agent.modules.providers.provider import ProviderConfig, ProviderType
 from agent.shared.config import get_config_service
 
 
-DEFAULT_TEMPERATURE = 0.0
-
-
-def _parse_temperature(value: str | float | int | None, default: float) -> float:
+def _parse_temperature(value: str | float | int | None) -> float | None:
     if value in (None, ""):
-        return default
+        return None
 
     try:
         return float(value)
@@ -108,7 +105,6 @@ def _resolve_chat_model_info_impl(
     configured_temperature = config.get(provider_temperature_key)
     resolved_temperature = _parse_temperature(
         temperature if temperature is not None else configured_temperature,
-        DEFAULT_TEMPERATURE,
     )
 
     resolved_api_key = api_key or provider_config.api_key
@@ -223,7 +219,7 @@ def _get_cached_model(
     base_url: str,
     api_key: str,
     model_name: str,
-    temperature: float,
+    temperature: float | None,
     extra_body_json: str = "",
     provider_name: str = "",
     profile_json: str = "",

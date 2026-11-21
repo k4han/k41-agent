@@ -43,7 +43,7 @@ class ModelConfig:
     """Configuration for a specific model invocation."""
 
     model_name: str
-    temperature: float = 0.0
+    temperature: float | None = None
     max_tokens: int | None = None
     profile: dict[str, Any] | None = None
     disable_retries: bool = False

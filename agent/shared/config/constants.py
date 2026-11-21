@@ -1269,7 +1269,7 @@ _PROVIDER_SETTING_FIELD_META: dict[str, dict[str, Any]] = {
     },
     "temperature": {
         "type": "number",
-        "description": "Temperature for this provider (0.0 = deterministic, 2.0 = creative)",
+        "description": "Optional sampling temperature for supported models. Leave blank to use the model default.",
         "label": "Temperature",
         "min": 0,
         "max": 2,

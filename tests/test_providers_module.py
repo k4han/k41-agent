@@ -153,7 +153,7 @@ def test_provider_config_creation() -> None:
 
 def test_model_config_defaults() -> None:
     mc = ModelConfig(model_name="test-model")
-    assert mc.temperature == 0.0
+    assert mc.temperature is None
     assert mc.max_tokens is None
 
 
@@ -857,26 +857,21 @@ def test_resolve_chat_model_uses_anthropic_factory(
     _get_cached_model.cache_clear()
 
 
-def test_resolve_chat_model_uses_provider_specific_temperature(
+@pytest.mark.parametrize(
+    ("configured", "override", "expected"),
+    [(None, None, None), (0.2, None, 0.2), (0.0, None, 0.0), (0.2, 0.0, 0.0)],
+)
+def test_resolve_chat_model_uses_explicit_temperature(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
+    configured: float | None,
+    override: float | None,
+    expected: float | None,
 ) -> None:
     _get_cached_model.cache_clear()
 
     config_path = tmp_path / "config.yaml"
-    _write_yaml(
-        config_path,
-        """
-        llm:
-            default_model: "openai-main/provider-model"
-            providers:
-                openai-main:
-                    type: "openai_compatible"
-                    api_key: "openai-key"
-                    default_model: "provider-model"
-                    temperature: 0.2
-        """,
-    )
+    _write_config(config_path, temperature=configured)
     _set_config_path(monkeypatch, config_path)
 
     repo = ConfigProviderRepository()
@@ -888,12 +883,12 @@ def test_resolve_chat_model_uses_provider_specific_temperature(
 
     service.register_factory(ProviderType.OPENAI_COMPATIBLE, mock_factory)
 
-    result = resolve_chat_model(service)
+    result = resolve_chat_model(service, temperature=override)
 
     assert result is mock_model
     call_args = mock_factory.create.call_args.args
     model_config = call_args[1]
-    assert model_config.temperature == 0.2
+    assert model_config.temperature == expected
 
     _get_cached_model.cache_clear()
 
@@ -1032,20 +1027,20 @@ def test_resolve_chat_model_resolves_primary_when_configured(
 
 
 def test_parse_temperature_none() -> None:
-    assert _parse_temperature(None, 0.5) == 0.5
+    assert _parse_temperature(None) is None
 
 
 def test_parse_temperature_empty() -> None:
-    assert _parse_temperature("", 0.5) == 0.5
+    assert _parse_temperature("") is None
 
 
 def test_parse_temperature_valid() -> None:
-    assert _parse_temperature("0.7", 0.5) == 0.7
+    assert _parse_temperature("0.7") == 0.7
 
 
 def test_parse_temperature_invalid() -> None:
     with pytest.raises(ValueError, match="llm.providers.<provider>.temperature"):
-        _parse_temperature("not-a-number", 0.5)
+        _parse_temperature("not-a-number")
 
 
 # --- Provider catalog runtime file ---

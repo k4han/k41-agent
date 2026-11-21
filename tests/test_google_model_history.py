@@ -57,7 +57,7 @@ async def test_signed_history_at_google_http_boundary(monkeypatch, model_name, m
             "streamGenerateContent" if mode in ("stream", "astream") else "generateContent"
         ))
         assert body["systemInstruction"]["parts"][0]["text"] == "Finish the requested task."
-        assert body["generationConfig"]["temperature"] == 0
+        assert "temperature" not in body["generationConfig"]
         assert body["tools"][0]["functionDeclarations"][0]["name"] == "echo"
         parts = body["contents"][1]["parts"]
         assert parts[0]["text"] == "Calling echo."

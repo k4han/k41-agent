@@ -41,6 +41,8 @@ def assert_report(response, monkeypatch, *, input_tokens, cached, output_tokens=
 async def test_responses_endpoint_cache_usage(monkeypatch, service_tier, mode):
     def handle(request):
         assert request.url.path == "/v1/responses"
+        body = json.loads(request.content)
+        assert "temperature" not in body
         response = {
             "id": "resp-test", "object": "response", "created_at": 1, "status": "completed",
             "model": "gpt-6", "error": None, "incomplete_details": None,
@@ -51,7 +53,7 @@ async def test_responses_endpoint_cache_usage(monkeypatch, service_tier, mode):
                 "output_tokens_details": {"reasoning_tokens": 10}},
             "service_tier": service_tier or "default",
         }
-        if not json.loads(request.content).get("stream"):
+        if not body.get("stream"):
             return httpx.Response(200, json=response)
         return httpx.Response(200, headers={"content-type": "text/event-stream"}, text=
             "data: " + json.dumps({"type": "response.completed", "sequence_number": 1, "response": response}) + "\n\n")
@@ -108,6 +110,7 @@ async def test_anthropic_stream_merges_start_usage_and_final_cumulative_totals(
     def handle(request):
         assert request.url.path == "/v1/messages"
         body = json.loads(request.content)
+        assert "temperature" not in body
         # Different totals expose request-state leaks when a model is reused concurrently.
         alternate = body["messages"][-1]["content"] == "Other"
         return httpx2.Response(200, headers={"content-type": "text/event-stream"},
