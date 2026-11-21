@@ -3,10 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from agent.modules.admin_auth import get_current_admin
-from agent.modules.admin_auth.keyboard_shortcuts import (
+from agent.modules.admin_auth import (
     DEFAULT_SHORTCUTS,
     ShortcutMap,
+    get_current_admin,
     read_keyboard_shortcuts,
     save_keyboard_shortcuts,
     validate_overrides,

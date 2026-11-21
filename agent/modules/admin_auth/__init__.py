@@ -13,18 +13,31 @@ from agent.modules.admin_auth.service import (
     LoginThrottled,
     get_admin_auth_service,
 )
-from agent.modules.admin_auth.models import AdminCredential
+from agent.modules.admin_auth.models import AdminCredential, AdminKeyboardShortcuts
+from agent.modules.admin_auth.keyboard_shortcuts import (
+    DEFAULT_SHORTCUTS,
+    ShortcutMap,
+    read_keyboard_shortcuts,
+    save_keyboard_shortcuts,
+    validate_overrides,
+)
 from agent.modules.admin_auth.migrations import migrate_admin_auth_tables
 
 
 __all__ = [
     "AdminAuthService",
     "AdminCredential",
+    "AdminKeyboardShortcuts",
     "DEFAULT_ADMIN_PASSWORD",
+    "DEFAULT_SHORTCUTS",
     "LoginThrottled",
+    "ShortcutMap",
     "migrate_admin_auth_tables",
     "create_access_token",
     "get_admin_auth_service",
     "get_current_admin",
     "get_secret_key",
+    "read_keyboard_shortcuts",
+    "save_keyboard_shortcuts",
+    "validate_overrides",
 ]
