@@ -60,10 +60,6 @@
   display: none;
 }
 
-.sidebar-collapsed .nav-section-title {
-  display: none;
-}
-
 .sidebar-collapsed .nav-separator {
   width: 24px;
   margin: 6px auto;

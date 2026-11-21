@@ -18,15 +18,6 @@
   background: var(--surface);
 }
 
-.app-shell-navigation-panel {
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-}
-
-.app-shell-navigation-panel[hidden],
 .app-shell-projects[hidden] {
   display: none;
 }
@@ -71,56 +62,6 @@
   box-shadow: 0 0 5px var(--accent);
 }
 
-.navigation-section-panel {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  overflow-y: auto;
-  padding: 10px;
-}
-
-.nav-link.navigation-section-page-link {
-  justify-content: space-between;
-  background: var(--surface-2);
-  color: var(--fg);
-  font-weight: 600;
-}
-
-.nav-link.navigation-section-page-link:hover {
-  background: var(--surface-3);
-}
-
-.navigation-section-list {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.navigation-section-list > li {
-  min-width: 0;
-}
-
-.navigation-section-row {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 9px;
-  font-size: var(--font-size-base);
-}
-
-.navigation-section-row .nav-label {
-  white-space: nowrap;
-}
-
-.navigation-section-detail {
-  color: var(--muted);
-  font-size: var(--font-size-xs);
-}
-
 .conversation-search-body {
   display: flex;
   flex-direction: column;
@@ -132,9 +73,17 @@
 }
 
 .conversation-search-results {
+  display: grid;
   min-height: 0;
+  gap: 2px;
+  margin: 0;
   overflow-y: auto;
   padding: 2px;
+  list-style: none;
+}
+
+.conversation-search-results > li {
+  min-width: 0;
 }
 
 .conversation-search-result {
@@ -938,18 +887,9 @@ body.sidebar-resizing * {
   color: var(--fg);
 }
 
-.nav-link.nav-new-chat {
-  background: var(--surface-2);
-  color: var(--fg);
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.nav-link.nav-new-chat:hover:not(:disabled) {
-  background: var(--surface-3);
-}
-
 .nav-link.nav-new-chat:disabled {
+  background: transparent;
+  color: var(--muted);
   cursor: default;
   opacity: 0.6;
 }
@@ -975,15 +915,6 @@ body.sidebar-resizing * {
   height: 1px;
   margin: 8px 4px;
   background: var(--border);
-}
-
-.nav-section-title {
-  padding: 6px 10px 4px;
-  color: var(--muted-2);
-  font-size: 0.6875rem;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .sidebar-footer {

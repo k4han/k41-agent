@@ -34,8 +34,7 @@ import { unwrap } from "solid-js/store";
 
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { ExportChatDialog } from "@/components/ExportChatDialog";
-import { CommandPaletteButton, useKeyboardShortcuts, useShortcutAction } from "@/components/KeyboardShortcutsProvider";
-import { NavigationSectionPanel, type NavigationSection } from "@/components/NavigationSectionPanel";
+import { useKeyboardShortcuts, useShortcutAction } from "@/components/KeyboardShortcutsProvider";
 import { ProjectActions } from "@/components/ProjectActions";
 import { InlineRenameInput } from "@/components/InlineRenameInput";
 import { UpdateDialog } from "@/components/UpdateDialog";
@@ -51,6 +50,7 @@ import {
 import type { ThreadSummary, ThreadWorkspaceGroup } from "@/lib/chatThreads";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import { API_PATHS } from "@/lib/endpoints";
+import { hasOpenDialog } from "@/lib/keyboardShortcuts";
 import { isSchedulerSession } from "@/lib/schedulerSessions";
 import { useSessions } from "@/lib/sessionStore";
 import { updateDashboardFavicon } from "@/lib/favicon";
@@ -67,21 +67,24 @@ import { cloneValue, truncateText } from "@/lib/utils";
 import { useToast } from "@/components/Toast";
 import type { WorkspaceBinding, WorkspaceRef } from "@/types";
 
-type NavItem = {
+type NavigationSection = "home" | "scheduler" | "repositories";
+
+type NavLink = {
   section: NavigationSection;
   href: string;
   label: string;
   icon: () => JSX.Element;
 };
 
-const navItems: NavItem[] = [
+const navItems: (NavLink | { section: "new-chat"; label: string })[] = [
   { section: "home", href: "/", label: "Home", icon: () => <Home size={15} /> },
-  { section: "repositories", href: "/repositories", label: "Repositories", icon: () => <GitPullRequest size={15} /> },
+  { section: "new-chat", label: "New chat" },
   { section: "scheduler", href: "/scheduler", label: "Scheduler", icon: () => <CalendarClock size={15} /> },
+  { section: "repositories", href: "/repositories", label: "Repositories", icon: () => <GitPullRequest size={15} /> },
 ];
-const navigationPanelId = "app-shell-navigation-panel";
+const navigationRailId = "app-shell-nav-rail";
 const projectsPanelId = "app-shell-projects";
-const PREVIEW_CLOSE_DELAY_MS = 150;
+const NAVIGATION_CLOSE_DELAY_MS = 150;
 
 type DeferredHistoryLoad = {
   kind: "idle" | "timeout";
@@ -107,7 +110,7 @@ export function AppShell(props: {
   const shortcuts = useKeyboardShortcuts();
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [collapsed, setCollapsed] = createSignal(window.localStorage.getItem(STORAGE_KEYS.SIDEBAR_COLLAPSED) === "collapsed");
-  const [previewSection, setPreviewSection] = createSignal<NavigationSection>();
+  const [temporaryNavigationOpen, setTemporaryNavigationOpen] = createSignal(false);
   const [projectMenuId, setProjectMenuId] = createSignal<string | null>(null);
   const {
     threads: historyThreads,
@@ -145,24 +148,19 @@ export function AppShell(props: {
     const segment = location.pathname.split("/", 2)[1];
     return segment === "repositories" || segment === "scheduler" ? segment : "home";
   });
-  const panelSection = () => isMobileViewport() ? "home" : collapsed() ? previewSection() : activeSection();
-  const sidebarTitle = () => {
-    const section = isMobileViewport() ? activeSection() : panelSection();
-    return navItems.find((item) => item.section === section)?.label;
-  };
-  const projectsVisible = () => isMobileViewport() ? mobileDrawerOpen() : Boolean(panelSection());
+  const projectsVisible = () => isMobileViewport() ? mobileDrawerOpen() : !collapsed() || temporaryNavigationOpen();
   const availableUpdateTitle = () => {
     const info = versionInfo();
     return info?.has_update ? `Update available: v${info.latest_version}` : undefined;
   };
   let sidebarRef: HTMLElement | undefined;
-  let navigationPanel: HTMLDivElement | undefined;
+  let navigationRail: HTMLElement | undefined;
   let projectsPanel: HTMLElement | undefined;
   let accountButton: HTMLButtonElement | undefined;
-  let previewTrigger: HTMLElement | undefined;
+  let navigationTrigger: HTMLElement | undefined;
   let pointerInNavigation = false;
-  let restoringPreviewFocus = false;
-  let previewCloseTimer: number | undefined;
+  let restoringNavigationFocus = false;
+  let navigationCloseTimer: number | undefined;
   let disposed = false;
   let deferredHistoryLoad: DeferredHistoryLoad | null = null;
   let threadsChangedTimer: number | undefined;
@@ -323,42 +321,42 @@ export function AppShell(props: {
 
   createEffect(() => navProjectsStore.setActiveThreadId(selectedChatThreadId()));
 
-  const clearPreviewClose = () => window.clearTimeout(previewCloseTimer);
+  const clearNavigationClose = () => window.clearTimeout(navigationCloseTimer);
   const hasNavigationFocus = () => {
     const focused = document.activeElement;
     return sidebarRef?.contains(focused) && focused?.matches(":focus-visible");
   };
 
-  const openPreview = (section: NavigationSection, trigger: HTMLElement | undefined) => {
-    if (!collapsed() || isMobileViewport() || restoringPreviewFocus) return;
-    if (section !== previewSection() && (historyMenuThreadId() || projectMenuId() || editingHistoryThreadId())) return;
-    clearPreviewClose();
-    previewTrigger = trigger;
-    setPreviewSection(section);
+  const openTemporaryNavigation = (trigger?: HTMLElement) => {
+    if (!collapsed() || isMobileViewport() || restoringNavigationFocus || hasOpenDialog()) return;
+    clearNavigationClose();
+    navigationTrigger = trigger ?? navigationTrigger;
+    setTemporaryNavigationOpen(true);
   };
 
-  const dismissPreview = (restoreFocus = false) => {
-    clearPreviewClose();
+  const dismissTemporaryNavigation = (restoreFocus = false) => {
+    clearNavigationClose();
     const focused = document.activeElement;
-    if (restoreFocus && previewTrigger && (
-      navigationPanel?.contains(focused) || projectsPanel?.contains(focused) || focused?.matches(".brand-version-btn")
+    if (restoreFocus && (
+      projectsPanel?.contains(focused) || focused?.matches(".brand-version-btn")
     )) {
-      restoringPreviewFocus = true;
-      previewTrigger.focus({ preventScroll: true });
-      restoringPreviewFocus = false;
+      const target = navigationTrigger ?? navigationRail?.querySelector<HTMLElement>('[aria-current="location"]');
+      restoringNavigationFocus = true;
+      target?.focus({ preventScroll: true });
+      restoringNavigationFocus = false;
     }
-    previewTrigger = undefined;
-    setPreviewSection(undefined);
+    navigationTrigger = undefined;
+    setTemporaryNavigationOpen(false);
   };
 
-  const schedulePreviewClose = () => {
-    clearPreviewClose();
-    if (!previewSection()) return;
-    previewCloseTimer = window.setTimeout(() => {
+  const scheduleNavigationClose = () => {
+    clearNavigationClose();
+    if (!temporaryNavigationOpen()) return;
+    navigationCloseTimer = window.setTimeout(() => {
       if (pointerInNavigation || hasNavigationFocus() || menuOpen()
         || historyMenuThreadId() || projectMenuId() || editingHistoryThreadId()) return;
-      dismissPreview();
-    }, PREVIEW_CLOSE_DELAY_MS);
+      dismissTemporaryNavigation();
+    }, NAVIGATION_CLOSE_DELAY_MS);
   };
 
   const isHoverPointer = (event: PointerEvent) => (
@@ -368,52 +366,60 @@ export function AppShell(props: {
   const handleNavigationPointerEnter = (event: PointerEvent) => {
     if (!isHoverPointer(event)) return;
     pointerInNavigation = true;
-    clearPreviewClose();
+    clearNavigationClose();
   };
 
-  const previewActiveSection = (event: PointerEvent) => {
-    if (!isHoverPointer(event) || previewSection()) return;
-    const activeLink = sidebarRef?.querySelector<HTMLElement>('.app-shell-nav-rail [aria-current="location"]');
-    openPreview(activeSection(), activeLink ?? undefined);
+  const handleRailFocusIn = (event: FocusEvent) => {
+    if (event.target instanceof HTMLElement && event.target.matches(".nav-link:focus-visible")) {
+      openTemporaryNavigation(event.target);
+    }
+  };
+
+  const handleRailKeydown = (event: KeyboardEvent) => {
+    if (event.key !== "ArrowRight" || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (!(event.target instanceof HTMLElement) || !event.target.matches(".nav-link")) return;
+    event.preventDefault();
+    openTemporaryNavigation(event.target);
+    projectsPanel?.querySelector<HTMLElement>(".nav-projects-manage")?.focus();
   };
 
   const handleNavigationPointerLeave = (event: PointerEvent) => {
     if (event.pointerType === "touch") return;
     pointerInNavigation = false;
-    schedulePreviewClose();
+    scheduleNavigationClose();
   };
 
   const handleNavigationFocusOut = (event: FocusEvent) => {
     if (event.relatedTarget instanceof Node && sidebarRef?.contains(event.relatedTarget)) return;
-    schedulePreviewClose();
+    scheduleNavigationClose();
   };
 
   const handleOutsidePointerDown = (event: PointerEvent) => {
-    if (!previewSection() || editingHistoryThreadId() || !(event.target instanceof Element)) return;
+    if (!temporaryNavigationOpen() || editingHistoryThreadId() || !(event.target instanceof Element)) return;
     if (sidebarRef?.contains(event.target) || historyMenuRef?.contains(event.target)) return;
     const projectMenu = projectMenuId();
     if (projectMenu && document.getElementById(projectMenu)?.contains(event.target)) return;
-    dismissPreview();
+    dismissTemporaryNavigation();
   };
 
   const handleSidebarClick = (event: MouseEvent) => {
     if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     if (!(event.target instanceof Element) || !event.target.closest("a[href]")) return;
     handleNavClick(event);
-    dismissPreview(true);
+    if (temporaryNavigationOpen()) dismissTemporaryNavigation(true);
   };
 
   const handleNavigationKeydown = (event: KeyboardEvent) => {
     if (event.key !== "Escape" || event.defaultPrevented) return;
-    if (document.querySelector('.dialog[aria-modal="true"]')) return;
+    if (hasOpenDialog()) return;
     if (projectMenuId()) return;
     if (historyMenuThreadId()) {
       closeHistoryMenu(true);
     } else if (menuOpen()) {
       setMenuOpen(false);
       accountButton?.focus({ preventScroll: true });
-    } else if (previewSection()) {
-      dismissPreview(true);
+    } else if (temporaryNavigationOpen()) {
+      dismissTemporaryNavigation(true);
     } else {
       handleDrawerKeydown(event);
       return;
@@ -449,19 +455,12 @@ export function AppShell(props: {
       setMobileDrawerOpen(!mobileDrawerOpen());
       return;
     }
-    const focused = document.activeElement;
-    const pinHadFocus = focused?.matches(".app-shell-sidebar-pin") && sidebarRef?.contains(focused);
     const next = !collapsed();
     batch(() => {
-      dismissPreview();
+      dismissTemporaryNavigation(next);
       setCollapsed(next);
     });
     window.localStorage.setItem(STORAGE_KEYS.SIDEBAR_COLLAPSED, next ? "collapsed" : "expanded");
-    if (pinHadFocus) {
-      queueMicrotask(() => {
-        sidebarRef?.querySelector<HTMLButtonElement>(".app-shell-sidebar-pin")?.focus({ preventScroll: true });
-      });
-    }
   };
   useShortcutAction("toggle-sidebar", { run: toggleSidebar });
 
@@ -473,7 +472,7 @@ export function AppShell(props: {
         class="btn btn-icon btn-ghost app-shell-sidebar-pin"
         type="button"
         onClick={toggleSidebar}
-        aria-controls={`${navigationPanelId} ${projectsPanelId}`}
+        aria-controls={`${navigationRailId} ${projectsPanelId}`}
         aria-expanded={projectsVisible()}
         aria-label={label()}
         aria-description={updateTitle()}
@@ -507,12 +506,12 @@ export function AppShell(props: {
 
   createEffect(on(
     [menuOpen, historyMenuThreadId, projectMenuId, editingHistoryThreadId],
-    schedulePreviewClose,
+    scheduleNavigationClose,
     { defer: true },
   ));
-  createEffect(on(() => location.pathname, () => dismissPreview(), { defer: true }));
+  createEffect(on(() => location.pathname, () => dismissTemporaryNavigation(), { defer: true }));
   createEffect(on(isMobileViewport, () => {
-    dismissPreview();
+    dismissTemporaryNavigation();
     pointerInNavigation = false;
   }, { defer: true }));
 
@@ -579,7 +578,7 @@ export function AppShell(props: {
 
   const [openingProject, setOpeningProject] = createSignal("");
   const openChatDraft = (context: Omit<NewChatNavigationState, "newChatId"> = {}) => {
-    dismissPreview(true);
+    if (temporaryNavigationOpen()) dismissTemporaryNavigation(true);
     navigate("/chat", { state: newChatNavigationState(context) });
     closeMobileDrawer();
   };
@@ -622,7 +621,7 @@ export function AppShell(props: {
     });
   });
 
-  const renderNavItem = (item: NavItem, desktop = false) => {
+  const renderNavLink = (item: NavLink) => {
     const href = useHref(useResolvedPath(() => item.href));
     const active = () => activeSection() === item.section;
     const live = () => item.section === "scheduler" && schedulerRunning();
@@ -634,27 +633,7 @@ export function AppShell(props: {
         class={`nav-link ${active() ? "active" : ""} ${live() ? "nav-link--live" : ""}`}
         aria-current={active() ? "location" : undefined}
         aria-label={label()}
-        aria-controls={desktop && collapsed() ? navigationPanelId : undefined}
-        aria-expanded={desktop && collapsed() ? previewSection() === item.section : undefined}
         title={label()}
-        onPointerEnter={desktop ? (event) => {
-          if (isHoverPointer(event) && !(navigationPanel?.contains(document.activeElement) && hasNavigationFocus())) {
-            openPreview(item.section, event.currentTarget);
-          }
-        } : undefined}
-        onFocus={desktop ? (event) => {
-          if (event.currentTarget.matches(":focus-visible")) openPreview(item.section, event.currentTarget);
-        } : undefined}
-        onKeyDown={desktop ? (event) => {
-          if (event.key !== "ArrowRight" || !collapsed() || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-          event.preventDefault();
-          openPreview(item.section, event.currentTarget);
-          queueMicrotask(() => {
-            if (previewSection() === item.section) {
-              navigationPanel?.querySelector<HTMLElement>("nav:not([hidden]) :is(a[href], button:not([disabled]))")?.focus();
-            }
-          });
-        } : undefined}
       >
         {item.icon()}
         <span class="nav-label">{item.label}</span>
@@ -668,22 +647,38 @@ export function AppShell(props: {
     );
   };
 
-  const renderSearchButton = () => (
-    <button
-      class="nav-link nav-search"
-      type="button"
-      aria-label="Search conversations"
-      aria-haspopup="dialog"
-      data-shortcut-action="search-sessions"
-      onPointerEnter={previewActiveSection}
-      onClick={() => {
-        dismissPreview();
-        shortcuts.run("search-sessions");
-      }}
-    >
-      <Search size={15} aria-hidden="true" />
-      <span class="nav-label">Search conversations</span>
-    </button>
+  const renderNavigationItems = () => (
+    <>
+      <For each={navItems}>
+        {(item) => "href" in item ? renderNavLink(item) : (
+          <button
+            class="nav-link nav-new-chat"
+            type="button"
+            aria-label={item.label}
+            data-shortcut-action="new-session"
+            disabled={Boolean(openingProject())}
+            onClick={() => openChatDraft()}
+          >
+            <Plus size={15} aria-hidden="true" />
+            <span class="nav-label">{item.label}</span>
+          </button>
+        )}
+      </For>
+      <button
+        class="nav-link nav-search"
+        type="button"
+        aria-label="Search conversations"
+        aria-haspopup="dialog"
+        data-shortcut-action="search-sessions"
+        onClick={() => {
+          dismissTemporaryNavigation();
+          shortcuts.run("search-sessions");
+        }}
+      >
+        <Search size={15} aria-hidden="true" />
+        <span class="nav-label">Search conversations</span>
+      </button>
+    </>
   );
 
   const renderHistoryItem = (thread: ThreadSummary) => {
@@ -971,7 +966,7 @@ export function AppShell(props: {
   onCleanup(() => {
     disposed = true;
     window.clearTimeout(threadsChangedTimer);
-    clearPreviewClose();
+    clearNavigationClose();
     cancelDeferredHistoryLoad();
     document.removeEventListener("click", handleClickOutside);
     document.removeEventListener("pointerdown", handleOutsidePointerDown);
@@ -1005,52 +1000,34 @@ export function AppShell(props: {
         onPointerLeave={handleNavigationPointerLeave}
         on:focusout={handleNavigationFocusOut}
       >
-        <div class="app-shell-sidebar-header">
-          <Show when={!isMobileViewport()}>
-            <nav
-              class="app-shell-nav-rail"
-              aria-label="Main navigation"
-              onPointerOver={(event) => {
-                if (event.target === event.currentTarget) previewActiveSection(event);
-              }}
-            >
-              <For each={navItems}>{(item) => renderNavItem(item, true)}</For>
-              {renderSearchButton()}
-              <CommandPaletteButton beforeOpen={dismissPreview} />
-            </nav>
-          </Show>
-          <div
-            id={navigationPanelId}
-            class="app-shell-navigation-panel"
-            ref={navigationPanel}
-            hidden={!panelSection()}
-            data-navigation-section={panelSection()}
+        <Show when={isMobileViewport()} fallback={
+          <nav
+            id={navigationRailId}
+            class="app-shell-nav-rail"
+            ref={navigationRail}
+            aria-label="Main navigation"
+            onPointerEnter={(event) => {
+              if (isHoverPointer(event)) openTemporaryNavigation();
+            }}
+            on:focusin={handleRailFocusIn}
+            onKeyDown={handleRailKeydown}
           >
-            <header class="app-shell-navigation-heading">
-              <h2 class="app-shell-navigation-title">{sidebarTitle()}</h2>
-              <Show when={isMobileViewport()} fallback={projectsVisible() && renderSidebarPin()}>
-                <button
-                  class="drawer-close-btn"
-                  type="button"
-                  onClick={closeMobileDrawer}
-                  aria-label="Close navigation"
-                  data-shortcut-action="toggle-sidebar"
-                >
-                  <X size={18} />
-                </button>
-              </Show>
-            </header>
-            <Show when={panelSection()} keyed>
-              {(section) => (
-                <NavigationSectionPanel
-                  section={section}
-                  onNewChat={() => openChatDraft()}
-                  newChatDisabled={Boolean(openingProject())}
-                />
-              )}
-            </Show>
-          </div>
-        </div>
+            {renderNavigationItems()}
+          </nav>
+        }>
+          <header class="app-shell-navigation-heading">
+            <h2 class="app-shell-navigation-title">{navItems.find((item) => item.section === activeSection())?.label}</h2>
+            <button
+              class="drawer-close-btn"
+              type="button"
+              onClick={closeMobileDrawer}
+              aria-label="Close navigation"
+              data-shortcut-action="toggle-sidebar"
+            >
+              <X size={18} />
+            </button>
+          </header>
+        </Show>
         <nav
           id={projectsPanelId}
           class="nav app-shell-projects"
@@ -1060,9 +1037,7 @@ export function AppShell(props: {
         >
           <div class="nav-scroll" onScroll={handleHistoryScroll}>
             <Show when={isMobileViewport()}>
-              <For each={navItems}>{(item) => renderNavItem(item)}</For>
-              {renderSearchButton()}
-              <CommandPaletteButton />
+              {renderNavigationItems()}
             </Show>
             <div class="nav-history-group open">
               <div class="nav-projects-header">
@@ -1222,29 +1197,27 @@ export function AppShell(props: {
                 </div>
               </Show>
             </div>
-            <Show
-              when={!isMobileViewport() && !projectsVisible()}
-              fallback={
-                <div class="sidebar-footer-brand">
-                  <div class="brand-title">Kai Console</div>
-                  <button
-                    type="button"
-                    class="brand-subtitle brand-version-btn"
-                    classList={{ "has-update": versionInfo()?.has_update }}
-                    onClick={openUpdateDialog}
-                    title={availableUpdateTitle() ?? `Version v${versionInfo()?.current_version || ""}`}
-                  >
-                    <span>v{versionInfo()?.current_version || "..."}</span>
-                    <Show when={versionInfo()?.has_update}>
-                      <span class="brand-update-badge">
-                        <Sparkles size={11} aria-hidden="true" />
-                        <span>Update: v{versionInfo()?.latest_version}</span>
-                      </span>
-                    </Show>
-                  </button>
-                </div>
-              }
-            >
+            <Show when={isMobileViewport() || projectsVisible()}>
+              <div class="sidebar-footer-brand">
+                <div class="brand-title">Kai Console</div>
+                <button
+                  type="button"
+                  class="brand-subtitle brand-version-btn"
+                  classList={{ "has-update": versionInfo()?.has_update }}
+                  onClick={openUpdateDialog}
+                  title={availableUpdateTitle() ?? `Version v${versionInfo()?.current_version || ""}`}
+                >
+                  <span>v{versionInfo()?.current_version || "..."}</span>
+                  <Show when={versionInfo()?.has_update}>
+                    <span class="brand-update-badge">
+                      <Sparkles size={11} aria-hidden="true" />
+                      <span>Update: v{versionInfo()?.latest_version}</span>
+                    </span>
+                  </Show>
+                </button>
+              </div>
+            </Show>
+            <Show when={!isMobileViewport()}>
               {renderSidebarPin()}
             </Show>
             <A href="/settings" class="btn btn-icon btn-ghost" title="Settings" aria-label="Settings">

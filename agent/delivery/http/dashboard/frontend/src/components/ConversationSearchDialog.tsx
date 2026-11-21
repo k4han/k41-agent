@@ -41,7 +41,7 @@ function ConversationSearch(props: { onSelect: () => void }) {
         onInput={(event) => setSearch(event.currentTarget.value)}
       />
       <Switch fallback={
-        <ul class="navigation-section-list conversation-search-results" aria-label={query() ? "Matching conversations" : "Recent conversations"}>
+        <ul class="conversation-search-results" aria-label={query() ? "Matching conversations" : "Recent conversations"}>
           <For each={matches()}>
             {(conversation) => (
               <li>

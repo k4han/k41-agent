@@ -277,7 +277,7 @@ export function useShortcutAction(action: ShortcutAction, command: ShortcutComma
   }
 }
 
-export function CommandPaletteButton(props: { beforeOpen?: () => void }) {
+export function CommandPaletteButton() {
   const shortcuts = useContext(ShortcutContext);
   if (!shortcuts) return null;
   return (
@@ -287,10 +287,7 @@ export function CommandPaletteButton(props: { beforeOpen?: () => void }) {
       aria-label="Command palette"
       aria-haspopup="dialog"
       data-shortcut-action="command-palette"
-      onClick={() => {
-        props.beforeOpen?.();
-        shortcuts.run("command-palette");
-      }}
+      onClick={() => shortcuts.run("command-palette")}
     >
       <Command size={15} aria-hidden="true" />
       <span class="nav-label">Command palette</span>
