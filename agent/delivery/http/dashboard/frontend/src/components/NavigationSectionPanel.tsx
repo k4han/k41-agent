@@ -1,13 +1,12 @@
 import { A } from "@solidjs/router";
-import { ChevronRight } from "lucide-solid";
+import { ChevronRight, Plus } from "lucide-solid";
 import { createMemo, For, Match, onCleanup, onMount, Show, Switch } from "solid-js";
 
-import { chatThreadHref, sortThreadsByLatest, type ThreadListPayload } from "@/lib/chatThreads";
 import { useDashboardData } from "@/lib/dashboardData";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
 import type { GitHubPayload, SchedulerJob } from "@/types";
 
-export type NavigationSection = "home" | "chat" | "history" | "repositories" | "scheduler";
+export type NavigationSection = "home" | "repositories" | "scheduler";
 
 type PreviewRow = { label: string; href?: string; detail?: string };
 
@@ -77,7 +76,11 @@ function NavigationList<T>(props: {
   );
 }
 
-export function NavigationSectionPanel(props: { section: Exclude<NavigationSection, "chat"> }) {
+export function NavigationSectionPanel(props: {
+  section: NavigationSection;
+  onNewChat: () => void;
+  newChatDisabled: boolean;
+}) {
   return (
     <Switch>
       <Match when={props.section === "home"}>
@@ -86,21 +89,16 @@ export function NavigationSectionPanel(props: { section: Exclude<NavigationSecti
             <span>Open Home</span>
             <ChevronRight size={14} aria-hidden="true" />
           </A>
+          <button
+            type="button"
+            class="nav-link nav-new-chat"
+            disabled={props.newChatDisabled}
+            onClick={props.onNewChat}
+          >
+            <Plus size={15} aria-hidden="true" />
+            New chat
+          </button>
         </nav>
-      </Match>
-      <Match when={props.section === "history"}>
-        <NavigationList<ThreadListPayload>
-          label="All chat history"
-          href="/history"
-          path="/dashboard-api/chat-history?limit=6"
-          empty="No recent conversations"
-          listTitle="Recent conversations"
-          refreshEvent={CUSTOM_DOM_EVENTS.THREADS_CHANGED}
-          rows={(payload) => sortThreadsByLatest(payload.threads).slice(0, 6).map((thread) => ({
-            label: thread.title || thread.thread_id,
-            href: chatThreadHref(thread.thread_id),
-          }))}
-        />
       </Match>
       <Match when={props.section === "repositories"}>
         <NavigationList<GitHubPayload>

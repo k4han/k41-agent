@@ -27,7 +27,7 @@
 }
 
 .app-shell-navigation-panel[hidden],
-.app-shell-navigation-panel .nav[hidden] {
+.app-shell-projects[hidden] {
   display: none;
 }
 
@@ -36,14 +36,20 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
   overflow-y: auto;
   padding: 10px;
 }
 
-.navigation-section-page-link {
+.nav-link.navigation-section-page-link {
   justify-content: space-between;
+  background: var(--surface-2);
+  color: var(--fg);
   font-weight: 600;
+}
+
+.nav-link.navigation-section-page-link:hover {
+  background: var(--surface-3);
 }
 
 .navigation-section-list {
@@ -217,11 +223,11 @@ body.sidebar-resizing * {
   opacity: 0;
 }
 
-.brand-expand-btn:hover .brand-expand-default {
+.brand-expand-btn:is(:hover, :focus-visible) .brand-expand-default {
   opacity: 0;
 }
 
-.brand-expand-btn:hover .brand-expand-icon {
+.brand-expand-btn:is(:hover, :focus-visible) .brand-expand-icon {
   opacity: 1;
 }
 

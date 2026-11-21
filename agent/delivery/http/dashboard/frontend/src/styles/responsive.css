@@ -45,12 +45,37 @@
   }
 
   .app-shell-sidebar {
-    display: grid;
-    grid-template-columns: var(--nav-rail-width);
-    grid-template-rows: minmax(0, 1fr) auto;
     height: 100dvh;
     border-right: 0;
     z-index: var(--z-mobile-drawer);
+  }
+
+  .app-shell-sidebar::after {
+    position: absolute;
+    inset: 0;
+    border-inline-end: 1px solid var(--border);
+    border-radius: inherit;
+    pointer-events: none;
+    content: "";
+  }
+
+  .app-shell--collapsed .app-shell-sidebar--open {
+    width: var(--sidebar-width, 290px);
+    border-radius: 0 10px 10px 0;
+    box-shadow: var(--shadow);
+  }
+
+  .app-shell-sidebar-header {
+    display: grid;
+    min-height: 0;
+    flex: 1;
+    grid-template-columns: var(--nav-rail-width);
+  }
+
+  .app-shell-sidebar--open .app-shell-sidebar-header {
+    height: min(258px, 60dvh);
+    flex: none;
+    grid-template-columns: var(--nav-rail-width) minmax(0, 1fr);
   }
 
   .app-shell-nav-rail {
@@ -62,7 +87,11 @@
     overflow-y: auto;
     scrollbar-width: none;
     padding: 9px 0;
-    border-right: 1px solid var(--border);
+    border-inline-end: 1px solid transparent;
+  }
+
+  .app-shell-sidebar--open .app-shell-nav-rail {
+    border-inline-end-color: var(--border);
   }
 
   .app-shell-nav-rail > button {
@@ -99,35 +128,42 @@
     background: transparent;
   }
 
-  .app-shell-navigation-panel {
-    position: absolute;
-    inset: 0 auto 0 var(--nav-rail-width);
-    width: calc(var(--sidebar-width, 290px) - var(--nav-rail-width));
-    border-right: 1px solid var(--border);
+  .app-shell-navigation-panel .brand {
+    flex-shrink: 0;
+  }
+
+  .app-shell-projects {
+    overflow: hidden;
+    padding-block-start: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .app-shell-projects .nav-scroll {
+    scroll-padding-block-start: 42px;
+  }
+
+  .app-shell-projects .nav-projects-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
     background: var(--surface);
   }
 
-  .app-shell--collapsed .app-shell-navigation-panel {
-    border-radius: 0 10px 10px 0;
-    box-shadow: var(--shadow);
-  }
-
-  .app-shell-navigation-panel .nav {
-    overflow: hidden;
-  }
-
   .app-shell-sidebar > .sidebar-footer {
-    grid-area: 2 / 1;
-    padding: 8px 0;
-    border-right: 1px solid var(--border);
+    flex: none;
+    padding: 9px 10px;
   }
 
-  .app-shell-sidebar .sidebar-footer-row {
+  .app-shell-sidebar:not(.app-shell-sidebar--open) > .sidebar-footer {
+    padding: 8px 0;
+  }
+
+  .app-shell-sidebar:not(.app-shell-sidebar--open) .sidebar-footer-row {
     flex-direction: column;
     gap: 8px;
   }
 
-  .app-shell-sidebar .user-menu {
+  .app-shell-sidebar:not(.app-shell-sidebar--open) .user-menu {
     bottom: 0;
     left: calc(100% + 8px);
   }

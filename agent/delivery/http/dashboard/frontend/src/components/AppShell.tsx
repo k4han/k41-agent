@@ -75,12 +75,11 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { section: "home", href: "/", label: "Home", icon: () => <Home size={15} /> },
-  { section: "chat", href: "/chat", label: "Chat", icon: () => <MessageSquare size={15} /> },
   { section: "repositories", href: "/repositories", label: "Repositories", icon: () => <GitPullRequest size={15} /> },
   { section: "scheduler", href: "/scheduler", label: "Scheduler", icon: () => <CalendarClock size={15} /> },
 ];
-const historyNavItem: NavItem = { section: "history", href: "/history", label: "History", icon: () => <History size={15} /> };
 const navigationPanelId = "app-shell-navigation-panel";
+const projectsPanelId = "app-shell-projects";
 const PREVIEW_CLOSE_DELAY_MS = 150;
 
 type DeferredHistoryLoad = {
@@ -142,29 +141,16 @@ export function AppShell(props: {
   const hasHoverPointer = createMediaQuery("(any-hover: hover)");
   const activeSection = createMemo<NavigationSection>(() => {
     const segment = location.pathname.split("/", 2)[1];
-    switch (segment) {
-      case "c":
-      case "chat":
-      case "projects":
-        return "chat";
-      case "history":
-      case "repositories":
-      case "scheduler":
-        return segment;
-      default:
-        return "home";
-    }
+    return segment === "repositories" || segment === "scheduler" ? segment : "home";
   });
-  const panelSection = () => isMobileViewport() ? undefined : collapsed() ? previewSection() : activeSection();
-  const projectsVisible = () => isMobileViewport() ? mobileDrawerOpen() : panelSection() === "chat";
-  const otherPanelSection = () => {
-    const section = panelSection();
-    return section === "chat" ? undefined : section;
-  };
+  const panelSection = () => isMobileViewport() ? "home" : collapsed() ? previewSection() : activeSection();
+  const projectsVisible = () => isMobileViewport() ? mobileDrawerOpen() : Boolean(panelSection());
   let sidebarRef: HTMLElement | undefined;
+  let sidebarToggle: HTMLButtonElement | undefined;
   let navigationPanel: HTMLDivElement | undefined;
+  let projectsPanel: HTMLElement | undefined;
   let accountButton: HTMLButtonElement | undefined;
-  let previewTrigger: HTMLAnchorElement | undefined;
+  let previewTrigger: HTMLElement | undefined;
   let pointerInNavigation = false;
   let restoringPreviewFocus = false;
   let previewCloseTimer: number | undefined;
@@ -334,7 +320,7 @@ export function AppShell(props: {
     return sidebarRef?.contains(focused) && focused?.matches(":focus-visible");
   };
 
-  const openPreview = (section: NavigationSection, trigger: HTMLAnchorElement) => {
+  const openPreview = (section: NavigationSection, trigger: HTMLElement | undefined = sidebarToggle) => {
     if (!collapsed() || isMobileViewport() || restoringPreviewFocus) return;
     if (section !== previewSection() && (historyMenuThreadId() || projectMenuId() || editingHistoryThreadId())) return;
     clearPreviewClose();
@@ -344,7 +330,8 @@ export function AppShell(props: {
 
   const dismissPreview = (restoreFocus = false) => {
     clearPreviewClose();
-    if (restoreFocus && previewTrigger && navigationPanel?.contains(document.activeElement)) {
+    const focused = document.activeElement;
+    if (restoreFocus && previewTrigger && (navigationPanel?.contains(focused) || projectsPanel?.contains(focused))) {
       restoringPreviewFocus = true;
       previewTrigger.focus({ preventScroll: true });
       restoringPreviewFocus = false;
@@ -373,6 +360,10 @@ export function AppShell(props: {
     clearPreviewClose();
   };
 
+  const previewActiveSection = (event: PointerEvent) => {
+    if (isHoverPointer(event) && !previewSection()) openPreview(activeSection());
+  };
+
   const handleNavigationPointerLeave = (event: PointerEvent) => {
     if (event.pointerType === "touch") return;
     pointerInNavigation = false;
@@ -390,6 +381,13 @@ export function AppShell(props: {
     const projectMenu = projectMenuId();
     if (projectMenu && document.getElementById(projectMenu)?.contains(event.target)) return;
     dismissPreview();
+  };
+
+  const handleSidebarClick = (event: MouseEvent) => {
+    if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (!(event.target instanceof Element) || !event.target.closest("a[href]")) return;
+    handleNavClick(event);
+    dismissPreview(true);
   };
 
   const handleNavigationKeydown = (event: KeyboardEvent) => {
@@ -533,6 +531,7 @@ export function AppShell(props: {
     workspaceBinding?: WorkspaceBinding;
     workspace?: WorkspaceRef | null;
   } = {}) => {
+    dismissPreview(true);
     navigate("/chat", {
       state: { newChatId: `${Date.now()}-${Math.random().toString(36).slice(2)}`, ...context },
     });
@@ -605,9 +604,6 @@ export function AppShell(props: {
               navigationPanel?.querySelector<HTMLElement>("nav:not([hidden]) :is(a[href], button:not([disabled]))")?.focus();
             }
           });
-        } : undefined}
-        onClick={desktop ? (event) => {
-          if (event.button === 0 && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) dismissPreview();
         } : undefined}
       >
         {item.icon()}
@@ -933,242 +929,246 @@ export function AppShell(props: {
       <aside
         id="app-shell-sidebar"
         class="sidebar app-shell-sidebar"
+        classList={{ "app-shell-sidebar--open": projectsVisible() }}
         ref={sidebarRef}
+        aria-label="Dashboard sidebar"
+        onClick={handleSidebarClick}
         onPointerEnter={handleNavigationPointerEnter}
         onPointerLeave={handleNavigationPointerLeave}
         on:focusout={handleNavigationFocusOut}
       >
-        <Show when={!isMobileViewport()}>
-          <nav class="app-shell-nav-rail" aria-label="Main navigation">
-            <button
-              class={collapsed() ? "brand-mark brand-expand-btn" : "brand-collapse-btn"}
-              type="button"
-              onClick={toggleSidebar}
-              aria-controls={navigationPanelId}
-              aria-expanded={Boolean(panelSection())}
-              aria-label={collapsed() ? "Pin navigation panel" : "Collapse navigation panel"}
-              title={collapsed()
-                ? (versionInfo()?.has_update
-                  ? `Pin navigation panel · Update available: v${versionInfo()?.latest_version}`
-                  : "Pin navigation panel")
-                : "Collapse navigation panel"}
+        <div class="app-shell-sidebar-header">
+          <Show when={!isMobileViewport()}>
+            <nav
+              class="app-shell-nav-rail"
+              aria-label="Main navigation"
+              onPointerOver={(event) => {
+                if (event.target === event.currentTarget) previewActiveSection(event);
+              }}
             >
-              <Show when={collapsed()} fallback={<ChevronsLeft size={14} />}>
-                <span class="brand-expand-icon"><ChevronsRight size={14} /></span>
-                <span class="brand-expand-default">
-                  <Bot size={16} />
-                  <Show when={versionInfo()?.has_update}>
-                    <span class="brand-collapsed-update-dot" />
-                  </Show>
-                </span>
-              </Show>
-            </button>
-            <For each={navItems}>{(item) => renderNavItem(item, true)}</For>
-            {renderNavItem(historyNavItem, true)}
-          </nav>
-        </Show>
-        <div
-          id={navigationPanelId}
-          class="app-shell-navigation-panel"
-          ref={navigationPanel}
-          hidden={!isMobileViewport() && !panelSection()}
-          data-navigation-section={panelSection()}
-        >
-          <div class="brand">
-            <Show when={isMobileViewport()}>
-              <div class="brand-mark" aria-hidden="true">
-                <Bot size={16} />
-              </div>
-            </Show>
-            <div class="brand-text">
-              <div class="brand-title">Kai Console</div>
               <button
+                ref={sidebarToggle}
+                class={collapsed() ? "brand-mark brand-expand-btn" : "brand-collapse-btn"}
                 type="button"
-                class={`brand-subtitle brand-version-btn ${versionInfo()?.has_update ? "has-update" : ""}`}
-                onClick={openUpdateDialog}
-                title={
-                  versionInfo()?.has_update
-                    ? `Update available: v${versionInfo()?.latest_version}`
-                    : `Version v${versionInfo()?.current_version || ""}`
-                }
+                onClick={toggleSidebar}
+                onPointerEnter={previewActiveSection}
+                aria-controls={`${navigationPanelId} ${projectsPanelId}`}
+                aria-expanded={Boolean(panelSection())}
+                aria-label={collapsed() ? "Pin navigation panel" : "Collapse navigation panel"}
+                title={collapsed()
+                  ? (versionInfo()?.has_update
+                    ? `Pin navigation panel · Update available: v${versionInfo()?.latest_version}`
+                    : "Pin navigation panel")
+                  : "Collapse navigation panel"}
               >
-                <span>v{versionInfo()?.current_version || "..."}</span>
-                <Show when={versionInfo()?.has_update}>
-                  <span class="brand-update-badge">
-                    <Sparkles size={11} />
-                    <span>Update: v{versionInfo()?.latest_version}</span>
+                <Show when={collapsed()} fallback={<ChevronsLeft size={14} aria-hidden="true" />}>
+                  <span class="brand-expand-icon" aria-hidden="true"><ChevronsRight size={14} /></span>
+                  <span class="brand-expand-default" aria-hidden="true">
+                    <Bot size={16} />
+                    <Show when={versionInfo()?.has_update}>
+                      <span class="brand-collapsed-update-dot" />
+                    </Show>
                   </span>
                 </Show>
               </button>
+              <For each={navItems}>{(item) => renderNavItem(item, true)}</For>
+            </nav>
+          </Show>
+          <div
+            id={navigationPanelId}
+            class="app-shell-navigation-panel"
+            ref={navigationPanel}
+            hidden={!panelSection()}
+            data-navigation-section={panelSection()}
+          >
+            <div class="brand">
+              <Show when={isMobileViewport()}>
+                <div class="brand-mark" aria-hidden="true">
+                  <Bot size={16} />
+                </div>
+              </Show>
+              <div class="brand-text">
+                <div class="brand-title">Kai Console</div>
+                <button
+                  type="button"
+                  class={`brand-subtitle brand-version-btn ${versionInfo()?.has_update ? "has-update" : ""}`}
+                  onClick={openUpdateDialog}
+                  title={
+                    versionInfo()?.has_update
+                      ? `Update available: v${versionInfo()?.latest_version}`
+                      : `Version v${versionInfo()?.current_version || ""}`
+                  }
+                >
+                  <span>v{versionInfo()?.current_version || "..."}</span>
+                  <Show when={versionInfo()?.has_update}>
+                    <span class="brand-update-badge">
+                      <Sparkles size={11} />
+                      <span>Update: v{versionInfo()?.latest_version}</span>
+                    </span>
+                  </Show>
+                </button>
+              </div>
+              <Show when={isMobileViewport()}>
+                <button
+                  class="drawer-close-btn"
+                  type="button"
+                  onClick={closeMobileDrawer}
+                  aria-label="Close navigation"
+                >
+                  <X size={18} />
+                </button>
+              </Show>
             </div>
-            <Show when={isMobileViewport()}>
-              <button
-                class="drawer-close-btn"
-                type="button"
-                onClick={closeMobileDrawer}
-                aria-label="Close navigation"
-              >
-                <X size={18} />
-              </button>
+            <Show when={panelSection()} keyed>
+              {(section) => (
+                <NavigationSectionPanel
+                  section={section}
+                  onNewChat={() => openChatDraft()}
+                  newChatDisabled={Boolean(openingProject())}
+                />
+              )}
             </Show>
           </div>
-          <Show when={otherPanelSection()} keyed>
-            {(section) => <NavigationSectionPanel section={section} />}
-          </Show>
-          <nav
-            class="nav"
-            aria-label={isMobileViewport() ? "Main navigation" : "Projects and chat history"}
-            hidden={!isMobileViewport() && panelSection() !== "chat"}
-            onClick={handleNavClick}
-          >
+        </div>
+        <nav
+          id={projectsPanelId}
+          class="nav app-shell-projects"
+          ref={projectsPanel}
+          aria-label={isMobileViewport() ? "Main navigation" : "Projects and chat history"}
+          hidden={!isMobileViewport() && !projectsVisible()}
+        >
+          <div class="nav-scroll" onScroll={handleHistoryScroll}>
             <Show when={isMobileViewport()}>
-              <For each={navItems.slice(0, 2)}>{(item) => renderNavItem(item)}</For>
+              <For each={navItems.filter((item) => item.section !== "home")}>{(item) => renderNavItem(item)}</For>
             </Show>
-            <div class="nav-scroll" onScroll={handleHistoryScroll}>
-              <Show when={isMobileViewport()}>
-                <For each={navItems.slice(2)}>{(item) => renderNavItem(item)}</For>
-              </Show>
-              <button
-                type="button"
-                class="nav-link nav-new-chat"
-                disabled={Boolean(openingProject())}
-                onClick={() => {
-                  dismissPreview(true);
-                  openChatDraft();
-                }}
-              >
-                <Plus size={15} aria-hidden="true" />
-                New chat
-              </button>
-              <div class="nav-history-group open">
-                <div class="nav-projects-header">
-                  <span>Projects</span>
-                  <A href="/projects" class="nav-projects-manage" title="Manage projects">Manage</A>
-                  <A
-                    href="/history"
-                    class="nav-history-all-btn"
-                    title="View all history"
-                    aria-label="View all history"
-                  >
-                    <History size={14} />
-                  </A>
-                </div>
-
-                <div
-                  class="nav-history-list"
-                  aria-label="Chat history"
+            <div class="nav-history-group open">
+              <div class="nav-projects-header">
+                <span>Projects</span>
+                <A href="/projects" class="nav-projects-manage" title="Manage projects">Manage</A>
+                <A
+                  href="/history"
+                  class="nav-history-all-btn"
+                  title="View all history"
+                  aria-label="View all history"
                 >
-                  <For each={historyGroups()}>
-                    {(group) => {
-                      const open = () => !collapsedProjects().has(group.key);
-                      const projectState = () => navProjectsStore.projectState(group.key);
-                      const previewThreads = createMemo(() => navProjectThreads(
-                        group.threads, selectedChatThreadId(), runningThreadIds(), projectState()?.expanded,
-                      ));
-                      const groupId = `nav-project-${encodeURIComponent(group.key)}`;
-                      return (
-                        <section class="nav-history-workspace" aria-label={group.label}>
-                          <div class="nav-project-heading">
-                            <button
-                              type="button"
-                              class="nav-history-workspace-toggle"
-                              aria-expanded={open()}
-                              aria-controls={groupId}
-                              title={group.label}
-                              onClick={() => toggleProject(group.key)}
-                            >
-                              <Show when={group.isRepo} fallback={<Folder size={15} />}>
-                                <GitBranch size={15} />
-                              </Show>
-                              <span class="nav-history-workspace-label">{group.label}</span>
-                              <Show when={group.is_pinned}><Pin size={12} aria-label="Pinned project" /></Show>
-                              <span class="nav-history-workspace-caret">
-                                <Show when={open()} fallback={<ChevronRight size={13} />}>
-                                  <ChevronDown size={13} />
-                                </Show>
-                              </span>
-                            </button>
-                            <button
-                              type="button"
-                              class="nav-project-add"
-                              disabled={Boolean(openingProject())}
-                              aria-label={`New chat in ${group.label}`}
-                              title={`New chat in ${group.label}`}
-                              onClick={() => startProjectChat(group)}
-                            >
-                              <Plus size={16} />
-                            </button>
-                            <Show when={group.id}>
-                              <ProjectActions
-                                project={{ id: group.id!, label: group.label,
-                                  is_pinned: Boolean(group.is_pinned), status: group.status || "active" }}
-                                onMenuOpenChange={handleProjectMenuOpenChange}
-                              />
-                            </Show>
-                          </div>
-                          <div id={groupId} class="nav-history-workspace-threads" hidden={!open()}>
-                            <Show when={group.threads.length === 0}><div class="nav-history-status">No conversations yet</div></Show>
-                            <For each={previewThreads()}>
-                              {(thread) => renderHistoryItem(thread)}
-                            </For>
-                            <Show when={group.threads.length > 0 && (!projectState()?.expanded || projectState()?.hasMore)}>
-                              <button
-                                class="nav-project-view-all"
-                                type="button"
-                                disabled={projectState()?.loading}
-                                aria-label={`Load more chats in ${group.label}`}
-                                aria-busy={projectState()?.loading}
-                                title={projectState()?.error || undefined}
-                                onClick={() => void navProjectsStore.loadProjectThreads(group.key)}
-                              >
-                                {projectState()?.loading ? "Loading..." : projectState()?.error ? "Retry" : projectState()?.expanded ? "Load more" : "View all"}
-                              </button>
-                            </Show>
-                          </div>
-                        </section>
-                      );
-                    }}
-                  </For>
+                  <History size={14} />
+                </A>
+              </div>
 
-                  <Show when={historyGroups().length === 0 && !historyError() && (!historyLoaded() || historyLoading())}>
-                    <div class="nav-history-skeleton" aria-label="Loading history">
-                      <span class="skeleton-line nav-history-skeleton-line" />
-                      <span class="skeleton-line nav-history-skeleton-line short" />
-                      <span class="skeleton-line nav-history-skeleton-line" />
-                    </div>
-                  </Show>
-                  <Show when={historyGroups().length === 0 && historyLoaded() && !historyLoading() && !historyError()}>
-                    <div class="nav-history-status">No projects</div>
-                  </Show>
-                  <Show when={historyGroups().length > 0 && historyLoading()}>
-                    <div class="nav-history-status">Loading more...</div>
-                  </Show>
-                  <Show when={historyError()}>
-                    <button
-                      class="nav-history-retry"
-                      type="button"
-                      onClick={() => void loadHistory(true)}
-                    >
-                      Retry
-                    </button>
-                  </Show>
-                  <Show
-                    when={
-                      historyGroups().length > 0
-                      && historyHasMore()
-                      && !historyLoading()
-                      && !historyError()
-                    }
+              <div
+                class="nav-history-list"
+                aria-label="Chat history"
+              >
+                <For each={historyGroups()}>
+                  {(group) => {
+                    const open = () => !collapsedProjects().has(group.key);
+                    const projectState = () => navProjectsStore.projectState(group.key);
+                    const previewThreads = createMemo(() => navProjectThreads(
+                      group.threads, selectedChatThreadId(), runningThreadIds(), projectState()?.expanded,
+                    ));
+                    const groupId = `nav-project-${encodeURIComponent(group.key)}`;
+                    return (
+                      <section class="nav-history-workspace" aria-label={group.label}>
+                        <div class="nav-project-heading">
+                          <button
+                            type="button"
+                            class="nav-history-workspace-toggle"
+                            aria-expanded={open()}
+                            aria-controls={groupId}
+                            title={group.label}
+                            onClick={() => toggleProject(group.key)}
+                          >
+                            <Show when={group.isRepo} fallback={<Folder size={15} />}>
+                              <GitBranch size={15} />
+                            </Show>
+                            <span class="nav-history-workspace-label">{group.label}</span>
+                            <Show when={group.is_pinned}><Pin size={12} aria-label="Pinned project" /></Show>
+                            <span class="nav-history-workspace-caret">
+                              <Show when={open()} fallback={<ChevronRight size={13} />}>
+                                <ChevronDown size={13} />
+                              </Show>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            class="nav-project-add"
+                            disabled={Boolean(openingProject())}
+                            aria-label={`New chat in ${group.label}`}
+                            title={`New chat in ${group.label}`}
+                            onClick={() => startProjectChat(group)}
+                          >
+                            <Plus size={16} />
+                          </button>
+                          <Show when={group.id}>
+                            <ProjectActions
+                              project={{ id: group.id!, label: group.label,
+                                is_pinned: Boolean(group.is_pinned), status: group.status || "active" }}
+                              onMenuOpenChange={handleProjectMenuOpenChange}
+                            />
+                          </Show>
+                        </div>
+                        <div id={groupId} class="nav-history-workspace-threads" hidden={!open()}>
+                          <Show when={group.threads.length === 0}><div class="nav-history-status">No conversations yet</div></Show>
+                          <For each={previewThreads()}>
+                            {(thread) => renderHistoryItem(thread)}
+                          </For>
+                          <Show when={group.threads.length > 0 && (!projectState()?.expanded || projectState()?.hasMore)}>
+                            <button
+                              class="nav-project-view-all"
+                              type="button"
+                              disabled={projectState()?.loading}
+                              aria-label={`Load more chats in ${group.label}`}
+                              aria-busy={projectState()?.loading}
+                              title={projectState()?.error || undefined}
+                              onClick={() => void navProjectsStore.loadProjectThreads(group.key)}
+                            >
+                              {projectState()?.loading ? "Loading..." : projectState()?.error ? "Retry" : projectState()?.expanded ? "Load more" : "View all"}
+                            </button>
+                          </Show>
+                        </div>
+                      </section>
+                    );
+                  }}
+                </For>
+
+                <Show when={historyGroups().length === 0 && !historyError() && (!historyLoaded() || historyLoading())}>
+                  <div class="nav-history-skeleton" aria-label="Loading history">
+                    <span class="skeleton-line nav-history-skeleton-line" />
+                    <span class="skeleton-line nav-history-skeleton-line short" />
+                    <span class="skeleton-line nav-history-skeleton-line" />
+                  </div>
+                </Show>
+                <Show when={historyGroups().length === 0 && historyLoaded() && !historyLoading() && !historyError()}>
+                  <div class="nav-history-status">No projects</div>
+                </Show>
+                <Show when={historyGroups().length > 0 && historyLoading()}>
+                  <div class="nav-history-status">Loading more...</div>
+                </Show>
+                <Show when={historyError()}>
+                  <button
+                    class="nav-history-retry"
+                    type="button"
+                    onClick={() => void loadHistory(true)}
                   >
-                    <button class="nav-history-retry" type="button" onClick={() => void loadHistory()}>
-                      Load more
-                    </button>
-                  </Show>
-                </div>
+                    Retry
+                  </button>
+                </Show>
+                <Show
+                  when={
+                    historyGroups().length > 0
+                    && historyHasMore()
+                    && !historyLoading()
+                    && !historyError()
+                  }
+                >
+                  <button class="nav-history-retry" type="button" onClick={() => void loadHistory()}>
+                    Load more
+                  </button>
+                </Show>
               </div>
             </div>
-          </nav>
-        </div>
+          </div>
+        </nav>
         <div class="sidebar-footer">
           <div class="sidebar-footer-row">
             <div class="user-menu-wrapper">

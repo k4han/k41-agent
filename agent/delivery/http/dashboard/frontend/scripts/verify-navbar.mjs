@@ -37,7 +37,6 @@ const byLatest = (left, right) => Date.parse(right.updated_at || '1970-01-01T00:
 const sends = [];
 const navRequests = [];
 const projectThreadRequests = [];
-const recentHistoryRequests = [];
 let historyRequests = 0;
 let failNav = false;
 let failProjectThreads = false;
@@ -120,15 +119,7 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ projects, has_more: false, next_cursor: null }));
       return;
     }
-    if (url.pathname === '/dashboard-api/chat-history') {
-      const limit = Number(url.searchParams.get('limit'));
-      if (limit > 0) {
-        recentHistoryRequests.push(limit);
-        res.end(JSON.stringify({ threads: [...threads].sort(byLatest).slice(0, limit), has_more: threads.length > limit }));
-        return;
-      }
-      historyRequests++;
-    }
+    if (url.pathname === '/dashboard-api/chat-history') historyRequests++;
     if (url.pathname === '/dashboard-api/github') {
       if (!releaseRepositoryPreview) await new Promise(resolve => { releaseRepositoryPreview = resolve; });
       if (failRepositories) {
@@ -233,6 +224,13 @@ try {
     await call('Input.dispatchKeyEvent', { type: 'keyUp', ...details });
   };
   const ready = () => until(() => js('document.querySelectorAll(".nav-history-workspace").length === 3 && !!document.querySelector(".chat-prompt-input") && !document.querySelector(".chat-prompt-input").disabled'), 'chat navigation');
+  const panel = '.app-shell-navigation-panel';
+  const openHome = `${panel} a[href="/"]`;
+  const newChat = `${panel} .nav-new-chat`;
+  const assertHomeActions = async () => {
+    assert.deepEqual(await js(`Array.from(document.querySelectorAll('${panel} nav .nav-link'), item => item.textContent.trim())`),
+      ['Open Home', 'New chat'], 'New chat follows Open Home in the Home panel');
+  };
   const key = value => js(`document.querySelector('.sidebar-resize-handle').dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(value)}, bubbles: true }))`);
   const draft = text => js(`{ const input = document.querySelector('.chat-prompt-input'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('input', { bubbles: true })); }`);
   const send = async workspace => {
@@ -296,9 +294,9 @@ try {
   threads.find(thread => thread.thread_id === 'local-5').updated_at = new Date().toISOString();
   await js(`window.dispatchEvent(new CustomEvent('k41:thread-start-running', { detail: { threadId: 'local-5', workspace: ${JSON.stringify(local)} } }))`);
   assert.equal(await js(`document.querySelector('.nav-history-link').getAttribute('href')`), '/c/local-5', 'running conversations appear first');
-  assert.equal(await js(`document.querySelector('a[href="/c/local-5"]').closest('section').getAttribute('aria-label')`), 'flask test', 'running conversations remain under their project');
-  assert.equal(await js(`document.querySelectorAll('a[href="/c/local-5"]').length`), 1);
-  assert.equal(await js(`document.querySelector('a[href="/c/local-5"]').closest('section').querySelectorAll('.nav-history-item').length`), 4, 'running and active conversations share the four-row limit');
+  assert.equal(await js(`document.querySelector('.nav-history-link[href="/c/local-5"]').closest('section').getAttribute('aria-label')`), 'flask test', 'running conversations remain under their project');
+  assert.equal(await js(`document.querySelectorAll('.nav-history-link[href="/c/local-5"]').length`), 1);
+  assert.equal(await js(`document.querySelector('.nav-history-link[href="/c/local-5"]').closest('section').querySelectorAll('.nav-history-item').length`), 4, 'running and active conversations share the four-row limit');
   threads.find(thread => thread.thread_id === 'github-0').updated_at = new Date().toISOString();
   await js(`window.dispatchEvent(new CustomEvent('k41:thread-start-running', { detail: { threadId: 'github-0' } }))`);
   assert.equal(await js(`document.querySelector('.nav-history-workspace').getAttribute('aria-label')`), 'cloudflare', 'running projects use their latest activity to break ties');
@@ -331,9 +329,10 @@ try {
   await until(() => js(`location.pathname === '/chat' && !document.querySelector('.chat-prompt-input').disabled`), 'new local chat');
   assert.equal(await js(`document.querySelector('.transcript').textContent.includes('Existing conversation')`), false);
   await send(local);
-  assert.ok((await box('.nav-new-chat')).bottom <= (await box('.nav-projects-header')).top, 'new chat is above Projects');
+  await assertHomeActions();
+  assert.ok((await box(newChat)).top >= (await box(openHome)).bottom, 'New chat appears directly below Open Home');
   await draft('Draft from the project workspace');
-  await click('.nav-new-chat');
+  await click(newChat);
   assert.equal(await js(`document.querySelector('.chat-prompt-input').value`), '', 'new chat opens a fresh draft on the same route');
   await send(undefined);
   await js(`document.querySelector('.nav-project-add[aria-label="New chat in flask test"]').click()`);
@@ -372,40 +371,58 @@ try {
   console.log('PASS: View all loads conversations inline, paginates, retries failures, and preserves the current route.');
 
   const rail = '.app-shell-nav-rail';
-  const panel = '.app-shell-navigation-panel';
+  const projects = '#app-shell-projects';
+  const footer = '.app-shell-sidebar .sidebar-footer-row';
   const toggle = `${rail} button`;
   const railLink = href => `${rail} a[href="${href}"]`;
   const homeLink = railLink('/');
-  const chatLink = railLink('/chat');
+  const repoLink = railLink('/repositories');
   const previewRows = '.navigation-section-list > li';
   const outside = { x: 650, y: 280 };
   const panelVisible = () => js(`document.querySelector('${panel}')?.hidden === false`);
   const savedPreference = () => js(`localStorage.getItem('k41-dashboard-sidebar')`);
+  const footerDirection = () => js(`getComputedStyle(document.querySelector('${footer}')).flexDirection`);
   const focusedInPanel = () => js(`document.querySelector('${panel}')?.contains(document.activeElement) ?? false`);
   const sectionIs = section => js(`document.querySelector('${panel}')?.dataset.navigationSection === '${section}'`);
-  await until(() => sectionIs('history'), 'pinned panel follows history route');
-  await until(() => js(`document.querySelectorAll('${previewRows} a').length === 6`), 'recent history');
-  assert.equal(recentHistoryRequests.at(-1), 6);
-  await move(await center(homeLink));
-  assert.equal(await sectionIs('history'), true, 'hovering another item leaves the pinned section on the current route');
-  await click(chatLink);
-  await until(() => sectionIs('chat'), 'click changes the active route and pinned panel');
+  await until(() => sectionIs('home'), 'the pinned panel uses Home shortcuts on the history page');
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('${rail} a'), item => item.getAttribute('href'))`),
+    ['/', '/repositories', '/scheduler']);
+  await assertHomeActions();
+  assert.equal((await box(projects)).width, 290, 'Projects spans the whole pinned sidebar');
+  assert.equal((await box(projects)).top, (await box(panel)).bottom, 'Projects sits below the shortcut area');
+  assert.equal(await footerDirection(), 'row');
+  await move(await center(repoLink));
+  assert.equal(await sectionIs('home'), true, 'hovering another item leaves the pinned section on the current route');
+  await click(newChat);
+  await until(() => js(`location.pathname === '/chat' && !!document.querySelector('.chat-prompt-input')`), 'the Home panel starts a new chat');
   await until(() => js(`document.querySelectorAll('${localProject} .nav-history-item').length === 27`), 'expanded conversations survive navigation');
-  await click(railLink('/history'));
-  await until(() => sectionIs('history'), 'pinned panel follows navigation back to history');
   assert.equal((await box(rail)).width, 52, 'pinned navigation has a 52px rail');
-  assert.equal(await js(`document.querySelector('${rail} a[aria-current="page"]').getAttribute('href')`), '/history');
+  await click('.nav-history-all-btn');
+  await until(() => js(`location.pathname === '/history' && !!document.querySelector('.select-control-trigger')`), 'Projects links back to history');
   const homeLinkX = (await box(homeLink)).x;
   await click(toggle);
   await until(async () => await width() === 52, '52px collapsed navigation');
   assert.equal(await panelVisible(), false, 'unpinning closes the panel while the pointer is still on the rail');
+  assert.equal((await box(projects)).height, 0, 'Projects is hidden while the rail is closed');
+  assert.equal(await footerDirection(), 'column');
   assert.equal((await box(homeLink)).x, homeLinkX, 'primary icons keep their position');
   assert.equal(await savedPreference(), 'collapsed');
   const mainBox = await box('.main');
   await move(outside);
+  await move({ x: 25, y: 400 });
+  await until(() => sectionIs('home'), 'hovering the rail background opens Home shortcuts on the history page');
+  assert.equal(await width(), 290, 'hover expands the whole sidebar');
+  assert.equal((await box(projects)).width, 290);
+  assert.equal(await footerDirection(), 'row');
+  assert.deepEqual(await box('.main'), mainBox, 'opening the full sidebar leaves the page in place');
+  await move({ x: 160, y: 400 });
+  await delay(200);
+  assert.equal(await panelVisible(), true, 'the sidebar stays open when the pointer enters Projects');
+  await move(outside);
+  await until(async () => !(await panelVisible()), 'leaving Projects closes the temporary sidebar');
   await move(await center(homeLink));
   await until(() => sectionIs('home'), 'home preview from the rail');
-  assert.equal(await js(`document.querySelector('${panel} .navigation-section-page-link').getAttribute('href')`), '/');
+  await assertHomeActions();
   assert.equal((await box(panel)).x, 52);
   assert.equal((await box(panel)).width, 238);
   assert.deepEqual(await box('.main'), mainBox, 'hover preview overlays the current page');
@@ -415,7 +432,6 @@ try {
   await delay(200);
   assert.equal(await panelVisible(), true, 'the panel stays open when the pointer crosses into it');
 
-  const repoLink = railLink('/repositories');
   await move(await center(repoLink));
   await until(() => sectionIs('repositories'), 'repository preview from its own icon');
   await until(() => Boolean(releaseRepositoryPreview), 'repository request starts on hover');
@@ -429,20 +445,17 @@ try {
   assert.equal(await sectionIs('scheduler'), true, 'the previous request cannot replace the current panel');
 
   await move(await center(repoLink));
-  await until(() => js(`!!document.querySelector('.navigation-section-panel button')`), 'repository error and retry');
+  await until(() => js(`!!document.querySelector('${panel} .nav-history-retry')`), 'repository error and retry');
   failRepositories = false;
-  await click('.navigation-section-panel button');
+  await click(`${panel} .nav-history-retry`);
   await until(() => js(`document.querySelectorAll('${previewRows} a').length === 6`), 'retry loads six repository links');
   assert.deepEqual(await js(`Array.from(document.querySelectorAll('${previewRows} a'), item => item.getAttribute('href'))`),
     [1, 2, 3, 4, 5, 6].map(id => `/repositories/${id}`));
-  await move(await center(railLink('/history')));
-  await until(() => sectionIs('history'), 'recent history preview');
-  await until(() => js(`document.querySelectorAll('${previewRows} a[href^="/c/"]').length === 6`), 'recent conversations have direct links');
   assert.equal(await js('location.pathname'), '/history', 'hovering sections leaves the current route intact');
 
   showManagedProject = true;
-  await move(await center(chatLink));
-  await until(() => sectionIs('chat'), 'chat preview from its own icon');
+  await move(await center(homeLink));
+  await until(() => sectionIs('home'), 'Home preview with Projects');
   await js(`window.dispatchEvent(new CustomEvent('k41:threads-changed'))`);
   await until(() => js(`!!document.querySelector('.project-actions-trigger')`), 'managed project');
   assert.equal(await js(`document.querySelector('.nav-history-group').getBoundingClientRect().height > 0`), true);
@@ -469,14 +482,14 @@ try {
   await press('Escape', 27);
   await until(async () => !(await panelVisible()), 'preview closes after canceling the rename outside the panel');
 
-  await move(await center(chatLink));
+  await move(await center(homeLink));
   await until(panelVisible, 'reopen preview');
   await js(`document.querySelector('.nav-scroll').scrollTop = 70`);
   const scrollTop = await js(`document.querySelector('.nav-scroll').scrollTop`);
   assert.ok(scrollTop > 0, 'project history is scrollable');
   await move(outside);
   await until(async () => !(await panelVisible()), 'preview closes after leaving navigation');
-  await move(await center(chatLink));
+  await move(await center(homeLink));
   await until(panelVisible, 'reopen scrolled preview');
   assert.equal(await js(`document.querySelector('.nav-scroll').scrollTop`), scrollTop);
 
@@ -492,17 +505,19 @@ try {
   assert.equal(await sectionIs('home'), true, 'keyboard focus opens the matching preview');
   await press('ArrowRight', 39);
   assert.equal(await focusedInPanel(), true, 'ArrowRight places focus in the matching panel');
+  await press('Tab', 9);
+  assert.equal(await hasFocus(newChat), true, 'New chat follows Open Home in keyboard order');
   await press('Escape', 27);
   assert.equal(await panelVisible(), false);
   assert.equal(await hasFocus(homeLink), true, 'Escape restores focus to the initiating icon');
   await press('Tab', 9);
-  assert.equal(await hasFocus(chatLink), true, 'Tab moves to the next icon after Escape');
-  assert.equal(await sectionIs('chat'), true, 'the next focused icon opens its own preview');
+  assert.equal(await hasFocus(repoLink), true, 'Tab moves to the next icon after Escape');
+  assert.equal(await sectionIs('repositories'), true, 'the next focused icon opens its own preview');
   await js(`document.querySelector('${toggle}').focus()`);
   await press('Enter', 13);
   assert.equal(await savedPreference(), 'expanded', 'Enter activates the focused toggle');
   await until(async () => await width() === 290, 'keyboard pins the panel');
-  assert.equal(await sectionIs('history'), true, 'pinning opens the panel for the current page');
+  assert.equal(await sectionIs('home'), true, 'pinning opens Home shortcuts on the history page');
   await call('Page.reload');
   await until(async () => await width() === 290 && await panelVisible(), 'pinned preference survives reload');
   await click(toggle);
@@ -525,6 +540,8 @@ try {
   await viewport(390, 844);
   await js(`document.querySelector('.topbar-menu-toggle').click()`);
   await until(() => js(`document.querySelector('.app-layout').classList.contains('app-layout--drawer-open') && document.querySelectorAll('.nav-history-workspace').length === 3`), 'mobile project drawer with saved desktop collapse');
+  await assertHomeActions();
+  assert.equal(await js(`document.querySelectorAll('.app-shell-sidebar a.nav-link:is([href="/chat"], [href="/history"])').length`), 0);
   assert.equal(await js(`!!document.querySelector('.sidebar-resize-handle')`), false);
   await until(() => js(`getComputedStyle(document.querySelector('.nav-project-add')).opacity === '1'`), 'visible mobile project action');
   assert.equal(await js(`document.documentElement.scrollWidth <= innerWidth`), true);
@@ -541,7 +558,7 @@ try {
   await js(`document.querySelector('.drawer-close-btn').click()`);
   await js(`document.querySelector('.chat-header-menu-toggle').click()`);
   await draft('Mobile draft');
-  await js(`document.querySelector('.nav-new-chat').click()`);
+  await js(`document.querySelector('${newChat}').click()`);
   await until(() => js(`!document.querySelector('.app-layout--drawer-open') && document.querySelector('.chat-prompt-input').value === ''`), 'new chat resets the draft and closes the mobile drawer');
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: mobile projects remain accessible with collapsed desktop preferences and close after starting a chat.');
