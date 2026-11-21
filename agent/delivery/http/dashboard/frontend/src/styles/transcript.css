@@ -291,8 +291,11 @@
 .thinking-block-body {
   box-sizing: border-box;
   min-width: 0;
+  max-height: min(16rem, 40dvh);
   margin: 6px 0 0 11px;
   padding: 2px 8px 2px 18px;
+  overflow-y: auto;
+  overflow-anchor: none;
   border-left: 1px solid var(--border);
 }
 

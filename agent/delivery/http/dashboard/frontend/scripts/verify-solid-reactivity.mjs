@@ -433,6 +433,37 @@ try {
   await delay(150);
   assert.equal(await js('(() => { const el = document.querySelector(".transcript"); return el.scrollHeight - el.clientHeight - el.scrollTop <= 1; })()'), true, 'Swiping toward the bottom must keep following new content.');
   console.log('PASS: nested tool scrolling stays independent, and downward wheel, keyboard, and touch input keep following at the bottom.');
+
+  const thinkingParagraphs = label => Array.from({ length: 30 }, (_, index) => `${label} ${index}.`).join('\n\n');
+  const sendThinking = label => send({ type: 'thinking', content: '\n\n' + thinkingParagraphs(label) });
+  sendThinking('Initial reasoning');
+  await until(() => js('!!document.querySelector(".thinking-block.is-live .thinking-block-body")'), 'live thinking block');
+  await js(`
+    window.thinkingBody = document.querySelector('.thinking-block-body');
+    window.thinkingAtBottom = () => thinkingBody.scrollHeight - thinkingBody.clientHeight - thinkingBody.scrollTop <= 2;
+    window.scrollThinkingTo = top => new Promise(resolve => {
+      thinkingBody.addEventListener('scroll', () => resolve(thinkingBody.scrollTop), { once: true });
+      thinkingBody.scrollTop = top;
+    });
+  `);
+  await until(() => js('thinkingBody.scrollTop > 0 && thinkingAtBottom()'), 'initial thinking follows the bottom');
+  assert.equal(await js(`
+    thinkingBody.clientHeight <= Math.min(16 * parseFloat(getComputedStyle(document.documentElement).fontSize), innerHeight * 0.4) + 1
+  `), true, 'Long thinking must fit within its height limit.');
+
+  sendThinking('More reasoning');
+  await until(() => js('thinkingBody.textContent.includes("More reasoning 29.") && thinkingAtBottom()'), 'thinking follows new reasoning');
+  const readingTop = await js('scrollThinkingTo(thinkingBody.scrollTop - 120)');
+  sendThinking('Reasoning while paused');
+  await until(() => js('thinkingBody.textContent.includes("Reasoning while paused 29.")'), 'reasoning renders while scrolled up');
+  await delay(150);
+  assert.equal(await js('thinkingBody.scrollTop'), readingTop, 'Scrolling up must pause thinking auto-scroll.');
+
+  await js('scrollThinkingTo(thinkingBody.scrollHeight)');
+  sendThinking('Reasoning after returning');
+  await until(() => js('thinkingBody.textContent.includes("Reasoning after returning 29.") && thinkingAtBottom()'), 'thinking resumes following at the bottom');
+  console.log('PASS: long thinking stays within its height limit and follows new reasoning only while at the bottom.');
+
   chatResponse.end();
   await until(() => js(`!document.querySelector('button[aria-label="Stop generating"]')`), 'next turn completion');
   console.log('PASS: tool calls and streamed replies preserve the turn anchor and respect manual scrolling in a long conversation.');

@@ -611,88 +611,7 @@
   text-align: right;
 }
 
-/* ── Settings groups & cards ── */
 
-.settings-group {
-  display: grid;
-  gap: 10px;
-}
-
-.settings-group--collapsed .settings-section-body {
-  display: none;
-}
-
-.settings-section-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 2px;
-}
-
-.settings-section-header-text {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.settings-section-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--font-size-base);
-  font-weight: 750;
-  color: var(--fg);
-  letter-spacing: -0.01em;
-}
-
-.settings-section-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 0.6875rem;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.settings-section-header-btn {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  padding: 0;
-}
-
-.settings-section-chevron {
-  color: var(--muted-2);
-  transition: transform 160ms ease;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.settings-section-chevron.open {
-  transform: rotate(0deg);
-}
-
-.settings-section-chevron:not(.open) {
-  transform: rotate(-90deg);
-}
-
-.settings-section-actions {
-  flex-shrink: 0;
-}
 
 .settings-config-header {
   display: flex;
@@ -891,15 +810,21 @@
 }
 
 /* Compact Table & Rows */
+.panel,
+.settings-list,
+.settings-table,
+.form-card {
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
 .settings-list,
 .settings-table {
   display: grid;
   gap: 0;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   isolation: isolate;
 }
 
@@ -1088,8 +1013,8 @@
 .setting-row-controls .input,
 .setting-row-controls .select,
 .setting-row-controls .select-control {
-  min-height: 30px;
-  height: 30px;
+  min-height: 32px;
+  height: 32px;
   font-size: 0.78125rem;
   padding: 3px 9px;
   border-radius: 6px;
@@ -1097,8 +1022,8 @@
 
 .setting-control-panel .form-input-wrapper .input,
 .setting-row-controls .form-input-wrapper .input {
-  min-height: 30px;
-  height: 30px;
+  min-height: 32px;
+  height: 32px;
 }
 
 .setting-control-panel .textarea,
@@ -1943,4 +1868,95 @@
   .skill-card-actions .btn {
     flex: 1 1 calc(50% - 8px);
   }
+}
+
+/* ── Unified Resource Toolbar ── */
+.settings-resource-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-resource-search {
+  position: relative;
+  display: block;
+  flex: 1 1 240px;
+  max-width: 448px;
+  min-width: 0;
+}
+
+.settings-resource-search svg {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  color: var(--muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.settings-resource-search input {
+  width: 100%;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  background: var(--surface);
+  color: var(--fg);
+  padding: 0 12px 0 34px;
+  font-size: 0.8125rem;
+}
+
+.settings-resource-search input:focus {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.settings-resource-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+}
+
+.settings-resource-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* ── Unified Empty State ── */
+.settings-empty-state {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.settings-empty-state-icon {
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-empty-state-title {
+  font-weight: 650;
+  color: var(--fg);
+  font-size: 0.875rem;
+}
+
+.settings-empty-state-hint {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.settings-empty-state-actions {
+  margin-top: 4px;
 }

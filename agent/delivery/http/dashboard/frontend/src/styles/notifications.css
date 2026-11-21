@@ -5,10 +5,7 @@
   min-width: 0;
 }
 
-.notifications-overview .page-title {
-  font-size: 1.5rem;
-  letter-spacing: -0.025em;
-}
+
 
 .notification-grid {
   display: grid;

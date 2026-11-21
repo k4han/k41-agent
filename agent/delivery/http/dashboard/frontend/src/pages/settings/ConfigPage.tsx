@@ -20,6 +20,7 @@ import {
   RESTART_REQUIRED_NOTICE,
   SettingRow,
   SettingsConfirmDialog,
+  SettingsEmptyState,
   SettingsPendingBar,
   SettingsSection,
   useSettingsData,
@@ -104,6 +105,7 @@ export function ConfigPage() {
   return (
     <SettingsLayout
       title="Server Runtime Configuration"
+      description="Runtime flags, host, database, and system environment configurations."
       breadcrumbLabel="Server Runtime"
     >
       <DataGate data={data()} error={error()} onRetry={load}>
@@ -162,15 +164,39 @@ export function ConfigPage() {
             </section>
 
             <div class="settings-config-header">
-              <div class="settings-toolbar-container">
-                <div class="settings-toolbar-search-wrap">
-                  <SettingsResourceToolbar
-                    searchValue={search()}
-                    searchPlaceholder="Search settings…"
-                    onSearchInput={setSearch}
-                  />
-                </div>
-                <div class="settings-toolbar-controls">
+              <SettingsResourceToolbar
+                searchValue={search()}
+                searchPlaceholder="Search settings…"
+                onSearchInput={setSearch}
+                filters={
+                  <Show when={categories().length > 1}>
+                    <div class="settings-category-nav" role="tablist" aria-label="Settings Categories">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={selectedCategory() === "all"}
+                        class={`settings-category-pill ${selectedCategory() === "all" ? "active" : ""}`}
+                        onClick={() => setSelectedCategory("all")}
+                      >
+                        <span>All</span>
+                      </button>
+                      <For each={categories()}>
+                        {(cat) => (
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={selectedCategory() === cat.id}
+                            class={`settings-category-pill ${selectedCategory() === cat.id ? "active" : ""}`}
+                            onClick={() => setSelectedCategory(cat.id)}
+                          >
+                            <span>{cat.label}</span>
+                          </button>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                }
+                actions={
                   <button
                     type="button"
                     class={`btn btn-sm ${showKeys() ? "btn-secondary" : "btn-ghost"} settings-toolbar-action-btn`}
@@ -180,35 +206,8 @@ export function ConfigPage() {
                     <Code size={13} />
                     <span>{showKeys() ? "Hide Keys" : "Show Keys"}</span>
                   </button>
-                </div>
-              </div>
-
-              <Show when={categories().length > 1}>
-                <div class="settings-category-nav" role="tablist" aria-label="Settings Categories">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={selectedCategory() === "all"}
-                    class={`settings-category-pill ${selectedCategory() === "all" ? "active" : ""}`}
-                    onClick={() => setSelectedCategory("all")}
-                  >
-                    <span>All</span>
-                  </button>
-                  <For each={categories()}>
-                    {(cat) => (
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={selectedCategory() === cat.id}
-                        class={`settings-category-pill ${selectedCategory() === cat.id ? "active" : ""}`}
-                        onClick={() => setSelectedCategory(cat.id)}
-                      >
-                        <span>{cat.label}</span>
-                      </button>
-                    )}
-                  </For>
-                </div>
-              </Show>
+                }
+              />
 
               <Show when={search().trim()}>
                 <div class="hint settings-search-meta">
@@ -235,16 +234,15 @@ export function ConfigPage() {
             <Show
               when={filteredCategories().length > 0}
               fallback={
-                <div class="panel" style={{ padding: "36px 20px", "text-align": "center" }}>
-                  <div style={{ display: "grid", "place-items": "center", gap: "8px", color: "var(--muted)" }}>
-                    <SearchX size={28} />
-                    <div style={{ "font-weight": "650", color: "var(--fg)" }}>No settings match your search</div>
-                    <div class="hint">Try a different term or clear the search.</div>
+                <SettingsEmptyState
+                  title="No settings match your search"
+                  hint="Try a different term or clear the search."
+                  action={
                     <button class="btn btn-sm" type="button" onClick={() => { setSearch(""); setSelectedCategory("all"); }}>
                       <RotateCcw size={13} /> Clear filters
                     </button>
-                  </div>
-                </div>
+                  }
+                />
               }
             >
               <div class="settings-sections-wrapper">
@@ -252,6 +250,7 @@ export function ConfigPage() {
                   {(group) => (
                     <SettingsSection
                       title={categoryLabel(group.category)}
+                      count={group.settings.length}
                     >
                       <div class="settings-list settings-table">
                         <For each={group.settings as [string, SettingInfo][]}>

@@ -29,17 +29,34 @@ export function TranscriptThinkingBlock(props: TranscriptThinkingBlockProps) {
   let bodyRef: HTMLDivElement | undefined;
   let contentRef: HTMLDivElement | undefined;
   let following = true;
+  let previousScrollTop = 0;
+  let touchY: number | undefined;
   let pendingScrollFrame: number | undefined;
 
   const isAtBottom = () => !!bodyRef
     && bodyRef.scrollHeight - bodyRef.clientHeight - bodyRef.scrollTop <= 2;
+  const pauseFollowing = () => {
+    if (bodyRef && bodyRef.scrollHeight > bodyRef.clientHeight) following = false;
+  };
   const scheduleFollow = () => {
     if (!following || !props.live || !open() || pendingScrollFrame !== undefined) return;
     pendingScrollFrame = window.requestAnimationFrame(() => {
       pendingScrollFrame = undefined;
       if (!following || !props.live || !open() || !bodyRef) return;
       bodyRef.scrollTop = bodyRef.scrollHeight;
+      previousScrollTop = bodyRef.scrollTop;
     });
+  };
+  const handleBodyScroll = (event: Event) => {
+    event.stopPropagation();
+    if (!bodyRef || !open()) return;
+    const scrollTop = bodyRef.scrollTop;
+    if (scrollTop < previousScrollTop && !isAtBottom()) {
+      pauseFollowing();
+    } else if (scrollTop > previousScrollTop && isAtBottom()) {
+      following = true;
+    }
+    previousScrollTop = scrollTop;
   };
 
   createEffect(() => {
@@ -50,6 +67,7 @@ export function TranscriptThinkingBlock(props: TranscriptThinkingBlockProps) {
     if (!mounted()) return;
     // Observe the content, since the viewport stops growing at its height cap.
     const observer = new ResizeObserver(scheduleFollow);
+    if (bodyRef) observer.observe(bodyRef);
     if (contentRef) observer.observe(contentRef);
     onCleanup(() => {
       observer.disconnect();
@@ -95,15 +113,28 @@ export function TranscriptThinkingBlock(props: TranscriptThinkingBlockProps) {
         tabIndex={0}
         onWheel={(event) => {
           event.stopPropagation();
-          if (event.deltaY < 0) following = false;
+          if (event.ctrlKey) return;
+          if (event.deltaY < 0) pauseFollowing();
           else if (event.deltaY > 0 && isAtBottom()) {
             following = true;
             scheduleFollow();
           }
         }}
+        onTouchStart={(event) => { touchY = event.touches[0]?.clientY; }}
+        onTouchMove={(event) => {
+          event.stopPropagation();
+          const nextY = event.touches[0]?.clientY;
+          if (touchY !== undefined && nextY !== undefined && nextY > touchY) pauseFollowing();
+          touchY = nextY;
+        }}
         onPointerDown={(event) => event.stopPropagation()}
-        onKeyDown={(event) => event.stopPropagation()}
-        onScroll={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (["ArrowUp", "PageUp", "Home"].includes(event.key) || (event.key === " " && event.shiftKey)) {
+            pauseFollowing();
+          }
+        }}
+        onScroll={handleBodyScroll}
       >
         <Show when={mounted()}>
           <div class="thinking-block-content" ref={contentRef}>

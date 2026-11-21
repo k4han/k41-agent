@@ -1,6 +1,6 @@
 import { createComputed, createMemo, createSignal, createUniqueId, For, type JSX, Show, untrack } from "solid-js";
 import { createStore, reconcile, unwrap } from "solid-js/store";
-import { ArrowRight, Check, RotateCcw, TriangleAlert } from "lucide-solid";
+import { ArrowRight, Check, ChevronDown, RotateCcw, SearchX, TriangleAlert } from "lucide-solid";
 
 import { Dialog } from "@/components/Dialog";
 import { useToast } from "@/components/Toast";
@@ -434,20 +434,77 @@ export function SettingsSection(props: {
   onToggle?: () => void;
   children: JSX.Element;
 }) {
+  const [internalOpen, setInternalOpen] = createSignal(props.defaultOpen ?? true);
+  const isExpanded = () => (props.isOpen !== undefined ? props.isOpen : internalOpen());
+  const toggle = () => {
+    if (props.onToggle) {
+      props.onToggle();
+    } else {
+      setInternalOpen(!internalOpen());
+    }
+  };
+
   return (
-    <section class={`settings-group ${props.class || ""}`}>
+    <section class={`settings-group ${props.collapsible && !isExpanded() ? "settings-group--collapsed" : ""} ${props.class || ""}`}>
       <div class="settings-section-header">
-        <div class="settings-section-header-text">
-          <div class="settings-section-title">
-            {props.title}
-          </div>
-        </div>
+        <Show
+          when={props.collapsible}
+          fallback={
+            <div class="settings-section-header-text">
+              <div class="settings-section-title">
+                {props.title}
+                <Show when={typeof props.count === "number"}>
+                  <span class="settings-section-count">{props.count}</span>
+                </Show>
+              </div>
+            </div>
+          }
+        >
+          <button
+            type="button"
+            class="settings-section-header-btn"
+            onClick={toggle}
+            aria-expanded={isExpanded()}
+          >
+            <ChevronDown size={14} class={`settings-section-chevron ${isExpanded() ? "open" : ""}`} />
+            <div class="settings-section-header-text">
+              <div class="settings-section-title">
+                {props.title}
+                <Show when={typeof props.count === "number"}>
+                  <span class="settings-section-count">{props.count}</span>
+                </Show>
+              </div>
+            </div>
+          </button>
+        </Show>
         <Show when={props.actions}>
           <div class="row-wrap settings-section-actions">{props.actions}</div>
         </Show>
       </div>
       <div class="settings-section-body">{props.children}</div>
     </section>
+  );
+}
+
+export function SettingsEmptyState(props: {
+  icon?: () => JSX.Element;
+  title: string;
+  hint?: string;
+  action?: JSX.Element;
+}) {
+  return (
+    <div class="panel settings-empty-state">
+      <div class="settings-empty-state-icon">
+        {props.icon ? props.icon() : <SearchX size={28} />}
+      </div>
+      <div class="settings-empty-state-title">{props.title}</div>
+      <Show when={props.hint}>
+        <div class="settings-empty-state-hint">{props.hint}</div>
+      </Show>
+      <Show when={props.action}>
+        <div class="settings-empty-state-actions">{props.action}</div>
+      </Show>
+    </div>
   );
 }
 
