@@ -297,12 +297,17 @@ class BrowserRepository:
             return await session.scalar(select(BrowserArtifact).where(
                 BrowserArtifact.artifact_id == artifact_id, BrowserArtifact.owner_id == owner_id))
 
-    async def pending_handoff(self, thread_id: str, *, include_expired=False):
+    async def pending_handoff(self, thread_id: str, *, include_expired=False, owner_id: str | None = None):
+        query = select(BrowserInvocation).where(
+            BrowserInvocation.thread_id == thread_id,
+            BrowserInvocation.status.in_(["handoff", "expired"] if include_expired else ["handoff"]),
+        )
+        if owner_id is not None:
+            query = query.join(BrowserBinding, BrowserBinding.thread_id == BrowserInvocation.thread_id).where(
+                BrowserBinding.owner_id == owner_id,
+            )
         async with self.session() as session:
-            row = await session.scalar(select(BrowserInvocation).where(
-                BrowserInvocation.thread_id == thread_id,
-                BrowserInvocation.status.in_(["handoff", "expired"] if include_expired else ["handoff"]))
-                .order_by(BrowserInvocation.id.desc()).limit(1))
+            row = await session.scalar(query.order_by(BrowserInvocation.id.desc()).limit(1))
             if row is None:
                 return None
             result = json.loads(row.result)
@@ -365,8 +370,7 @@ class BrowserRepository:
             await session.commit()
 
     async def owned_handoff(self, thread_id: str, owner_id: str):
-        binding = await self.binding(thread_id)
-        return await self.pending_handoff(thread_id, include_expired=True) if binding and binding["owner_id"] == owner_id else None
+        return await self.pending_handoff(thread_id, include_expired=True, owner_id=owner_id)
 
     async def images(self, owner_id: str, thread_id: str):
         async with self.session() as session:

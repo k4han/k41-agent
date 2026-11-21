@@ -70,6 +70,67 @@ async def scheduled(runtime_environment, browser, monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("use_browser", [False, True], ids=["model", "browser"])
+async def test_scheduler_thread_loads_while_run_is_active(scheduled, monkeypatch, use_browser):
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from agent.delivery.http.dashboard.routes.conversations import router
+    from agent.modules.admin_auth import get_current_admin
+
+    f = scheduled
+    thread_id = "scheduled-run-1"
+    owner_id = "admin:1"
+    started = asyncio.Event()
+    release = asyncio.Event()
+    await f.admit()
+
+    async def slow_operation(**values):
+        started.set()
+        await release.wait()
+        return "Done"
+
+    if use_browser:
+        browser_session = await f.browser.ensure(thread_id, owner_id)
+        monkeypatch.setattr(browser_session.driver.facade, "run", slow_operation)
+
+    async def work(state):
+        if use_browser:
+            await f.browser.execute(thread_id, owner_id, "browser-call", "browser_run", {"code": "return 'Done';"})
+        else:
+            await slow_operation()
+        return {"messages": [AIMessage(content="Done")]}
+
+    saver = InMemorySaver()
+    builder = StateGraph(BaseState, context_schema=WorkflowContext)
+    builder.add_node("work", work)
+    builder.add_edge(START, "work")
+    builder.add_edge("work", END)
+    f.env.current_graph[0] = builder.compile(checkpointer=saver)
+    monkeypatch.setattr(f.env.container, "_checkpointer", saver)
+    job = await f.env.repository.claim("run-1", "worker")
+    assert job
+    execution = asyncio.create_task(f.env.service._execute(job))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+        monkeypatch.setattr(f.env.container, "_persistence_ready", True)
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[get_current_admin] = lambda: "1"
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            async with asyncio.timeout(2):
+                response = await client.get(f"/dashboard-api/chat-history/{thread_id}")
+        assert response.status_code == 200
+        assert response.json()["kind"] == "scheduled"
+        assert response.json()["messages"][0]["content"] == "Sign in"
+        assert not response.json().get("pending_browser_handoffs")
+        assert (await get_run(f.env.service, "run-1", owner_id))["status"] == "running"
+    finally:
+        release.set()
+        await execution
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("decision", ["return", "cancel"])
 async def test_scheduled_browser_waits_and_resumes_exact_execution(scheduled, decision):
     f = scheduled

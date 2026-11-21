@@ -367,6 +367,10 @@ class BrowserService:
 
     async def owned_handoff(self, thread_id, owner_id):
         thread_id = self.canonical(thread_id)
+        if f"thread:{thread_id}" in self.operation_locks:
+            # Chat history can use the last committed handoff while the browser is busy.
+            # The browser status check or sweeper handles expiration under the lock.
+            return await self.repository.owned_handoff(thread_id, owner_id)
         async with self.thread_scope(thread_id):
             binding = await self.repository.binding(thread_id)
             if not binding or binding["owner_id"] != owner_id:
