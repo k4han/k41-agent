@@ -422,7 +422,8 @@ class AsyncSubagentService:
                                       usage_context=job["context"].get("usage_context")), background_scope(
                                           job["job_id"], source, job["root_thread_id"]):
                 try:
-                    async with aclosing(self._job_stream(job, params.get("_run_id"))) as events:
+                    stream = self._job_stream(job, params.get("_run_id"), _queue_turn=params.get("_queue_turn"))
+                    async with aclosing(stream) as events:
                         async for event in events:
                             yield event
                 except (asyncio.CancelledError, GraphDrained):
@@ -435,8 +436,10 @@ class AsyncSubagentService:
 
         session = None
         try:
+            queue_owner = job["context"].get("browser_owner_id") if job["kind"] == "notification_resume" else None
             session = await self.container.chat_stream_manager.start_if_idle(
                 job["thread_id"], {"_execution_id": job["job_id"]}, run_fn=run,
+                queue_owner=queue_owner,
             )
             if session is None:
                 await self.repository.heartbeat(job, release=True)
@@ -456,7 +459,7 @@ class AsyncSubagentService:
         finally:
             self._signal.set()
 
-    async def _job_stream(self, job: dict, stream_run_id: str | None):
+    async def _job_stream(self, job: dict, stream_run_id: str | None, *, _queue_turn=None):
         from agent.modules.agent_runtime.protocol import application_event, run_agent_protocol_stream
         from agent.modules.browser import finish_thread_browser
         from agent.modules.workflows import get_workflow_graph
@@ -552,6 +555,7 @@ class AsyncSubagentService:
                 _execution=execution, _run_id=stream_run_id,
                 _async_wakeup=wakeup,
                 _async_notification_agent=job["context"].get("routed_agent_name") if job["kind"] == "wakeup" else None,
+                **({"_queue_turn": _queue_turn} if _queue_turn is not None else {}),
             )) as events:
                 async for event in events:
                     projected = application_event(event)

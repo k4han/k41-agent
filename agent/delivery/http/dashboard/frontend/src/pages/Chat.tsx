@@ -104,6 +104,7 @@ import { useBrowserSession } from "@/lib/useBrowserSession";
 import { useWorkspaceRuntime } from "@/lib/useWorkspaceRuntime";
 import { fetchCatalog, getBackendDisplayName, isBackendEnabled } from "@/lib/catalogStore";
 import { useChatAttachments } from "@/lib/useChatAttachments";
+import { useChatMessageQueue, type QueuedMessage } from "@/lib/useChatMessageQueue";
 import { useContextWindow } from "@/lib/useContextWindow";
 import { useBackgroundStream } from "@/lib/useBackgroundStream";
 import {
@@ -538,6 +539,15 @@ export function ChatPage() {
     updateUserInputRequestResult,
     flushPendingMessageChunks,
   } = streams;
+  const newChatQueueScope = () => location.state?.newChatId || "__new__";
+  const queueScope = () => currentThreadId() || currentStreamThreadId() || newChatQueueScope();
+  const queue = useChatMessageQueue({
+    scope: queueScope,
+    onError: (message) => { if (!isUnmounting) showToast(message, "error"); },
+    onSendDraft: (message) => { if (!composerDisabled()) void sendMessage(false, undefined, undefined, message); },
+  });
+  const viewedQueueRun = () => queue.state()?.run_id;
+  const connectedQueueRuns = new Map<string, string>();
 
   const attach = useChatAttachments({
     getModelSupportsImage: modelSupportsImage,
@@ -829,7 +839,10 @@ export function ChatPage() {
     // Apply buffered deltas before the persisted stream entry is re-keyed below.
     flushPendingMessageChunks();
     const oldStreamTid = streamThreadIdRef.id;
+    if (oldStreamTid === threadId) return;
     const isViewingPending = !isUnmounting && currentStreamThreadId() === oldStreamTid;
+
+    if (oldStreamTid) queue.moveDrafts(oldStreamTid, threadId);
 
     if (isViewingPending) {
       acpOptions.bindConversation(threadId);
@@ -874,6 +887,16 @@ export function ChatPage() {
     }
   });
 
+  const bindQueueResponse = (response: Response, stream: StreamThreadIdRef) => {
+    const threadId = response.headers.get("X-Thread-ID");
+    const runId = response.headers.get("X-Run-ID");
+    if (threadId && threadId !== stream.id) onThreadCreated(threadId, stream);
+    if (runId && stream.id && !stream.id.startsWith("__pending__")) {
+      connectedQueueRuns.set(stream.id, runId);
+      queue.bindRun(stream.id, runId);
+    }
+  };
+
   const streamCallbacks: StreamCallbacks = {
     updateToolActivity: (toolCallId, patch, threadId) => {
       setItems((current) => current.map((item) => item.type === "tool" && item.tool_call_id === toolCallId
@@ -894,6 +917,13 @@ export function ChatPage() {
     onThreadCreated,
     onContextUsage: updateContextUsage,
     onBrowserHandoffChange: updateBrowserHandoff,
+    onChatQueue: (snapshot, threadId) => {
+      if (snapshot.thread_id === threadId) queue.applySnapshot(snapshot);
+    },
+    onChatQueueReverted: (messageIds, threadId) => {
+      const reverted = new Set(messageIds);
+      setItems((current) => current.filter((item) => item.type !== "message" || !item.messageId || !reverted.has(item.messageId)), threadId);
+    },
     onThreadTitle: (threadId, title) => {
       if (threadId === currentThreadId()) {
         setThreadTitleOverride(title);
@@ -954,10 +984,10 @@ export function ChatPage() {
     return Boolean(task && ACTIVE_TASK_STATUSES.has(task.status));
   });
   const conversationBusy = createMemo(() => (
-    streaming() || threadLoading() || earlierMessagesLoading() || backgroundTaskActive() || backgroundLive() || Boolean(activeSession()) || forking()
+    streaming() || Boolean(viewedQueueRun()) || threadLoading() || earlierMessagesLoading() || backgroundTaskActive() || backgroundLive() || Boolean(activeSession()) || forking()
   ));
   const stopActive = createMemo(() => (
-    streaming() || backgroundTaskActive() || backgroundLive() || Boolean(activeSession())
+    streaming() || Boolean(viewedQueueRun()) || backgroundTaskActive() || backgroundLive() || Boolean(activeSession())
   ));
   const workspaceLocked = createMemo(() => Boolean((currentThreadId() || draftProjectId()) && workingDir().trim()));
   const composerDisabled = createMemo(() => (
@@ -966,6 +996,21 @@ export function ChatPage() {
   const inputDisabled = createMemo(() => (
     threadLoading() || hasPendingInterrupt() || compacting() || workspaceRuntime.busy()
   ));
+  const queueing = createMemo(() => {
+    if (inputDisabled() || earlierMessagesLoading() || forking() || !canReconnectStream()) return false;
+    if (searchParams.checkpoint_id && !streaming()) return false;
+    const stream = persistedStreams.get(currentStreamThreadId() || "");
+    return Boolean(viewedQueueRun() || (streaming() && stream?.acceptsQueuedMessages));
+  });
+  const canSendQueuedMessage = createMemo(() => {
+    if (inputDisabled() || forking() || !canReconnectStream() || queue.state()?.status === "waiting") return false;
+    return viewedQueueRun() ? Boolean(queue.state()?.can_insert) : !conversationBusy();
+  });
+  const queueSendLabel = () => {
+    if (queue.state()?.status === "waiting") return "Answer the pending request first";
+    if (!viewedQueueRun()) return "Send queued message now";
+    return queue.state()?.can_insert ? "Insert before the next model call" : "Sends after the current turn";
+  };
   const userInputRequestDisabled = createMemo(() => conversationBusy() || compacting());
 
   const loadThread = async (threadId: string, checkpointId = "") => {
@@ -1157,6 +1202,7 @@ export function ChatPage() {
     const payload: ChatPayload = {
       message,
       user_id: "dashboard",
+      enable_message_queue: true,
       agent_name: agentNameOverride || agentName(),
       reasoning_effort: requestEffort(),
       permission_mode: permissionMode(),
@@ -1237,6 +1283,7 @@ export function ChatPage() {
     resume = false,
     resumePayload?: ChatResumePayload,
     agentNameOverride?: string,
+    queuedDraft?: QueuedMessage,
   ) => {
     isUnmounting = false;
     cleanupStaleStreams();
@@ -1256,12 +1303,13 @@ export function ChatPage() {
       showToast("Wait for compaction to finish.", "warning");
       return;
     }
-    const selectedAttachments = attachments();
-    const attachedFiles = selectedAttachments.map(toPayloadAttachment);
-    const message = resume ? "" : (prompt().trim() || (
-      selectedAttachments.length ? DEFAULT_ATTACHMENT_MESSAGE : ""
+    const draftScope = currentThreadId() || newChatQueueScope();
+    const selectedAttachments = queuedDraft ? [] : attachments();
+    const attachedFiles = queuedDraft?.attachments ?? selectedAttachments.map(toPayloadAttachment);
+    const message = resume ? "" : ((queuedDraft?.text ?? prompt()).trim() || (
+      attachedFiles.length ? DEFAULT_ATTACHMENT_MESSAGE : ""
     ));
-    if (!resume && !message && !selectedAttachments.length) {
+    if (!resume && !message && !attachedFiles.length) {
       showToast("Enter a message or attach a file.", "warning");
       return;
     }
@@ -1325,24 +1373,30 @@ export function ChatPage() {
       workspace: workspaceExecution(payload.workspace),
     };
 
-    getOrCreateStreamSignals(streamThreadIdRef.id, items()).selection = rememberSelection();
+    const stream = getOrCreateStreamSignals(streamThreadIdRef.id, items());
+    stream.selection = rememberSelection();
+    stream.acceptsQueuedMessages = true;
+    queue.start(streamThreadIdRef.id);
     setCurrentStreamThreadId(streamThreadIdRef.id);
 
+    let userItemId: number | undefined;
     if (!resume) {
       setThreadData((current) => current?.total_user_messages !== undefined
         ? { ...current, total_user_messages: current.total_user_messages + 1 } : current);
-      appendItem(
+      userItemId = appendItem(
         {
           type: "message",
           role: "user",
           text: message,
-          attachments: selectedAttachments.map(toTranscriptAttachment),
+          attachments: attachedFiles.map(toTranscriptAttachment),
         },
         "turn-start",
         streamThreadIdRef.id
       );
-      setPrompt("");
-      clearAttachments(selectedAttachments);
+      if (!queuedDraft) {
+        setPrompt("");
+        clearAttachments(selectedAttachments);
+      }
     }
 
     const abortController = new AbortController();
@@ -1408,12 +1462,28 @@ export function ChatPage() {
         body: JSON.stringify(payload),
         signal: abortController.signal,
       });
+      if (response.status === 409 && !resume && payload.thread_id) {
+        const { detail } = await response.clone().json().catch(() => ({}));
+        if (detail?.code === "chat_queue_active" && typeof detail.run_id === "string") {
+          removePendingAssistantStatus();
+          const threadId = streamThreadIdRef.id;
+          if (userItemId !== undefined) removeItem(userItemId, threadId);
+          setThreadData((current) => current?.thread_id === threadId && current.total_user_messages !== undefined
+            ? { ...current, total_user_messages: Math.max(0, current.total_user_messages - 1) } : current);
+          if (queuedDraft) queue.forgetDraft(draftScope, queuedDraft.id);
+          queue.bindRun(threadId, detail.run_id);
+          queue.enqueue(queuedDraft?.text ?? message, attachedFiles, threadId);
+          return;
+        }
+      }
       if (!response.ok) {
         throw new Error(await readError(response));
       }
       if (!response.body) {
         throw new Error("Streaming response is not available.");
       }
+      if (queuedDraft) queue.forgetDraft(draftScope, queuedDraft.id);
+      bindQueueResponse(response, streamThreadIdRef);
       if (!resume && resolvedWorkspace) {
         const key = workspaceEnvironmentKey(resolvedWorkspace);
         if (key && !initializedWorkspaces().has(key)) {
@@ -1448,6 +1518,7 @@ export function ChatPage() {
     } finally {
       settleStreamThinking(assistantIdRef, streamThreadIdRef, streamCallbacks);
       const finishedTid = streamThreadIdRef.id;
+      queue.holdUnboundDrafts(finishedTid, finishedTid.startsWith("__pending__") ? draftScope : finishedTid);
       finishLocalStream(finishedTid);
       if (finishedTid) {
         window.dispatchEvent(
@@ -1459,12 +1530,28 @@ export function ChatPage() {
       window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
       if (finishedTid && !isUnmounting && currentThreadId() === finishedTid) {
         void refreshThread(finishedTid);
+        void queue.refresh(finishedTid);
       }
     }
   };
 
+  const submitComposer = () => {
+    if (!queueing()) {
+      void sendMessage();
+      return;
+    }
+    const text = prompt().trim();
+    const files = attachments();
+    if (!text && !files.length) return;
+    batch(() => {
+      queue.enqueue(text, files.map(toPayloadAttachment));
+      setPrompt("");
+      clearAttachments(files);
+    });
+  };
+
   /** Resolves to the number of streamed events, or null when no reconnect was attempted. */
-  const reconnectStream = async (threadId: string): Promise<number | null> => {
+  const reconnectStream = async (threadId: string, runId?: string): Promise<number | null> => {
     if (isUnmounting || threadId !== currentThreadId() || threadLoading()) return null;
     cleanupStaleStreams();
     if (streaming()) {
@@ -1490,7 +1577,7 @@ export function ChatPage() {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ thread_id: threadId }),
+        body: JSON.stringify({ thread_id: threadId, run_id: runId }),
         signal: abortController.signal,
       });
       if (!response.ok) {
@@ -1499,6 +1586,7 @@ export function ChatPage() {
       if (!response.body) {
         throw new Error("Streaming response is not available.");
       }
+      bindQueueResponse(response, streamThreadIdRef);
 
       const handleEvent = makeEventHandler(assistantIdRef, streamedRef, streamThreadIdRef, currentItems);
       await readNDJSONStream(response.body, (event) => {
@@ -1529,6 +1617,7 @@ export function ChatPage() {
       window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
       if (finishedTid && !isUnmounting && currentThreadId() === finishedTid) {
         void refreshThread(finishedTid);
+        void queue.refresh(finishedTid);
       }
     }
     return eventCount;
@@ -1559,6 +1648,7 @@ export function ChatPage() {
         if (acpAgentSelected() && currentThreadId() === tid) {
           void refreshThread(tid);
         }
+        if (currentThreadId() === tid) void queue.refresh(tid);
       }
       return;
     }
@@ -1572,6 +1662,7 @@ export function ChatPage() {
       requests.push(postJson(API_PATHS.taskCancel(taskId), {}));
     }
     const results = await Promise.allSettled(requests);
+    if (currentThreadId() === tid) void queue.refresh(tid);
     if (results.some((result) => result.status === "fulfilled")) {
       showToast("Session stop requested.");
       // A stop during a browser handoff ends it with no stream left to report that.
@@ -1817,7 +1908,10 @@ export function ChatPage() {
     const streamThreadIdRef: StreamThreadIdRef = { id: threadId, message: nextText };
     threadLoadRequestId += 1;
     threadLoadController?.abort();
-    getOrCreateStreamSignals(streamThreadIdRef.id, nextItems).selection = rememberSelection();
+    const stream = getOrCreateStreamSignals(streamThreadIdRef.id, nextItems);
+    stream.selection = rememberSelection();
+    stream.acceptsQueuedMessages = true;
+    queue.start(streamThreadIdRef.id);
     setCurrentStreamThreadId(streamThreadIdRef.id);
 
     const abortController = new AbortController();
@@ -1846,6 +1940,7 @@ export function ChatPage() {
         body: JSON.stringify({
           message: nextText,
           user_id: "dashboard",
+          enable_message_queue: true,
           thread_id: threadId,
           message_index: payload.messageIndex,
           source_checkpoint_id: payload.sourceCheckpointId,
@@ -1864,6 +1959,7 @@ export function ChatPage() {
       if (!response.body) {
         throw new Error("Streaming response is not available.");
       }
+      bindQueueResponse(response, streamThreadIdRef);
 
       await readNDJSONStream(
         response.body,
@@ -1884,6 +1980,7 @@ export function ChatPage() {
     } finally {
       settleStreamThinking(assistantIdRef, streamThreadIdRef, streamCallbacks);
       const finishedTid = streamThreadIdRef.id;
+      queue.holdUnboundDrafts(finishedTid, finishedTid);
       finishLocalStream(finishedTid);
       window.dispatchEvent(
         new CustomEvent(CUSTOM_DOM_EVENTS.THREAD_STOP_RUNNING, {
@@ -1893,6 +1990,7 @@ export function ChatPage() {
       window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
       if (finishedTid && !isUnmounting && currentThreadId() === finishedTid) {
         void refreshThread(finishedTid);
+        void queue.refresh(finishedTid);
       }
     }
   };
@@ -2003,6 +2101,24 @@ export function ChatPage() {
 
   // A memo so refreshing the same thread's payload does not refetch sessions.
   const readyThreadId = createMemo(() => threadData()?.thread_id || "");
+  createEffect(on([currentThreadId, canReconnectStream, () => searchParams.checkpoint_id], ([threadId, supported, checkpoint]) => {
+    if (!threadId || !supported || checkpoint) return;
+    const controller = new AbortController();
+    const refresh = () => void queue.refresh(threadId, controller.signal);
+    refresh();
+    window.addEventListener("focus", refresh);
+    onCleanup(() => {
+      controller.abort();
+      window.removeEventListener("focus", refresh);
+    });
+  }));
+  createEffect(on([currentThreadId, readyThreadId, viewedQueueRun, streaming, threadLoading, () => searchParams.checkpoint_id],
+    ([threadId, readyId, runId, isStreaming, loading, checkpoint]) => {
+      if (threadId !== readyId || !runId || isStreaming || loading || checkpoint || connectedQueueRuns.get(threadId) === runId) return;
+      connectedQueueRuns.set(threadId, runId);
+      void reconnectStream(threadId, runId);
+    },
+  ));
   createEffect(on([currentThreadId, () => searchParams.checkpoint_id], ([threadId, checkpoint]) => {
     if (!threadId || threadId.startsWith("__pending__") || checkpoint) return;
     const tabId = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
@@ -2436,7 +2552,7 @@ export function ChatPage() {
                 chatPromptRef={(el) => (chatPromptRef = el)}
                 prompt={prompt()}
                 onPromptChange={setPrompt}
-                onSend={() => void sendMessage()}
+                onSend={submitComposer}
                 onStop={stopChat}
                 onResume={handleResume}
                 onAddFiles={addFiles}
@@ -2445,6 +2561,17 @@ export function ChatPage() {
                 stopActive={stopActive()}
                 composerDisabled={composerDisabled()}
                 inputDisabled={inputDisabled()}
+                submitDisabled={composerDisabled() && !queueing()}
+                queueing={queueing()}
+                queue={{
+                  messages: searchParams.checkpoint_id && !streaming() ? [] : queue.messages(),
+                  paused: queue.state()?.status === "paused",
+                  canSendNow: canSendQueuedMessage(),
+                  sendLabel: queueSendLabel(),
+                  onSendNow: (message) => void queue.sendNow(message, permissionMode()),
+                  onRemove: queue.remove,
+                  onEdit: queue.edit,
+                }}
                 backgroundTaskActive={backgroundTaskActive()}
                 currentThreadId={currentThreadId()}
                 attachments={attachments()}

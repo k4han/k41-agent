@@ -80,6 +80,7 @@ from agent.modules.tools.runtime.shell_guard import check_command_blocked
 from agent.modules.tools.runtime.thread_storage import (
     THREAD_STORAGE_BASE_DIR,
     THREAD_STORAGE_DIRS,
+    attachment_upload_path,
     ensure_git_exclude,
     ensure_physical_workspace_storage,
     ensure_sandbox_workspace_storage,
@@ -289,6 +290,7 @@ __all__ = [
     "ensure_workspace_storage_root",
     "hydrate_workspace_storage",
     "hydrate_workspace_storage_to_sandbox",
+    "attachment_upload_path",
     "ingest_attachment_file",
     "ingest_attachment_file_to_sandbox",
     "save_generated_image",

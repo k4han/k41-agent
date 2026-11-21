@@ -86,6 +86,7 @@ export const API_PATHS = {
   chatEvents: "/v2/api/chat/events",
   chatEventsReconnect: "/v2/api/chat/events/reconnect",
   chatEventsEdit: "/v2/api/chat/events/edit",
+  chatMessageQueue: (threadId: string) => `/v2/api/chat/${encodeURIComponent(threadId)}/message-queue`,
   chatStream: "/api/chat/stream",
   chatStreamRun: "/api/chat/stream/run",
   backgroundTaskStream: (threadId: string) =>

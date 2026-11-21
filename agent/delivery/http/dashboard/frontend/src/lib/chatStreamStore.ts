@@ -137,6 +137,7 @@ export interface ContextUsage {
 
 export type PersistedStreamSignals = {
   selection?: ChatModelPreference & { agentName: string };
+  acceptsQueuedMessages?: boolean;
   items: ReturnType<typeof createTranscriptItems>;
   streaming: ReturnType<typeof createSignal<boolean>>;
   controller: ReturnType<typeof createSignal<AbortController | null>>;

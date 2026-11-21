@@ -786,6 +786,7 @@ def _build_target_context(runtime_context: WorkflowContext, target_agent: AgentC
         browser_owner_id=runtime_context.browser_owner_id,
     )
     target_context.channel_trim_applied = runtime_context.channel_trim_applied
+    target_context.chat_queue_turn = getattr(runtime_context, "chat_queue_turn", None)
     return target_context
 
 
@@ -883,6 +884,9 @@ async def llm_call(
     target_workflow = _resolve_target_workflow(target_agent)
 
     target_graph = GraphRegistry.get(target_workflow)
+    queue_turn = getattr(runtime.context, "chat_queue_turn", None)
+    if queue_turn is not None:
+        queue_turn.queue.set_workflow(target_workflow)
 
     invoke_kwargs = {"config": config}
     if _graph_accepts_context(target_graph):

@@ -230,27 +230,34 @@ def save_generated_image(
     return storage_path
 
 
+def attachment_upload_path(filename: str, *, message_id: str | None = None) -> Path:
+    """Return the attachment path relative to workspace storage."""
+    directory = Path("uploads")
+    if message_id is not None:
+        directory /= sanitize_workspace_key(message_id)
+        filename = filename.replace("\\", "/")
+    return directory / Path(filename).name
+
+
 def ingest_attachment_file(
     filename: str,
     content_bytes: bytes,
     workspace_scope: WorkspaceScope | str | None = None,
     workspace_root: Path | str | None = None,
+    *,
+    message_id: str | None = None,
 ) -> Path:
     """Save an uploaded attachment to persistent storage and physical workspace."""
-    if workspace_scope:
-        storage_dir = ensure_workspace_storage_root(workspace_scope) / "uploads"
-    else:
-        storage_dir = THREAD_STORAGE_BASE_DIR / "uploads"
-    storage_dir.mkdir(parents=True, exist_ok=True)
-    safe_filename = Path(filename).name
-    storage_path = storage_dir / safe_filename
+    relative_path = attachment_upload_path(filename, message_id=message_id)
+    storage_root = ensure_workspace_storage_root(workspace_scope) if workspace_scope else THREAD_STORAGE_BASE_DIR
+    storage_path = storage_root / relative_path
+    storage_path.parent.mkdir(parents=True, exist_ok=True)
     storage_path.write_bytes(content_bytes)
 
     if workspace_root:
         try:
-            ws_uploads_dir = ensure_physical_workspace_storage(workspace_root) / "uploads"
-            ws_uploads_dir.mkdir(parents=True, exist_ok=True)
-            ws_path = ws_uploads_dir / safe_filename
+            ws_path = ensure_physical_workspace_storage(workspace_root) / relative_path
+            ws_path.parent.mkdir(parents=True, exist_ok=True)
             ws_path.write_bytes(content_bytes)
         except OSError:
             pass
@@ -450,6 +457,7 @@ __all__ = [
     "generated_images_dir_for_workspace",
     "hydrate_workspace_storage",
     "hydrate_workspace_storage_to_sandbox",
+    "attachment_upload_path",
     "ingest_attachment_file",
     "ingest_attachment_file_to_sandbox",
     "root_thread_id",

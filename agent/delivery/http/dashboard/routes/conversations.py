@@ -317,8 +317,12 @@ async def rename_chat_thread(
 async def delete_chat_thread(thread_id: str) -> dict[str, str]:
     """Delete a conversation thread and all its checkpoints."""
     thread_id = resolve_thread_id(thread_id)
+    from agent.bootstrap.container import get_active_container
     from agent.modules.notifications.interruption import active_manager
 
+    container = get_active_container()
+    if container is not None:
+        await container.chat_stream_manager.discard_message_queue(thread_id)
     manager = active_manager()
     if manager:
         await manager.invalidate(thread_id)

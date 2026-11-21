@@ -84,7 +84,9 @@ def _emit_notice(writer: Any, text: str) -> None:
     _emit(writer, {"type": "final", "content": text, "already_streamed": True})
 
 
-def _end_with_notice(writer: Any, turn_id: str, label: str, text: str) -> dict[str, Any]:
+def _end_with_notice(writer: Any, turn_id: str, label: str, text: str, queue_turn=None) -> dict[str, Any]:
+    if queue_turn is not None:
+        queue_turn.failed = True
     _emit_notice(writer, text)
     return {"messages": [_notice_message(turn_id, label, text)], "acp_pending": False}
 
@@ -311,25 +313,26 @@ async def acp_turn_node(state: AcpState, config: RunnableConfig, runtime: Runtim
     """Drive the turn until it ends or needs a human, then commit its transcript."""
     service = get_acp_service()
     writer = get_stream_writer()
+    queue_turn = getattr(runtime.context, "chat_queue_turn", None)
     turn_id = str(state.get("acp_turn_id") or "")
     turn = service.turn(turn_id)
     if turn is None:
         if service.was_started(turn_id) or state.get("acp_boot_id") != service.boot_id:
             # The prompt may already have run, so it must not be sent again.
             await abandon_thread_handoffs(get_thread_id(config))
-            return _end_with_notice(writer, turn_id, "lost", TURN_LOST_NOTICE)
+            return _end_with_notice(writer, turn_id, "lost", TURN_LOST_NOTICE, queue_turn)
         if runtime.context.get_workspace().backend != "local":
-            return _end_with_notice(writer, turn_id, "remote", REMOTE_WORKSPACE_NOTICE)
+            return _end_with_notice(writer, turn_id, "remote", REMOTE_WORKSPACE_NOTICE, queue_turn)
         try:
             turn = await _start_turn(state, config, runtime, turn_id)
         except AcpNotInstalled as exc:
-            return _end_with_notice(writer, turn_id, "setup", str(exc))
+            return _end_with_notice(writer, turn_id, "setup", str(exc), queue_turn)
         except AcpError as exc:
             from agent.modules.agents import get_catalog_service
 
             agent = get_catalog_service().get_agent(runtime.context.get_agent_name())
             agent_id = agent.acp.agent if agent and agent.acp else ""
-            return _end_with_notice(writer, turn_id, "setup", describe_failure(exc, agent_id))
+            return _end_with_notice(writer, turn_id, "setup", describe_failure(exc, agent_id), queue_turn)
     turn.attached = True
     try:
         while True:
@@ -357,6 +360,8 @@ async def acp_turn_node(state: AcpState, config: RunnableConfig, runtime: Runtim
         turn.attached = False
         update.update(messages=turn.messages(), acp_pending=True)
         return update
+    if queue_turn is not None and (turn.error is not None or turn.stop_reason != "end_turn"):
+        queue_turn.failed = True
     notice = turn.result_notice()
     if notice:
         _emit(writer, {"type": "message", "content": notice})

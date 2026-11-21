@@ -405,6 +405,7 @@ async def compact_message_history(
     keep_recent_messages: int | None = None,
     max_retained_tokens: int | None = None,
     active_skills: dict | None = None,
+    retain_from_id: str | None = None,
 ) -> CompactedHistory:
     """Summarize a supplied history without reading or writing graph checkpoints."""
     from agent.modules.skills import bind_skill_context, model_skill_history, skill_events
@@ -445,6 +446,14 @@ async def compact_message_history(
     if cutoff_index is None:
         cutoff_index = resolve_compaction_cutoff(messages, target_keep=effective_keep)
 
+    latest_cutoff = len(messages) - 1
+    if retain_from_id:
+        latest_cutoff = next((index for index, message in enumerate(messages) if message.id == retain_from_id), latest_cutoff)
+    if cutoff_index > latest_cutoff:
+        cutoff_index = next((index for index in range(latest_cutoff, 0, -1) if is_valid_message_sequence(messages[index:])), None)
+        if cutoff_index is None:
+            raise CompactionBudgetError("The queued messages must fit together in the model context.")
+
     def count(items: list[BaseMessage]) -> int:
         return count_tokens_approximately(normalize_messages_for_chat_model(items))
 
@@ -459,7 +468,7 @@ async def compact_message_history(
     if budget is not None:
         if budget <= 0:
             raise CompactionBudgetError("No input budget remains for conversation history.")
-        safe_indices.extend(index for index in range(cutoff_index + 1, len(messages)) if is_valid_message_sequence(messages[index:]))
+        safe_indices.extend(index for index in range(cutoff_index + 1, latest_cutoff + 1) if is_valid_message_sequence(messages[index:]))
         summary_reserve = min(1024, max(1, budget // 3))
         cutoff_index = next(
             (index for index in safe_indices if count(inject("", index)) + summary_reserve <= budget),

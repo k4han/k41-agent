@@ -11,6 +11,7 @@ import { parseContextBreakdown, type WorkspaceRef } from "@/types";
 import { CUSTOM_DOM_EVENTS, recursionLimitStorageKey, STREAM_ERROR_CODES, STREAM_EVENTS } from "@/lib/eventConstants";
 import { GENERATE_IMAGE_TOOL_NAME } from "@/lib/generatedImages";
 import type { ProtocolState } from "@/lib/protocolStreamHandler";
+import type { ChatQueueSnapshot } from "@/lib/useChatMessageQueue";
 import {
   ASK_USER_TOOL_NAME,
   normalizeUserInputRequest,
@@ -31,6 +32,8 @@ export interface StreamCallbacks {
   setRecursionLimitReached: (value: boolean, threadId?: string) => void;
   onThreadCreated: (threadId: string, streamThreadIdRef: StreamThreadIdRef) => void;
   onThreadTitle?: (threadId: string, title: string) => void;
+  onChatQueue?: (queue: ChatQueueSnapshot, threadId: string) => void;
+  onChatQueueReverted?: (messageIds: string[], threadId: string) => void;
   onContextUsage?: (usage: ContextUsage, threadId: string) => void;
   onBrowserHandoffChange?: (pending: boolean, threadId: string) => void;
   updateToolActivity?: (toolCallId: string, patch: Partial<TranscriptTool>, threadId: string) => void;

@@ -133,27 +133,52 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
     from agent.modules.projects import project_secret_context
     system_prompt += await project_secret_context(workspace, thread_id=thread_id or "")
 
-    history = state["messages"]
     from agent.modules.skills import active_context, skill_commands
-    active_skills = state.get("active_skills", {})
-    processed_skill_messages = state.get("processed_skill_messages", [])
-    try:
-        if state.get("active_skills") or skill_commands(state["messages"])[0]:
-            history, active_skills, processed_skill_messages = await active_context(state, workspace=workspace, thread_id=thread_id or "",
-                agent_name=agent_name, names=ctx.get_allowed_skill_names(), tools=tools)
-    except (PermissionError, FileNotFoundError, ValueError) as exc:
-        return {
-            "messages": [AIMessage(content=f"Unable to use the requested skill: {exc}")],
-            "active_skills": active_skills if any(tool.name == "skill" for tool in tools) else {},
-        }
-    resolved = get_resolved_chat_model(provider_name=provider, model=model)
-    history, decision_updates = await restore_legacy_decision_context(state, history, working_dir)
-    pool_history = history
+
     pool_tools = tools
     initial_trim_applied = getattr(ctx, "channel_trim_applied", False)
+    queue_turn = getattr(ctx, "chat_queue_turn", None)
+    insertions = []
+    model_state = state
+    history_context = None
+
+    async def prepare_history():
+        nonlocal model_state, history_context
+        added = await queue_turn.take_insertions(thread_id, workspace) if queue_turn is not None else []
+        if added:
+            insertions.extend(added)
+            model_state = {**state, "messages": [*state["messages"], *insertions]}
+        if history_context is None or added:
+            history = model_state["messages"]
+            active_skills = model_state.get("active_skills", {})
+            processed_skill_messages = model_state.get("processed_skill_messages", [])
+            try:
+                command_groups = [skill_commands(state["messages"])]
+                command_groups.extend(skill_commands((message,)) for message in insertions)
+                if active_skills or any(commands for commands, _ in command_groups):
+                    history, active_skills, processed_skill_messages = await active_context(
+                        model_state, workspace=workspace, thread_id=thread_id or "", agent_name=agent_name,
+                        names=ctx.get_allowed_skill_names(), tools=pool_tools, command_groups=command_groups,
+                    )
+            except (PermissionError, FileNotFoundError, ValueError) as exc:
+                return {
+                    "messages": [*insertions, AIMessage(content=f"Unable to use the requested skill: {exc}")],
+                    "active_skills": active_skills if any(tool.name == "skill" for tool in pool_tools) else {},
+                }
+            history, decision_updates = await restore_legacy_decision_context(model_state, history, working_dir)
+            history_context = history, active_skills, processed_skill_messages, decision_updates
+        return None
+
+    skill_error = await prepare_history()
+    if skill_error is not None:
+        return skill_error
+    resolved = get_resolved_chat_model(provider_name=provider, model=model)
 
     async def attempt(resolved):
-        history = pool_history
+        skill_error = await prepare_history()
+        if skill_error is not None:
+            return skill_error
+        history, active_skills, processed_skill_messages, decision_updates = history_context
         tools = pool_tools
         ctx.channel_trim_applied = initial_trim_applied
         system = SystemMessage(content=system_prompt)
@@ -161,8 +186,9 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         history, history_updates = await prepare_model_context(
             history, system=system, tools=tools, context=ctx,
             agent_config=agent_config, resolved=resolved, config=config, active_skills=active_skills,
+            **({"retain_from_id": insertions[0].id} if insertions else {}),
         )
-        if not history_updates and history is not state["messages"]:
+        if not history_updates and history is not model_state["messages"]:
             from langchain_core.messages import RemoveMessage
             from langgraph.graph.message import REMOVE_ALL_MESSAGES
             history_updates = [RemoveMessage(id=REMOVE_ALL_MESSAGES), *history]
@@ -190,7 +216,8 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
             ),
         )
         emit_reported_context_usage(response, resolved=resolved, config=config, context_breakdown=context_breakdown)
-        updates = {"messages": [*(history_updates or notification_updates.get("messages", [])), response]}
+        messages_to_save = history_updates or [*notification_updates.get("messages", []), *insertions]
+        updates = {"messages": [*messages_to_save, response]}
         updates.update(decision_updates)
         if notification_updates:
             updates.update(async_tasks=notification_updates["async_tasks"],

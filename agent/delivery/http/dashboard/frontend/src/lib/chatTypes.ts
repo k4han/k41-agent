@@ -50,6 +50,7 @@ export type ChatPayload = {
   checkpoint_id?: string;
   attachments?: ChatAttachmentPayload[];
   resume?: boolean;
+  enable_message_queue?: boolean;
   resume_payload?: ChatResumePayload;
   interrupt_id?: string;
 };

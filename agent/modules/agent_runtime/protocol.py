@@ -254,6 +254,9 @@ async def stream_graph(
                 native.append({**event, "method": "custom:k41", "params": {
                     **params, "data": {**data, "projection": "ui"},
                 }})
+            elif method == "custom" and isinstance(data, dict) and data.get("type") == "chat_queue_delivery":
+                if data.get("thread_id") == config.get("configurable", {}).get("thread_id"):
+                    native.append(protocol_event("custom:k41", {**data, "projection": "ui"}))
             elif method == "messages":
                 payload, metadata = data
                 metadata = metadata if isinstance(metadata, dict) else {}

@@ -26,6 +26,7 @@ let nextAttachmentId = 1;
 export function useChatAttachments(params: UseChatAttachmentsParams) {
   const { getModelSupportsImage, showToast } = params;
   const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
+  let draftVersion = 0;
 
   const revokeAttachmentPreview = (attachment: PendingAttachment) => {
     if (attachment.preview_url) {
@@ -42,6 +43,7 @@ export function useChatAttachments(params: UseChatAttachmentsParams) {
   };
 
   const clearAllAttachments = () => {
+    draftVersion += 1;
     const currentAttachments = attachments();
     if (!currentAttachments.length) {
       return;
@@ -65,6 +67,8 @@ export function useChatAttachments(params: UseChatAttachmentsParams) {
     }
 
     let nextAttachments = [...attachments()];
+    const originalCount = nextAttachments.length;
+    const version = draftVersion;
     let totalSize = nextAttachments.reduce((sum, attachment) => sum + attachment.size, 0);
 
     for (const file of files) {
@@ -147,7 +151,23 @@ export function useChatAttachments(params: UseChatAttachmentsParams) {
       }
     }
 
-    setAttachments(nextAttachments);
+    const added = nextAttachments.slice(originalCount);
+    if (version !== draftVersion) {
+      added.forEach(revokeAttachmentPreview);
+      return;
+    }
+    const current = [...attachments()];
+    let currentSize = current.reduce((sum, attachment) => sum + attachment.size, 0);
+    for (const attachment of added) {
+      if (current.length >= MAX_ATTACHMENTS || currentSize + attachment.size > MAX_TOTAL_ATTACHMENT_BYTES) {
+        revokeAttachmentPreview(attachment);
+        showToast(`Could not attach ${attachment.name} because the draft reached its attachment limit.`, "warning");
+        continue;
+      }
+      current.push(attachment);
+      currentSize += attachment.size;
+    }
+    setAttachments(current);
   };
 
   createEffect(() => {
@@ -162,6 +182,7 @@ export function useChatAttachments(params: UseChatAttachmentsParams) {
   });
 
   onCleanup(() => {
+    draftVersion += 1;
     attachments().forEach(revokeAttachmentPreview);
   });
 

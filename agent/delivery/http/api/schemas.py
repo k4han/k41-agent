@@ -57,6 +57,7 @@ class ChatRequest(PoolSelectionValidation):
     interrupt_id: str | None = Field(default=None, min_length=1, max_length=128)
     attachments: list[ChatAttachment] = Field(default_factory=list, description="File or image attachments to include with the message.")
     resume: bool = Field(default=False, description="Whether this message is resuming a paused conversation.")
+    enable_message_queue: bool = Field(default=False, description="Enable the dashboard message queue for this event stream.")
 
 
 class ChatResponse(BaseModel):
@@ -152,6 +153,7 @@ class EditChatRequest(PoolSelectionValidation):
 
     message: str = Field(..., min_length=1, description="The edited user message content.")
     user_id: str = Field(default="anonymous", description="Identifier for the user.")
+    enable_message_queue: bool = Field(default=False, description="Enable the dashboard message queue for this event stream.")
     thread_id: str = Field(..., min_length=1, description="The thread ID containing the message to edit.")
     message_index: int = Field(..., ge=0, description="Index of the message to edit within the thread.")
     source_checkpoint_id: str = Field(..., min_length=1, description="Checkpoint ID to fork from.")

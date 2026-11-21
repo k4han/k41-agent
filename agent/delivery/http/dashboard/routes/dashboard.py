@@ -520,6 +520,14 @@ async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
     # lets it commit the partial output. Cancelling its task would discard it.
     acp_service = peek_acp_service()
     acp_thread_id = resolved_thread_id or (str(thread_id) if thread_id else None)
+    manager = None
+    queue_paused = False
+    if acp_thread_id:
+        try:
+            manager = get_chat_stream_manager()
+            queue_paused = manager.pause_message_queue(acp_thread_id)
+        except RuntimeError:
+            logger.debug("No chat stream manager for thread %s", acp_thread_id, exc_info=True)
     if acp_service is not None and acp_thread_id and await acp_service.stop_thread(acp_thread_id):
         from agent.modules.notifications.interruption import active_manager
 
@@ -553,19 +561,16 @@ async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
             subagents = active_async_subagent_service()
             if subagents is not None:
                 success = await subagents.cancel_tree(target_thread_id) or success
-        try:
-            manager = get_chat_stream_manager()
+        if manager is not None:
             session = await manager.get_session(target_thread_id)
             if session is not None:
-                session.cancel(force=True)
+                session.cancel(force=session.message_queue is None)
                 success = True
-        except Exception:
-            logger.debug("Failed to cancel chat stream session for thread %s", target_thread_id, exc_info=True)
 
-    if not success:
+    if not success and not queue_paused:
         raise HTTPException(status_code=400, detail="No active session found to cancel.")
 
-    return {"success": success}
+    return {"success": True}
 
 
 @router.get("/dashboard-api/sessions/events")

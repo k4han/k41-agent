@@ -41,6 +41,52 @@ function mount(t, callback) {
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+test('a failed queued draft uses the latest run or can start fresh after a server reset', async t => {
+  const { API_PATHS } = loadModule('../src/lib/endpoints.ts');
+  for (const lastRunId of [null, 'replacement-run']) {
+    const threadId = lastRunId || 'restarted-thread';
+    const previous = { thread_id: threadId, run_id: 'old-run', last_run_id: 'old-run', revision: 3,
+      status: 'running', can_insert: true, messages: [] };
+    const idle = { ...previous, run_id: null, last_run_id: lastRunId, revision: lastRunId ? 6 : 0,
+      status: 'idle', can_insert: false };
+    const uploads = [];
+    const recovered = [];
+    const { useChatMessageQueue } = loadModule('../src/lib/useChatMessageQueue.ts', {
+      '@/lib/endpoints': { API_PATHS },
+      '@/lib/api': {
+        apiFetch: async () => idle,
+        postJson: async (_url, body) => {
+          uploads.push({ runId: body.run_id, permissionMode: body.permission_mode });
+          if (body.run_id === previous.run_id) throw new Error('The active chat run changed.');
+          return { ...idle, revision: idle.revision + 1, run_id: 'follow-up-run', last_run_id: 'follow-up-run', status: 'running',
+            messages: [{ id: body.id, text: body.text, attachments: [], revision: 0, sending: false, priority: false }] };
+        },
+      },
+    });
+    const { value: queue } = mount(t, () => useChatMessageQueue({
+      scope: () => threadId,
+      onError: () => {},
+      onSendDraft: draft => recovered.push(draft.text),
+    }));
+    queue.applySnapshot(previous);
+    queue.enqueue('Follow-up', []);
+    await tick();
+    const draft = queue.messages()[0];
+    assert.ok(draft.error);
+    await queue.sendNow(draft, 'ask');
+    if (lastRunId) {
+      assert.deepEqual(uploads, [
+        { runId: 'old-run', permissionMode: undefined }, { runId: lastRunId, permissionMode: 'ask' },
+      ]);
+      assert.equal(queue.state().run_id, 'follow-up-run');
+      assert.equal(queue.messages()[0].text, 'Follow-up');
+    } else {
+      assert.deepEqual(uploads, [{ runId: 'old-run', permissionMode: undefined }]);
+      assert.deepEqual(recovered, ['Follow-up']);
+    }
+  }
+});
+
 test('ACP options ignore late probes and separate card and workspace choices', async t => {
   const acp = loadModule('../src/lib/acp.ts');
   const { API_PATHS } = loadModule('../src/lib/endpoints.ts');

@@ -18,6 +18,7 @@ import type { PermissionMode } from "@/lib/permissionMode";
 import { AcpSessionOptions } from "@/components/AcpSessionOptions";
 import { AgentModelPicker } from "@/components/AgentModelPicker";
 import { ChatTodos, type TodoProgress } from "@/components/ChatTodos";
+import { ChatMessageQueue, type ChatMessageQueueProps } from "@/components/ChatMessageQueue";
 import { ContextWindowIndicator, type ContextWindowData } from "@/components/ContextWindowIndicator";
 import { Dialog } from "@/components/Dialog";
 import {
@@ -44,6 +45,9 @@ export interface ChatComposerProps {
   stopActive: boolean;
   composerDisabled: boolean;
   inputDisabled: boolean;
+  submitDisabled?: boolean;
+  queueing?: boolean;
+  queue?: ChatMessageQueueProps;
   backgroundTaskActive: boolean;
   currentThreadId: string;
   attachments: PendingAttachment[];
@@ -85,6 +89,8 @@ export function ChatComposer(props: ChatComposerProps) {
   let fileInputRef: HTMLInputElement | undefined;
   let composerRef: HTMLDivElement | undefined;
   const skillSuggestions = useSkillSuggestions(props, () => chatPromptRef);
+  const sendDisabled = () => props.submitDisabled ?? props.composerDisabled;
+  const hasMessage = () => Boolean(props.prompt.trim() || props.attachments.length);
 
   const [previewAttachment, setPreviewAttachment] = createSignal<PendingAttachment | null>(null);
   const [isDragging, setIsDragging] = createSignal(false);
@@ -178,7 +184,7 @@ export function ChatComposer(props: ChatComposerProps) {
   const handleDragEnter = (e: DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (props.composerDisabled) return;
+    if (sendDisabled()) return;
     dragCounter += 1;
     if (e.dataTransfer?.items && e.dataTransfer.items.length > 0) {
       setIsDragging(true);
@@ -188,7 +194,7 @@ export function ChatComposer(props: ChatComposerProps) {
   const handleDragOver = (e: DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!props.composerDisabled && e.dataTransfer) {
+    if (!sendDisabled() && e.dataTransfer) {
       e.dataTransfer.dropEffect = "copy";
     }
   };
@@ -208,7 +214,7 @@ export function ChatComposer(props: ChatComposerProps) {
     e.stopPropagation();
     dragCounter = 0;
     setIsDragging(false);
-    if (props.composerDisabled) return;
+    if (sendDisabled()) return;
     if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
       await props.onAddFiles(e.dataTransfer.files);
     }
@@ -315,7 +321,7 @@ export function ChatComposer(props: ChatComposerProps) {
                     e.stopPropagation();
                     props.onRemoveAttachment(attachment.id);
                   }}
-                  disabled={props.composerDisabled}
+                  disabled={sendDisabled()}
                   title="Remove file"
                   aria-label={`Remove ${attachment.name}`}
                 >
@@ -325,6 +331,9 @@ export function ChatComposer(props: ChatComposerProps) {
             )}
           </For>
         </div>
+      </Show>
+      <Show when={props.queue}>
+        {(queue) => <ChatMessageQueue {...queue()} />}
       </Show>
       <div class="chat-prompt-wrapper">
         <Show when={skillSuggestions.open()}>
@@ -378,7 +387,9 @@ export function ChatComposer(props: ChatComposerProps) {
           placeholder={
             props.backgroundTaskActive
               ? "Background task is running..."
-              : props.currentThreadId
+              : props.queueing
+                ? "Queue a message or attach files..."
+                : props.currentThreadId
                 ? "Reply or attach files..."
                 : "What would you like to work on?"
           }
@@ -422,7 +433,7 @@ export function ChatComposer(props: ChatComposerProps) {
             if (skillSuggestions.handleKeyDown(event)) return;
             if ((event.key === "Enter" && !event.shiftKey) || (event.key === "Enter" && (event.ctrlKey || event.metaKey))) {
               event.preventDefault();
-              if (!props.composerDisabled) {
+              if (!sendDisabled()) {
                 props.onSend();
               }
             }
@@ -464,7 +475,7 @@ export function ChatComposer(props: ChatComposerProps) {
                       fileInputRef?.click();
                       setShowMoreMenu(false);
                     }}
-                    disabled={props.composerDisabled}
+                    disabled={sendDisabled()}
                   >
                     <Paperclip size={15} />
                     <span>Attach files</span>
@@ -476,7 +487,7 @@ export function ChatComposer(props: ChatComposerProps) {
                       setShowPasteDialog(true);
                       setShowMoreMenu(false);
                     }}
-                    disabled={props.composerDisabled}
+                    disabled={sendDisabled()}
                   >
                     <FileText size={15} />
                     <span>Paste as attachment</span>
@@ -488,7 +499,7 @@ export function ChatComposer(props: ChatComposerProps) {
                       props.onPromptChange("");
                       setShowMoreMenu(false);
                     }}
-                    disabled={props.composerDisabled || !props.prompt.trim()}
+                    disabled={sendDisabled() || !props.prompt.trim()}
                   >
                     <Trash2 size={15} />
                     <span>Clear prompt</span>
@@ -553,21 +564,19 @@ export function ChatComposer(props: ChatComposerProps) {
             />
           </Show>
           <div class="chat-composer-send-wrapper">
-            <Show
-              when={props.stopActive}
-              fallback={
-                <button
-                  class="chat-composer-icon chat-composer-send"
-                  type="button"
-                  onClick={() => props.onSend()}
-                  disabled={props.composerDisabled || (!props.prompt.trim() && !props.attachments.length)}
-                  title="Send message (Enter)"
-                  aria-label="Send message"
-                >
-                  <ArrowUp size={16} />
-                </button>
-              }
-            >
+            <Show when={!props.stopActive || (props.queueing && hasMessage())}>
+              <button
+                class="chat-composer-icon chat-composer-send"
+                type="button"
+                onClick={() => props.onSend()}
+                disabled={sendDisabled() || !hasMessage()}
+                title={props.queueing ? "Queue message (Enter)" : "Send message (Enter)"}
+                aria-label={props.queueing ? "Queue message" : "Send message"}
+              >
+                <ArrowUp size={16} />
+              </button>
+            </Show>
+            <Show when={props.stopActive}>
               <button
                 class="chat-composer-icon chat-composer-stop"
                 type="button"

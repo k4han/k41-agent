@@ -151,8 +151,9 @@ async def _list_workflow_child_thread_ids(checkpointer: object, thread_id: str) 
 
 async def delete_workflow_thread_tree(thread_id: str) -> None:
     thread_id = resolve_thread_id(thread_id)
-    from agent.modules.agent_runtime import get_active_session_registry
+    from agent.modules.agent_runtime import get_active_session_registry, get_chat_stream_manager
 
+    await get_chat_stream_manager().discard_message_queue(thread_id)
     async with get_active_session_registry().wait_for_thread_mutation(thread_id):
         await _delete_workflow_thread_tree_reserved(thread_id)
 

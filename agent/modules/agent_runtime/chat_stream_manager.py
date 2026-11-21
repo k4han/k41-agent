@@ -12,18 +12,27 @@ import logging
 import tempfile
 from bisect import bisect_right
 from collections.abc import AsyncIterator, Callable, Iterator
-from contextlib import aclosing, asynccontextmanager
-from typing import Any, AsyncGenerator
+from contextlib import aclosing, asynccontextmanager, nullcontext
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 from uuid import uuid4
 
 from langgraph.errors import GraphDrained, GraphRecursionError
 
+from agent.modules.agent_runtime.chat_message_queue import (
+    ChatMessageQueue,
+    ChatQueueConflict,
+    ChatQueueTurn,
+    QueuedChatMessage,
+)
 from agent.modules.agent_runtime.protocol import application_event, protocol_event, run_agent_protocol_stream
 from agent.shared.infrastructure.errors import (
     classify_agent_error,
     friendly_agent_error_message,
     find_exception as _find_exception,
 )
+
+if TYPE_CHECKING:
+    from agent.modules.tools import PermissionMode
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +149,15 @@ class _ReplayLog:
 class ChatStreamSession:
     """Represents a background agent stream execution session."""
 
-    def __init__(self, thread_id: str, params: dict[str, Any], run_fn: Any = None) -> None:
+    def __init__(
+        self,
+        thread_id: str,
+        params: dict[str, Any],
+        run_fn: Any = None,
+        *,
+        message_queue: ChatMessageQueue | None = None,
+        queued_message: QueuedChatMessage | None = None,
+    ) -> None:
         self.thread_id = thread_id
         self.run_fn = run_fn or run_agent_protocol_stream
         self.run_id = uuid4().hex
@@ -154,10 +171,15 @@ class ChatStreamSession:
         self.done = False
         self._superseded = False
         self._on_done: Callable[[ChatStreamSession], None] | None = None
+        self.message_queue = message_queue
+        self._queued_message = queued_message
+        self._outcome = "failed"
 
     def start(self, *, on_done: Callable[[ChatStreamSession], None] | None = None) -> None:
         """Start the agent stream execution in a background task."""
         self._on_done = on_done
+        if self.message_queue is not None:
+            self.message_queue.begin(self.run_id, self._queue_event)
         self.task = asyncio.create_task(
             self._run_agent_background(),
             name=f"chat-stream-{self.thread_id}",
@@ -166,6 +188,8 @@ class ChatStreamSession:
 
     def _finish(self) -> None:
         """End subscriptions, including when the task never started."""
+        if self.message_queue is not None:
+            self.message_queue.finish(self.run_id, self._outcome)
         self.done = True
         for queue in self.queues:
             if queue.empty():
@@ -186,13 +210,12 @@ class ChatStreamSession:
     async def _run_agent_background(self) -> None:
         logger.info("Starting chat stream run %s for thread %s", self.run_id, self.thread_id)
         try:
-            async with aclosing(self.run_fn(**self.params)) as events:
-                async for event in events:
-                    update = application_event(event)
-                    if update is not None and update.get("type") == "error":
-                        await self._push_error_event(update)
-                    else:
-                        await self.push_event(event)
+            if self.message_queue is not None:
+                await self._run_queued_turns(self.message_queue)
+            else:
+                async with aclosing(self.run_fn(**self.params)) as events:
+                    async for event in events:
+                        await self._forward_event(event)
         except GraphDrained:
             logger.info("Graph drained for thread %s", self.thread_id)
         except asyncio.CancelledError:
@@ -229,6 +252,80 @@ class ChatStreamSession:
         finally:
             self._finish()
 
+    async def _forward_event(self, event: dict[str, Any]) -> bool:
+        update = application_event(event)
+        if update is not None and update.get("type") == "error":
+            await self._push_error_event(update)
+            return False
+        await self.push_event(event)
+        return True
+
+    async def _run_queued_turns(self, queue: ChatMessageQueue) -> None:
+        from agent.bootstrap.container import get_active_container
+        from agent.modules.agent_runtime.runner import track_active_session
+
+        # Keep one active session and replay cursor across the automatic turns.
+        tracking = nullcontext()
+        if get_active_container() is not None:
+            tracking = track_active_session(
+                self.thread_id, self.params.get("agent_name", "default"),
+                usage_context=self.params.get("usage_context"),
+            )
+        run_fn = self.run_fn
+        params = self.params
+        message = self._queued_message
+        first_turn = True
+        with tracking:
+            while True:
+                turn = ChatQueueTurn(queue, message)
+                try:
+                    terminal = await self._stream_queue_turn(run_fn, params, turn, first_turn=first_turn)
+                finally:
+                    await turn.settle()
+
+                outcome = (terminal or {}).get("params", {}).get("data", {}).get("event")
+                if turn.failed or outcome != "completed" or not queue.run_options:
+                    self._outcome = "interrupted" if outcome == "interrupted" and not turn.failed else "failed"
+                    if terminal is not None:
+                        await self.push_event(terminal)
+                    return
+
+                message = queue.next_message()
+                if message is None:
+                    await self.push_event(terminal)
+                    self._outcome = "completed"
+                    return
+
+                params = self._queued_params(queue, message)
+                run_fn = run_agent_protocol_stream
+                first_turn = False
+
+    def _queued_params(self, queue: ChatMessageQueue, message: QueuedChatMessage) -> dict[str, Any]:
+        return {
+            **(queue.run_options or {}),
+            "_run_id": self.run_id,
+            "user_input": message.text,
+            "attachments": message.attachments,
+        }
+
+    async def _stream_queue_turn(self, run_fn, params, turn: ChatQueueTurn, *, first_turn: bool):
+        terminal = None
+        async with aclosing(run_fn(**params, _queue_turn=turn)) as events:
+            async for event in events:
+                if event.get("method") == "lifecycle" and not event["params"].get("namespace"):
+                    outcome = event["params"]["data"].get("event")
+                    if outcome == "started" and not first_turn:
+                        continue
+                    if outcome in {"completed", "interrupted"}:
+                        terminal = event
+                        continue
+                if not await self._forward_event(event):
+                    turn.failed = True
+        return terminal
+
+    def _queue_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        self._append_event(protocol_event("custom:k41", {**payload, "type": event_type, "projection": "ui"}))
+
     async def _push_error_event(self, event: dict[str, Any]) -> None:
         """Save an error before delivering it so history can restore identical text."""
         from agent.modules.conversations import record_thread_run_error
@@ -245,6 +342,9 @@ class ChatStreamSession:
 
     async def push_event(self, event: dict[str, Any]) -> None:
         """Append an event to the replay log and wake subscribers."""
+        self._append_event(event)
+
+    def _append_event(self, event: dict[str, Any]) -> None:
         # Log access and subscriber registration never suspend on this event loop.
         self.last_seq += 1
         event = {**event, "seq": self.last_seq, "event_id": f"{self.run_id}:{self.last_seq}"}
@@ -285,6 +385,8 @@ class ChatStreamSession:
     def cancel(self, *, superseded: bool = False, force: bool = False) -> None:
         """Request cancellation, optionally interrupting an earlier cancellation."""
         self._superseded = self._superseded or superseded
+        if self.message_queue is not None and self.message_queue.run_id == self.run_id:
+            self.message_queue.pause()
         if self.task and not self.task.done() and (force or not self.task.cancelling()):
             self.task.cancel()
 
@@ -294,6 +396,7 @@ class ChatStreamManager:
 
     def __init__(self) -> None:
         self._sessions: dict[str, ChatStreamSession] = {}
+        self._message_queues: dict[str, ChatMessageQueue] = {}
         self._thread_locks: dict[str, tuple[asyncio.Lock, int]] = {}
         self._expiry_handles: dict[ChatStreamSession, asyncio.TimerHandle] = {}
         self._closing = False
@@ -324,6 +427,14 @@ class ChatStreamManager:
     def _ensure_open(self) -> None:
         if self._closing:
             raise RuntimeError("Chat stream manager is shutting down.")
+
+    @staticmethod
+    async def _prepare_new_run(thread_id: str, *, check_only: bool = False) -> None:
+        from agent.modules.notifications.interruption import active_manager
+
+        notifications = active_manager()
+        if notifications is not None:
+            await notifications.prepare_new_run(thread_id, check_only=check_only)
 
     def _session_finished(self, session: ChatStreamSession) -> None:
         """Retain replay independently of execution and cancellation."""
@@ -362,7 +473,7 @@ class ChatStreamManager:
             raise TimeoutError(f"Chat stream cancellation timed out for threads: {thread_ids}")
 
     async def get_or_create_session(
-        self, thread_id: str, params: dict[str, Any], run_fn: Any = None
+        self, thread_id: str, params: dict[str, Any], run_fn: Any = None, *, queue_owner: str | None = None,
     ) -> ChatStreamSession:
         """Get or create an active background stream session for a thread.
 
@@ -372,26 +483,27 @@ class ChatStreamManager:
         self._ensure_open()
         async with self._lock_thread(thread_id):
             self._ensure_open()
-            from agent.modules.notifications.interruption import active_manager
-
-            notifications = active_manager()
-            if notifications and not (params.get("resume") or params.get("resume_payload")):
-                await notifications.prepare_new_run(thread_id)
             existing = self._sessions.get(thread_id)
-            if existing and existing.task and not existing.task.done():
+            active = existing is not None and existing.task is not None and not existing.task.done()
+            if queue_owner and active and existing.message_queue is not None:
+                run_id = existing.run_id if existing.message_queue.owner == queue_owner else None
+                raise ChatQueueConflict("This conversation is running. Add the message to its queue.", run_id=run_id)
+            if not (params.get("resume") or params.get("resume_payload")):
+                await self._prepare_new_run(thread_id)
+            if active:
                 logger.info("Cancelling existing stream session for thread %s to start new message", thread_id)
                 existing.cancel(superseded=True)
                 await self._wait_for_sessions([existing])
 
             self._ensure_open()
-            if existing is not None:
-                self._remove_session(thread_id, existing)
-            session = ChatStreamSession(thread_id, params, run_fn)
-            self._sessions[thread_id] = session
-            session.start(on_done=self._session_finished)
-            return session
+            queue = self._message_queue(thread_id, queue_owner)
+            if queue_owner and queue is None:
+                queue = self._message_queues[thread_id] = ChatMessageQueue(thread_id, queue_owner)
+            return self._start_session(thread_id, params, run_fn, queue=queue)
 
-    async def start_if_idle(self, thread_id: str, params: dict[str, Any], run_fn: Any = None) -> ChatStreamSession | None:
+    async def start_if_idle(
+        self, thread_id: str, params: dict[str, Any], run_fn: Any = None, *, queue_owner: str | None = None,
+    ) -> ChatStreamSession | None:
         """Admit a system run without superseding a user's execution."""
         from agent.modules.agent_runtime import get_active_session_registry, ThreadMutationConflictError
 
@@ -403,14 +515,133 @@ class ChatStreamManager:
                 return None
             try:
                 with get_active_session_registry().reserve_thread_mutation(thread_id, require_idle=True):
-                    if existing:
-                        self._remove_session(thread_id, existing)
-                    session = ChatStreamSession(thread_id, params, run_fn)
-                    self._sessions[thread_id] = session
-                    session.start(on_done=self._session_finished)
-                    return session
+                    queue = self._message_queue(thread_id, queue_owner)
+                    return self._start_session(thread_id, params, run_fn, queue=queue)
             except ThreadMutationConflictError:
                 return None
+
+    def _start_session(
+        self, thread_id: str, params: dict[str, Any], run_fn: Any = None, *,
+        queue: ChatMessageQueue | None = None, message: QueuedChatMessage | None = None,
+    ) -> ChatStreamSession:
+        existing = self._sessions.get(thread_id)
+        if existing is not None:
+            self._remove_session(thread_id, existing)
+        session = ChatStreamSession(thread_id, params, run_fn, message_queue=queue, queued_message=message)
+        self._sessions[thread_id] = session
+        session.start(on_done=self._session_finished)
+        return session
+
+    def _message_queue(self, thread_id: str, owner: str | None) -> ChatMessageQueue | None:
+        queue = self._message_queues.get(thread_id)
+        return queue if queue is not None and queue.owner == owner else None
+
+    def _require_message_queue(self, thread_id: str, owner: str) -> ChatMessageQueue:
+        queue = self._message_queue(thread_id, owner)
+        if queue is None:
+            raise ChatQueueConflict("There is no message queue for this conversation.")
+        return queue
+
+    def message_queue_snapshot(self, thread_id: str, owner: str) -> dict[str, Any]:
+        return (self._message_queue(thread_id, owner) or ChatMessageQueue(thread_id, owner)).snapshot()
+
+    async def enqueue_message(
+        self, thread_id: str, owner: str, run_id: str, message_id: str, text: str, attachments: list[Any],
+        *, permission_mode: PermissionMode | None = None,
+    ) -> dict[str, Any]:
+        from agent.modules.agent_runtime.runner import _normalize_chat_attachments
+
+        normalized = await asyncio.to_thread(_normalize_chat_attachments, attachments) if attachments else []
+        message = QueuedChatMessage(message_id, text.strip(), normalized)
+        async with self._lock_thread(thread_id):
+            self._ensure_open()
+            queue = self._require_message_queue(thread_id, owner)
+            queue.enqueue(run_id, message)
+            if queue.run_id is None and (next_message := queue.next_message()) is not None:
+                # An enqueue can arrive just after the run sends its last event.
+                run_options = queue.run_options
+                if run_options is not None and permission_mode is not None:
+                    run_options = {**run_options, "permission_mode": permission_mode}
+                try:
+                    await self._start_pending_message(queue, next_message, run_options)
+                except ChatQueueConflict:
+                    queue.pause()
+            return queue.snapshot()
+
+    async def change_queued_message(
+        self, thread_id: str, owner: str, message_id: str, revision: int, *, text: str | None = None,
+    ) -> dict[str, Any]:
+        async with self._lock_thread(thread_id):
+            queue = self._require_message_queue(thread_id, owner)
+            message = queue.editable(message_id, revision)
+            if text is None:
+                del queue.messages[message.id]
+            else:
+                message.update_text(text.strip())
+                message.revision += 1
+            queue.changed()
+            return queue.snapshot()
+
+    async def send_queued_message_now(
+        self, thread_id: str, owner: str, message_id: str, revision: int,
+        *, permission_mode: PermissionMode | None = None,
+    ) -> dict[str, Any]:
+        async with self._lock_thread(thread_id):
+            self._ensure_open()
+            queue = self._require_message_queue(thread_id, owner)
+            message = queue.editable(message_id, revision)
+            if queue.run_id is not None:
+                if not queue.can_insert:
+                    raise ChatQueueConflict("This agent can only receive queued messages after the current turn.")
+                message.priority = True
+                message.revision += 1
+                queue.paused = False
+                queue.changed()
+            elif queue.waiting:
+                raise ChatQueueConflict("Answer the pending request before sending a new message.")
+            else:
+                run_options = {**queue.run_options, "permission_mode": permission_mode} if queue.run_options else None
+                await self._start_pending_message(queue, message, run_options)
+            return queue.snapshot()
+
+    async def _start_pending_message(
+        self, queue: ChatMessageQueue, message: QueuedChatMessage, run_options: dict[str, Any] | None,
+    ) -> None:
+        from agent.modules.agent_runtime import ThreadMutationConflictError, get_active_session_registry
+
+        existing = self._sessions.get(queue.thread_id)
+        if not run_options or (existing and existing.task and not existing.task.done()):
+            raise ChatQueueConflict("The conversation is not ready to send this message yet.")
+        pause_version = queue.pause_version
+        try:
+            await self._prepare_new_run(queue.thread_id, check_only=True)
+            self._ensure_open()
+            if queue.pause_version != pause_version:
+                raise ValueError("The queue was paused before the message could be sent.")
+            with get_active_session_registry().reserve_thread_mutation(queue.thread_id, require_idle=True):
+                queue.paused = False
+                self._start_session(
+                    queue.thread_id, {**run_options, "user_input": message.text, "attachments": message.attachments},
+                    queue=queue, message=message,
+                )
+        except (ThreadMutationConflictError, ValueError) as exc:
+            raise ChatQueueConflict(str(exc)) from exc
+
+    def pause_message_queue(self, thread_id: str) -> bool:
+        queue = self._message_queues.get(thread_id)
+        if queue is not None:
+            queue.pause()
+            return bool(queue.messages or queue.run_id)
+        return False
+
+    async def discard_message_queue(self, thread_id: str) -> None:
+        async with self._lock_thread(thread_id):
+            queue = self._message_queues.pop(thread_id, None)
+            session = self._sessions.get(thread_id)
+            if queue is not None and session is not None and session.message_queue is queue:
+                session.cancel(superseded=True)
+                await self._wait_for_sessions([session])
+                self._remove_session(thread_id, session)
 
     async def get_session(self, thread_id: str) -> ChatStreamSession | None:
         """Retrieve an active stream session for a thread, if any exists."""
@@ -440,6 +671,7 @@ class ChatStreamManager:
             for session in sessions:
                 if session.task is None or session.task.done():
                     self._remove_session(session.thread_id, session)
+            self._message_queues.clear()
 
 
 def get_chat_stream_manager(container=None) -> ChatStreamManager:

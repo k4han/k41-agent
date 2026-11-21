@@ -1,5 +1,6 @@
 import type { ContentBlockDelta, Event as ProtocolEvent } from "@langchain/protocol";
 import type { SubagentActivity, TranscriptItem } from "@/components/Transcript";
+import type { ChatQueueSnapshot } from "@/lib/useChatMessageQueue";
 import {
   applyApplicationEvent,
   mergeToolActivity,
@@ -220,6 +221,34 @@ export function handleProtocolEvent(
   }
   if (event.method === "custom:k41") {
     const data = object(params.data);
+    if (!namespace.length && data.projection === "ui") {
+      if (data.type === "chat_queue" && Array.isArray(data.messages)) {
+        callbacks.onChatQueue?.(data as unknown as ChatQueueSnapshot, thread.id);
+        return;
+      }
+      if (data.type === "chat_queue_reverted" && Array.isArray(data.message_ids)) {
+        callbacks.onChatQueueReverted?.(data.message_ids.map(String), thread.id);
+        return;
+      }
+      if (data.type === "chat_queue_delivery" && data.message_id) {
+        settleStreamThinking(refs, thread, callbacks);
+        if (refs.id !== null && !streamed.received) callbacks.removeItem?.(refs.id, thread.id);
+        refs.id = null;
+        streamed.received = false;
+        scope.currentMessage = "";
+        scope.messages.clear();
+        if (!data.inserted) {
+          scope.tools.clear();
+          scope.toolBlocks.clear();
+          scope.outputDeltas.clear();
+        }
+        callbacks.appendItem({
+          type: "message", role: "user", messageId: String(data.message_id), text: String(data.text || ""),
+          attachments: Array.isArray(data.attachments) ? data.attachments : undefined,
+        }, data.inserted ? "bottom" : "turn-start", thread.id);
+        return;
+      }
+    }
     if (data.type === "run_state") {
       if (scope.descriptor) {
         scope.descriptor = { ...scope.descriptor, checkpoint_id: String(data.checkpoint_id || "") };

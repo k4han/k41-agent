@@ -1,12 +1,15 @@
 
 from agent.modules.tools import PermissionMode
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.runnables import RunnableConfig
 
 from agent.modules.workspaces import WorkspaceRef, normalize_workspace_ref
 from agent.shared.config.constants import DEFAULT_WORKSPACE_ROOT
+
+if TYPE_CHECKING:
+    from agent.modules.agent_runtime import ChatQueueTurn
 
 DEFAULT_CONTEXT_COMPACT_THRESHOLD = 75
 DEFAULT_WORKING_DIR = DEFAULT_WORKSPACE_ROOT
@@ -29,6 +32,7 @@ class WorkflowContext:
     permission_mode: PermissionMode | None = None
     browser_owner_id: str | None = None
     acp_config_options: dict[str, str] | None = None
+    chat_queue_turn: "ChatQueueTurn | None" = None
 
     def __init__(
         self,

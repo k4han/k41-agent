@@ -1,12 +1,12 @@
 
-from agent.modules.tools import PermissionMode
+from agent.modules.tools import PermissionMode, attachment_upload_path
 import asyncio
 import base64
 import binascii
 from contextlib import contextmanager
 import logging
 from pathlib import Path
-from typing import Any, AsyncGenerator, Iterator
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Iterator
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
@@ -65,6 +65,9 @@ from agent.modules.tools import (
 from agent.modules.workspaces import WorkspaceRef
 from agent.modules.agent_runtime.workspace_admission import guard_workspace_run
 from agent.modules.agent_runtime.protocol import stream_graph
+
+if TYPE_CHECKING:
+    from agent.modules.agent_runtime.chat_message_queue import ChatQueueTurn
 
 logger = logging.getLogger(__name__)
 
@@ -329,8 +332,10 @@ def _text_attachment_block(attachment: dict[str, Any]) -> dict[str, str]:
     return {"type": "text", "text": text}
 
 
-def _file_attachment_block(attachment: dict[str, Any]) -> dict[str, str]:
+def _file_attachment_block(attachment: dict[str, Any], *, message_id: str | None = None) -> dict[str, str]:
     path = f".k41-agent/uploads/{attachment['name']}"
+    if message_id is not None:
+        path = f".k41-agent/{attachment_upload_path(attachment['name'], message_id=message_id).as_posix()}"
     text = (
         f"Attached file: {attachment['name']}\n"
         f"Workspace path: {path}\n"
@@ -353,6 +358,8 @@ def _image_metadata_block(attachment: dict[str, Any]) -> dict[str, str]:
 def _ingest_attachments_to_workspace(
     attachments: list[dict[str, Any]] | None,
     workspace: Any,
+    *,
+    message_id: str | None = None,
 ) -> None:
     if not attachments or workspace is None:
         return
@@ -379,6 +386,7 @@ def _ingest_attachments_to_workspace(
                     content_bytes=content_bytes,
                     workspace_scope=scope,
                     workspace_root=ws_root,
+                    message_id=message_id,
                 )
     except Exception as exc:
         logger.debug("Failed to ingest attachments into workspace: %s", exc)
@@ -389,6 +397,7 @@ async def _ingest_attachments_to_sandbox(
     workspace: Any,
     *,
     thread_id: str | None = None,
+    message_id: str | None = None,
 ) -> None:
     """Persist attachments into a sandbox's ``.k41-agent`` mount.
 
@@ -416,7 +425,8 @@ async def _ingest_attachments_to_sandbox(
                     if not name:
                         continue
                     content = base64.b64decode(attachment["base64"]) if attachment.get("base64") else str(attachment.get("content", "")).encode()
-                    await file_io.write_bytes(".k41-agent/uploads/" + name, content)
+                    path = attachment_upload_path(name, message_id=message_id).as_posix()
+                    await file_io.write_bytes(f".k41-agent/{path}", content)
             return
         from agent.modules.tools import (
             ensure_sandbox_workspace_storage,
@@ -431,6 +441,8 @@ async def _ingest_attachments_to_sandbox(
             name = str(attachment.get("name") or "").strip()
             if not name:
                 continue
+            if message_id is not None:
+                name = attachment_upload_path(name, message_id=message_id).as_posix()
             content_bytes: bytes | None = None
             if attachment.get("base64"):
                 try:
@@ -451,15 +463,17 @@ def _make_user_message(
     user_input: str,
     attachments: list[Any] | None = None,
     workspace: Any = None,
+    *,
+    message_id: str | None = None,
 ) -> HumanMessage:
     """Build a message and persist attachments; call off the event loop."""
-    message_id = f"user-{uuid4()}"
+    user_message_id = message_id or f"user-{uuid4()}"
     normalized_attachments = _normalize_chat_attachments(attachments)
     if not normalized_attachments:
-        return HumanMessage(content=user_input, id=message_id)
+        return HumanMessage(content=user_input, id=user_message_id)
 
     if workspace is not None:
-        _ingest_attachments_to_workspace(normalized_attachments, workspace)
+        _ingest_attachments_to_workspace(normalized_attachments, workspace, message_id=message_id)
 
     content_blocks: list[dict[str, str]] = [
         {
@@ -472,7 +486,7 @@ def _make_user_message(
             content_blocks.append(_text_attachment_block(attachment))
             continue
         if attachment["kind"] == "file":
-            content_blocks.append(_file_attachment_block(attachment))
+            content_blocks.append(_file_attachment_block(attachment, message_id=message_id))
             continue
         content_blocks.append(_image_metadata_block(attachment))
         content_blocks.append(
@@ -485,7 +499,7 @@ def _make_user_message(
 
     return HumanMessage(
         content=content_blocks,
-        id=message_id,
+        id=user_message_id,
         additional_kwargs={"attachments": _attachment_metadata(normalized_attachments)},
     )
 
@@ -1338,6 +1352,7 @@ async def run_agent_stream(
     _checkpoint_metadata: dict[str, Any] | None = None,
     _execution: Any = None,
     _async_notification_agent: str | None = None,
+    _queue_turn: "ChatQueueTurn | None" = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Run a workflow graph and stream UI events (tool calls and text chunks).
 
@@ -1428,6 +1443,8 @@ async def run_agent_stream(
         browser_owner_id=browser_owner_id,
         acp_config_options=acp_config_options,
     )
+    if _queue_turn is not None:
+        _queue_turn.bind(graph, context, resolved_workflow, workspace, usage_context)
     config["configurable"]["async_subagents_supported"] = (approval_supported and resolved_workflow != ACP_AGENT_GRAPH_TYPE
         and (_execution is None or _execution.source != "scheduled"))
     if _async_notification_agent:
@@ -1484,8 +1501,12 @@ async def run_agent_stream(
         stream_kwargs.update(durability="sync", control=_execution.control)
 
     registry = get_active_session_registry()
+    queued_message = _queue_turn.message if _queue_turn is not None else None
     if not resume and normalized_resume_payload is None and attachments and workspace is not None:
-        await _ingest_attachments_to_sandbox(attachments, workspace, thread_id=thread_id)
+        await _ingest_attachments_to_sandbox(
+            attachments, workspace, thread_id=thread_id,
+            message_id=queued_message.message_id if queued_message is not None else None,
+        )
     if _execution is not None:
         input_data = _execution.input
         user_message_id = None
@@ -1501,10 +1522,13 @@ async def run_agent_stream(
     else:
         user_message = await asyncio.to_thread(
             _make_user_message, user_input, attachments, workspace=workspace,
+            **({"message_id": queued_message.message_id} if queued_message is not None else {}),
         )
         input_data = {"messages": [user_message]}
         user_message_id = _message_id(user_message)
         current_user_seen = False
+        if queued_message is not None:
+            yield _queue_turn.announce_turn_input()
 
     title_event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
@@ -1605,6 +1629,8 @@ async def run_agent_stream(
                     yield user_input_event
 
                 messages = event.get("messages", [])
+                if _queue_turn is not None:
+                    _queue_turn.observe(messages)
                 if not messages:
                     continue
 
@@ -1722,6 +1748,7 @@ async def run_agent_edit_stream(
     resume: bool = False,
     emit_thinking: bool = False,
     _protocol_events: bool = False,
+    _queue_turn: "ChatQueueTurn | None" = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Fork a thread from the checkpoint before a user message and stream the result."""
     from agent.modules.agents import get_catalog_service
@@ -1777,6 +1804,8 @@ async def run_agent_edit_stream(
         permission_mode=permission_mode,
         browser_owner_id=browser_owner_id,
     )
+    if _queue_turn is not None:
+        _queue_turn.bind(graph, context, resolved_workflow, workspace, usage_context)
     notifications, notification_context = await _notification_context(context, resolved_workflow, usage_context, config)
     if notifications:
         await notifications.prepare_new_run(thread_id)
@@ -1865,6 +1894,8 @@ async def run_agent_edit_stream(
                 yield user_input_event
 
             messages = event.get("messages", [])
+            if _queue_turn is not None:
+                _queue_turn.observe(messages)
             if not messages:
                 continue
 

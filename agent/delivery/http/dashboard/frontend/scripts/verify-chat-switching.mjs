@@ -52,6 +52,10 @@ const reconnects = [];
 const writes = [];
 const backgroundSnapshots = [];
 const pendingForks = [];
+const queuePath = '/v2/api/chat/queued/message-queue';
+let queueSnapshot;
+let pendingQueueResponse;
+let queueEditConflicts = 0;
 let delayedHistory;
 let holdHistory = false;
 let workspaceResolution;
@@ -62,8 +66,45 @@ const acpStatus = { display_name: 'OpenCode', auth: { signed_in: true, config_op
   { id: 'model', name: 'Model', category: 'model', current_value: 'model-b',
     options: ['model-a', 'model-b'].map(value => ({ value, name: value })) },
 ] } };
+function openQueueStream(res) {
+  res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'X-Thread-ID': 'queued', 'X-Run-ID': queueSnapshot.run_id });
+  res.flushHeaders();
+  protocolFixture(res, 'queued');
+  responses.set('queued', res);
+  res.write(JSON.stringify({ ...queueSnapshot, type: 'chat_queue' }) + '\n');
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  if (queueSnapshot && (url.pathname === queuePath || url.pathname.startsWith(`${queuePath}/`))) {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    const payload = body ? JSON.parse(body) : {};
+    const [id, action] = url.pathname.slice(queuePath.length + 1).split('/');
+    const message = queueSnapshot.messages.find(entry => entry.id === id);
+    if (req.method === 'POST' && !id) {
+      assert.equal(payload.run_id, queueSnapshot.run_id);
+      queueSnapshot.messages.push({ ...payload, revision: 0, priority: false, sending: false });
+    } else if (req.method === 'PATCH' && message) {
+      if (payload.revision !== message.revision) {
+        queueEditConflicts += 1;
+        res.writeHead(409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ detail: 'The queued message changed.' }));
+        return;
+      }
+      Object.assign(message, { text: payload.text, revision: message.revision + 1 });
+    } else if (action === 'send-now' && message) {
+      assert.equal(payload.revision, message.revision);
+      assert.equal(payload.permission_mode, sentMessages.at(-1).permission_mode);
+      Object.assign(message, { priority: true, revision: message.revision + 1 });
+    } else if (req.method === 'DELETE' && message) {
+      queueSnapshot.messages = queueSnapshot.messages.filter(entry => entry.id !== id);
+    }
+    if (req.method !== 'GET') queueSnapshot.revision += 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(queueSnapshot));
+    return;
+  }
   if (url.pathname === '/dashboard-api/acp/agents/opencode') {
     res.setHeader('Content-Type', 'application/json');
     if (url.searchParams.has('cwd')) acpProbes.push(res);
@@ -101,6 +142,17 @@ const server = http.createServer(async (req, res) => {
     const payload = JSON.parse(body);
     if (url.pathname.endsWith('/reconnect')) reconnects.push(payload);
     else sentMessages.push(payload);
+    if (queueSnapshot && payload.new_thread && payload.message === 'Initial queue conversation prompt') {
+      assert.equal(payload.enable_message_queue, true);
+      pendingQueueResponse = res;
+      return;
+    }
+    if (payload.thread_id === 'queued') {
+      assert.ok(url.pathname.endsWith('/reconnect'));
+      assert.equal(payload.run_id, queueSnapshot.run_id);
+      openQueueStream(res);
+      return;
+    }
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
     res.flushHeaders();
     protocolFixture(res, payload.thread_id);
@@ -114,7 +166,9 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (url.pathname.startsWith('/dashboard-api/')) {
-    if (req.method !== 'GET') writes.push({ method: req.method, path: url.pathname });
+    if (req.method !== 'GET' && url.pathname !== '/dashboard-api/chat-presence') {
+      writes.push({ method: req.method, path: url.pathname });
+    }
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'switching-test-csrf');
     if (holdSessions && url.pathname === '/dashboard-api/sessions') {
@@ -734,9 +788,103 @@ try {
   assert.deepEqual(sentMessages.at(-1).acp_config_options, { model: 'model-a' });
   finish('acp-created', 'OpenCode follow-up completed');
   await completed();
+
+  history.queued = { ...history.first, thread_id: 'queued', title: 'Message queue', messages: [] };
+  queueSnapshot = { thread_id: 'queued', run_id: null, last_run_id: null, status: 'idle', revision: 0, can_insert: false, messages: [] };
+  await navigate('/chat');
+  await loaded();
+  await send('Initial queue conversation prompt');
+  const queueTexts = () => js(`Array.from(document.querySelectorAll('.chat-queue-text'), el => el.textContent)`);
+  const typePrompt = text => js(`(() => {
+    const input = document.querySelector('.chat-prompt-input');
+    input.focus();
+    input.value = ${JSON.stringify(text)};
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  const enter = (options = {}) => js(`document.querySelector('.chat-prompt-input').dispatchEvent(
+    new KeyboardEvent('keydown', ${JSON.stringify({ key: 'Enter', bubbles: true, cancelable: true, ...options })}))`);
+  await typePrompt('Queue first');
+  assert.equal(await enter({ isComposing: true }), true, 'Enter used by an input method does not queue the message');
+  assert.equal(await enter({ shiftKey: true }), true, 'Shift+Enter keeps the textarea newline behavior');
+  assert.deepEqual(await queueTexts(), []);
+  await enter();
+  await until(async () => (await queueTexts())[0] === 'Queue first', 'Enter adds a message before the conversation receives an ID');
+  assert.equal(queueSnapshot.messages.length, 0);
+  Object.assign(queueSnapshot, { status: 'running', run_id: 'queue-test-run', last_run_id: 'queue-test-run', can_insert: true, revision: 1 });
+  openQueueStream(pendingQueueResponse);
+  await until(() => js('location.pathname === "/c/queued"'), 'temporary queue moves to the new conversation');
+  await until(() => queueSnapshot.messages.length === 1, 'the temporary queue is saved on the server');
+  await typePrompt('Queue with file');
+  await js(`(() => {
+    const clipboardData = new DataTransfer();
+    clipboardData.items.add(new File(['Notes'], 'queue-note.txt', { type: 'text/plain' }));
+    document.querySelector('.chat-prompt-input').dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData }));
+  })()`);
+  await until(() => js(`document.querySelector('.chat-attachment-name')?.textContent === 'queue-note.txt'`), 'attachment available');
+  await js(`document.querySelector('button[aria-label="Queue message"]').click()`);
+  await until(() => queueSnapshot.messages.length === 2, 'queue button adds message and attachment');
+  assert.equal(queueSnapshot.messages[1].attachments[0].content, 'Notes');
+
+  await typePrompt('Keep the current draft');
+  await js(`document.querySelector('button[aria-label="Queued message actions"]').click()`);
+  await js(`document.querySelector('[role="menuitem"]').click()`);
+  await js(`(() => {
+    const edit = document.querySelector('[aria-label="Edit queued message"]');
+    edit.value = 'Edited queued message';
+    edit.dispatchEvent(new Event('input', { bubbles: true }));
+    edit.closest('form').querySelector('[type="submit"]').click();
+  })()`);
+  await until(() => queueSnapshot.messages[0]?.text === 'Edited queued message', 'inline edit saved');
+  assert.equal(await js(`document.querySelector('.chat-prompt-input').value`), 'Keep the current draft');
+
+  await js(`document.querySelector('button[aria-label="Queued message actions"]').click()`);
+  await js(`document.querySelector('[role="menuitem"]').click()`);
+  const editedMessage = queueSnapshot.messages[0];
+  Object.assign(editedMessage, { text: 'Edited in another tab', revision: editedMessage.revision + 1 });
+  const attachedMessage = queueSnapshot.messages[1];
+  Object.assign(attachedMessage, { text: 'Queue with file updated', revision: attachedMessage.revision + 1 });
+  queueSnapshot.revision += 1;
+  responses.get('queued').write(JSON.stringify({ ...queueSnapshot, type: 'chat_queue' }) + '\n');
+  await until(async () => (await queueTexts()).includes(attachedMessage.text), 'the queue receives edits from another tab');
+  assert.equal(await js(`document.querySelector('[aria-label="Edit queued message"]').value`), 'Edited queued message');
+  await js(`document.querySelector('.chat-queue-editor button[type="submit"]').click()`);
+  await until(() => queueEditConflicts === 1, 'a stale edit receives a conflict');
+  assert.equal(editedMessage.text, 'Edited in another tab');
+  await js(`document.querySelector('.chat-queue-editor button[type="button"]').click()`);
+
+  await js(`Array.from(document.querySelectorAll('button[aria-label="Insert before the next model call"]'))[1].click()`);
+  await until(() => queueSnapshot.messages[1]?.priority, 'mark for insertion');
+  await js(`document.querySelector('button[aria-label="Remove queued message"]').click()`);
+  await until(() => queueSnapshot.messages.length === 1, 'remove queued message');
+
+  await navigate('/c/second');
+  assert.deepEqual(await queueTexts(), []);
+  await navigate('/c/queued');
+  await reload();
+  await until(() => js(`!!document.querySelector('button[aria-label="Marked for insertion"]')`), 'reload restores the queued priority');
+  await until(() => reconnects.some(request => request.thread_id === 'queued'), 'reload reconnects to the queued run');
+  const delivered = queueSnapshot.messages[0];
+  const messageId = `user-queued-${delivered.id}`;
+  queueSnapshot.messages = [];
+  queueSnapshot.revision += 1;
+  const queueResponse = responses.get('queued');
+  queueResponse.write(JSON.stringify({ ...queueSnapshot, type: 'chat_queue' }) + '\n');
+  queueResponse.write(JSON.stringify({ type: 'chat_queue_delivery', message_id: messageId,
+    text: delivered.text, attachments: delivered.attachments, inserted: true }) + '\n');
+  const deliveredCount = () => js(`Array.from(document.querySelectorAll('.transcript .message.user')).filter(row => row.textContent.includes('Queue with file')).length`);
+  await until(async () => await deliveredCount() === 1 && (await queueTexts()).length === 0, 'delivered message moved into transcript');
+  history.queued.messages.push({ id: messageId, role: 'user', content: delivered.text, attachments: delivered.attachments });
+  Object.assign(queueSnapshot, { run_id: null, can_insert: false, status: 'idle', revision: queueSnapshot.revision + 1 });
+  queueResponse.write(JSON.stringify({ ...queueSnapshot, type: 'chat_queue' }) + '\n');
+  finish('queued', 'Queue checked');
+  await completed();
+  await reload();
+  assert.equal(await deliveredCount(), 1, 'checkpoint reload contains the delivered message once');
+
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
-  console.log('PASS: model preferences, concurrent streams, delayed navigation, workspace snapshots, conversation branching, and OpenCode model selection through workspace discovery, streaming, reloads, and follow-up turns.');
+  console.log('PASS: chat switching, model preferences, branching, OpenCode options, and message queue actions through a reload.');
 } finally {
+  pendingQueueResponse?.end();
   for (const response of responses.values()) response.end();
   workspaceResolution?.end();
   delayedHistory?.res.end();

@@ -77,9 +77,9 @@ async def test_llm_node_returns_skill_command_errors_without_calling_model(monke
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("with_attachment", [False, True])
+@pytest.mark.parametrize(("with_attachment", "with_insertions"), [(False, False), (True, False), (False, True)])
 async def test_llm_node_activates_explicit_skill_before_model_call(
-    monkeypatch, tmp_path, isolated_container, with_attachment,
+    monkeypatch, tmp_path, isolated_container, with_attachment, with_insertions,
 ):
     from langchain_core.messages import utils as message_utils
     from agent.modules.agent_runtime.runner import _make_user_message
@@ -128,18 +128,28 @@ async def test_llm_node_activates_explicit_skill_before_model_call(
     initial_system = captured["messages"][0].content
     from langchain_core.utils.function_calling import convert_to_openai_tool
     initial_tools = [convert_to_openai_tool(tool) for tool in captured["tools"]]
+    processed_ids = [message.id]
+    if with_insertions:
+        refresh = HumanMessage(content="/skill refresh demo", id="queued-refresh")
+        clarification = HumanMessage(content="Include a short summary.", id="queued-clarification")
+        runtime.context.chat_queue_turn = SimpleNamespace(take_insertions=AsyncMock(side_effect=[
+            [refresh, clarification], [],
+        ]))
+        processed_ids.append(refresh.id)
     result = await llm_node_module.llm_node(
         {"messages": [message]},
         config, runtime,
     )
+    runtime.context.chat_queue_turn = None
 
     assert "<active_skills>" not in captured["messages"][0].content
     assert "Follow these durable instructions." not in captured["messages"][0].content
     responses = [message for message in captured["messages"] if isinstance(message, ToolMessage)]
-    assert len(responses) == 1 and "Follow these durable instructions." in responses[0].content
-    assert any(message.id == responses[0].id for message in result["messages"])
+    assert len(responses) == len(processed_ids)
+    assert "Follow these durable instructions." in responses[-1].content
+    assert any(message.id == responses[-1].id for message in result["messages"])
     assert [entry["name"] for entry in result["active_skills"].values()] == ["demo"]
-    assert result["processed_skill_messages"] == [message.id]
+    assert result["processed_skill_messages"] == processed_ids
     assert counted
     assert captured["messages"][0].content == initial_system
     assert [convert_to_openai_tool(tool) for tool in captured["tools"]] == initial_tools
@@ -149,7 +159,7 @@ async def test_llm_node_activates_explicit_skill_before_model_call(
     resumed["messages"] = add_messages(resumed["messages"], [HumanMessage(content="Continue", id="next-user")])
     next_result = await llm_node_module.llm_node(resumed, config, runtime)
     assert captured["messages"][:len(sent)] == sent
-    assert len([message for message in captured["messages"] if isinstance(message, ToolMessage)]) == 1
+    assert len([message for message in captured["messages"] if isinstance(message, ToolMessage)]) == len(processed_ids)
     assert len(next_result["messages"]) == 1
     from agent.modules.workflows.prompt_builders import estimate_thread_prompt_breakdown
     monkeypatch.setattr("agent.modules.workspaces.get_thread_workspace_ref", AsyncMock(return_value=runtime.context.get_workspace()))

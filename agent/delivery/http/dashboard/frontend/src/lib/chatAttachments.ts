@@ -44,7 +44,7 @@ export function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
-export function toTranscriptAttachment(attachment: PendingAttachment): TranscriptAttachment {
+export function toTranscriptAttachment(attachment: ChatAttachmentPayload): TranscriptAttachment {
   return {
     name: attachment.name,
     mime_type: attachment.mime_type,

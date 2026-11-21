@@ -21,6 +21,8 @@ from agent.modules.acp.service import AcpService, not_installed_notice
 from agent.modules.acp.translator import TurnTranscript
 from agent.modules.acp.turns import SIGN_IN_NOTICE, STOP_TURN_OPTION_ID
 from agent.modules.agent_runtime import runner as runner_module
+from agent.modules.agent_runtime import ChatQueueConflict
+from agent.modules.agent_runtime.protocol import application_event
 from agent.modules.agents.models import AcpAgentSettings, AgentConfig
 from agent.modules.agents.parser import parse_agent_markdown_content, serialize_agent_config
 from agent.modules.browser.models import BrowserArtifact, BrowserBinding, BrowserInvocation, BrowserProfile, BrowserProjectProfile
@@ -167,6 +169,42 @@ async def test_text_turn_streams_once_and_persists(env):
     assert next(event for event in events if event["type"] == "context_usage")["current_context_tokens"] == 123
     assert visible(await env.messages()) == [("user", "scenario:text"), ("ai", "Hello world")]
     assert not (await env.state()).next
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed", [False, True])
+async def test_dashboard_queue_submits_a_new_acp_prompt_only_after_success(env, failed):
+    manager = env.container.chat_stream_manager
+    owner = "admin:test"
+    options = {
+        "thread_id": THREAD,
+        "agent_name": "ag",
+        "working_dir": str(env.workspace),
+        "browser_owner_id": owner,
+        "usage_context": {"platform": "api", "user_id": "dashboard"},
+    }
+    try:
+        session = await manager.get_or_create_session(THREAD, {
+            **options, "user_input": "scenario:bad_stop" if failed else "scenario:permission",
+        }, queue_owner=owner)
+        await manager.enqueue_message(THREAD, owner, session.run_id, "after", "Queued follow-up", [])
+        with pytest.raises(ChatQueueConflict, match="after the current turn"):
+            await manager.send_queued_message_now(THREAD, owner, "after", 0)
+        await asyncio.wait_for(session.task, 20)
+        assert len(env.calls("session/prompt")) == 1
+        assert manager.message_queue_snapshot(THREAD, owner)["status"] == ("paused" if failed else "waiting")
+
+        if not failed:
+            updates = [update async for event in session.subscribe() if (update := application_event(event))]
+            resumed = await manager.get_or_create_session(THREAD, {
+                **options, "user_input": "", "resume_payload": resume(updates, "allow"),
+            }, queue_owner=owner)
+            await asyncio.wait_for(resumed.task, 20)
+            assert [part["text"] for part in env.calls("session/prompt")[-1]["params"]["prompt"] if part["type"] == "text"] == ["Queued follow-up"]
+            assert visible(await env.messages())[-2:] == [("user", "Queued follow-up"), ("ai", "Queued follow-up")]
+            assert manager.message_queue_snapshot(THREAD, owner)["messages"] == []
+    finally:
+        await manager.shutdown()
 
 
 @pytest.mark.asyncio

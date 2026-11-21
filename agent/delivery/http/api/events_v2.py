@@ -6,12 +6,13 @@ import json
 import asyncio
 from contextlib import aclosing
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from agent.delivery.http.common.streaming import ChatStreamingResponse, stream_chat_chunks
 
 from agent.delivery.http.api.router import (
+    DASHBOARD_USER_ID,
     STREAM_RESPONSE_HEADERS,
     accept_chat_response,
     check_scheduled_chat,
@@ -19,12 +20,14 @@ from agent.delivery.http.api.router import (
     prepare_run_params,
 )
 from agent.delivery.http.api.schemas import (
+    ChatAttachment,
     ChatRequest,
     EditChatRequest,
     ReconnectRequest,
 )
 from agent.modules.admin_auth import get_current_admin
 from agent.modules.agent_runtime import (
+    ChatQueueConflict,
     get_chat_stream_manager,
     protocol_event,
     run_agent_edit_protocol_stream,
@@ -33,7 +36,7 @@ from agent.modules.agent_runtime import (
 from agent.shared.thread_ids import resolve_thread_id
 from agent.modules.agent_runtime import get_async_subagent_service, active_async_subagent_service
 from agent.shared.async_subagents import request_key
-from agent.modules.tools import HumanResumePayload
+from agent.modules.tools import HumanResumePayload, PermissionMode
 from agent.modules.notifications.interruption import ResponseConflict
 
 router = APIRouter(
@@ -102,8 +105,12 @@ async def chat_events(request: ChatRequest, http_request: Request, admin: str = 
         raise HTTPException(409, detail="Stop async tasks before rewinding this conversation.")
     try:
         session = await get_chat_stream_manager().get_or_create_session(
-            thread_id, params, run_fn=run_agent_protocol_stream
+            thread_id, params, run_fn=run_agent_protocol_stream,
+            queue_owner=f"admin:{admin}" if request.enable_message_queue and request.user_id == DASHBOARD_USER_ID else None,
         )
+    except ChatQueueConflict as exc:
+        detail = {"code": "chat_queue_active", "run_id": exc.run_id, "message": str(exc)} if exc.run_id else str(exc)
+        raise HTTPException(409, detail=detail) from None
     except ResponseConflict as exc:
         raise HTTPException(409, str(exc)) from None
     if request.new_thread and not request.thread_id:
@@ -131,8 +138,9 @@ async def chat_events_edit(
     try:
         session = await get_chat_stream_manager().get_or_create_session(
             str(params["thread_id"]), params, run_fn=run_agent_edit_protocol_stream,
+            queue_owner=f"admin:{admin}" if request.enable_message_queue and request.user_id == DASHBOARD_USER_ID else None,
         )
-    except ResponseConflict as exc:
+    except (ChatQueueConflict, ResponseConflict) as exc:
         raise HTTPException(409, str(exc)) from None
     return stream_response(http_request, session)
 
@@ -155,6 +163,74 @@ async def reconnect(request: ReconnectRequest, http_request: Request):
             },
         )
     return stream_response(http_request, session, after_seq=request.after_seq or 0)
+
+
+class QueueMessageRequest(BaseModel):
+    id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
+    run_id: str = Field(min_length=1, max_length=64)
+    text: str
+    attachments: list[ChatAttachment] = Field(default_factory=list)
+    permission_mode: PermissionMode | None = None
+
+
+class QueueRevisionRequest(BaseModel):
+    revision: int = Field(ge=0)
+
+
+class QueueEditRequest(QueueRevisionRequest):
+    text: str
+
+
+class QueueSendNowRequest(QueueRevisionRequest):
+    permission_mode: PermissionMode | None = None
+
+
+async def _queue_operation(operation):
+    try:
+        return await operation
+    except ChatQueueConflict as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+
+
+@router.get("/chat/{thread_id}/message-queue")
+async def get_message_queue(thread_id: str, admin: str = Depends(get_current_admin)):
+    return get_chat_stream_manager().message_queue_snapshot(resolve_thread_id(thread_id), f"admin:{admin}")
+
+
+@router.post("/chat/{thread_id}/message-queue", status_code=202)
+async def enqueue_message(thread_id: str, body: QueueMessageRequest, admin: str = Depends(get_current_admin)):
+    return await _queue_operation(get_chat_stream_manager().enqueue_message(
+        resolve_thread_id(thread_id), f"admin:{admin}", body.run_id, body.id, body.text, body.attachments,
+        permission_mode=body.permission_mode,
+    ))
+
+
+@router.patch("/chat/{thread_id}/message-queue/{message_id}")
+async def edit_queued_message(thread_id: str, message_id: str, body: QueueEditRequest, admin: str = Depends(get_current_admin)):
+    return await _queue_operation(get_chat_stream_manager().change_queued_message(
+        resolve_thread_id(thread_id), f"admin:{admin}", message_id, body.revision, text=body.text,
+    ))
+
+
+@router.delete("/chat/{thread_id}/message-queue/{message_id}")
+async def delete_queued_message(thread_id: str, message_id: str, revision: int = Query(ge=0), admin: str = Depends(get_current_admin)):
+    return await _queue_operation(get_chat_stream_manager().change_queued_message(
+        resolve_thread_id(thread_id), f"admin:{admin}", message_id, revision,
+    ))
+
+
+@router.post("/chat/{thread_id}/message-queue/{message_id}/send-now")
+async def send_queued_message_now(
+    thread_id: str, message_id: str, body: QueueSendNowRequest, admin: str = Depends(get_current_admin),
+):
+    thread_id = resolve_thread_id(thread_id)
+    owner = f"admin:{admin}"
+    await check_scheduled_chat(thread_id, owner)
+    return await _queue_operation(get_chat_stream_manager().send_queued_message_now(
+        thread_id, owner, message_id, body.revision, permission_mode=body.permission_mode,
+    ))
 
 
 @router.get("/chat/{thread_id}/subagents/{delegation_id}")

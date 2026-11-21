@@ -98,6 +98,7 @@ async def prepare_model_context(
     config: dict,
     tools: list | None = None,
     active_skills: dict | None = None,
+    retain_from_id: str | None = None,
 ) -> tuple[list[BaseMessage], list[BaseMessage]]:
     """Compact before every model call and trim channel history once per run."""
     override = getattr(context, "context_compact_threshold", None)
@@ -120,6 +121,7 @@ async def prepare_model_context(
                 thread_id=str(config.get("configurable", {}).get("thread_id", "")),
                 max_retained_tokens=target_budget - await asyncio.to_thread(count, []),
                 **({"active_skills": active_skills} if active_skills is not None else {}),
+                **({"retain_from_id": retain_from_id} if retain_from_id is not None else {}),
             )
             after = await asyncio.to_thread(count, compacted.messages)
             if after < before and after <= target_budget:
@@ -131,7 +133,7 @@ async def prepare_model_context(
     trim_threshold = getattr(context, "channel_context_trim_threshold", None)
     if trim_threshold is not None and not getattr(context, "channel_trim_applied", False):
         trimmed = await asyncio.to_thread(trim_channel_history, current, trim_threshold)
-        if trimmed is not current:
+        if trimmed is not current and (retain_from_id is None or any(message.id == retain_from_id for message in trimmed)):
             current = model_skill_history(trimmed, active_skills) if active_skills is not None else trimmed
             current_tokens = await asyncio.to_thread(count, current)
         context.channel_trim_applied = True

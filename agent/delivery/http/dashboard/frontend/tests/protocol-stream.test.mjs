@@ -87,6 +87,28 @@ test('a parent continuation retains both completed subagents while streaming its
   assert.equal(f.items.at(-1).text, 'Combined answer');
 });
 
+test('a queued input starts a separate reply and is reused by stream replay', () => {
+  const render = f => {
+    f.send('lifecycle', { event: 'started', thread_id: 'parent' });
+    f.send('messages', [{ event: 'message-start', id: 'first-answer' }, { run_id: 'first-answer' }]);
+    f.send('custom:k41', { type: 'message', message_id: 'first-answer', content: 'First answer', projection: 'ui' });
+    const queued = f.send('custom:k41', {
+      type: 'chat_queue_delivery', message_id: 'user-queued-1', text: 'Follow-up', inserted: false, projection: 'ui',
+    });
+    f.sendEvent(queued);
+    f.send('messages', [{ event: 'message-start', id: 'second-answer' }, { run_id: 'second-answer' }]);
+    f.send('custom:k41', { type: 'message', message_id: 'second-answer', content: 'Second answer', projection: 'ui' });
+  };
+  const live = fixture([{ id: 1, type: 'message', role: 'user', text: 'Start' }]);
+  render(live);
+  assert.deepEqual(live.items.map(item => [item.role, item.text]), [
+    ['user', 'Start'], ['assistant', 'First answer'], ['user', 'Follow-up'], ['assistant', 'Second answer'],
+  ]);
+  const replayed = fixture(live.items, true);
+  render(replayed);
+  assert.deepEqual(replayed.items, live.items);
+});
+
 test('reconnecting the same run reuses tools and answers without shrinking checkpoint text', () => {
   const previous = [
     { id: 1, type: 'message', role: 'user', messageId: 'user', text: 'Delegate work' },

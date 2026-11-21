@@ -44,6 +44,7 @@ from agent.modules.agent_runtime.chat_stream_manager import (
     ChatStreamSession,
     get_chat_stream_manager,
 )
+from agent.modules.agent_runtime.chat_message_queue import ChatQueueConflict, ChatQueueTurn
 from agent.modules.agent_runtime.protocol import (
     protocol_event,
     run_agent_protocol_stream,
@@ -114,6 +115,8 @@ __all__ = [
     "track_active_session",
     "ChatStreamManager",
     "ChatStreamSession",
+    "ChatQueueConflict",
+    "ChatQueueTurn",
     "get_chat_stream_manager",
     "protocol_event",
     "annotate_delegation_results",

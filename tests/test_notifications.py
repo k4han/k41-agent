@@ -10,7 +10,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
@@ -261,6 +261,36 @@ async def test_wakeup_can_resume_its_own_question(notification_run, notification
     assert response.status_code == 200
     assert "Combined result" in response.text
     assert not (await state.manager.snapshot(row)).next
+
+
+@pytest.mark.asyncio
+async def test_dashboard_queue_drains_after_a_managed_response(notification_run, notification_http):
+    state = notification_run
+    thread_id = "api_parent"
+
+    async def work(values):
+        latest = next(message for message in reversed(values["messages"]) if isinstance(message, HumanMessage))
+        if latest.content == "Requires an answer":
+            _ask_user("Decision", state.questions, "", SimpleNamespace(tool_call_id="question"))
+        return {"messages": [AIMessage(content=f"Completed {latest.content}")]}
+
+    install_graph(state.env, work)
+    endpoint = "/v2/api/chat/events"
+    payload = {"thread_id": thread_id, "user_id": "dashboard", "enable_message_queue": True}
+    start = await notification_http.post(endpoint, json={**payload, "message": "Requires an answer"})
+    assert start.status_code == 200
+    queue_path = f"/v2/api/chat/{thread_id}/message-queue"
+    queued = await notification_http.post(queue_path, json={
+        "id": "follow-up", "run_id": start.headers["X-Run-ID"], "text": "Follow-up",
+    })
+    assert queued.status_code == 202 and queued.json()["status"] == "waiting"
+
+    resumed = await notification_http.post(endpoint, json={**payload, "message": "", "resume_payload": ANSWER})
+    assert resumed.status_code == 200
+    assert "Completed Requires an answer" in resumed.text
+    assert "Completed Follow-up" in resumed.text
+    snapshot = (await notification_http.get(queue_path)).json()
+    assert snapshot["status"] == "idle" and snapshot["messages"] == []
 
 
 @pytest.mark.asyncio

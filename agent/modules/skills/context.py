@@ -9,6 +9,8 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.modules.skills.sources import workspace_key
 
+SkillCommandGroup = tuple[list[tuple[str, str]], str]
+
 
 def activation_key(agent_name: str, workspace, name: str) -> str:
     return hashlib.sha256(f"{agent_name}\0{workspace_key(workspace)}\0{name}".encode()).hexdigest()
@@ -116,7 +118,7 @@ def model_skill_history(messages, active_skills: dict | None = None, *, insertio
     return messages if result == messages else result
 
 
-def skill_commands(messages) -> tuple[list[tuple[str, str]], str]:
+def skill_commands(messages) -> SkillCommandGroup:
     """Only explicit leading commands in the latest user message activate skills."""
     latest = next((message for message in reversed(messages) if isinstance(message, HumanMessage)), None)
     if latest is None:
@@ -145,21 +147,25 @@ def requested_skills(messages) -> list[str]:
     return [name for action, name in skill_commands(messages)[0] if action == "load"]
 
 
-async def active_context(state: dict, *, workspace, thread_id: str, agent_name: str, names, tools) -> tuple[list, dict, list[str]]:
+async def active_context(
+    state: dict, *, workspace, thread_id: str, agent_name: str, names, tools,
+    command_groups: list[SkillCommandGroup] | None = None,
+) -> tuple[list, dict, list[str]]:
     from agent.modules.skills.packages import get_skill_packages
 
     history = state.get("messages", [])
     active = bind_skill_context(state.get("active_skills", {}), history)
     command_messages = []
     processed = list(state.get("processed_skill_messages", []))
-    commands, message_id = skill_commands(state.get("messages", []))
+    if command_groups is None:
+        command_groups = [skill_commands(history)]
+    pending = [(commands, message_id) for commands, message_id in command_groups if commands and message_id not in processed]
     if not any(tool.name == "skill" for tool in tools):
-        if commands and message_id not in processed:
+        if pending:
             raise PermissionError("This agent does not have the skill tool enabled.")
-        return model_skill_history(state.get("messages", []), {}), {}, processed
+        return model_skill_history(history, {}), {}, processed
     packages = get_skill_packages()
-    request_key = message_id
-    if commands and request_key not in processed:
+    for commands, message_id in pending:
         for action, name in commands:
             key = activation_key(agent_name, workspace, name)
             if action == "unload":
@@ -174,7 +180,7 @@ async def active_context(state: dict, *, workspace, thread_id: str, agent_name: 
                 command_messages.extend(_skill_message_pair(key, active[key],
                     call_id=skill_context_id(key, active[key]["version"], f"{thread_id}:{message_id}:{action}"),
                     instructions=instructions, refresh=action == "refresh"))
-        processed = [*processed[-99:], request_key]
+        processed = [*processed[-99:], message_id]
     for key, entry in list(active.items()):
         if packages.authorize_active(entry, workspace=workspace, agent_name=agent_name, allowed_names=names):
             entry = await packages.restore(entry, workspace=workspace, thread_id=thread_id, defer_execution=True)
