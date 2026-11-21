@@ -1612,10 +1612,10 @@ export function WorkspaceExplorer(props: {
               class="workspace-icon-btn workspace-collapse-btn workspace-explorer-close-btn"
               type="button"
               onClick={props.onCollapse}
-              title="Close workspace explorer"
-              aria-label="Close workspace explorer"
+              title="Collapse workspace"
+              aria-label="Collapse workspace"
             >
-              <X size={16} />
+              <PanelRightClose size={16} />
             </button>
           </Show>
         </div>

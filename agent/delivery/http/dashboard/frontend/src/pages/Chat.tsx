@@ -5,7 +5,6 @@ import { handleProtocolEvent } from "@/lib/protocolStreamHandler";
 import { useLocation, useNavigate, useParams, useSearchParams } from "@solidjs/router";
 import {
   Menu,
-  PanelRightClose,
   PanelRightOpen,
   X,
 } from "lucide-solid";
@@ -2472,11 +2471,18 @@ export function ChatPage() {
                     })}
                     onOpenBrowser={openBrowserWorkspace}
                   />
-                  <button class="chat-header-workspace-btn" type="button" onClick={explorer.toggle}
-                    title={explorer.open() ? "Close workspace" : "Open workspace"}
-                    aria-label={explorer.open() ? "Close workspace" : "Open workspace"} aria-expanded={explorer.open()}>
-                    <Show when={explorer.open()} fallback={<PanelRightOpen size={19} />}><PanelRightClose size={19} /></Show>
-                  </button>
+                  <Show when={!explorer.open()}>
+                    <button
+                      class="chat-header-workspace-btn"
+                      type="button"
+                      onClick={explorer.toggle}
+                      title="Open workspace"
+                      aria-label="Open workspace"
+                      aria-expanded={false}
+                    >
+                      <PanelRightOpen size={19} />
+                    </button>
+                  </Show>
                 </div>
               </div>
               <Show when={threadError() || backgroundStreamError()}>
