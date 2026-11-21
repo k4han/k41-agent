@@ -1615,7 +1615,7 @@ export function WorkspaceExplorer(props: {
               title="Collapse workspace"
               aria-label="Collapse workspace"
             >
-              <PanelRightClose size={16} />
+              <PanelRightClose size={19} />
             </button>
           </Show>
         </div>

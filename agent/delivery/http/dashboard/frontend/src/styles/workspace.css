@@ -26,11 +26,9 @@
 
 .workspace-closed .workspace-drawer {
   border-left: 0 !important;
-  width: 0 !important;
   min-width: 0 !important;
-  max-width: 0 !important;
+  opacity: 0;
   overflow: hidden !important;
-  visibility: hidden !important;
   pointer-events: none !important;
 }
 
@@ -139,14 +137,14 @@ body.workspace-resizing * {
 /* Tabs Navigation Bar */
 .workspace-tabs-bar {
   display: flex;
-  min-height: 38px;
-  height: 38px;
+  min-height: 48px;
+  height: 48px;
   flex: 0 0 auto;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--border);
   background: var(--surface-2);
-  padding: 0 8px 0 10px;
+  padding: calc(var(--safe-top) + 4px) 14px 4px 10px;
   position: relative;
   z-index: 3;
   min-width: 0;
@@ -157,10 +155,25 @@ body.workspace-resizing * {
 .workspace-header-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   flex: 0 0 auto;
   margin-left: 8px;
   align-self: center;
+}
+
+.workspace-icon-btn.workspace-collapse-btn {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 6px;
+  color: var(--muted);
+  transition: color 120ms ease, background-color 120ms ease, opacity 180ms ease;
+}
+
+.workspace-icon-btn.workspace-collapse-btn:hover {
+  color: var(--fg);
+  background: var(--surface-3);
 }
 
 /* Dedicated File Tabs Bar (below main tabs) */
