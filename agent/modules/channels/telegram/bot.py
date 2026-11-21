@@ -73,7 +73,7 @@ def create_dispatcher():
         raise ImportError("Install aiogram with uv before enabling Telegram.") from exc
 
     dp = Dispatcher()
-    from agent.modules.notifications.telegram import PREFIX, handle_callback
+    from agent.modules.notifications import PREFIX, handle_callback
 
     dp.callback_query.register(handle_callback, F.data.startswith(PREFIX))
     dp.message.register(handle_telegram_message)

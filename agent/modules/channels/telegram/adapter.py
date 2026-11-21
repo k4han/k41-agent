@@ -182,7 +182,7 @@ async def handle_telegram_message(message: Any) -> None:
     if not getattr(message, "text", None) or not getattr(message, "from_user", None):
         return
 
-    from agent.modules.notifications.telegram import handle_reply
+    from agent.modules.notifications import handle_reply
 
     if await handle_reply(message):
         return

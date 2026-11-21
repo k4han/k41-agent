@@ -869,7 +869,7 @@ class BrowserService:
                 if done:
                     decision = waiting.result()
                 else:
-                    from agent.modules.notifications.interruption import active_manager
+                    from agent.modules.notifications import active_manager
 
                     manager = active_manager() if payload.get("timeout_minutes") else None
                     # Give the notification worker time to resume the paused ACP turn.
@@ -922,7 +922,7 @@ class BrowserService:
         if recorded is not None:
             return recorded
         current = await self._ensure(thread_id, owner_id)
-        from agent.modules.notifications.interruption import active_manager
+        from agent.modules.notifications import active_manager
 
         manager = active_manager()
         minutes = manager.settings.timeout_minutes if manager else None
@@ -987,7 +987,7 @@ class BrowserService:
                               "content": "Browser session was lost while returning control. Start a new session and inspect it before continuing."}
                 else:
                     result = await self._handoff_snapshot(current, authorize_snapshot)
-        from agent.modules.notifications.interruption import active_manager
+        from agent.modules.notifications import active_manager
 
         manager = active_manager()
         if manager and await manager.browser_status(thread_id, payload["handoff_id"]) == "timed_out":
@@ -1099,7 +1099,7 @@ class BrowserService:
         await asyncio.gather(*(reap(thread_id) for thread_id in targets))
 
     async def _expire_handoffs(self, thread_id, *, force_handoff_id=None):
-        from agent.modules.notifications.interruption import active_manager
+        from agent.modules.notifications import active_manager
 
         manager = active_manager()
         if manager:

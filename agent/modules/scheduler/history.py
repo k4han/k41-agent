@@ -176,7 +176,7 @@ async def mark_interrupted_runs() -> int:
         )
         interrupted = result.all()
         await session.commit()
-    from agent.modules.notifications.failures import report_failure
+    from agent.modules.notifications import report_failure
 
     for run_id, thread_id in interrupted:
         await report_failure(run_id, "Scheduler", thread_id)

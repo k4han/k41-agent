@@ -318,7 +318,7 @@ async def delete_chat_thread(thread_id: str) -> dict[str, str]:
     """Delete a conversation thread and all its checkpoints."""
     thread_id = resolve_thread_id(thread_id)
     from agent.bootstrap.container import get_active_container
-    from agent.modules.notifications.interruption import active_manager
+    from agent.modules.notifications import active_manager
 
     container = get_active_container()
     if container is not None:

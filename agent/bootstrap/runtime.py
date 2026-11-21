@@ -149,7 +149,7 @@ class AppRuntime:
             cleanup_started_at = datetime.now(timezone.utc)
             cleanup_paths = await asyncio.to_thread(self._snapshot_cleanup_paths)
 
-            from agent.modules.notifications.interruption import InterruptionTimeoutManager
+            from agent.modules.notifications import InterruptionTimeoutManager
 
             self.container._interruption_timeout_manager = InterruptionTimeoutManager(self.container)
             logger.info("Restoring background task history...")

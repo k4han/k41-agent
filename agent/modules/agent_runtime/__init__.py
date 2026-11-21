@@ -12,6 +12,7 @@ from agent.modules.agent_runtime.active_sessions import (
 def get_active_session_registry(*args, **kwargs) -> ActiveSessionRegistry:
     return active_sessions.get_active_session_registry(*args, **kwargs)
 from agent.modules.agent_runtime.runner import (
+    _get_plan_resume_source_agent_name,
     _normalize_human_resume_payload,
     _validate_human_resume_payload,
     _resolve_agent_name_for_resume,
@@ -24,6 +25,16 @@ from agent.modules.agent_runtime.runner import (
     run_agent_stream,
     track_active_session,
 )
+from agent.modules.agent_runtime.async_subagents import (
+    SubagentExecutionRecord,
+    SubagentNotificationRecord,
+    SubagentTaskRecord,
+    get_async_subagent_service,
+    active_async_subagent_service,
+)
+from agent.modules.agent_runtime.async_subagents.service import AsyncSubagentService, _run_context
+from agent.modules.agent_runtime.async_subagents.repository import encode, job_dict
+
 from agent.modules.agent_runtime.background_tasks import (
     BackgroundTask,
     BackgroundTaskManager,
@@ -46,6 +57,7 @@ from agent.modules.agent_runtime.chat_stream_manager import (
 )
 from agent.modules.agent_runtime.chat_message_queue import ChatQueueConflict, ChatQueueTurn
 from agent.modules.agent_runtime.protocol import (
+    application_event,
     protocol_event,
     run_agent_protocol_stream,
     run_agent_edit_protocol_stream,
@@ -56,16 +68,6 @@ from agent.modules.agent_runtime.delegation import (
     enrich_delegated_calls,
     get_subagent_history,
 )
-
-from agent.modules.agent_runtime.async_subagents import (
-    SubagentExecutionRecord,
-    SubagentNotificationRecord,
-    SubagentTaskRecord,
-    get_async_subagent_service,
-    active_async_subagent_service,
-)
-from agent.modules.agent_runtime.async_subagents.service import AsyncSubagentService
-from agent.modules.agent_runtime.async_subagents.repository import encode, job_dict
 
 from agent.modules.agent_runtime.input_messages import (
     DEFAULT_IMAGE_PROMPT,
@@ -79,6 +81,9 @@ __all__ = [
     "get_async_subagent_service",
     "active_async_subagent_service",
     "AsyncSubagentService",
+    "_run_context",
+    "_get_plan_resume_source_agent_name",
+    "application_event",
     "encode",
     "job_dict",
     "_normalize_human_resume_payload",

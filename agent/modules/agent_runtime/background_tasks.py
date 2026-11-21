@@ -27,7 +27,7 @@ from agent.modules.agent_runtime.active_sessions import (
 )
 from agent.modules.agent_runtime.protocol import EventSequence, application_event, protocol_event
 from agent.modules.notifications import send_notification as _send_notification
-from agent.modules.notifications.failures import background_scope, report_failure
+from agent.modules.notifications import background_scope, report_failure
 from agent.modules.workspaces import (
     WorkspaceRef,
     bind_workspace_ref,
@@ -213,7 +213,7 @@ class BackgroundTaskManager:
     async def restore_from_persistence(self) -> None:
         """Restore task history from the background task table."""
         from agent.modules.agent_runtime.repository import get_background_task_repository
-        from agent.modules.notifications.interruption import active_manager
+        from agent.modules.notifications import active_manager
 
         try:
             repository = get_background_task_repository()
@@ -471,7 +471,7 @@ class BackgroundTaskManager:
                 else:
                     result = await self._run_streamed_task(task, run_fn)
                 task.result = _truncate_stored_text(result)
-                from agent.modules.notifications.interruption import active_manager
+                from agent.modules.notifications import active_manager
 
                 manager = active_manager()
                 if manager and await manager.has_paused_run(task.thread_id):

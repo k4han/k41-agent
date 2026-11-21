@@ -183,7 +183,7 @@ class AsyncSubagentService:
             raise ValueError("A human response is required.")
         _validate_human_resume_payload(normalized)
         payload = normalized.model_dump(exclude_none=True)
-        from agent.modules.notifications.interruption import active_manager
+        from agent.modules.notifications import active_manager
 
         manager = active_manager()
         if manager and await manager.accept_manual(thread_id=parent, interrupt_id=interrupt_id, payload=payload,
@@ -266,8 +266,8 @@ class AsyncSubagentService:
                 logger.warning("Could not update background task history after resume.", exc_info=True)
                 return None
             if not settled and status == "completed" and text:
-                from agent.modules.notifications.service import send_notification
-                from agent.modules.notifications.settings import CHANNELS
+                from agent.modules.notifications import send_notification
+                from agent.modules.notifications import CHANNELS
 
                 usage = job["context"].get("usage_context") or {}
                 destination = usage.get("user_id") or usage.get("channel_id")
@@ -404,7 +404,7 @@ class AsyncSubagentService:
 
     @staticmethod
     async def _report_job_failure(job, error=None, *, destination=None):
-        from agent.modules.notifications.failures import report_failure
+        from agent.modules.notifications import report_failure
 
         if job["kind"] != "notification_resume":
             source = "Scheduler" if job["kind"] == "scheduled" else "Background subagent"
@@ -415,7 +415,7 @@ class AsyncSubagentService:
     async def _execute(self, job: dict):
         async def run(**params):
             from agent.modules.agent_runtime.runner import track_active_session
-            from agent.modules.notifications.failures import background_scope
+            from agent.modules.notifications import background_scope
 
             source = "Scheduler" if job["kind"] == "scheduled" else "Background subagent"
             with track_active_session(job["thread_id"], job["context"]["agent_name"],

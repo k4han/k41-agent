@@ -9,7 +9,7 @@ from sqlalchemy import select, update
 from agent.modules.notifications.interruption import ResponseConflict, active_manager, identities_query
 from agent.modules.notifications.models import InterruptionRecord, NotificationDelivery
 from agent.modules.notifications.settings import messages
-from agent.modules.users.models import UserIdentity
+from agent.modules.users import UserIdentity
 
 PREFIX = "kn:"
 PAGE_SIZE = 8
@@ -54,7 +54,7 @@ def _keyboard(delivery, question, index, url, *, selected=(), page=0, submit=Non
 
 
 async def send_request(manager, delivery, row, external_id, url):
-    from agent.modules.channels.telegram.adapter import get_telegram_adapter
+    from agent.modules.channels import get_telegram_adapter
 
     bot = get_telegram_adapter().bot
     if bot is None:
@@ -288,7 +288,7 @@ async def handle_reply(message):
     if text.startswith("/"):
         if original is None:
             return False
-        from agent.modules.channels.commands import get_default_command_registry
+        from agent.modules.channels import get_default_command_registry
 
         registry = get_default_command_registry()
         command = registry.parse(text)

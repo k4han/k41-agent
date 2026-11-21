@@ -4,11 +4,11 @@ import logging
 
 from sqlalchemy import select
 
-from agent.modules.agent_runtime.async_subagents.models import SubagentExecutionRecord as Execution, SubagentTaskRecord as Task
-from agent.modules.agent_runtime.async_subagents.repository import job_dict
-from agent.modules.conversations.models import ConversationThread
+from agent.modules.agent_runtime import SubagentExecutionRecord as Execution, SubagentTaskRecord as Task
+from agent.modules.agent_runtime import job_dict
+from agent.modules.conversations import ConversationThread
 from agent.modules.notifications.interruption import pending_interrupts
-from agent.modules.workflows.checkpoint.queries import list_checkpoint_summaries
+from agent.modules.workflows import list_checkpoint_summaries
 
 logger = logging.getLogger(__name__)
 

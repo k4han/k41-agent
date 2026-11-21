@@ -430,7 +430,7 @@ class ChatStreamManager:
 
     @staticmethod
     async def _prepare_new_run(thread_id: str, *, check_only: bool = False) -> None:
-        from agent.modules.notifications.interruption import active_manager
+        from agent.modules.notifications import active_manager
 
         notifications = active_manager()
         if notifications is not None:

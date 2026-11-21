@@ -235,7 +235,7 @@ async def execute_scheduled_task(
                 job_id=scheduler_job_id, task=task, platform=platform, user_id=user_id,
                 trigger_source=trigger_source, workspace=workspace, browser_owner_id=owner_id, executor=executor)
         outcome = "completed"
-        from agent.modules.notifications.failures import background_scope
+        from agent.modules.notifications import background_scope
 
         try:
             with background_scope(run_id, "Scheduler", background_thread_id):
@@ -271,12 +271,12 @@ async def execute_scheduled_task(
                 agent_name=AGENT_NAME, provider=executor["provider"], model=executor["model"])
         if recorded and not agent_finished:
             await _record_run_finish(run_id, status=RUN_STATUS_FAILED, error=str(e) or type(e).__name__)
-        from agent.modules.notifications.failures import report_failure
+        from agent.modules.notifications import report_failure
 
         if await report_failure(run_id, "Scheduler", background_thread_id, error=e,
                                 destination=(platform, str(user_id))):
             return
-        from agent.modules.notifications.interruption import active_manager
+        from agent.modules.notifications import active_manager
 
         manager = active_manager()
         error_msg = (

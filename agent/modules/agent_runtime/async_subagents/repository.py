@@ -290,7 +290,7 @@ class AsyncSubagentRepository:
             if row is None:
                 return None
             if status == "waiting":
-                from agent.modules.notifications.interruption import active_manager
+                from agent.modules.notifications import active_manager
 
                 manager = active_manager()
                 if manager and not (task and (task.status == "cancelled" or task.deleted_at)):

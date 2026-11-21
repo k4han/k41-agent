@@ -66,6 +66,7 @@ from agent.modules.tools.builtin.utility.ask_user import (
     AskUserInput,
     AskUserOption,
     AskUserQuestion,
+    _validate_answer_payload,
     HumanResumePayload,
     UserQuestionAnswer,
 )
@@ -242,6 +243,7 @@ __all__ = [
     "ASK_USER_INTERRUPT_TYPE",
     "ASK_USER_TOOL_NAME",
     "AskUserAnswerResumePayload",
+    "_validate_answer_payload",
     "AskUserFreeText",
     "AskUserInput",
     "AskUserOption",

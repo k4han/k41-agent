@@ -13,14 +13,14 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from agent.modules.agent_runtime.async_subagents.models import (
+from agent.modules.agent_runtime import (
     SubagentExecutionRecord as Execution,
     SubagentNotificationRecord,
     SubagentTaskRecord as Task,
 )
 from agent.modules.notifications.models import InterruptionRecord, NotificationDelivery
 from agent.modules.notifications.settings import CHANNELS, NotificationSettings, load_settings, messages
-from agent.modules.users.models import User, UserIdentity
+from agent.modules.users import User, UserIdentity
 from agent.shared.async_subagents import LIVE_STATUSES, request_key
 from agent.shared.infrastructure.db import get_async_session, utcnow
 from agent.shared.thread_ids import resolve_thread_id
@@ -164,7 +164,7 @@ class InterruptionTimeoutManager:
             logger.exception("Could not register a paused conversation.")
 
     async def run_context(self, context, workflow, usage_context):
-        from agent.modules.agent_runtime.async_subagents.service import _run_context
+        from agent.modules.agent_runtime import _run_context
 
         result = {**_run_context(context), "workflow": workflow, "usage_context": usage_context}
         if usage_context.get("platform") in CHANNELS:
@@ -197,7 +197,7 @@ class InterruptionTimeoutManager:
             return None
         result = ""
         if row.status == "completed":
-            from agent.modules.agent_runtime.async_subagents.service import AsyncSubagentService
+            from agent.modules.agent_runtime import AsyncSubagentService
 
             try:
                 checkpoint_id = json.loads(row.context_json).get("_notification_checkpoint_id")
@@ -366,7 +366,7 @@ class InterruptionTimeoutManager:
         if len(requests) != 1 or not checkpoint_id:
             raise ResponseConflict("The response does not match the pending request.")
         if action == "approve":
-            from agent.modules.agent_runtime.runner import (
+            from agent.modules.agent_runtime import (
                 _get_plan_resume_source_agent_name, _normalize_human_resume_payload, _resolve_agent_name_for_resume,
             )
 
@@ -386,8 +386,8 @@ class InterruptionTimeoutManager:
         return job.job_id
 
     async def accept(self, row, payload, *, timeout=False, identity_id=None, external_id=None, paired_user_id=None):
-        from agent.modules.scheduler.models import SchedulerJobRun
-        from agent.modules.tools.builtin.utility.ask_user import (
+        from agent.modules.scheduler import SchedulerJobRun
+        from agent.modules.tools import (
             AskUserAnswerResumePayload, AskUserInput, _validate_answer_payload,
         )
 
@@ -520,7 +520,7 @@ class InterruptionTimeoutManager:
         return {(identity.platform, identity.external_id) for identity in recipients}
 
     async def publish_error(self, key, source, thread_id, *, error=None, rate=False):
-        from agent.modules.providers.pool_errors import classify_pool_failure
+        from agent.modules.providers import classify_pool_failure
         from agent.shared.infrastructure.errors import classify_agent_error
 
         failure = classify_pool_failure(error) if error is not None else None

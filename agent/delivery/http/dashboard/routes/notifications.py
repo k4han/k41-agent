@@ -6,9 +6,9 @@ from agent.delivery.http.dashboard.routes.helpers.identities import serialize_id
 from agent.delivery.http.dashboard.routes.helpers.settings import update_config_settings
 from agent.modules.admin_auth import get_current_admin
 from agent.modules.conversations import get_conversation_thread
-from agent.modules.notifications.interruption import active_manager, identities_query
-from agent.modules.notifications.settings import NotificationSettings, load_settings
-from agent.modules.users.models import UserIdentity
+from agent.modules.notifications import active_manager, identities_query
+from agent.modules.notifications import NotificationSettings, load_settings
+from agent.modules.users import UserIdentity
 from agent.shared.infrastructure.db import get_async_session
 from agent.shared.thread_ids import resolve_thread_id
 

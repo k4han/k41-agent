@@ -49,7 +49,7 @@ def test_edit_endpoint_passes_mode_to_the_edit_runner(isolated_container, monkey
         return None
     async def subscribe(**kwargs):
         yield {"type": "final", "content": "done"}
-    async def session(thread_id, params, *, run_fn):
+    async def session(thread_id, params, *, run_fn, **kwargs):
         captured.update(params)
         captured["runner"] = run_fn
         return SimpleNamespace(subscribe=subscribe, run_id="run", thread_id=thread_id)

@@ -30,9 +30,9 @@ from agent.modules.agent_runtime import (
     run_agent,
     run_agent_full,
 )
-from agent.modules.agent_runtime.protocol import application_event
+from agent.modules.agent_runtime import application_event
 from agent.modules.conversations import create_thread_id
-from agent.modules.notifications.interruption import RunAdmissionConflict, active_manager
+from agent.modules.notifications import RunAdmissionConflict, active_manager
 from agent.shared.thread_ids import resolve_thread_id
 from agent.modules.providers import (
     ModelPoolExhausted,

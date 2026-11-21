@@ -390,8 +390,8 @@ print(json.dumps({"running": running}))
         return approved
 
     async def _call_worker(self, client, context, request=None):
-        from agent.modules.notifications.failures import report_failure
-        from agent.modules.providers.pool_errors import classify_pool_failure
+        from agent.modules.notifications import report_failure
+        from agent.modules.providers import classify_pool_failure
 
         try:
             if request is None:

@@ -73,7 +73,7 @@ async def notify_run(value, *, covered=False):
         return
     content = value["result"] if value["status"] == "completed" else f"Error: {value['error']}"
     if value["status"] != "completed":
-        from agent.modules.notifications.interruption import active_manager
+        from agent.modules.notifications import active_manager
 
         manager = active_manager()
         if manager and (link := manager.dashboard_link(value["thread_id"])):
@@ -131,7 +131,7 @@ async def resume_run(service, run_id, interrupt_id, payload, owner_id):
         raise ValueError("A human response is required.")
     _validate_human_resume_payload(normalized)
     payload = normalized.model_dump(exclude_none=True)
-    from agent.modules.notifications.interruption import active_manager
+    from agent.modules.notifications import active_manager
 
     manager = active_manager()
     if manager and payload["action"] in {"answer", "browser_handoff"}:

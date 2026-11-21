@@ -37,7 +37,7 @@ from agent.shared.thread_ids import resolve_thread_id
 from agent.modules.agent_runtime import get_async_subagent_service, active_async_subagent_service
 from agent.shared.async_subagents import request_key
 from agent.modules.tools import HumanResumePayload, PermissionMode
-from agent.modules.notifications.interruption import ResponseConflict
+from agent.modules.notifications import ResponseConflict
 
 router = APIRouter(
     prefix="/v2/api", tags=["agent-events"], dependencies=[Depends(get_current_admin)]

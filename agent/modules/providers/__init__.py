@@ -18,6 +18,7 @@ from agent.modules.providers.provider import ProviderConfig, ProviderType
 from agent.modules.providers.profiles import EFFORT_PATTERN, parse_model_profiles
 from agent.modules.providers.context_window import DEFAULT_CONTEXT_WINDOW
 from agent.modules.providers.context_budget import model_input_budget, model_response_reserve
+from agent.modules.providers.pool_errors import classify_pool_failure
 from agent.modules.providers.model_pools import (
     ModelPoolConfig,
     ModelPoolExhausted,
@@ -192,6 +193,7 @@ __all__ = [
     "validate_pool_effort",
     "pool_call_config",
     "should_propagate_pool_error",
+    "classify_pool_failure",
     "ModelPoolConfig",
     "ModelPoolExhausted",
     "ModelPoolService",

@@ -90,7 +90,7 @@ async def cancel_background_task(task_id: str) -> dict[str, str]:
     manager = get_background_task_manager()
     task = manager.get(task_id)
     if task and task["status"] == "waiting":
-        from agent.modules.notifications.interruption import active_manager
+        from agent.modules.notifications import active_manager
 
         notifications = active_manager()
         if notifications:

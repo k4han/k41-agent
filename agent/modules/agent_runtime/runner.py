@@ -1148,7 +1148,7 @@ def track_active_session(
 
 
 async def _notification_context(context, workflow, usage_context, config):
-    from agent.modules.notifications.interruption import active_manager
+    from agent.modules.notifications import active_manager
 
     manager = active_manager()
     if manager is None:

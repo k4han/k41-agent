@@ -529,7 +529,7 @@ async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
         except RuntimeError:
             logger.debug("No chat stream manager for thread %s", acp_thread_id, exc_info=True)
     if acp_service is not None and acp_thread_id and await acp_service.stop_thread(acp_thread_id):
-        from agent.modules.notifications.interruption import active_manager
+        from agent.modules.notifications import active_manager
 
         notifications = active_manager()
         if notifications:
@@ -550,7 +550,7 @@ async def stop_dashboard_session(payload: dict[str, Any]) -> dict[str, Any]:
     # the chat stream session directly guarantees the LLM stream actually stops.
     target_thread_id = resolved_thread_id or (str(thread_id) if thread_id else None)
     if target_thread_id:
-        from agent.modules.notifications.interruption import active_manager
+        from agent.modules.notifications import active_manager
 
         notifications = active_manager()
         if notifications:
