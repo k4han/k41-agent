@@ -73,9 +73,10 @@
   }
 
   .app-shell-sidebar--open .app-shell-sidebar-header {
-    height: min(258px, 60dvh);
+    max-height: 60dvh;
     flex: none;
     grid-template-columns: var(--nav-rail-width) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .app-shell-nav-rail {
@@ -94,7 +95,7 @@
     border-inline-end-color: var(--border);
   }
 
-  .app-shell-nav-rail > button {
+  .app-shell-nav-rail > button:first-child {
     margin: 0 0 5px;
   }
 
@@ -126,6 +127,11 @@
     padding: 0;
     border: 0;
     background: transparent;
+  }
+
+  /* The icon rail determines the height of the shared header. */
+  .app-shell-navigation-panel {
+    contain: size;
   }
 
   .app-shell-navigation-panel .brand {

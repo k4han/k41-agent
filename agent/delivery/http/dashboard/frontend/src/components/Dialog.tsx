@@ -104,9 +104,10 @@ export function Dialog(props: DialogProps) {
     if (props.open && dialogRef) {
       const timer = setTimeout(() => {
         if (!dialogRef) return;
-        const initialFocus = dialogRef.querySelector<HTMLElement>(
-          'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [autofocus], .dialog-close-btn, button:not([disabled])'
-        );
+        const initialFocus = dialogRef.querySelector<HTMLElement>("[autofocus]")
+          ?? dialogRef.querySelector<HTMLElement>(
+            'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), .dialog-close-btn, button:not([disabled])',
+          );
         initialFocus?.focus();
       }, 40);
       onCleanup(() => clearTimeout(timer));

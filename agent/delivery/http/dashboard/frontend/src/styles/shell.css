@@ -81,6 +81,36 @@
   font-size: var(--font-size-xs);
 }
 
+.conversation-search-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.conversation-search-body > .input {
+  flex: none;
+}
+
+.conversation-search-results {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.conversation-search-result {
+  min-height: 44px;
+}
+
+.conversation-search-result-text {
+  display: grid;
+  min-width: 0;
+}
+
+.conversation-search-project {
+  color: var(--muted-2);
+  font-size: var(--font-size-xs);
+}
+
 .app-layout--resizing {
   transition: none;
 }

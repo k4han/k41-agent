@@ -73,6 +73,11 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ type: 'final', content: 'Done.' }) + '\n');
     return;
   }
+  if (url.pathname.startsWith('/v2/api/chat/') && url.pathname.endsWith('/async-tasks')) {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ tasks: [], total: 0, active_count: 0 }));
+    return;
+  }
   if (url.pathname.endsWith('/sessions/events')) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.write('event: snapshot\ndata: {"sessions":[]}\n\n');
@@ -373,7 +378,12 @@ try {
   const rail = '.app-shell-nav-rail';
   const projects = '#app-shell-projects';
   const footer = '.app-shell-sidebar .sidebar-footer-row';
-  const toggle = `${rail} button`;
+  const toggle = `${rail} button:first-child`;
+  const searchButton = '.app-shell-sidebar .nav-search';
+  const searchDialog = '.conversation-search-dialog';
+  const searchInput = `${searchDialog} input[type="search"]`;
+  const searchResults = `${searchDialog} .conversation-search-result`;
+  const searchFor = value => js(`{ const input = document.querySelector('${searchInput}'); input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); }`);
   const railLink = href => `${rail} a[href="${href}"]`;
   const homeLink = railLink('/');
   const repoLink = railLink('/repositories');
@@ -390,6 +400,8 @@ try {
   await assertHomeActions();
   assert.equal((await box(projects)).width, 290, 'Projects spans the whole pinned sidebar');
   assert.equal((await box(projects)).top, (await box(panel)).bottom, 'Projects sits below the shortcut area');
+  const projectsGap = (await box(projects)).top - (await box(searchButton)).bottom;
+  assert.ok(projectsGap >= 0 && projectsGap <= 12, 'Projects starts just below the search icon');
   assert.equal(await footerDirection(), 'row');
   await move(await center(repoLink));
   assert.equal(await sectionIs('home'), true, 'hovering another item leaves the pinned section on the current route');
@@ -413,6 +425,7 @@ try {
   await until(() => sectionIs('home'), 'hovering the rail background opens Home shortcuts on the history page');
   assert.equal(await width(), 290, 'hover expands the whole sidebar');
   assert.equal((await box(projects)).width, 290);
+  assert.equal((await box(projects)).top - (await box(searchButton)).bottom, projectsGap, 'hover uses the same compact header as pinned navigation');
   assert.equal(await footerDirection(), 'row');
   assert.deepEqual(await box('.main'), mainBox, 'opening the full sidebar leaves the page in place');
   await move({ x: 160, y: 400 });
@@ -431,6 +444,22 @@ try {
   await move({ x: 160, y: 100 });
   await delay(200);
   assert.equal(await panelVisible(), true, 'the panel stays open when the pointer crosses into it');
+
+  const requestsBeforeSearch = historyRequests;
+  await click(searchButton);
+  await until(() => js(`document.activeElement.matches('${searchInput}')`), 'search focuses the query field');
+  await until(() => js(`document.querySelectorAll('${searchResults}').length === 10`), 'recent conversations in search');
+  assert.equal(historyRequests, requestsBeforeSearch + 1, 'opening search loads conversation summaries on demand');
+  assert.equal(await panelVisible(), false, 'search closes the hover panel');
+  await searchFor('  FLASK CONVERSATION 18  ');
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('${searchResults}'), result => result.getAttribute('href'))`), ['/c/local-18']);
+  await searchFor('flask test');
+  assert.equal(await js(`document.querySelectorAll('${searchResults}').length`), 27, 'search can match the project name');
+  await searchFor('no conversation matches this');
+  assert.equal(await js(`document.querySelector('${searchDialog} [role="status"]').textContent`), 'No matching conversations.');
+  assert.equal(await js('location.pathname'), '/history', 'search keeps the current page while typing');
+  await press('Escape', 27);
+  await until(() => js(`!document.querySelector('${searchDialog}') && document.activeElement.matches('${searchButton}')`), 'Escape closes search and returns focus');
 
   await move(await center(repoLink));
   await until(() => sectionIs('repositories'), 'repository preview from its own icon');
@@ -560,8 +589,19 @@ try {
   await draft('Mobile draft');
   await js(`document.querySelector('${newChat}').click()`);
   await until(() => js(`!document.querySelector('.app-layout--drawer-open') && document.querySelector('.chat-prompt-input').value === ''`), 'new chat resets the draft and closes the mobile drawer');
-  assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
   console.log('PASS: mobile projects remain accessible with collapsed desktop preferences and close after starting a chat.');
+
+  await js(`document.querySelector('.chat-header-menu-toggle').click()`);
+  await until(() => js(`!!document.querySelector('.app-layout--drawer-open ${searchButton}')`), 'search is available in the mobile drawer');
+  await click(searchButton);
+  await until(() => js(`document.querySelectorAll('${searchResults}').length === 10`), 'mobile search loads conversations');
+  await searchFor('Flask conversation 18');
+  await click(`${searchResults}[href="/c/local-18"]`);
+  await until(() => js(`location.pathname === '/c/local-18' && !document.querySelector('${searchDialog}, .app-layout--drawer-open')
+    && document.querySelector('.transcript')?.textContent.includes('Existing conversation')`), 'search loads the selected conversation and closes the mobile drawer');
+  assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
+  console.log('PASS: search opens from both navigation layouts, filters by title or project, and opens the selected conversation.');
+
   if (process.env.NAVBAR_SCREENSHOT) {
     await viewport(1600);
     await until(() => js(`!!document.querySelector('.brand-expand-btn')`), 'desktop sidebar toggle');

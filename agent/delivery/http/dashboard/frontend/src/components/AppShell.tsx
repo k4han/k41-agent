@@ -23,6 +23,7 @@ import {
   PlaySquare,
   Plus,
   RefreshCw,
+  Search,
   Settings,
   Sparkles,
   Square,
@@ -33,6 +34,7 @@ import { createEffect, createMemo, createSignal, For, JSX, on, onCleanup, onMoun
 import { Portal } from "solid-js/web";
 import { unwrap } from "solid-js/store";
 
+import { ConversationSearchDialog } from "@/components/ConversationSearchDialog";
 import { DeleteThreadDialog } from "@/components/DeleteThreadDialog";
 import { ExportChatDialog } from "@/components/ExportChatDialog";
 import { NavigationSectionPanel, type NavigationSection } from "@/components/NavigationSectionPanel";
@@ -104,6 +106,7 @@ export function AppShell(props: {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [menuOpen, setMenuOpen] = createSignal(false);
+  const [searchOpen, setSearchOpen] = createSignal(false);
   const [collapsed, setCollapsed] = createSignal(window.localStorage.getItem(STORAGE_KEYS.SIDEBAR_COLLAPSED) === "collapsed");
   const [previewSection, setPreviewSection] = createSignal<NavigationSection>();
   const [projectMenuId, setProjectMenuId] = createSignal<string | null>(null);
@@ -458,7 +461,10 @@ export function AppShell(props: {
     schedulePreviewClose,
     { defer: true },
   ));
-  createEffect(on(() => location.pathname, () => dismissPreview(), { defer: true }));
+  createEffect(on(() => location.pathname, () => {
+    dismissPreview();
+    setSearchOpen(false);
+  }, { defer: true }));
   createEffect(on(isMobileViewport, () => {
     dismissPreview();
     pointerInNavigation = false;
@@ -617,6 +623,24 @@ export function AppShell(props: {
       </A>
     );
   };
+
+  const renderSearchButton = () => (
+    <button
+      class="nav-link nav-search"
+      type="button"
+      aria-label="Search conversations"
+      aria-haspopup="dialog"
+      title="Search conversations"
+      onPointerEnter={previewActiveSection}
+      onClick={() => {
+        dismissPreview();
+        setSearchOpen(true);
+      }}
+    >
+      <Search size={15} aria-hidden="true" />
+      <span class="nav-label">Search conversations</span>
+    </button>
+  );
 
   const renderHistoryItem = (thread: ThreadSummary) => {
     return (
@@ -972,6 +996,7 @@ export function AppShell(props: {
                 </Show>
               </button>
               <For each={navItems}>{(item) => renderNavItem(item, true)}</For>
+              {renderSearchButton()}
             </nav>
           </Show>
           <div
@@ -1040,6 +1065,7 @@ export function AppShell(props: {
           <div class="nav-scroll" onScroll={handleHistoryScroll}>
             <Show when={isMobileViewport()}>
               <For each={navItems.filter((item) => item.section !== "home")}>{(item) => renderNavItem(item)}</For>
+              {renderSearchButton()}
             </Show>
             <div class="nav-history-group open">
               <div class="nav-projects-header">
@@ -1303,6 +1329,14 @@ export function AppShell(props: {
           </Portal>
         )}
       </Show>
+      <ConversationSearchDialog
+        open={searchOpen()}
+        onClose={() => setSearchOpen(false)}
+        onSelect={() => {
+          setSearchOpen(false);
+          closeMobileDrawer();
+        }}
+      />
       <ExportChatDialog target={exportTarget()} onClose={() => setExportTarget(null)} />
       <DeleteThreadDialog
         open={deleteTarget() !== null}
