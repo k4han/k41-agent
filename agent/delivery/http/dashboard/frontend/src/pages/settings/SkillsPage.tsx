@@ -36,6 +36,7 @@ import type {
   SkillEntry as Entry,
   SkillFileDetail as FileDetail,
 } from "@/lib/skillPackages";
+import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { SettingsLayout } from "./SettingsLayout";
 
 type Preview = {
@@ -359,6 +360,7 @@ export function SkillsPage() {
   return (
     <SettingsLayout
       title="Skills"
+      description="Manage reusable skills, skill packages, execution environments, and directory mappings."
       breadcrumbLabel="Skills"
       contentWidth="wide"
       actions={
@@ -392,71 +394,61 @@ export function SkillsPage() {
             <span>{error()}</span>
           </div>
         </Show>
-        <section class="panel">
-          <div class="panel-body stack">
-            <div class="skills-toolbar">
-              <div class="skills-toolbar-filters">
-                <select
-                  class="select"
-                  aria-label="Skill scope"
-                  value={scope()}
+        <SettingsResourceToolbar
+          searchValue={search()}
+          searchPlaceholder="Search skills by name, description, or path..."
+          onSearchInput={setSearch}
+          filters={
+            <div class="row-wrap" style={{ gap: "8px", "align-items": "center" }}>
+              <select
+                class="select"
+                aria-label="Skill scope"
+                value={scope()}
+                disabled={busy()}
+                onChange={(event) => {
+                  setScope(event.currentTarget.value);
+                  void execute(load);
+                }}
+                style={{ width: "auto", "min-width": "140px" }}
+              >
+                <option value="global">Shared skills</option>
+                <option value="project">Workspace skills</option>
+              </select>
+              <Show when={scope() === "project"}>
+                <WorkspaceSelector
+                  workingDir={workspace()?.locator || ""}
+                  defaultWorkingDir={defaultDirectory()}
+                  workspace={workspace()}
+                  locked={false}
                   disabled={busy()}
-                  onChange={(event) => {
-                    setScope(event.currentTarget.value);
-                    void execute(load);
-                  }}
-                  style={{ width: "auto", "min-width": "150px" }}
-                >
-                  <option value="global">Shared skills</option>
-                  <option value="project">Workspace skills</option>
-                </select>
-                <Show when={scope() === "project"}>
-                  <WorkspaceSelector
-                    workingDir={workspace()?.locator || ""}
-                    defaultWorkingDir={defaultDirectory()}
-                    workspace={workspace()}
-                    locked={false}
-                    disabled={busy()}
-                    onSelectionChange={(draft) => void selectWorkspace(draft)}
-                  />
-                </Show>
-              </div>
-              <div class="skills-toolbar-search">
-                <div class="settings-resource-search" style={{ width: "100%" }}>
-                  <Search size={15} />
-                  <input
-                    class="input"
-                    type="search"
-                    aria-label="Search skills"
-                    placeholder="Search skills by name, description, or path..."
-                    value={search()}
-                    onInput={(event) => setSearch(event.currentTarget.value)}
-                  />
-                </div>
-              </div>
-              <div class="skills-toolbar-actions">
-                <button
-                  class="btn btn-primary"
-                  disabled={busy()}
-                  onClick={() => setCreateOpen(true)}
-                >
-                  <Plus size={14} /> New skill
-                </button>
-                <button
-                  class="btn"
-                  disabled={busy()}
-                  onClick={() => {
-                    setPreview(null);
-                    setOverwrite(false);
-                    setImportOpen(true);
-                  }}
-                >
-                  <Upload size={14} /> Import
-                </button>
-              </div>
+                  onSelectionChange={(draft) => void selectWorkspace(draft)}
+                />
+              </Show>
             </div>
-          </div>
-        </section>
+          }
+          actions={
+            <>
+              <button
+                class="btn btn-primary"
+                disabled={busy()}
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus size={14} /> New skill
+              </button>
+              <button
+                class="btn"
+                disabled={busy()}
+                onClick={() => {
+                  setPreview(null);
+                  setOverwrite(false);
+                  setImportOpen(true);
+                }}
+              >
+                <Upload size={14} /> Import
+              </button>
+            </>
+          }
+        />
         <section class="panel">
           <div class="panel-body stack">
             <div

@@ -6,8 +6,6 @@ import {
   Layers,
   RotateCcw,
   Route,
-  Save,
-  SearchX,
   ShieldCheck,
   Workflow,
   Wrench,
@@ -25,6 +23,7 @@ import {
   type PendingChange,
   SettingRow,
   SettingsConfirmDialog,
+  SettingsEmptyState,
   SettingsPendingBar,
   SettingsSection,
   useSettingsData,
@@ -120,18 +119,8 @@ export function DecisionsPage() {
   return (
     <SettingsLayout
       title="Decisions & Routing"
+      description="Fast-path routing and confidence thresholds for domain decision models."
       breadcrumbLabel="Decisions"
-      actions={
-        <button
-          class="btn btn-primary"
-          type="button"
-          disabled={saving() || pendingChanges().length === 0}
-          onClick={() => setConfirmOpen(true)}
-        >
-          <Save size={14} />
-          Save {pendingChanges().length ? `(${pendingChanges().length})` : ""}
-        </button>
-      }
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {(payload) => (
@@ -145,11 +134,11 @@ export function DecisionsPage() {
                   display: "flex",
                   "align-items": "flex-start",
                   gap: "14px",
-                  "border-left": "4px solid var(--primary, #3b82f6)",
+                  "border-left": "4px solid var(--primary)",
                   "margin-bottom": "8px",
                 }}
               >
-                <div style={{ color: "var(--primary, #3b82f6)", "margin-top": "2px" }}>
+                <div style={{ color: "var(--primary)", "margin-top": "2px" }}>
                   <BrainCircuit size={22} />
                 </div>
                 <div style={{ display: "flex", "flex-direction": "column", gap: "4px" }}>
@@ -162,8 +151,8 @@ export function DecisionsPage() {
                         "font-size": "0.6875rem",
                         padding: "2px 8px",
                         "border-radius": "999px",
-                        background: "rgba(16, 185, 129, 0.12)",
-                        color: "#10b981",
+                        background: "color-mix(in srgb, var(--success) 12%, transparent)",
+                        color: "var(--success)",
                         "font-weight": "600",
                       }}
                     >
@@ -197,16 +186,15 @@ export function DecisionsPage() {
             <Show
               when={routingSettings().length > 0}
               fallback={
-                <div class="panel" style={{ padding: "36px 20px", "text-align": "center" }}>
-                  <div style={{ display: "grid", "place-items": "center", gap: "8px", color: "var(--muted)" }}>
-                    <SearchX size={28} />
-                    <div style={{ "font-weight": "650", color: "var(--fg)" }}>No decision settings match your search</div>
-                    <div class="hint">Try a different term or clear the search.</div>
+                <SettingsEmptyState
+                  title="No decision settings match your search"
+                  hint="Try a different term or clear the search."
+                  action={
                     <button class="btn btn-sm" type="button" onClick={() => setSearch("")}>
                       <RotateCcw size={13} /> Clear search
                     </button>
-                  </div>
-                </div>
+                  }
+                />
               }
             >
               <div class="settings-sections-wrapper">
@@ -214,6 +202,7 @@ export function DecisionsPage() {
                 <Show when={routingSettings().length > 0}>
                   <SettingsSection
                     title="Agent Routing Strategy"
+                    count={routingSettings().length}
                   >
                     <div class="settings-list settings-table">
                       <For each={routingSettings() as [string, SettingInfo][]}>

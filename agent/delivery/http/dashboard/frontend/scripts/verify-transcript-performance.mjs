@@ -47,6 +47,7 @@ try {
           import { ToastProvider } from '@/components/Toast';
           import { useChatScroll } from '@/lib/useChatScroll';
           import { createTranscriptItems } from '@/lib/chatStreamStore';
+          import { CHAT_PANEL_MIN_WIDTH, WORKSPACE_EXPLORER_MIN_WIDTH } from '@/lib/chatTypes';
           import { highlightCode } from '@/lib/codeHighlight';
           import tokenStyles from '@/styles/tokens.css?inline';
           import baseStyles from '@/styles/base.css?inline';
@@ -56,7 +57,9 @@ try {
           import responsiveStyles from '@/styles/responsive.css?inline';
           const style = document.createElement('style');
           style.textContent = tokenStyles + baseStyles + chatStyles + transcriptStyles + markdownStyles + responsiveStyles
-            + '.chat-shell { height: 600px; --workspace-explorer-width: 320px; transition: none; }'
+            + '.chat-shell { height: 600px; --workspace-explorer-width: 480px; transition: none;'
+            + '--chat-panel-min-width: ' + CHAT_PANEL_MIN_WIDTH + 'px;'
+            + '--workspace-explorer-min-width: ' + WORKSPACE_EXPLORER_MIN_WIDTH + 'px; }'
             + '#app { min-height: 0; display: flex; flex: 1; }';
           document.head.appendChild(style);
           window.workerCount = 0;
@@ -70,6 +73,7 @@ try {
             const scroll = useChatScroll(() => element);
             const [items, setItems] = createTranscriptItems(Array.from({ length: 2000 }, (_, index) => ({
               id: index, type: 'message', role: index % 2 ? 'assistant' : 'user',
+              messageIndex: index, sourceCheckpointId: 'checkpoint',
               text: 'Message ' + index + '. ' + 'Variable height content. '.repeat(1 + index % 12),
             })));
             const [thread, setThread] = createSignal('large');
@@ -147,6 +151,17 @@ try {
   await until(() => js('!!window.transcript'), 'transcript mount');
   const count = () => js('document.querySelectorAll(".transcript-virtual-row").length');
   const bottom = () => js('Math.abs(transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop) < 3');
+  const assertRowLayout = async (label) => {
+    const gaps = await js(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
+      const rows = Array.from(document.querySelectorAll('.transcript-virtual-row'));
+      resolve(rows.slice(1).flatMap((row, index) => {
+        const previous = rows[index];
+        if (Number(row.dataset.index) !== Number(previous.dataset.index) + 1) return [];
+        return [row.getBoundingClientRect().top - previous.getBoundingClientRect().bottom];
+      }));
+    })))`);
+    assert.ok(gaps.length > 0 && gaps.every(gap => Math.abs(gap) <= 1), `Rows stay contiguous ${label}: ${gaps}`);
+  };
   assert.ok(await count() < 40, '2000 messages must mount only a viewport and overscan');
   assert.equal(await js('workerCount'), 0, 'plain messages must not start the highlighter');
   await until(bottom, 'initial bottom following');
@@ -157,8 +172,31 @@ try {
   await call('Emulation.setDeviceMetricsOverride', { width: 420, height: 820, deviceScaleFactor: 1, mobile: false });
   await until(() => js('transcript.clientWidth <= 420 && !!document.querySelector(\'[data-transcript-item-id="0"]\')'), 'narrow viewport remeasurement');
   assert.ok(await count() < 40);
+  await assertRowLayout('after narrowing the viewport');
   await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 820, deviceScaleFactor: 1, mobile: false });
   await until(() => js('transcript.clientWidth > 1000'), 'wide viewport remeasurement');
+  await assertRowLayout('after widening the viewport');
+  const setWorkspaceOpen = open => js(`(() => {
+    const shell = document.querySelector('.chat-shell');
+    shell.classList.toggle('workspace-open', ${open});
+    shell.classList.toggle('workspace-closed', ${!open});
+  })()`);
+  await setWorkspaceOpen(true);
+  await assertRowLayout('after opening the workspace');
+  await setWorkspaceOpen(false);
+  await assertRowLayout('after closing the workspace');
+  await js('document.querySelector(\'[data-transcript-item-id="0"] [aria-label="Edit and regenerate"]\').click()');
+  await setWorkspaceOpen(true);
+  await js('document.querySelector(".chat-shell").style.setProperty("--workspace-explorer-width", "900px")');
+  await until(() => js(`(() => {
+    const bubble = document.querySelector('.message-bubble.editing');
+    const editor = bubble.querySelector('.message-edit');
+    const input = editor.querySelector('textarea');
+    return bubble.getBoundingClientRect().right >= input.getBoundingClientRect().right
+      && editor.scrollWidth <= editor.clientWidth;
+  })()`), 'message editor fits the narrowed chat panel');
+  await js('document.querySelector(\'[aria-label="Cancel edit"]\').click(); document.querySelector(".chat-shell").style.removeProperty("--workspace-explorer-width")');
+  await setWorkspaceOpen(false);
   await js('setStreaming(true); setItems(items => [...items, { id: 2000, type: "message", role: "user", text: "New turn" }]); scroll.setTurnAnchorItemId(2000); scroll.setAutoScroll(true); scroll.scrollToTurnAnchor(2000)');
   await until(() => js('(() => { const row = document.querySelector(\'[data-transcript-item-id="2000"]\'); return row && Math.abs(row.getBoundingClientRect().top - transcript.getBoundingClientRect().top) < 3; })()'), 'new turn anchor outside visible range');
   await js('setItems(items => [...items, { id: 2001, type: "message", role: "assistant", text: "Growing reply. ".repeat(700) }]); scroll.scrollToBottom()');
@@ -192,12 +230,8 @@ try {
   for (const width of [360, 768, 1280, 1920]) {
     await call('Emulation.setDeviceMetricsOverride', { width, height: 820, deviceScaleFactor: 1, mobile: false });
     for (const workspaceOpen of [false, true]) {
-      await js(`(() => {
-        const shell = document.querySelector('.chat-shell');
-        shell.classList.toggle('workspace-open', ${workspaceOpen});
-        shell.classList.toggle('workspace-closed', ${!workspaceOpen});
-        return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      })()`);
+      await setWorkspaceOpen(workspaceOpen);
+      await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
       const dimensions = await js(`(() => {
         const row = document.querySelector('.transcript-virtual-row').getBoundingClientRect();
         const reference = document.querySelector('#layout-reference').getBoundingClientRect();

@@ -624,8 +624,6 @@
   }
 
   .chat-composer .agent-model-badge {
-    padding-inline: 4px;
-    min-width: 38px;
     justify-content: center;
   }
 

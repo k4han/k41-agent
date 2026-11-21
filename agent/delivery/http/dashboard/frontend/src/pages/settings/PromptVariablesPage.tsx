@@ -155,14 +155,9 @@ export function PromptVariablesPage() {
   return (
     <SettingsLayout
       title="Prompt Variables"
+      description="Manage reusable template variables and placeholders for agent prompts."
       breadcrumbLabel="Prompt Variables"
       contentWidth="wide"
-      actions={
-        <button class="btn" type="button" onClick={load}>
-          <RefreshCw size={14} />
-          Reload
-        </button>
-      }
     >
       <DataGate data={data()} error={error()} onRetry={load}>
         {() => (
@@ -172,10 +167,16 @@ export function PromptVariablesPage() {
               searchPlaceholder="Search prompt variables..."
               onSearchInput={setQuery}
               actions={
-                <button class="btn btn-primary" type="button" onClick={openCreate}>
-                  <Plus size={14} />
-                  New Variable
-                </button>
+                <>
+                  <button class="btn" type="button" onClick={load}>
+                    <RefreshCw size={14} />
+                    Reload
+                  </button>
+                  <button class="btn btn-primary" type="button" onClick={openCreate}>
+                    <Plus size={14} />
+                    New Variable
+                  </button>
+                </>
               }
             />
 

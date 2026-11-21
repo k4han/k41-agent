@@ -1,6 +1,6 @@
 import { ArrowDown, CirclePause, Loader2, Sparkles } from "lucide-solid";
 import { createVirtualizer, defaultRangeExtractor, type Range, type VirtualItem } from "@tanstack/solid-virtual";
-import { createEffect, createMemo, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, For, onCleanup, Show } from "solid-js";
 
 import { TranscriptActivityGroup } from "@/components/TranscriptActivityGroup";
 import { StatusIndicator } from "@/components/StatusIndicator";
@@ -122,19 +122,6 @@ export function ChatTranscript(props: ChatTranscriptProps) {
     virtualizer.getVirtualItems().map((row) => [String(row.key), row]),
   ));
   const virtualKeys = createMemo(() => Array.from(virtualRows().keys()));
-  onMount(() => {
-    const element = transcriptElement;
-    if (!element) return;
-    let width = element.clientWidth;
-    const observer = new ResizeObserver(() => {
-      if (element.clientWidth === width) return;
-      width = element.clientWidth;
-      // Wrapped text and rich content need new measurements after a panel resize.
-      virtualizer.measure();
-    });
-    observer.observe(element);
-    onCleanup(() => observer.disconnect());
-  });
   const answerItemId = createMemo(() => findTranscriptAnswerId(props.filteredItems));
   const completedAnswerIds = createMemo(() => streamActive() ? new Set<number>() : findTranscriptCompletedAnswerIds(props.items));
   const resumeItemId = createMemo(() => findTranscriptResumeId(props.items));

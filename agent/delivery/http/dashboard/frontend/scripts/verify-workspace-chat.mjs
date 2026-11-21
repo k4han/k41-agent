@@ -459,12 +459,49 @@ try {
   assert.equal(await js('workspaceElement === document.querySelector(".workspace-explorer")'), true, 'closing retains the mounted workspace');
   await js('document.querySelector(\'button[aria-label="Open workspace"]\').click()');
   assert.equal(await js('workspaceElement === document.querySelector(".workspace-explorer")'), true, 'reopening retains workspace state');
+  await call('Emulation.setDeviceMetricsOverride', { width: 1200, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await js('document.querySelector(\'[aria-label="Unpin navigation panel"]\')?.click()');
+  await until(() => js('document.querySelector(".chat-shell").clientWidth === 1148'), 'collapsed navigation layout');
+  const workspaceEdge = await js('document.querySelector(".workspace-resize-handle").getBoundingClientRect().left + 4');
+  await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: workspaceEdge, y: 200, button: 'left', clickCount: 1 });
+  await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 560, y: 200, button: 'left', buttons: 1 });
+  await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 560, y: 200, button: 'left', clickCount: 1 });
+  const workspaceWidth = () => js('document.querySelector(".workspace-drawer").getBoundingClientRect().width');
+  await until(async () => Math.abs(await workspaceWidth() - 640) < 1, 'resized workspace width');
+  const setDraft = text => js(`(() => {
+    const input = document.querySelector('.chat-prompt-input');
+    input.value = ${JSON.stringify(text)};
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  const draftLayout = () => js(`(() => {
+    const input = document.querySelector('.chat-prompt-input');
+    return { height: input.clientHeight, clipped: input.scrollHeight > input.clientHeight + 1 && getComputedStyle(input).overflowY === 'hidden' };
+  })()`);
+  await setDraft('A draft should stay visible as the chat width changes. '.repeat(6));
+  const wideDraft = await draftLayout();
+  await click('[aria-label="Pin navigation panel"]');
+  await until(() => js('document.querySelector(".chat-shell").clientWidth === 910'), 'expanded navigation layout');
+  const chatWidth = await js('document.querySelector(".chat-panel").getBoundingClientRect().width');
+  assert.ok(chatWidth >= 379, `The workspace must leave room for chat after the sidebar expands (chat: ${chatWidth}px)`);
+  await until(async () => (await draftLayout()).height > wideDraft.height, 'draft grows as text wraps');
+  const narrowDraft = await draftLayout();
+  assert.equal(narrowDraft.clipped, false, 'draft text stays visible after the sidebar expands');
+  await click('[aria-label="Unpin navigation panel"]');
+  await until(async () => Math.abs(await workspaceWidth() - 640) < 1, 'restored workspace width');
+  await until(async () => (await draftLayout()).height === wideDraft.height, 'restored draft height');
+  await setDraft('');
+  await click('[aria-label="Pin navigation panel"]');
+  await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await until(async () => Math.abs(await workspaceWidth() - 640) < 1, 'workspace width returns after widening the viewport');
+  console.log('PASS: The workspace and draft adapt when the navigation sidebar changes the chat width.');
   await openPicker();
   assert.equal(await js('!!document.querySelector(".workspace-selector.locked") && !document.querySelector(".workspace-tab-btn")'), true, 'existing conversation project must remain locked');
   await escape();
   await js(`window.chatTranscript = document.querySelector('.transcript');
+    chatTranscript.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
     chatTranscript.scrollTop = Math.floor((chatTranscript.scrollHeight - chatTranscript.clientHeight) / 2);
-    chatTranscript.dispatchEvent(new Event('scroll'));
+    new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));`);
+  await js(`
     window.chatScrollTop = chatTranscript.scrollTop;
     window.chatWasDetached = false;
     window.chatObserver = new MutationObserver(records => {
@@ -834,7 +871,12 @@ try {
   await call('Page.reload');
   await until(() => js('document.querySelector(".composer-workspace-backend")?.textContent.includes("Daytona")'), 'runtime persists after reloading')
     .catch(async error => { throw new Error(`${error.message}: ${await js('JSON.stringify({url: location.href, text: document.body.innerText.slice(0, 1500)})')} ${JSON.stringify(exceptions)}`); });
-  assert.equal(await js('document.body.textContent.includes("History message 0")'), true, 'switch preserves conversation history');
+  await js(`(() => {
+    const transcript = document.querySelector('.transcript');
+    transcript.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }));
+    transcript.scrollTop = 0;
+  })()`);
+  await until(() => js('document.body.textContent.includes("History message 0")'), 'switch preserves conversation history');
   await click('.composer-workspace-trigger');
   await until(() => js('!!document.querySelector(".composer-runtime-picker")'), 'runtime picker after reload');
   runtimePayload.host_mirror = { path: root, status: 'conflict', revision: 'a'.repeat(64), remote_revision: 'b'.repeat(64),

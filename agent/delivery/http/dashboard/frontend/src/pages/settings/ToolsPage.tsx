@@ -1,6 +1,6 @@
 import { batch, createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { unwrap } from "solid-js/store";
-import { RotateCcw, Save, SearchX } from "lucide-solid";
+import { RotateCcw } from "lucide-solid";
 
 import { SettingsResourceToolbar } from "@/components/SettingsResourceToolbar";
 import { DataGate } from "@/components/State";
@@ -14,6 +14,7 @@ import {
   type PendingChange,
   SettingRow,
   SettingsConfirmDialog,
+  SettingsEmptyState,
   SettingsPendingBar,
   SettingsSection,
   useSettingsData,
@@ -160,18 +161,8 @@ export function ToolsPage() {
   return (
     <SettingsLayout
       title="Tool Configuration"
+      description="Global configuration and provider defaults for built-in tools."
       breadcrumbLabel="Tools"
-      actions={
-        <button
-          class="btn btn-primary"
-          type="button"
-          disabled={pendingChanges().length === 0}
-          onClick={() => setConfirmOpen(true)}
-        >
-          <Save size={14} />
-          Save {pendingChanges().length ? `(${pendingChanges().length})` : ""}
-        </button>
-      }
     >
       <DataGate data={data()} error={error()} onRetry={loadWithDraft}>
         {(payload) => (
@@ -185,10 +176,6 @@ export function ToolsPage() {
                     onSearchInput={setSearch}
                   />
                 </div>
-              </div>
-              <div class="hint">
-                Global defaults for built-in tools. Per-agent overrides live in Agents →
-                Capabilities &amp; Tools. Empty values reset a setting to its schema default.
               </div>
               <Show when={search().trim()}>
                 <div class="hint settings-search-meta">
@@ -205,22 +192,21 @@ export function ToolsPage() {
             <Show
               when={toolGroups().length > 0}
               fallback={
-                <div class="panel" style={{ padding: "36px 20px", "text-align": "center" }}>
-                  <div style={{ display: "grid", "place-items": "center", gap: "8px", color: "var(--muted)" }}>
-                    <SearchX size={28} />
-                    <div style={{ "font-weight": "650", color: "var(--fg)" }}>No tool settings match your search</div>
-                    <div class="hint">Try a different term or clear the search.</div>
+                <SettingsEmptyState
+                  title="No tool settings match your search"
+                  hint="Try a different term or clear the search."
+                  action={
                     <button class="btn btn-sm" type="button" onClick={() => setSearch("")}>
                       <RotateCcw size={13} /> Clear filters
                     </button>
-                  </div>
-                </div>
+                  }
+                />
               }
             >
               <div class="settings-sections-wrapper">
                 <For each={toolGroups()}>
                   {(group) => (
-                    <SettingsSection title={group.tool}>
+                    <SettingsSection title={group.tool} count={group.entries.length}>
                       <div class="settings-list settings-table">
                         <For each={group.entries as [string, SettingInfo][]}>
                           {([key, info]: [string, SettingInfo]) => (

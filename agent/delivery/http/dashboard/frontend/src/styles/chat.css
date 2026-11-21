@@ -31,7 +31,10 @@
 }
 
 .chat-shell-resizable.workspace-open {
-  grid-template-columns: minmax(0, 1fr) minmax(0, var(--workspace-explorer-width));
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(
+    var(--workspace-explorer-width),
+    max(var(--workspace-explorer-min-width), 100% - var(--chat-panel-min-width))
+  ));
   column-gap: 0;
   gap: 0;
 }
@@ -566,7 +569,6 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  min-width: min(520px, 70vw);
 }
 
 .message-edit-input {
@@ -589,6 +591,7 @@
 
 .message-edit-actions {
   display: inline-flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
@@ -642,6 +645,7 @@
 }
 
 .message.user .message-bubble.editing {
+  width: 554px;
   border-color: transparent;
   padding: 14px 16px;
   border-radius: 18px;
@@ -884,12 +888,6 @@
 
   .message-branch-switcher {
     min-height: 40px;
-  }
-
-  .message-edit {
-    min-width: 0;
-    width: 100%;
-    max-width: 100%;
   }
 
   .message-edit-btn {

@@ -50,13 +50,13 @@ export function AcpAgentsPage() {
   onCleanup(() => { disposed = true; });
 
   return (
-    <SettingsLayout title="ACP Agents" contentWidth="medium">
+    <SettingsLayout
+      title="ACP Agents"
+      description="Connect external agents over the Agent Client Protocol using your installed CLI and account."
+      breadcrumbLabel="ACP Agents"
+      contentWidth="medium"
+    >
       <div class="stack settings-page-stack">
-        <div class="settings-page-heading">
-          <p class="settings-page-description">
-            Connect external agents over the Agent Client Protocol using your installed CLI and account.
-          </p>
-        </div>
         <Show when={loadError()}><p class="hint" role="alert">{loadError()}</p></Show>
         <Show when={agents.items} fallback={<Show when={!loadError()}><p class="hint" role="status">Starting the agent to check its status…</p></Show>}>
           <For each={agents.items}>{(agent) => <AcpAgentPanel agent={agent} refreshing={refreshing()} onRefresh={refresh} />}</For>

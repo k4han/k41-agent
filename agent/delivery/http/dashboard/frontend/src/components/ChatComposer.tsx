@@ -141,18 +141,39 @@ export function ChatComposer(props: ChatComposerProps) {
     if (!chatPromptRef) {
       return;
     }
+    chatPromptRef.style.overflowY = "hidden";
     chatPromptRef.style.height = "auto";
     const computed = window.getComputedStyle(chatPromptRef);
     const maxHeight = Number.parseFloat(computed.maxHeight) || 220;
-    const nextHeight = Math.min(chatPromptRef.scrollHeight, maxHeight);
+    const contentHeight = chatPromptRef.scrollHeight;
+    const nextHeight = Math.min(contentHeight, maxHeight);
     const minHeight = Number.parseFloat(computed.minHeight) || 48;
     chatPromptRef.style.height = `${Math.max(nextHeight, minHeight)}px`;
-    chatPromptRef.style.overflowY = chatPromptRef.scrollHeight > maxHeight ? "auto" : "hidden";
+    if (contentHeight > maxHeight) chatPromptRef.style.overflowY = "auto";
   };
 
   createEffect(() => {
     props.prompt;
     resizeChatPromptInput();
+  });
+
+  onMount(() => {
+    const input = chatPromptRef;
+    if (!input) return;
+    let width = input.offsetWidth;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      const nextWidth = input.offsetWidth;
+      if (nextWidth === width) return;
+      width = nextWidth;
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(resizeChatPromptInput);
+    });
+    observer.observe(input, { box: "border-box" });
+    onCleanup(() => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+    });
   });
 
   const handleGlobalClick = (e: MouseEvent) => {

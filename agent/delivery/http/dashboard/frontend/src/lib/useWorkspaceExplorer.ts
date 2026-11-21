@@ -18,7 +18,7 @@ export function useWorkspaceExplorer(getShellRef: () => HTMLDivElement | undefin
   let justResizedTimer: number | null = null;
   let stopResize: (() => void) | null = null;
 
-  const clampWidth = (value: number, availableWidth = window.innerWidth) => {
+  const clampWidth = (value: number, availableWidth = Infinity) => {
     const viewportMax = Math.max(WORKSPACE_EXPLORER_MIN_WIDTH, availableWidth - CHAT_PANEL_MIN_WIDTH);
     const maxWidth = Math.min(WORKSPACE_EXPLORER_MAX_WIDTH, viewportMax);
     return Math.min(maxWidth, Math.max(WORKSPACE_EXPLORER_MIN_WIDTH, Math.round(value)));
@@ -40,7 +40,7 @@ export function useWorkspaceExplorer(getShellRef: () => HTMLDivElement | undefin
     setFullscreen((prev) => !prev);
   };
 
-  const applyWidth = (value: number, availableWidth?: number) => {
+  const applyWidth = (value: number, availableWidth: number) => {
     const nextWidth = clampWidth(value, availableWidth);
     setWidth(nextWidth);
     window.localStorage.setItem(WORKSPACE_EXPLORER_WIDTH_KEY, String(nextWidth));
@@ -102,29 +102,19 @@ export function useWorkspaceExplorer(getShellRef: () => HTMLDivElement | undefin
   };
 
   onMount(() => {
-    const shellWidth = getShellRef()?.getBoundingClientRect().width;
     const savedWidth = Number(window.localStorage.getItem(WORKSPACE_EXPLORER_WIDTH_KEY));
     if (Number.isFinite(savedWidth) && savedWidth > 0) {
-      setWidth(clampWidth(savedWidth, shellWidth || window.innerWidth));
+      setWidth(clampWidth(savedWidth));
     }
 
-    const handleWindowResize = () => {
-      if (!open()) return;
-      const currentShellWidth = getShellRef()?.getBoundingClientRect().width;
-      setWidth((curr) => clampWidth(curr, currentShellWidth || window.innerWidth));
-    };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && fullscreen()) {
         event.preventDefault();
         setFullscreen(false);
       }
     };
-    window.addEventListener("resize", handleWindowResize);
     window.addEventListener("keydown", handleKeyDown);
-    onCleanup(() => {
-      window.removeEventListener("resize", handleWindowResize);
-      window.removeEventListener("keydown", handleKeyDown);
-    });
+    onCleanup(() => window.removeEventListener("keydown", handleKeyDown));
   });
 
   onCleanup(() => {

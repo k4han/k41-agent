@@ -271,11 +271,15 @@ export function useKeyboardShortcuts(): ShortcutContextValue {
 }
 
 export function useShortcutAction(action: ShortcutAction, command: ShortcutCommand) {
-  onCleanup(useKeyboardShortcuts().register(action, command));
+  const shortcuts = useContext(ShortcutContext);
+  if (shortcuts) {
+    onCleanup(shortcuts.register(action, command));
+  }
 }
 
 export function CommandPaletteButton(props: { beforeOpen?: () => void }) {
-  const shortcuts = useKeyboardShortcuts();
+  const shortcuts = useContext(ShortcutContext);
+  if (!shortcuts) return null;
   return (
     <button
       class="nav-link shortcut-launcher"

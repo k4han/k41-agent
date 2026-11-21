@@ -92,7 +92,9 @@ import {
   type ChatResumePayload,
   type WorkspaceResolvePayload,
   ATTACHMENT_ACCEPT,
+  CHAT_PANEL_MIN_WIDTH,
   DEFAULT_ATTACHMENT_MESSAGE,
+  WORKSPACE_EXPLORER_MIN_WIDTH,
 } from "@/lib/chatTypes";
 import { ACTIVE_TASK_STATUSES, DRAWER_MEDIA_QUERY, MOBILE_MEDIA_QUERY } from "@/lib/uiConstants";
 import { createMediaQuery } from "@/lib/useMediaQuery";
@@ -2379,7 +2381,11 @@ export function ChatPage() {
           <div
             ref={chatShellRef}
             class={`chat-shell chat-shell-resizable ${explorer.open() ? "workspace-open" : "workspace-closed"} ${explorer.fullscreen() ? "workspace-fullscreen" : ""} ${explorer.resizing() ? "workspace-resizing" : ""}`}
-            style={`--workspace-explorer-width: ${explorer.width()}px;`}
+            style={{
+              "--workspace-explorer-width": `${explorer.width()}px`,
+              "--chat-panel-min-width": `${CHAT_PANEL_MIN_WIDTH}px`,
+              "--workspace-explorer-min-width": `${WORKSPACE_EXPLORER_MIN_WIDTH}px`,
+            }}
             onClick={handleShellClick}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
