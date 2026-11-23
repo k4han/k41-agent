@@ -1,4 +1,5 @@
 import { A } from "@solidjs/router";
+import { Search } from "lucide-solid";
 import { createMemo, createSignal, createUniqueId, For, on, createEffect, Show } from "solid-js";
 
 import { Dialog } from "@/components/Dialog";
@@ -73,25 +74,28 @@ export function CommandPalette(props: {
 
   return (
     <Dialog open={props.open} title="Command palette" class="shortcut-palette-dialog" bodyClass="shortcut-palette" onClose={props.onClose}>
-      <input
-        class="input"
-        type="text"
-        role="combobox"
-        aria-label="Search commands or pages"
-        aria-autocomplete="list"
-        aria-controls={listId}
-        aria-expanded="true"
-        aria-activedescendant={activeIndex() >= 0 ? optionId(activeIndex()) : undefined}
-        placeholder="Search commands or pages"
-        autocomplete="off"
-        autofocus
-        value={query()}
-        onInput={(event) => {
-          setQuery(event.currentTarget.value);
-          setIndex(0);
-        }}
-        onKeyDown={onKeyDown}
-      />
+      <div class="shortcut-palette-search">
+        <Search size={15} class="shortcut-palette-search-icon" aria-hidden="true" />
+        <input
+          class="input shortcut-palette-input"
+          type="search"
+          role="combobox"
+          aria-label="Search commands or pages"
+          aria-autocomplete="list"
+          aria-controls={listId}
+          aria-expanded="true"
+          aria-activedescendant={activeIndex() >= 0 ? optionId(activeIndex()) : undefined}
+          placeholder="Search commands or pages"
+          autocomplete="off"
+          autofocus
+          value={query()}
+          onInput={(event) => {
+            setQuery(event.currentTarget.value);
+            setIndex(0);
+          }}
+          onKeyDown={onKeyDown}
+        />
+      </div>
       <ul id={listId} class="shortcut-palette-list" role="listbox" aria-label="Commands and pages">
         <For each={matches()}>
           {(item, itemIndex) => (
@@ -102,15 +106,20 @@ export function CommandPalette(props: {
               onPointerMove={() => setIndex(itemIndex())}
               onClick={() => props.onSelect(item)}
             >
-              <span>{item.label}</span>
+              <span class="shortcut-palette-label">{item.label}</span>
               <Show when={item.binding}>{(binding) => <ShortcutKeys binding={binding()} primary={props.primary} />}</Show>
             </li>
           )}
         </For>
       </ul>
       <Show when={!matches().length}>
-        <p class="muted" role="status">No matching commands.</p>
+        <p class="muted shortcut-palette-empty" role="status">No matching commands.</p>
       </Show>
+      <div class="shortcut-palette-footer" aria-hidden="true">
+        <span class="shortcut-palette-hint"><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+        <span class="shortcut-palette-hint"><kbd>↵</kbd> Select</span>
+        <span class="shortcut-palette-hint"><kbd>esc</kbd> Close</span>
+      </div>
     </Dialog>
   );
 }

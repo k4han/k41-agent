@@ -749,6 +749,16 @@
   .shortcut-palette-dialog {
     align-self: flex-end;
     margin: 0;
+    height: min(80vh, 80dvh);
+    max-height: 90dvh;
+  }
+
+  .shortcut-palette {
+    padding-bottom: max(16px, calc(10px + var(--safe-bottom)));
+  }
+
+  .shortcut-palette-footer {
+    display: none;
   }
 
   .dialog-close-btn {

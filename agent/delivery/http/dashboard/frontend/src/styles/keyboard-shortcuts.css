@@ -140,26 +140,55 @@
 .shortcut-palette-dialog {
   align-self: flex-start;
   margin: clamp(32px, 10vh, 80px) auto auto auto;
+  height: min(520px, calc(100vh - 120px));
 }
 
 .shortcut-palette {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.shortcut-palette-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.shortcut-palette-search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--muted);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.shortcut-palette-input {
+  width: 100%;
+  padding-left: 36px;
 }
 
 .shortcut-palette-list {
-  max-height: min(44vh, 330px);
-  overflow-y: auto;
-  list-style: none;
-  padding: 0;
+  display: grid;
+  align-content: start;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 2px;
   margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
 }
 
 .shortcut-palette-list li {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   min-height: 38px;
   padding: 7px 10px;
   border-radius: var(--radius-sm);
@@ -168,6 +197,53 @@
 
 .shortcut-palette-list li[aria-selected="true"] {
   background: var(--accent-subtle);
+}
+
+.shortcut-palette-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut-palette-list .shortcut-keys {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.shortcut-palette-empty {
+  margin: 0;
+  padding: 24px 8px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.shortcut-palette-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.shortcut-palette-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.shortcut-palette-hint kbd {
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 @media (max-width: 640px) {
