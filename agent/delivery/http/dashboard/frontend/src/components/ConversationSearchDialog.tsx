@@ -1,6 +1,6 @@
-import { A } from "@solidjs/router";
+import { A, useNavigate } from "@solidjs/router";
 import { MessageSquare } from "lucide-solid";
-import { createMemo, createSignal, For, Match, Switch } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Match, Switch } from "solid-js";
 
 import { Dialog } from "@/components/Dialog";
 import { chatThreadHref, sortThreadsByLatest, threadWorkspaceLabel, type ThreadListPayload } from "@/lib/chatThreads";
@@ -8,7 +8,9 @@ import { useDashboardData } from "@/lib/dashboardData";
 import { API_PATHS } from "@/lib/endpoints";
 
 function ConversationSearch(props: { onSelect: () => void }) {
+  const navigate = useNavigate();
   const [search, setSearch] = createSignal("");
+  const [activeIndex, setActiveIndex] = createSignal(0);
   const query = createMemo(() => search().trim().toLowerCase());
   const history = useDashboardData<ThreadListPayload>(API_PATHS.chatHistory);
   const conversations = createMemo(() => {
@@ -24,9 +26,39 @@ function ConversationSearch(props: { onSelect: () => void }) {
     return term ? conversations().filter((conversation) => conversation.searchText.includes(term)) : conversations().slice(0, 10);
   });
 
+  createEffect(() => {
+    query();
+    setActiveIndex(0);
+  });
+
   const handleResultClick = (event: MouseEvent) => {
     if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     props.onSelect();
+  };
+
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.isComposing || event.keyCode === 229) return;
+    const list = matches();
+    if (!list.length) return;
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      const next = Math.min(activeIndex() + 1, list.length - 1);
+      setActiveIndex(next);
+      document.getElementById(`conv-search-item-${next}`)?.scrollIntoView({ block: "nearest" });
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      const next = Math.max(activeIndex() - 1, 0);
+      setActiveIndex(next);
+      document.getElementById(`conv-search-item-${next}`)?.scrollIntoView({ block: "nearest" });
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const target = list[activeIndex()];
+      if (target) {
+        navigate(target.href);
+        props.onSelect();
+      }
+    }
   };
 
   return (
@@ -39,13 +71,21 @@ function ConversationSearch(props: { onSelect: () => void }) {
         autofocus
         value={search()}
         onInput={(event) => setSearch(event.currentTarget.value)}
+        onKeyDown={handleKeyDown}
       />
       <Switch fallback={
         <ul class="conversation-search-results" aria-label={query() ? "Matching conversations" : "Recent conversations"}>
           <For each={matches()}>
-            {(conversation) => (
-              <li>
-                <A class="nav-link conversation-search-result" activeClass="" href={conversation.href} onClick={handleResultClick}>
+            {(conversation, index) => (
+              <li id={`conv-search-item-${index()}`}>
+                <A
+                  class="nav-link conversation-search-result"
+                  classList={{ "active": index() === activeIndex() }}
+                  activeClass=""
+                  href={conversation.href}
+                  onClick={handleResultClick}
+                  onMouseEnter={() => setActiveIndex(index())}
+                >
                   <MessageSquare size={15} aria-hidden="true" />
                   <span class="conversation-search-result-text">
                     <span class="nav-label" title={conversation.title}>{conversation.title}</span>

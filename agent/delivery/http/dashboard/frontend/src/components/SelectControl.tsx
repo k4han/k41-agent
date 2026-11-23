@@ -121,13 +121,37 @@ export function SelectControl(props: {
       setOpen(next);
     }
   };
+
+  const focusOption = (index: number) => {
+    if (!menuRef) return;
+    const items = Array.from(menuRef.querySelectorAll<HTMLButtonElement>(".select-control-option:not(:disabled)"));
+    if (items.length === 0) return;
+    const target = items[Math.max(0, Math.min(index, items.length - 1))];
+    target?.focus();
+  };
+
+  const moveFocus = (delta: number) => {
+    if (!menuRef) return;
+    const items = Array.from(menuRef.querySelectorAll<HTMLButtonElement>(".select-control-option:not(:disabled)"));
+    if (items.length === 0) return;
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    if (currentIndex === -1) {
+      focusOption(delta > 0 ? 0 : items.length - 1);
+    } else {
+      const nextIndex = (currentIndex + delta + items.length) % items.length;
+      items[nextIndex]?.focus();
+    }
+  };
+
   const selectOption = (option: SelectControlOption) => {
     if (option.disabled) {
       return;
     }
     props.onChange(option.value);
     close();
+    triggerRef?.focus();
   };
+
   const handleDocumentPointerDown = (event: PointerEvent) => {
     const target = event.target;
     if (target instanceof Node) {
@@ -136,6 +160,7 @@ export function SelectControl(props: {
     }
     close();
   };
+
   const handleKeyDown = (event: KeyboardEvent) => {
     if (props.disabled) {
       return;
@@ -146,9 +171,26 @@ export function SelectControl(props: {
       close();
       return;
     }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open()) {
+        toggle();
+      }
+      queueMicrotask(() => {
+        focusOption(event.key === "ArrowDown" ? 0 : props.options.length - 1);
+      });
+      return;
+    }
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       toggle();
+      if (open()) {
+        queueMicrotask(() => focusOption(0));
+      }
+      return;
+    }
+    if (event.key === "Tab" && open()) {
+      close();
     }
   };
 
@@ -208,6 +250,22 @@ export function SelectControl(props: {
               if (event.key === "Escape") {
                 event.preventDefault();
                 event.stopPropagation();
+                close();
+                triggerRef?.focus();
+              } else if (event.key === "ArrowDown") {
+                event.preventDefault();
+                moveFocus(1);
+              } else if (event.key === "ArrowUp") {
+                event.preventDefault();
+                moveFocus(-1);
+              } else if (event.key === "Home") {
+                event.preventDefault();
+                focusOption(0);
+              } else if (event.key === "End") {
+                event.preventDefault();
+                focusOption(props.options.length - 1);
+              } else if (event.key === "Tab") {
+                event.preventDefault();
                 close();
                 triggerRef?.focus();
               }

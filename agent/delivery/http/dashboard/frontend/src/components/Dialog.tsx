@@ -15,6 +15,8 @@ export type DialogIconVariant = "danger" | "warning" | "primary" | "success" | "
 export interface DialogProps {
   open: boolean;
   title: string | JSX.Element;
+  /** Accessible name when the title contains interactive content that should not be announced. */
+  ariaLabel?: string;
   subtitle?: string | JSX.Element;
   icon?: JSX.Element;
   iconVariant?: DialogIconVariant;
@@ -144,7 +146,8 @@ export function Dialog(props: DialogProps) {
             class={`dialog ${resolvedSizeClass()} ${props.class || ""}`}
             role="dialog"
             aria-modal="true"
-            aria-labelledby={titleId}
+            aria-label={props.ariaLabel}
+            aria-labelledby={props.ariaLabel ? undefined : titleId}
             aria-describedby={props.subtitle ? descId : undefined}
             onClick={(e) => e.stopPropagation()}
           >

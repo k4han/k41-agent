@@ -181,7 +181,7 @@
   opacity: 0;
   visibility: hidden;
   transition: opacity 120ms ease, transform 120ms ease, visibility 120ms ease;
-  z-index: 1000;
+  z-index: var(--z-floating-menu, 550);
 }
 
 .sidebar-collapsed:not(.app-layout--drawer-open) .settings-sidebar .nav-link[data-tooltip]:hover::after {

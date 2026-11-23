@@ -2,6 +2,7 @@ import "@/styles/routes/shell.css";
 
 import { A, useHref, useLocation, useNavigate, useResolvedPath } from "@solidjs/router";
 import {
+  ArrowLeft,
   CalendarClock,
   ChevronDown,
   ChevronRight,
@@ -103,6 +104,8 @@ export function AppShell(props: {
   actions?: JSX.Element;
   children: JSX.Element;
   noHeader?: boolean;
+  backHref?: string;
+  breadcrumbSegments?: Array<{ label: string; href?: string }>;
 }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -1263,9 +1266,43 @@ export function AppShell(props: {
                 <Menu size={18} />
               </button>
             </Show>
-            <div>
-              <h1 class="page-title">{props.title}</h1>
-              {props.subtitle ? <p class="page-subtitle">{props.subtitle}</p> : null}
+            <div class="topbar-nav">
+              <Show when={props.backHref}>
+                <A href={props.backHref!} class="topbar-back-link" aria-label="Go back" title="Go back">
+                  <ArrowLeft size={16} />
+                </A>
+              </Show>
+              <div class="topbar-heading">
+                <Show when={props.breadcrumbSegments && props.breadcrumbSegments.length > 0}>
+                  <nav class="topbar-breadcrumb" aria-label="Breadcrumb">
+                    <For each={props.breadcrumbSegments}>
+                      {(segment, index) => (
+                        <>
+                          <Show when={index() > 0}>
+                            <span class="topbar-breadcrumb-separator" aria-hidden="true">
+                              <ChevronRight size={11} />
+                            </span>
+                          </Show>
+                          <Show
+                            when={index() !== props.breadcrumbSegments!.length - 1 && segment.href}
+                            fallback={
+                              <span class="topbar-breadcrumb-current" aria-current="page">
+                                {segment.label}
+                              </span>
+                            }
+                          >
+                            <A href={segment.href!} class="topbar-breadcrumb-link">
+                              {segment.label}
+                            </A>
+                          </Show>
+                        </>
+                      )}
+                    </For>
+                  </nav>
+                </Show>
+                <h1 class="page-title">{props.title}</h1>
+                {props.subtitle ? <p class="page-subtitle">{props.subtitle}</p> : null}
+              </div>
             </div>
             <div class="row-wrap">{props.actions}</div>
           </header>

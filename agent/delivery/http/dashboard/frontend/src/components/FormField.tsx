@@ -1,9 +1,10 @@
 import { createMemo, JSX, Show, splitProps } from "solid-js";
-import { AlertCircle, HelpCircle, Info } from "lucide-solid";
+import { CircleAlert, HelpCircle } from "lucide-solid";
 
 import { classNames } from "@/lib/utils";
 
 export type FormFieldProps = {
+  id?: string;
   label: string;
   error?: string;
   helper?: string;
@@ -14,7 +15,8 @@ export type FormFieldProps = {
 };
 
 export function FormField(props: FormFieldProps) {
-  const [local, others] = splitProps(props, [
+  const [local] = splitProps(props, [
+    "id",
     "label",
     "error",
     "helper",
@@ -30,7 +32,7 @@ export function FormField(props: FormFieldProps) {
   return (
     <div class={classNames("form-field", local.class, hasError() && "form-field--error")}>
       <Show when={local.label}>
-        <label class={classNames("form-field-label", local.labelClass)}>
+        <label class={classNames("form-field-label", local.labelClass)} for={local.id}>
           {local.label}
           <Show when={local.required}>
             <span class="form-field-required" aria-label="required">
@@ -42,7 +44,7 @@ export function FormField(props: FormFieldProps) {
       <div class="form-field-input">{local.children}</div>
       <Show when={hasError()}>
         <div class="form-field-error" role="alert">
-          <AlertCircle size={12} />
+          <CircleAlert size={12} />
           <span>{local.error}</span>
         </div>
       </Show>
@@ -80,6 +82,7 @@ export function FormFieldGroup(props: FormFieldGroupProps) {
 }
 
 export type FormFieldInlineProps = {
+  id?: string;
   label: string;
   error?: string;
   helper?: string;
@@ -89,7 +92,8 @@ export type FormFieldInlineProps = {
 };
 
 export function FormFieldInline(props: FormFieldInlineProps) {
-  const [local, others] = splitProps(props, [
+  const [local] = splitProps(props, [
+    "id",
     "label",
     "error",
     "helper",
@@ -103,7 +107,7 @@ export function FormFieldInline(props: FormFieldInlineProps) {
 
   return (
     <div class={classNames("form-field-inline", local.class, hasError() && "form-field--error")}>
-      <label class="form-field-inline-label">
+      <label class="form-field-inline-label" for={local.id}>
         {local.label}
         <Show when={local.required}>
           <span class="form-field-required" aria-label="required">
@@ -115,7 +119,7 @@ export function FormFieldInline(props: FormFieldInlineProps) {
         <div class="form-field-inline-input">{local.children}</div>
         <Show when={hasError()}>
           <div class="form-field-error form-field-error--inline" role="alert">
-            <AlertCircle size={12} />
+            <CircleAlert size={12} />
             <span>{local.error}</span>
           </div>
         </Show>

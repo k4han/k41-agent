@@ -96,13 +96,19 @@ export function ProjectDetailPage() {
     } finally { setSaving(false); void load(true); }
   };
 
-  return <AppShell title={project()?.label || "Project"} subtitle={project()?.workspace.execution.locator}
+  return <AppShell
+    title={project()?.label || "Project"}
+    subtitle={project()?.workspace.execution.locator}
+    backHref="/projects"
+    breadcrumbSegments={[
+      { label: "Projects", href: "/projects" },
+      { label: project()?.label || "Project" },
+    ]}
     actions={<Show when={project()}>{(current) => <div class="row-wrap">
       <A class="btn" href={`/history?workspace=${encodeURIComponent(current().key)}`}>View history</A>
       <button class="btn btn-primary" disabled={opening()} onClick={() => void openChat()}>{opening() ? "Preparing workspace..." : "New chat"}</button>
     </div>}</Show>}>
     <div class="projects-page project-detail">
-      <A href="/projects">Back to projects</A>
       <Show when={loading()}><p role="status">Loading project...</p></Show>
       <Show when={error()}><div class="project-error" role="alert">{error()} <button class="btn" onClick={() => void load()}>Retry project</button></div></Show>
       <Show when={project()}>{(current) => <>

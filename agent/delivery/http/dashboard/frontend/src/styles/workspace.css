@@ -212,14 +212,14 @@ body.workspace-resizing * {
   border-radius: 4px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--muted-foreground, #888);
+  color: var(--muted);
   cursor: pointer;
   transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
 }
 
 .workspace-file-tab-action-btn:hover {
-  background: var(--surface-3, rgba(255, 255, 255, 0.08));
-  color: var(--foreground, #eee);
+  background: var(--surface-3);
+  color: var(--fg);
   border-color: var(--border);
 }
 
@@ -465,7 +465,7 @@ body.workspace-resizing * {
 
 .workspace-plus-menu {
   position: fixed;
-  z-index: 1000;
+  z-index: var(--z-floating-menu, 550);
   display: flex;
   width: 195px;
   flex-direction: column;

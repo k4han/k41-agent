@@ -1,5 +1,5 @@
 import { For, Show } from "solid-js";
-import { ChevronDown, ChevronRight } from "lucide-solid";
+import { Check, ChevronDown, ChevronRight, ListTodo } from "lucide-solid";
 
 export interface TodoItem {
   content: string;
@@ -41,18 +41,7 @@ export function ChatTodos(props: ChatTodosProps) {
                 <div class="chat-todos-title">
                   <Show when={props.progress.activeStatus === "completed"}>
                     <span class="todo-status-icon completed">
-                      <svg
-                        viewBox="0 0 24 24"
-                        width="14"
-                        height="14"
-                        stroke="currentColor"
-                        stroke-width="3"
-                        fill="none"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      >
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                      </svg>
+                      <Check size={14} stroke-width={2.5} />
                     </span>
                   </Show>
                   <Show when={props.progress.activeStatus === "in_progress"}>
@@ -80,23 +69,7 @@ export function ChatTodos(props: ChatTodosProps) {
           </div>
 
           <div class="chat-todos-header-right">
-            <svg
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-              stroke="currentColor"
-              stroke-width="2"
-              fill="none"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <line x1="8" y1="6" x2="21" y2="6"></line>
-              <line x1="8" y1="12" x2="21" y2="12"></line>
-              <line x1="8" y1="18" x2="21" y2="18"></line>
-              <path d="M3 6h.01"></path>
-              <path d="M3 12h.01"></path>
-              <path d="M3 18h.01"></path>
-            </svg>
+            <ListTodo size={16} />
           </div>
         </div>
 
@@ -107,18 +80,7 @@ export function ChatTodos(props: ChatTodosProps) {
                 <div class={`chat-todo-item ${todo.status}`}>
                   <Show when={todo.status === "completed"}>
                     <span class="todo-status-icon completed">
-                      <svg
-                        viewBox="0 0 24 24"
-                        width="14"
-                        height="14"
-                        stroke="currentColor"
-                        stroke-width="3"
-                        fill="none"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      >
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                      </svg>
+                      <Check size={14} stroke-width={2.5} />
                     </span>
                   </Show>
                   <Show when={todo.status === "in_progress"}>

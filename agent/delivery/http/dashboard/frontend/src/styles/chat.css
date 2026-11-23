@@ -1122,7 +1122,7 @@
 
 
 
-.async-task-controls { display: grid; gap: 12px; padding: 12px; border-top: 1px solid var(--border-color, #8884); }
+.async-task-controls { display: grid; gap: 12px; padding: 12px; border-top: 1px solid var(--border); }
 .async-task-controls label { display: grid; gap: 6px; }
 .async-task-controls textarea { width: 100%; min-width: 0; resize: vertical; font: inherit; }
 .async-task-actions { display: flex; flex-wrap: wrap; gap: 8px; }

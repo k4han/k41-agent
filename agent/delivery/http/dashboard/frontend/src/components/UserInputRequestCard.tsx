@@ -152,7 +152,11 @@ export function UserInputRequestCard(props: {
                 </Show>
               </div>
               <Show when={question().options.length > 0}>
-                <div class="user-input-options">
+                <div
+                  class="user-input-options"
+                  role="group"
+                  aria-label={question().question}
+                >
                   <For each={question().options}>
                     {(option) => {
                       const isSelected = () => selectedIds(question().id).includes(option.id);

@@ -1,4 +1,4 @@
-import { AlertCircle, Check, ChevronRight, Loader2 } from "lucide-solid";
+import { Check, ChevronRight, CircleAlert, Loader2 } from "lucide-solid";
 import { createEffect, createMemo, createSignal, createUniqueId, For, onCleanup, Show } from "solid-js";
 
 import { TranscriptItemView, type TranscriptItemViewProps } from "@/components/Transcript";
@@ -145,7 +145,7 @@ export function TranscriptActivityGroup(props: TranscriptActivityGroupProps) {
                 when={summary().hasFailed}
                 fallback={<Check size={14} class="activity-group-check-icon" />}
               >
-                <AlertCircle size={14} class="activity-group-alert-icon" />
+                <CircleAlert size={14} class="activity-group-alert-icon" />
               </Show>
             }
           >

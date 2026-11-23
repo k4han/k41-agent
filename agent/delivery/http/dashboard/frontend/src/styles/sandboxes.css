@@ -89,24 +89,24 @@
 }
 
 .sandboxes-filter-chip-daytona.active {
-  color: #6c5ce7;
+  color: var(--chart-3);
 }
 
 .sandboxes-filter-chip-daytona.active .sandboxes-filter-icon {
-  color: #6c5ce7;
+  color: var(--chart-3);
 }
 
 .sandboxes-filter-chip-modal.active {
-  color: #1f8a70;
+  color: var(--success);
 }
 
 .sandboxes-filter-chip-modal.active .sandboxes-filter-icon {
-  color: #1f8a70;
+  color: var(--success);
 }
 
 .sandboxes-filter-chip-instabox.active,
 .sandboxes-filter-chip-instabox.active .sandboxes-filter-icon {
-  color: #0284c7;
+  color: var(--info);
 }
 
 .sandboxes-toggle {
@@ -281,18 +281,18 @@
 }
 
 .sandbox-backend-icon[data-brand="daytona"] {
-  background: color-mix(in srgb, #6c5ce7 14%, var(--surface));
-  color: #6c5ce7;
+  background: color-mix(in srgb, var(--chart-3) 14%, var(--surface));
+  color: var(--chart-3);
 }
 
 .sandbox-backend-icon[data-brand="modal"] {
-  background: color-mix(in srgb, #1f8a70 14%, var(--surface));
-  color: #1f8a70;
+  background: color-mix(in srgb, var(--success) 14%, var(--surface));
+  color: var(--success);
 }
 
 .sandbox-backend-icon[data-brand="instabox"] {
-  background: color-mix(in srgb, #0284c7 14%, var(--surface));
-  color: #0284c7;
+  background: color-mix(in srgb, var(--info) 14%, var(--surface));
+  color: var(--info);
 }
 
 .sandbox-backend-name {
@@ -365,15 +365,15 @@
 }
 
 .sandbox-status-ok {
-  color: #16a34a;
-  background: color-mix(in srgb, #16a34a 12%, var(--surface));
-  border-color: color-mix(in srgb, #16a34a 24%, var(--border));
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--success) 24%, var(--border));
 }
 
 .sandbox-status-warn {
-  color: #d97706;
-  background: color-mix(in srgb, #d97706 12%, var(--surface));
-  border-color: color-mix(in srgb, #d97706 24%, var(--border));
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--warning) 24%, var(--border));
 }
 
 .sandbox-status-muted {
@@ -383,9 +383,9 @@
 }
 
 .sandbox-status-danger {
-  color: #dc2626;
-  background: color-mix(in srgb, #dc2626 12%, var(--surface));
-  border-color: color-mix(in srgb, #dc2626 24%, var(--border));
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 24%, var(--border));
 }
 
 .sandbox-actions {
@@ -406,14 +406,7 @@
   animation: spin 0.9s linear infinite;
 }
 
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
+
 
 /* --- Mobile search input (≤640px) ----------------------------------- */
 @media (max-width: 640px) {

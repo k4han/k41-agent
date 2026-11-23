@@ -1,5 +1,5 @@
 import { JSX, Show } from "solid-js";
-import { AlertTriangle, Info, Loader2 } from "lucide-solid";
+import { Info, Loader2, TriangleAlert } from "lucide-solid";
 import { Dialog, DialogSize } from "@/components/Dialog";
 
 export interface ConfirmDialogProps {
@@ -25,9 +25,9 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
   const defaultIcon = () => {
     switch (variant()) {
       case "danger":
-        return <AlertTriangle size={17} />;
+        return <TriangleAlert size={17} />;
       case "warning":
-        return <AlertTriangle size={17} />;
+        return <TriangleAlert size={17} />;
       case "primary":
       default:
         return <Info size={17} />;
@@ -63,7 +63,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
               when={props.loading}
               fallback={
                 <Show when={variant() === "danger"}>
-                  <AlertTriangle size={14} />
+                  <TriangleAlert size={14} />
                 </Show>
               }
             >

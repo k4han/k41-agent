@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, onCleanup, Show } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import { useNavigate, useParams } from "@solidjs/router";
 import {
   Camera,
@@ -30,6 +30,7 @@ import {
   type InstaboxPort,
   type InstaboxSnapshot,
 } from "@/lib/instabox";
+import { useVisibleInterval } from "@/lib/useVisibleInterval";
 import "@/styles/instabox.css";
 
 import { SettingsLayout } from "./SettingsLayout";
@@ -88,7 +89,7 @@ export function InstaboxMachinePage() {
   void refreshAll();
 
   // Keep progress visible after a reload: poll while operations or snapshots are still pending.
-  const poll = window.setInterval(() => {
+  useVisibleInterval(() => {
     const pendingSnapshot = snapshots().some((item) => item.state === "pending");
     if (activeOperations().length > 0 || pendingSnapshot) {
       void loadOperations().catch(() => undefined);
@@ -96,7 +97,6 @@ export function InstaboxMachinePage() {
       if (pendingSnapshot) void loadSnapshots().catch(() => undefined);
     }
   }, POLL_MS);
-  onCleanup(() => window.clearInterval(poll));
 
   const run = async (label: string, action: () => Promise<unknown>, success?: string) => {
     setBusy(label);

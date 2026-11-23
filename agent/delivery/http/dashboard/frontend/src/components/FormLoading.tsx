@@ -1,5 +1,5 @@
 import { createMemo, For, JSX, Show, splitProps } from "solid-js";
-import { Loader2, Check, AlertCircle, RefreshCw } from "lucide-solid";
+import { Loader2, Check, CircleAlert, RefreshCw } from "lucide-solid";
 
 import { classNames } from "@/lib/utils";
 
@@ -129,7 +129,7 @@ export function FormState(props: FormStateProps) {
       case "success":
         return <Check size={20} class="form-state-icon form-state-icon--success" />;
       case "error":
-        return <AlertCircle size={20} class="form-state-icon form-state-icon--error" />;
+        return <CircleAlert size={20} class="form-state-icon form-state-icon--error" />;
       default:
         return null;
     }

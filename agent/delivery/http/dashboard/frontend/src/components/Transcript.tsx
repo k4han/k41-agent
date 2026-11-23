@@ -33,10 +33,10 @@ import {
   Show,
   type Accessor,
 } from "solid-js";
-import { Portal } from "solid-js/web";
 
 import { AgentPicker } from "@/components/AgentPicker";
 import { CopyButton } from "@/components/CopyButton";
+import { Dialog } from "@/components/Dialog";
 import { browserImageUrl } from "@/lib/browserViewer";
 import { Markdown } from "@/components/Markdown";
 import { StatusIndicator } from "@/components/StatusIndicator";
@@ -1453,71 +1453,62 @@ function HtmlPreviewBlock(props: {
           <pre class="tool-html-preview-error">{formatValue(props.result)}</pre>
         </Show>
       </section>
-      <Show when={expanded()}>
-        <Portal>
-          <div
-            class="dialog-backdrop"
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget) {
-                setExpanded(false);
-              }
-            }}
-          >
-            <section
-              class="dialog tool-html-preview-dialog"
-              role="dialog"
-              aria-modal="true"
-              aria-label={title()}
-            >
-              <header class="dialog-header tool-html-preview-dialog-header">
-                <div class="tool-html-preview-title-wrap">
-                  <span class="mono tool-html-preview-title">{title()}</span>
-                  <Show when={isPage()}>
-                    <span class="tool-html-preview-tag">Full Page</span>
-                  </Show>
-                </div>
-                <div class="tool-html-preview-actions">
-                  <HtmlPreviewToolbar
-                    mode={mode}
-                    onToggleMode={() => setMode(mode() === "preview" ? "source" : "preview")}
-                    html={props.preview.html}
-                    viewport={viewport}
-                    onSelectViewport={setViewport}
-                    zoom={zoom}
-                    onZoomIn={handleZoomIn}
-                    onZoomOut={handleZoomOut}
-                    onZoomReset={handleZoomReset}
-                    scaleToFit={scaleToFit}
-                    onToggleScaleToFit={() => setScaleToFit(!scaleToFit())}
-                    onOpenNewTab={handleOpenNewTab}
-                    isDialog={true}
-                  />
-                  <button
-                    class="btn btn-icon btn-sm"
-                    type="button"
-                    onClick={() => setExpanded(false)}
-                    title="Close"
-                    aria-label="Close preview popup"
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-              </header>
-              <div class="tool-html-preview-dialog-body">
-                <Show
-                  when={mode() === "preview"}
-                  fallback={<pre class="tool-html-preview-source">{props.preview.html}</pre>}
-                >
-                  {renderStage(true)}
-                </Show>
-                <Show when={hasErrorResult()}>
-                  <pre class="tool-html-preview-error">{formatValue(props.result)}</pre>
-                </Show>
-              </div>
-            </section>
+      <Dialog
+        open={expanded()}
+        onClose={() => setExpanded(false)}
+        size="full"
+        class="tool-html-preview-dialog"
+        headerClass="tool-html-preview-dialog-header"
+        bodyClass="tool-html-preview-dialog-body"
+        showCloseButton={false}
+        ariaLabel={isPage() ? `${title()} (full page)` : title()}
+        title={
+          <div class="tool-html-preview-title-wrap" style={{ "justify-content": "space-between", "width": "100%", "display": "flex", "align-items": "center" }}>
+            <div style={{ display: "flex", "align-items": "center", gap: "6px" }}>
+              <span class="mono tool-html-preview-title">{title()}</span>
+              <Show when={isPage()}>
+                <span class="tool-html-preview-tag">Full Page</span>
+              </Show>
+            </div>
+            <div class="tool-html-preview-actions">
+              <HtmlPreviewToolbar
+                mode={mode}
+                onToggleMode={() => setMode(mode() === "preview" ? "source" : "preview")}
+                html={props.preview.html}
+                viewport={viewport}
+                onSelectViewport={setViewport}
+                zoom={zoom}
+                onZoomIn={handleZoomIn}
+                onZoomOut={handleZoomOut}
+                onZoomReset={handleZoomReset}
+                scaleToFit={scaleToFit}
+                onToggleScaleToFit={() => setScaleToFit(!scaleToFit())}
+                onOpenNewTab={handleOpenNewTab}
+                isDialog={true}
+              />
+              <button
+                class="btn btn-icon btn-sm"
+                type="button"
+                onClick={() => setExpanded(false)}
+                title="Close"
+                aria-label="Close preview popup"
+              >
+                <X size={15} />
+              </button>
+            </div>
           </div>
-        </Portal>
-      </Show>
+        }
+      >
+        <Show
+          when={mode() === "preview"}
+          fallback={<pre class="tool-html-preview-source">{props.preview.html}</pre>}
+        >
+          {renderStage(true)}
+        </Show>
+        <Show when={hasErrorResult()}>
+          <pre class="tool-html-preview-error">{formatValue(props.result)}</pre>
+        </Show>
+      </Dialog>
     </>
   );
 }

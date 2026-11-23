@@ -1,8 +1,8 @@
 import { createSignal, Show } from "solid-js";
 import {
-  AlertCircle,
   ArrowRight,
   CheckCircle2,
+  CircleAlert,
   Download,
   ExternalLink,
   GitBranch,
@@ -140,7 +140,7 @@ export function UpdateDialog() {
         <Show when={state() === "error"}>
           <div class="update-dialog-progress-state">
             <div class="update-dialog-spinner-container text-danger">
-              <AlertCircle size={42} />
+              <CircleAlert size={42} />
             </div>
             <h3 class="update-dialog-progress-title">Update Failed</h3>
             <p class="update-dialog-progress-desc text-danger">{error()}</p>
@@ -155,7 +155,7 @@ export function UpdateDialog() {
           <Show when={versionCheckError()}>
             <div class="update-dev-notice" role="alert">
               <div class="update-dev-notice-header">
-                <AlertCircle size={16} class="text-danger" />
+                <CircleAlert size={16} class="text-danger" />
                 <strong>Could not check for updates</strong>
               </div>
               <p class="update-dev-notice-text">{versionCheckError()}</p>

@@ -1,7 +1,7 @@
 import "@/styles/routes/home.css";
 
 import { A } from "@solidjs/router";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { AlertCircle, MessageSquarePlus } from "lucide-solid";
 
 import { AppShell } from "@/components/AppShell";
@@ -18,6 +18,7 @@ import {
 import { apiFetch, postJson } from "@/lib/api";
 import { API_PATHS } from "@/lib/endpoints";
 import { HOME_CACHE_MAX_AGE_MS, STORAGE_KEYS } from "@/lib/uiConstants";
+import { useVisibleInterval } from "@/lib/useVisibleInterval";
 import type { HomePayload } from "@/types";
 
 const HOME_POLL_INTERVAL_MS = 10000;
@@ -59,63 +60,40 @@ export function HomePage() {
   const [data, setData] = createSignal<HomePayload | undefined>(readHomeCache());
   const [error, setError] = createSignal("");
   const { showToast } = useToast();
-  let timer: number | undefined;
   let loading = false;
-  let disposed = false;
-
-  const clearRefreshTimer = () => {
-    if (timer !== undefined) {
-      window.clearTimeout(timer);
-      timer = undefined;
-    }
-  };
-
-  const scheduleRefresh = () => {
-    clearRefreshTimer();
-    if (disposed || document.hidden) {
-      return;
-    }
-
-    timer = window.setTimeout(() => {
-      timer = undefined;
-      void load();
-    }, HOME_POLL_INTERVAL_MS);
-  };
 
   const load = async () => {
-    if (disposed || loading) {
+    if (loading) {
       return;
     }
 
     loading = true;
-    clearRefreshTimer();
     setError("");
     try {
       const payload = await apiFetch<HomePayload>("/dashboard-api/home");
-      if (disposed) {
-        return;
-      }
-
       setData(payload);
       writeHomeCache(payload);
     } catch (err) {
-      if (!disposed) {
-        setError(err instanceof Error ? err.message : "Failed to load home");
-      }
+      setError(err instanceof Error ? err.message : "Failed to load home");
     } finally {
       loading = false;
-      scheduleRefresh();
     }
   };
+
+  useVisibleInterval(() => void load(), HOME_POLL_INTERVAL_MS);
 
   const serviceAction = async (name: string, action: "start" | "stop") => {
     const path =
       action === "start"
         ? API_PATHS.serviceStart(name)
         : API_PATHS.serviceStop(name);
-    await postJson(path);
-    showToast(`Service ${action} requested.`);
-    await load();
+    try {
+      await postJson(path);
+      showToast(`Service ${action} requested.`);
+      await load();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : `Failed to ${action} service`, "error");
+    }
   };
 
   const allAction = async (action: "start-all" | "stop-all") => {
@@ -127,29 +105,6 @@ export function HomePage() {
       showToast(err instanceof Error ? err.message : "Service action failed", "error");
     }
   };
-
-  const handleVisibilityChange = () => {
-    if (disposed) {
-      return;
-    }
-
-    if (document.hidden) {
-      clearRefreshTimer();
-      return;
-    }
-
-    void load();
-  };
-
-  onMount(() => {
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    void load();
-  });
-  onCleanup(() => {
-    disposed = true;
-    clearRefreshTimer();
-    document.removeEventListener("visibilitychange", handleVisibilityChange);
-  });
 
   return (
     <AppShell

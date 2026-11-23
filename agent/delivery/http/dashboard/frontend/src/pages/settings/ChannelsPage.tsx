@@ -30,6 +30,7 @@ import {
 } from "lucide-solid";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { CopyButton } from "@/components/CopyButton";
 import { DashboardTable } from "@/components/DashboardTable";
 import { EmptyState } from "@/components/EmptyState";
 import { SelectControl, type SelectControlOption } from "@/components/SelectControl";
@@ -161,14 +162,14 @@ const CHANNEL_DEFS: ChannelDefinition[] = [
               <span class="channel-webhook-helper-label">Webhook target</span>
               <div class="channel-webhook-helper-value">
                 <code>{url}</code>
-                <button
+                <CopyButton
+                  value={url}
                   class="btn btn-sm"
-                  type="button"
-                  onClick={() => void writeToClipboard(url).catch(() => {})}
+                  showIcon
+                  iconSize={13}
                 >
-                  <Copy size={13} />
                   Copy
-                </button>
+                </CopyButton>
               </div>
             </div>
           );
@@ -265,14 +266,14 @@ function telegramWebhookHelper(
       <span class="channel-webhook-helper-label">Webhook target</span>
       <div class="channel-webhook-helper-value">
         <code>{url}</code>
-        <button
+        <CopyButton
+          value={url}
           class="btn btn-sm"
-          type="button"
-          onClick={() => void writeToClipboard(url).catch(() => {})}
+          showIcon
+          iconSize={13}
         >
-          <Copy size={13} />
           Copy
-        </button>
+        </CopyButton>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import { createResource, createSignal, For, Show } from "solid-js";
+import { Button } from "@/components/Button";
 import { PlanReviewView, createTranscriptUserInputRequest } from "@/components/Transcript";
 import { UserInputRequestCard, type UserInputRequestSubmitPayload } from "@/components/UserInputRequestCard";
 import { asyncInputRequest, liveAsyncTask, type AsyncTask } from "@/lib/asyncSubagents";
@@ -46,18 +47,18 @@ export function AsyncTaskControls(props: {
         </Show>
       }>
         <p>{String(interrupt.value.reason || "Complete the manual step in the browser.")}</p>
-        <button type="button" disabled={props.busy} onClick={() => window.dispatchEvent(new CustomEvent("k41-browser-handoff", {
+        <Button size="sm" disabled={props.busy} onClick={() => window.dispatchEvent(new CustomEvent("k41-browser-handoff", {
           detail: { threadId: props.task?.parent_thread_id, browserThreadId: props.task?.thread_id },
-        }))}>Open browser</button>
+        }))}>Open browser</Button>
       </Show>}</For>
     </Show>
     <Show when={props.task && props.task.status !== "cancelled"}>
-      <label>Follow-up instructions<textarea value={instructions()} disabled={props.busy}
+      <label class="field">Follow-up instructions<textarea class="input" value={instructions()} disabled={props.busy}
         onInput={(event) => setInstructions(event.currentTarget.value)} rows={2} /></label>
       <div class="async-task-actions">
-        <button type="button" disabled={props.busy || !instructions().trim()} onClick={() => void update()}>Queue instructions</button>
-        <Show when={liveAsyncTask(props.task!.status)}><button type="button" disabled={props.busy}
-          onClick={() => void props.perform("cancel")}>Cancel task</button></Show>
+        <Button size="sm" variant="primary" disabled={props.busy || !instructions().trim()} onClick={() => void update()}>Queue instructions</Button>
+        <Show when={liveAsyncTask(props.task!.status)}><Button size="sm" variant="danger" disabled={props.busy}
+          onClick={() => void props.perform("cancel")}>Cancel task</Button></Show>
       </div>
     </Show>
   </section>;

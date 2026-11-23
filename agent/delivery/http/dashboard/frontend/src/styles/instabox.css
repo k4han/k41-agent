@@ -22,8 +22,8 @@
 .instabox-confirm code { overflow-wrap: anywhere; }
 .instabox-desktop-page { display: flex; height: min(70vh, 720px); min-height: 320px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius, 8px); }
 .instabox-op-status { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); font-size: 11px; }
-.instabox-op-status[data-status="succeeded"] { color: #15803d; }
-.instabox-op-status[data-status="failed"] { color: #dc2626; }
+.instabox-op-status[data-status="succeeded"] { color: var(--success); }
+.instabox-op-status[data-status="failed"] { color: var(--danger); }
 
 @media (max-width: 640px) {
   .instabox-desktop-page { height: 60vh; }

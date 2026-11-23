@@ -1,7 +1,7 @@
 import "@/styles/routes/repositories.css";
 
 import { A, useNavigate, useParams } from "@solidjs/router";
-import { createMemo, createSignal, For, JSX, onMount, Show } from "solid-js";
+import { createMemo, createSignal, For, JSX, Show } from "solid-js";
 import {
   Bot,
   GitBranch,
@@ -31,6 +31,8 @@ import {
 } from "@/lib/catalogStore";
 import { getBackendIcon } from "@/lib/iconRegistry";
 import { truncateText } from "@/lib/utils";
+import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
+import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
 import type {
   BackgroundTask,
   GitHubPayload,
@@ -90,6 +92,13 @@ function toDraft(repo: GitHubRepositoryBinding): RepositoryDraft {
     branch_prefix: repo.branch_prefix || "k41",
     workspace_backend: repo.workspace_backend || "local",
   };
+}
+
+function normalizeDraft(draft: RepositoryDraft): RepositoryDraft {
+  if (isBackendEnabled(draft.workspace_backend)) {
+    return draft;
+  }
+  return { ...draft, workspace_backend: "local" };
 }
 
 function splitList(value: string): string[] {
@@ -288,7 +297,7 @@ function RepositoryListPage() {
       tasks: [],
     };
 
-  onMount(load);
+  useCatalogAndLoad(load);
 
   return (
     <AppShell
@@ -423,10 +432,7 @@ function RepositoryDetailPage(props: { repositoryId: string }) {
         `/dashboard-api/github/repositories/${encodeURIComponent(props.repositoryId)}`,
       );
       setData(payload);
-      const nextDraft = toDraft(payload.repository);
-      if (!isBackendEnabled(nextDraft.workspace_backend)) {
-        nextDraft.workspace_backend = "local";
-      }
+      const nextDraft = normalizeDraft(toDraft(payload.repository));
       setDraft(nextDraft);
       setTaskNotify(nextDraft.notify_identity);
     } catch (err) {
@@ -538,12 +544,26 @@ function RepositoryDetailPage(props: { repositoryId: string }) {
     return Array.from(names).sort();
   });
 
-  onMount(load);
+  const isDirty = createMemo(() => {
+    const current = draft();
+    const repo = data()?.repository;
+    if (!current || !repo) return false;
+    const initial = normalizeDraft(toDraft(repo));
+    return JSON.stringify(current) !== JSON.stringify(initial);
+  });
+  useUnsavedChanges(isDirty);
+
+  useCatalogAndLoad(load);
 
   return (
     <AppShell
       title={data()?.repository.full_name || "Repository"}
       subtitle="Repo-specific automation, optimization, and activity."
+      backHref="/repositories"
+      breadcrumbSegments={[
+        { label: "Repositories", href: "/repositories" },
+        { label: data()?.repository.full_name || "Repository" },
+      ]}
       actions={
         <>
           <button class="btn" type="button" disabled={busy() === "sync"} onClick={sync}>

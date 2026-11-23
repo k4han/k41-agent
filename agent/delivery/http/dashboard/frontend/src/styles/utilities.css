@@ -72,12 +72,18 @@
   }
 }
 
-.animate-spin {
+.animate-spin,
+.spin-icon,
+.spinner-animate,
+.spin {
   animation: spin 1s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-spin {
+  .animate-spin,
+  .spin-icon,
+  .spinner-animate,
+  .spin {
     animation: none;
   }
 }

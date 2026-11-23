@@ -16,6 +16,7 @@ import { API_PATHS } from "@/lib/endpoints";
 import { isSchedulerSession } from "@/lib/schedulerSessions";
 import { useSessions } from "@/lib/sessionStore";
 import { useCatalogAndLoad } from "@/lib/useCatalogAndLoad";
+import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
 import { useVisibleInterval } from "@/lib/useVisibleInterval";
 import { dateTimeInTimeZone, triggerArgsFromDateInput, truncateText } from "@/lib/utils";
 import { formatRunTime, modelLabel, RunHistoryPanel } from "@/components/scheduler/RunHistoryPanel";
@@ -898,6 +899,7 @@ export function SchedulerPage() {
   const [saving, setSaving] = createSignal(false);
   const [editJob, setEditJob] = createSignal<SchedulerJob | null>(null);
   const [editForm, setEditForm] = createSignal<ScheduleForm>(defaultScheduleForm());
+  const [editBaseline, setEditBaseline] = createSignal<ScheduleForm | null>(null);
   const [deleteTarget, setDeleteTarget] = createSignal<SchedulerJob | null>(null);
   const [deleting, setDeleting] = createSignal(false);
   const [historyJobFilter, setHistoryJobFilter] = createSignal("");
@@ -909,6 +911,18 @@ export function SchedulerPage() {
   const { sessions } = useSessions();
 
   useVisibleInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+
+  const isDirty = createMemo(() => {
+    if (createOpen() && Boolean(form().task.trim())) return true;
+    const baseline = editBaseline();
+    if (!editJob() || !baseline) return false;
+    return JSON.stringify(editForm()) !== JSON.stringify(baseline);
+  });
+  useUnsavedChanges(isDirty, () => {
+    setCreateOpen(false);
+    setEditJob(null);
+    setEditBaseline(null);
+  });
 
   const schedulerSessions = createMemo(() => sessions().filter(isSchedulerSession));
   const runsByThread = createMemo(() => new Map(recentRuns().map((run) => [run.thread_id, run])));
@@ -1020,7 +1034,7 @@ export function SchedulerPage() {
     );
     const identity = matchedIdentity ? `${matchedIdentity.platform}:${matchedIdentity.external_id}` : "__manual__";
 
-    setEditForm({
+    const next: ScheduleForm = {
       task: job.task,
       project_id: job.project_id ?? null,
       identity,
@@ -1038,7 +1052,9 @@ export function SchedulerPage() {
       cron_day: String(args.day ?? "*"),
       cron_month: String(args.month ?? "*"),
       cron_day_of_week: String(args.day_of_week ?? "*"),
-    });
+    };
+    setEditForm(next);
+    setEditBaseline(next);
   };
 
   const updateJob = async () => {

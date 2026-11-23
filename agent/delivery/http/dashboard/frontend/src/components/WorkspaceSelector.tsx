@@ -15,11 +15,11 @@ import {
   Cloud,
   Sparkles,
   Search,
-  Copy,
   X,
   Lock,
 } from "lucide-solid";
 
+import { CopyButton } from "@/components/CopyButton";
 import { Dialog } from "@/components/Dialog";
 import { SelectControl } from "@/components/SelectControl";
 import { useToast } from "@/components/Toast";
@@ -195,7 +195,6 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
   const [createFolderOpen, setCreateFolderOpen] = createSignal(false);
   const [newFolderName, setNewFolderName] = createSignal("");
   const [createFolderResolving, setCreateFolderResolving] = createSignal(false);
-  const [copiedPath, setCopiedPath] = createSignal(false);
 
   const pathSegments = createMemo(() => {
     const currentPath = browsePayload()?.path || localDraft() || "";
@@ -452,18 +451,6 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
       setLocalDraft(payload.path);
       closeBrowser();
       commitSelection(payload.path);
-    }
-  };
-
-  const copyPathToClipboard = async () => {
-    const target = browsePayload()?.path || localDraft();
-    if (!target) return;
-    try {
-      await navigator.clipboard.writeText(target);
-      setCopiedPath(true);
-      setTimeout(() => setCopiedPath(false), 1500);
-    } catch {
-      // ignore
     }
   };
 
@@ -1114,17 +1101,13 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
             </div>
 
             <div class="workspace-browser-header-tools">
-              <button
+              <CopyButton
+                value={() => browsePayload()?.path || localDraft()}
                 class="btn btn-icon workspace-browser-nav-btn"
-                type="button"
-                title={copiedPath() ? "Copied!" : "Copy current path"}
-                aria-label="Copy current path"
-                onClick={() => void copyPathToClipboard()}
-              >
-                <Show when={copiedPath()} fallback={<Copy size={13} />}>
-                  <Check size={13} />
-                </Show>
-              </button>
+                title="Copy current path"
+                ariaLabel="Copy current path"
+                iconSize={13}
+              />
               <button
                 class="btn btn-icon workspace-browser-nav-btn"
                 type="button"

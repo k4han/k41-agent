@@ -100,17 +100,28 @@ export function uniqueSorted(values: Array<string | null | undefined>): string[]
   return Array.from(new Set(values.filter(Boolean) as string[])).sort();
 }
 
+export const STATUS_CLASSES = {
+  RUNNING: "badge badge-info",
+  SUCCESS: "badge badge-success",
+  DANGER: "badge badge-danger",
+  WARNING: "badge badge-warning",
+  DEFAULT: "badge",
+} as const;
+
 export function statusBadgeClass(status: string): string {
-  if (["running", "completed", "success", "valid", "active"].includes(status)) {
-    return "badge badge-success";
+  if (["running", "in_progress"].includes(status)) {
+    return STATUS_CLASSES.RUNNING;
+  }
+  if (["completed", "success", "valid", "active"].includes(status)) {
+    return STATUS_CLASSES.SUCCESS;
   }
   if (["failed", "error", "invalid"].includes(status)) {
-    return "badge badge-danger";
+    return STATUS_CLASSES.DANGER;
   }
   if (["pending", "starting", "stopping", "paused", "cancelled"].includes(status)) {
-    return "badge badge-warning";
+    return STATUS_CLASSES.WARNING;
   }
-  return "badge";
+  return STATUS_CLASSES.DEFAULT;
 }
 
 export function truncateText(value: string, maxLength: number): string {

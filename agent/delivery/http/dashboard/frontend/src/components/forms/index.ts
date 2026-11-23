@@ -38,6 +38,14 @@ export {
   type FormProgressProps,
 } from "../FormValidation";
 
+// Button Primitive Component
+export {
+  Button,
+  type ButtonProps,
+  type ButtonVariant,
+  type ButtonSize,
+} from "../Button";
+
 // Form Loading Components
 export {
   FormLoading,

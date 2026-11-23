@@ -1,4 +1,4 @@
-import { AlertCircle, Check, ChevronRight, CirclePause, Loader2 } from "lucide-solid";
+import { CircleAlert, Check, ChevronRight, CirclePause, Loader2 } from "lucide-solid";
 import { createEffect, createMemo, createSignal, For, on, Show } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { useSearchParams } from "@solidjs/router";
@@ -44,7 +44,7 @@ export function SubagentDetails(props: { activity: SubagentActivity; itemId?: nu
           <Show when={activity().live} fallback={
             <Show when={failed()} fallback={
               <Show when={paused()} fallback={<Check size={14} />}><CirclePause size={14} /></Show>
-            }><AlertCircle size={14} /></Show>
+            }><CircleAlert size={14} /></Show>
           }><Loader2 size={14} class="spin-icon" /></Show>
         </span>
         <span class="subagent-summary-text">

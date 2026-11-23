@@ -1,5 +1,5 @@
 import { createMemo, For, JSX, Show } from "solid-js";
-import { AlertCircle, CheckCircle, Info, AlertTriangle } from "lucide-solid";
+import { CircleAlert, CheckCircle, Info, TriangleAlert } from "lucide-solid";
 
 import { classNames } from "@/lib/utils";
 
@@ -28,9 +28,9 @@ export function FormValidation(props: FormValidationProps) {
   const getIcon = (type: ValidationMessage["type"]) => {
     switch (type) {
       case "error":
-        return <AlertCircle size={14} />;
+        return <CircleAlert size={14} />;
       case "warning":
-        return <AlertTriangle size={14} />;
+        return <TriangleAlert size={14} />;
       case "info":
         return <Info size={14} />;
       case "success":
@@ -121,10 +121,10 @@ export function FormFieldError(props: FormFieldErrorProps) {
         props.class
       )}>
         <Show when={props.error}>
-          <AlertCircle size={12} class="form-field-error-icon" />
+          <CircleAlert size={12} class="form-field-error-icon" />
         </Show>
         <Show when={props.warning && !props.error}>
-          <AlertTriangle size={12} class="form-field-error-icon" />
+          <TriangleAlert size={12} class="form-field-error-icon" />
         </Show>
         <span class="form-field-error-text">
           {props.error || props.warning}
