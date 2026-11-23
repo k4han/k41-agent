@@ -62,10 +62,19 @@
   box-shadow: 0 0 5px var(--accent);
 }
 
+.conversation-search-dialog {
+  align-self: flex-start;
+  margin: clamp(32px, 10vh, 80px) auto auto auto;
+  height: min(520px, calc(100vh - 120px));
+}
+
 .conversation-search-body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .conversation-search-body > .input {
@@ -74,6 +83,8 @@
 
 .conversation-search-results {
   display: grid;
+  align-content: start;
+  flex: 1 1 auto;
   min-height: 0;
   gap: 2px;
   margin: 0;
@@ -98,6 +109,12 @@
 .conversation-search-project {
   color: var(--muted-2);
   font-size: var(--font-size-xs);
+}
+
+.conversation-search-body > [role="status"],
+.conversation-search-body > .muted {
+  margin: 0;
+  padding: 16px 4px;
 }
 
 .app-layout--resizing {

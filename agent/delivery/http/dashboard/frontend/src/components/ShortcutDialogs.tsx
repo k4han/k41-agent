@@ -72,7 +72,7 @@ export function CommandPalette(props: {
   };
 
   return (
-    <Dialog open={props.open} title="Command palette" bodyClass="shortcut-palette" onClose={props.onClose}>
+    <Dialog open={props.open} title="Command palette" class="shortcut-palette-dialog" bodyClass="shortcut-palette" onClose={props.onClose}>
       <input
         class="input"
         type="text"

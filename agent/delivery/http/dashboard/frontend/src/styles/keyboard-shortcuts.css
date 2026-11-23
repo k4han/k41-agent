@@ -137,6 +137,11 @@
   font: inherit;
 }
 
+.shortcut-palette-dialog {
+  align-self: flex-start;
+  margin: clamp(32px, 10vh, 80px) auto auto auto;
+}
+
 .shortcut-palette {
   display: grid;
   gap: 10px;
