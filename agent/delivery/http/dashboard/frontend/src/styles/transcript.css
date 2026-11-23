@@ -961,13 +961,13 @@
   overflow: auto;
 }
 
-/* User message action floating position fix: anchor to top-right of bubble to prevent overlapping following turns */
+/* User message action floating position: anchor to bottom-right of bubble */
 .message.user .message-actions {
   position: absolute;
   right: 8px;
-  top: -14px;
-  bottom: auto;
-  transform: translateY(-2px);
+  bottom: -14px;
+  top: auto;
+  transform: translateY(2px);
 }
 
 .message.user:hover .message-actions,

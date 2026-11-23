@@ -426,7 +426,7 @@
 .message.user {
   justify-content: flex-end;
   position: relative;
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
 
 .message-bubble {
@@ -484,8 +484,8 @@
 .message-actions {
   position: absolute;
   right: 6px;
-  top: -14px;
-  bottom: auto;
+  bottom: -14px;
+  top: auto;
   z-index: 2;
   display: inline-flex;
   align-items: center;
@@ -499,7 +499,7 @@
   opacity: 0;
   pointer-events: none;
   max-width: none;
-  transform: translateY(-2px);
+  transform: translateY(2px);
   transition: opacity 140ms ease, transform 140ms ease;
 }
 
@@ -874,15 +874,15 @@
   }
 
   .message.user {
-    margin-bottom: 14px;
+    margin-bottom: 18px;
     padding-bottom: 0;
   }
 
   .message.user .message-actions {
     opacity: 1;
     pointer-events: auto;
-    top: -12px;
-    bottom: auto;
+    bottom: -12px;
+    top: auto;
     right: 4px;
     transform: none;
   }
