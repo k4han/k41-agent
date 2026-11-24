@@ -486,21 +486,33 @@
   gap: 20px;
   padding-top: var(--settings-content-padding-top);
   padding-bottom: 96px; /* space for pending bar */
+  width: 100%;
+  max-width: 100%;
+  margin-inline: 0;
+  box-sizing: border-box;
 }
 
-.settings-content-narrow {
-  width: min(100%, 760px);
+.settings-page-heading,
+.settings-page-body {
+  width: 100%;
+  max-width: 980px;
+  margin-inline: auto;
+}
+
+.settings-content-narrow .settings-page-heading,
+.settings-content-narrow .settings-page-body {
   max-width: 760px;
 }
 
-.settings-content-form,
-.settings-content-medium {
-  width: min(100%, 980px);
+.settings-content-form .settings-page-heading,
+.settings-content-form .settings-page-body,
+.settings-content-medium .settings-page-heading,
+.settings-content-medium .settings-page-body {
   max-width: 980px;
 }
 
-.settings-content-wide {
-  width: min(100%, 1280px);
+.settings-content-wide .settings-page-heading,
+.settings-content-wide .settings-page-body {
   max-width: 1280px;
 }
 
@@ -508,9 +520,7 @@
 .settings-content .settings-page-body > form,
 .settings-content .settings-page-body > .stack > form,
 .settings-content .settings-page-body > .form-card,
-.settings-content .settings-page-body > .stack > .form-card,
-.settings-content-medium .settings-page-body,
-.settings-content-form .settings-page-body {
+.settings-content .settings-page-body > .stack > .form-card {
   max-width: 980px;
 }
 
@@ -547,7 +557,8 @@
 }
 
 @media (min-width: 981px) {
-  .settings-content-wide {
+  .settings-content-wide .settings-page-heading,
+  .settings-content-wide .settings-page-body {
     width: 100%;
     max-width: 1280px;
   }
