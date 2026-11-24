@@ -464,11 +464,30 @@ try {
   assert.equal(await railLabelsVisible(), true);
   assert.equal((await box(`${homeLink} svg`)).x, homeIconX);
   assert.deepEqual(await box('.main'), mainBox, 'opening the full sidebar leaves the page in place');
+
+  const unpinnedHandle = await js(`(() => { const r = document.querySelector('.sidebar-resize-handle').getBoundingClientRect(); return { x: r.x + r.width / 2, y: 100 }; })()`);
+  assert.equal(await js(`document.elementFromPoint(${unpinnedHandle.x}, ${unpinnedHandle.y})?.className`), 'sidebar-resize-handle', 'resize handle is exposed in unpinned temporary navigation');
+  await call('Input.dispatchMouseEvent', { type: 'mouseMoved', ...unpinnedHandle });
+  await call('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, ...unpinnedHandle });
+  assert.equal(await js('document.body.classList.contains("sidebar-resizing")'), true, 'pointer press starts resizing while unpinned');
+  await call('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'left', buttons: 1, x: 360, y: 100 });
+  await until(async () => await width() === 360, 'pointer resize in unpinned navigation');
+  assert.equal(await width(), 360);
+  assert.equal(await js('localStorage.getItem("k41-dashboard-sidebar-width")'), '360', 'unpinned resize persists to storage');
+  await call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, x: 360, y: 100 });
+  assert.equal(await js('document.body.classList.contains("sidebar-resizing")'), false);
+  assert.equal(await projectsVisible(), true, 'sidebar remains open after resize');
+  await key('ArrowLeft');
+  await until(async () => await width() === 344, 'keyboard resize in unpinned navigation');
+  await js(`document.querySelector('.sidebar-resize-handle').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await until(async () => await width() === 290, 'reset navigation width in unpinned navigation');
+
   await move({ x: 160, y: 400 });
   await delay(200);
   assert.equal(await projectsVisible(), true, 'the sidebar stays open when the pointer enters Projects');
   await move(outside);
   await until(async () => !(await projectsVisible()), 'leaving Projects closes the temporary sidebar');
+  assert.equal(await js('!!document.querySelector(".sidebar-resize-handle")'), false, 'resize handle is hidden when temporary navigation closes');
   await move(await center(homeLink));
   await until(projectsVisible, 'hovering an icon opens the whole sidebar');
   assert.deepEqual(await box('.main'), mainBox, 'temporary navigation overlays the current page');

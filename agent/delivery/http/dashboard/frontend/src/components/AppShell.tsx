@@ -144,14 +144,14 @@ export function AppShell(props: {
     handleNavClick,
     handleKeydown: handleDrawerKeydown,
   } = useMobileDrawer({ sidebarId: "app-shell-sidebar" });
-  const sidebar = useSidebarResize(() => !collapsed() && !isMobileViewport());
+  const projectsVisible = () => isMobileViewport() ? mobileDrawerOpen() : !collapsed() || temporaryNavigationOpen();
+  const sidebar = useSidebarResize(() => !isMobileViewport() && projectsVisible());
   const chatViewport = useVisualViewport(() => Boolean(props.noHeader) && isMobileViewport());
   const hasHoverPointer = createMediaQuery("(any-hover: hover)");
   const activeSection = createMemo<NavigationSection>(() => {
     const segment = location.pathname.split("/", 2)[1];
     return segment === "repositories" || segment === "scheduler" ? segment : "home";
   });
-  const projectsVisible = () => isMobileViewport() ? mobileDrawerOpen() : !collapsed() || temporaryNavigationOpen();
   const availableUpdateTitle = () => {
     const info = versionInfo();
     return info?.has_update ? `Update available: v${info.latest_version}` : undefined;
@@ -357,7 +357,8 @@ export function AppShell(props: {
     if (!temporaryNavigationOpen()) return;
     navigationCloseTimer = window.setTimeout(() => {
       if (pointerInNavigation || hasNavigationFocus() || menuOpen()
-        || historyMenuThreadId() || projectMenuId() || editingHistoryThreadId()) return;
+        || historyMenuThreadId() || projectMenuId() || editingHistoryThreadId()
+        || sidebar.resizing()) return;
       dismissTemporaryNavigation();
     }, NAVIGATION_CLOSE_DELAY_MS);
   };
@@ -399,11 +400,22 @@ export function AppShell(props: {
 
   const handleOutsidePointerDown = (event: PointerEvent) => {
     if (!temporaryNavigationOpen() || editingHistoryThreadId() || !(event.target instanceof Element)) return;
+    if (sidebar.resizing()) return;
     if (sidebarRef?.contains(event.target) || historyMenuRef?.contains(event.target)) return;
     const projectMenu = projectMenuId();
     if (projectMenu && document.getElementById(projectMenu)?.contains(event.target)) return;
     dismissTemporaryNavigation();
   };
+
+  createEffect(on(sidebar.resizing, (isResizing, wasResizing) => {
+    if (wasResizing && !isResizing && temporaryNavigationOpen()) {
+      if (!pointerInNavigation && !sidebarRef?.matches(":hover")) {
+        scheduleNavigationClose();
+      } else {
+        pointerInNavigation = true;
+      }
+    }
+  }));
 
   const handleSidebarClick = (event: MouseEvent) => {
     if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
@@ -1228,7 +1240,7 @@ export function AppShell(props: {
             </A>
           </div>
         </div>
-        <Show when={!collapsed() && !isMobileViewport()}>
+        <Show when={!isMobileViewport() && (projectsVisible() || sidebar.resizing())}>
           <div
             class="sidebar-resize-handle"
             role="separator"
