@@ -229,11 +229,14 @@ export function groupThreadsByWorkspace(threads: ThreadSummary[]): ThreadWorkspa
 export function toThreadTranscript(
   messages: ThreadMessage[],
   threadId?: string | null,
+  messageOffset = 0,
 ): ThreadTranscriptItem[] {
   const items: ThreadTranscriptItem[] = [];
   const wakeups = new Set<string>();
 
-  messages.forEach((msg, messageIndex) => {
+  messages.forEach((msg, index) => {
+    // Keep fallback keys stable when older pages are prepended.
+    const messageIndex = messageOffset + index;
     if (msg.source === "async_subagent") {
       const wakeup = msg.async_wakeup;
       if (wakeup?.wakeup_id && !wakeups.has(wakeup.wakeup_id)) {

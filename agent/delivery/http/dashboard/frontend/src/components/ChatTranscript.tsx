@@ -1,6 +1,6 @@
 import { ArrowDown, CirclePause, Loader2, Sparkles } from "lucide-solid";
 import { createVirtualizer, defaultRangeExtractor, type Range, type VirtualItem } from "@tanstack/solid-virtual";
-import { createEffect, createMemo, For, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, For, on, onCleanup, Show } from "solid-js";
 
 import { TranscriptActivityGroup } from "@/components/TranscriptActivityGroup";
 import { StatusIndicator } from "@/components/StatusIndicator";
@@ -13,6 +13,8 @@ import { useShowThinking } from "@/lib/useShowThinking";
 import { useStreamingTranscriptItem } from "@/lib/useStreamingTranscriptItem";
 import { useTranscriptActivityView } from "@/lib/useTranscriptActivityView";
 import type { AgentCard } from "@/types";
+
+const HISTORY_START_THRESHOLD = 1;
 
 export function ChatWelcomeHero() {
   return (
@@ -34,6 +36,8 @@ export interface ChatTranscriptProps {
   setTranscriptRef: (el: HTMLDivElement) => void;
   onScroll: () => void;
   onUserScroll: (direction?: number) => void;
+  onLoadEarlierMessages?: (preservePosition: (apply: () => void) => void) => void;
+  loadingEarlierMessages?: boolean;
   items: ChatTranscriptItem[];
   filteredItems: ChatTranscriptItem[];
   threadLoading: boolean;
@@ -84,6 +88,10 @@ export interface ChatTranscriptProps {
 export function ChatTranscript(props: ChatTranscriptProps) {
   let previousTouchY: number | undefined;
   let transcriptElement: HTMLDivElement | undefined;
+  let previousScrollTop = 0;
+  createEffect(on([() => props.currentThreadId, () => props.threadLoading], () => {
+    previousScrollTop = 0;
+  }));
   const streamActive = () => props.streaming || props.backgroundLive;
   const isStreamingItem = useStreamingTranscriptItem(
     () => props.items,
@@ -147,6 +155,47 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   const showAssistantActions = (itemId: number) =>
     !streamActive() && (completedAnswerIds().has(itemId) || answerItemId() === itemId);
 
+  const preserveHistoryPosition = (apply: () => void) => {
+    const scrollTop = Math.max(0, transcriptElement?.scrollTop ?? 0);
+    const anchor = virtualizer.getVirtualItemForOffset(scrollTop);
+    const view = activityView();
+    const entry = anchor && view.entries.get(view.keys[anchor.index]);
+    const offset = anchor ? scrollTop - anchor.start : 0;
+    apply();
+    if (!entry || !transcriptElement?.isConnected) return;
+
+    const next = activityView();
+    let index = next.keys.indexOf(entry.key);
+    if (index < 0 && entry.kind === "activity") {
+      // The older page may extend this group and change its leading item's key.
+      const itemIds = new Set(entry.items.map(item => item.id));
+      index = next.keys.findIndex(key => {
+        const candidate = next.entries.get(key);
+        return candidate?.kind === "activity" && candidate.items.some(item => itemIds.has(item.id));
+      });
+    }
+    // The virtualizer has rebuilt its measurements for the prepended rows.
+    const start = virtualizer.measurementsCache[index]?.start;
+    if (start !== undefined) virtualizer.scrollToOffset(start + offset);
+  };
+
+  const handleScroll = (event: Event & { currentTarget: HTMLDivElement }) => {
+    const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+    const reachedStart = previousScrollTop > HISTORY_START_THRESHOLD && scrollTop <= HISTORY_START_THRESHOLD
+      && scrollHeight - clientHeight > HISTORY_START_THRESHOLD;
+    previousScrollTop = scrollTop;
+    props.onScroll();
+    if (reachedStart) props.onLoadEarlierMessages?.(preserveHistoryPosition);
+  };
+
+  const handleUserScroll = (direction: number) => {
+    props.onUserScroll(direction);
+    // At the top, an upward gesture can leave scrollTop unchanged.
+    if (direction < 0 && transcriptElement && transcriptElement.scrollTop <= HISTORY_START_THRESHOLD) {
+      props.onLoadEarlierMessages?.(preserveHistoryPosition);
+    }
+  };
+
   return (
     <div class="transcript-container">
       <div
@@ -155,15 +204,15 @@ export function ChatTranscript(props: ChatTranscriptProps) {
           transcriptElement = element;
           props.setTranscriptRef(element);
         }}
-        onScroll={props.onScroll}
+        onScroll={handleScroll}
         onWheel={(event) => {
-          if (!event.ctrlKey) props.onUserScroll(event.deltaY);
+          if (!event.ctrlKey) handleUserScroll(event.deltaY);
         }}
         onTouchStart={(event) => { previousTouchY = event.touches[0]?.clientY; }}
         onTouchMove={(event) => {
           const nextY = event.touches[0]?.clientY;
           if (previousTouchY !== undefined && nextY !== undefined) {
-            props.onUserScroll(previousTouchY - nextY);
+            handleUserScroll(previousTouchY - nextY);
           }
           previousTouchY = nextY;
         }}
@@ -181,7 +230,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
           ) {
             const scrollingUp = ["ArrowUp", "PageUp", "Home"].includes(event.key)
               || (event.key === " " && event.shiftKey);
-            props.onUserScroll(scrollingUp ? -1 : 1);
+            handleUserScroll(scrollingUp ? -1 : 1);
           }
         }}
         tabIndex={0}
@@ -329,6 +378,12 @@ export function ChatTranscript(props: ChatTranscriptProps) {
           </Show>
         </Show>
       </div>
+      <Show when={props.loadingEarlierMessages}>
+        <div class="transcript-history-loading" role="status" aria-live="polite">
+          <Loader2 size={16} class="spin-icon" aria-hidden="true" />
+          <span class="sr-only">Loading earlier messages...</span>
+        </div>
+      </Show>
       <Show when={props.items.length > 0 && props.showScrollToBottom}>
         <button
           class="scroll-to-bottom-btn"

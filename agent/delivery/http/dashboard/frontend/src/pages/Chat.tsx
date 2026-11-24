@@ -219,7 +219,8 @@ export function ChatPage() {
   const [threadData, setThreadData] = createSignal<ThreadMessagesPayload>();
   const [threadError, setThreadError] = createSignal("");
   const [threadLoading, setThreadLoading] = createSignal(false);
-  const [earlierMessagesLoading, setEarlierMessagesLoading] = createSignal(false);
+  const [earlierMessagesLoad, setEarlierMessagesLoad] = createSignal<"scroll" | "regenerate" | null>(null);
+  const earlierMessagesLoading = () => earlierMessagesLoad() !== null;
   const [currentThreadId, setCurrentThreadId] = createSignal("");
   const asyncTasks = useAsyncTasks(currentThreadId);
   const [browserHandoffThreads, setBrowserHandoffThreads] = createSignal(new Set<string>());
@@ -817,7 +818,7 @@ export function ChatPage() {
     if (showEarlier || !persistedStreams.has(payload.thread_id)) {
       updateBrowserHandoff(Boolean(payload.pending_browser_handoffs?.length), payload.thread_id);
       const historyItems = preserveTranscriptIds([
-        ...toThreadTranscript(payload.messages, payload.thread_id),
+        ...toThreadTranscript(payload.messages, payload.thread_id, payload.next_before ?? 0),
         ...(payload.pending_requests || []).map((value) => {
           const request = normalizeUserInputRequest(value);
           return createTranscriptUserInputRequest({ toolCallId: request.tool_call_id, interruptId: request.interrupt_id,
@@ -1033,7 +1034,7 @@ export function ChatPage() {
     threadLoadController?.abort();
     const requestController = new AbortController();
     threadLoadController = requestController;
-    setEarlierMessagesLoading(false);
+    setEarlierMessagesLoad(null);
     setCurrentThreadId(threadId);
     if (threadData()?.thread_id !== threadId) setThreadData(undefined);
     setThreadError("");
@@ -1085,7 +1086,7 @@ export function ChatPage() {
     threadLoadController?.abort();
     const requestController = new AbortController();
     threadLoadController = requestController;
-    setEarlierMessagesLoading(false);
+    setEarlierMessagesLoad(null);
     try {
       const payload = await apiFetch<ThreadMessagesPayload>(
         threadApiPath(threadId, checkpointId),
@@ -1102,28 +1103,25 @@ export function ChatPage() {
     }
   };
 
-  const loadEarlierMessages = async () => {
+  const loadEarlierMessages = async (preservePosition: (apply: () => void) => void) => {
     const current = threadData();
-    if (!current?.has_more || conversationBusy() || compacting()) return;
+    if (!current?.has_more || current.thread_id !== currentThreadId() || conversationBusy() || compacting()) return;
     const requestId = threadLoadRequestId;
     const requestController = threadLoadController;
-    setEarlierMessagesLoading(true);
+    setEarlierMessagesLoad("scroll");
     try {
       const page = await fetchEarlierThreadPage(current, requestController?.signal);
       if (isUnmounting || requestId !== threadLoadRequestId || current !== threadData() || stopActive() || compacting()) return;
-      applyThreadPayload({
+      preservePosition(() => applyThreadPayload({
         ...current, messages: [...page.messages, ...current.messages],
         has_more: page.has_more, next_before: page.next_before,
-      }, true, true);
-      window.requestAnimationFrame(() => {
-        if (!isUnmounting && requestId === threadLoadRequestId && transcriptRef) transcriptRef.scrollTop = 0;
-      });
+      }, true, true));
     } catch (err) {
       if (!isUnmounting && requestId === threadLoadRequestId && !requestController?.signal.aborted) {
         showToast(err instanceof Error ? err.message : "Failed to load earlier messages", "error");
       }
     } finally {
-      if (!isUnmounting && requestId === threadLoadRequestId) setEarlierMessagesLoading(false);
+      if (!isUnmounting && requestId === threadLoadRequestId) setEarlierMessagesLoad(null);
     }
   };
 
@@ -1201,7 +1199,7 @@ export function ChatPage() {
       restoreSelection();
       scroll.clearTurnAnchor();
       setThreadLoading(false);
-      setEarlierMessagesLoading(false);
+      setEarlierMessagesLoad(null);
       if (threadId) void loadThread(threadId);
       else setItems([]);
     },
@@ -2053,7 +2051,7 @@ export function ChatPage() {
     if (!prompt && current?.has_more) {
       const requestId = threadLoadRequestId;
       const requestController = threadLoadController;
-      setEarlierMessagesLoading(true);
+      setEarlierMessagesLoad("regenerate");
       try {
         const expanded = await fetchThreadForRegeneration(current, payload?.messageIndex, requestController?.signal);
         if (isUnmounting || requestId !== threadLoadRequestId || current !== threadData() || stopActive() || compacting()) return;
@@ -2065,7 +2063,7 @@ export function ChatPage() {
         }
         return;
       } finally {
-        if (!isUnmounting && requestId === threadLoadRequestId) setEarlierMessagesLoading(false);
+        if (!isUnmounting && requestId === threadLoadRequestId) setEarlierMessagesLoad(null);
       }
     }
     if (prompt?.type === "message" && prompt.messageIndex !== undefined && prompt.sourceCheckpointId) {
@@ -2520,14 +2518,6 @@ export function ChatPage() {
                   </Show>
                 </div>
               </Show>
-              <Show when={threadData()?.has_more && threadData()?.thread_id === currentThreadId()}>
-                <div class="row-wrap chat-column chat-earlier-messages-wrap">
-                  <button class="btn" type="button" disabled={conversationBusy() || compacting()}
-                    onClick={() => void loadEarlierMessages()}>
-                    {earlierMessagesLoading() ? "Loading earlier messages..." : "Load earlier messages"}
-                  </button>
-                </div>
-              </Show>
               <Show when={asyncTasks.error()}>
                 <div class="thread-banner thread-banner-error chat-column" role="alert">{asyncTasks.error()}
                   <button type="button" onClick={() => void asyncTasks.refresh()}>Retry</button>
@@ -2545,6 +2535,8 @@ export function ChatPage() {
                 }}
                 onScroll={handleTranscriptScroll}
                 onUserScroll={scroll.handleUserScroll}
+                onLoadEarlierMessages={preservePosition => void loadEarlierMessages(preservePosition)}
+                loadingEarlierMessages={earlierMessagesLoad() === "scroll"}
                 items={items()}
                 filteredItems={filteredItems()}
                 threadLoading={threadLoading()}
