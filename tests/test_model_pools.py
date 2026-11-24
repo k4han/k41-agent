@@ -504,6 +504,71 @@ async def test_real_langgraph_stream_preserves_output_boundary_and_actual_usage(
         _get_cached_model.cache_clear()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("thought", [False, True], ids=["text", "thinking"])
+@pytest.mark.parametrize("protocol", [False, True], ids=["legacy-stream", "protocol-stream"])
+async def test_gemini_503_after_signature_only_chunk_uses_next_pool_member(pool_setup, monkeypatch, thought, protocol):
+    from google.genai.errors import ServerError
+    from google.genai.models import AsyncModels
+    from google.genai.types import Candidate, Content, GenerateContentResponse, Part
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langgraph.graph import END, START, MessagesState, StateGraph
+
+    from agent.modules.agent_runtime.protocol import stream_graph
+    from agent.modules.providers.google.chat_model import GoogleChatModel
+
+    async def generate_content_stream(self, *, model, **kwargs):
+        async def responses():
+            yield GenerateContentResponse(
+                model_version=model,
+                candidates=[Candidate(content=Content(
+                    role="model", parts=[Part(text="", thought=thought, thought_signature=b"signature")],
+                ))],
+            )
+            raise ServerError(503, {"error": {
+                "code": 503, "status": "UNAVAILABLE", "message": "This model is currently experiencing high demand.",
+            }})
+
+        return responses()
+
+    monkeypatch.setattr(AsyncModels, "generate_content_stream", generate_content_stream)
+    primary = GoogleChatModel(model="gemini-3.5-flash", google_api_key="test", max_retries=1, cache=False)
+    pool_setup.source.values[POOL_PREFIX + "small"]["members"].reverse()
+    calls = []
+
+    async def node(state, config):
+        async def attempt(candidate):
+            calls.append(candidate.provider_name)
+            if candidate.provider_name == "b":
+                message = await primary.ainvoke(state["messages"], config=pool_call_config(config))
+            else:
+                message = AIMessage(content="Fallback succeeded")
+            return {"messages": [message]}
+
+        return await pool_setup.service.execute("small", attempt)
+
+    builder = StateGraph(MessagesState)
+    builder.add_node("llm", node)
+    builder.add_edge(START, "llm")
+    builder.add_edge("llm", END)
+    graph = builder.compile()
+    state = {"messages": [HumanMessage(content="hi")]}
+    modes = ["messages", "values"]
+    events = (
+        stream_graph(graph, state, config={}, stream_mode=modes)
+        if protocol else graph.astream(state, stream_mode=modes)
+    )
+    responses = []
+    async for kind, data in events:
+        if kind == "values":
+            responses.extend(message.content for message in data["messages"] if isinstance(message, AIMessage))
+
+    assert responses == ["Fallback succeeded"]
+    assert calls == ["b", "b", "b", "a"]
+    assert pool_setup.sleeps == [1, 2]
+    assert pool_setup.service.status("small")[0]["error_code"] == "upstream"
+
+
 def test_pool_configuration_persists_in_existing_runtime_settings(tmp_path):
     from agent.shared.config.database_source import DatabaseConfigSource
     from agent.shared.infrastructure.db.runtime_settings import RuntimeSetting

@@ -107,6 +107,25 @@ class MemberState:
     generation: int = 0
 
 
+def _has_stream_output(content: str | list[str | dict[str, Any]] | None) -> bool:
+    if not isinstance(content, list):
+        return bool(content)
+    for block in content:
+        if isinstance(block, dict):
+            # A text or reasoning block may carry only a signature or other metadata.
+            block_type = block.get("type")
+            if block_type == "text":
+                block = block.get("text")
+            elif block_type in ("thinking", "reasoning", "reasoning_content"):
+                block = (
+                    block.get("thinking") or block.get("reasoning") or block.get("reasoning_content")
+                    or block.get("text") or block.get("content") or block.get("summary")
+                )
+        if block:
+            return True
+    return False
+
+
 class OutputGuard(BaseCallbackHandler):
     """Observe actual model output, including streams started by LangGraph."""
 
@@ -115,11 +134,16 @@ class OutputGuard(BaseCallbackHandler):
     def __init__(self) -> None:
         self.started = False
 
-    def on_llm_new_token(self, token: str, *, chunk: Any = None, **kwargs: Any) -> None:
+    def on_llm_new_token(self, token: str | list[str | dict[str, Any]], *, chunk: Any = None, **kwargs: Any) -> None:
+        if self.started:
+            return
         message = getattr(chunk, "message", None)
-        if token or getattr(message, "content", None) or getattr(message, "tool_call_chunks", None):
-            self.started = True
-        if getattr(message, "additional_kwargs", {}).get("reasoning_content"):
+        if (
+            _has_stream_output(token)
+            or _has_stream_output(getattr(message, "content", None))
+            or getattr(message, "tool_call_chunks", None)
+            or getattr(message, "additional_kwargs", {}).get("reasoning_content")
+        ):
             self.started = True
 
 
