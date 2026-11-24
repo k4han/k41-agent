@@ -2,6 +2,7 @@ import logging
 import asyncio
 import pickle
 import uuid
+from contextlib import aclosing
 from html import escape as escape_html
 from typing import Any
 
@@ -10,7 +11,8 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from agent.modules.agent_runtime import SessionManager, run_agent_full
+from agent.modules.agent_runtime import SessionManager, get_chat_stream_manager
+from agent.modules.agent_runtime.protocol import application_event, run_agent_protocol_stream
 from agent.modules.notifications import send_notification as _send_notification
 from agent.modules.workspaces import WorkspaceBinding
 from agent.shared.infrastructure.db.engine import (
@@ -173,6 +175,36 @@ async def _record_run_finish(run_id: str, **kwargs: Any) -> None:
         logger.warning("Could not record scheduler run result: %s", exc)
 
 
+async def _run_scheduled_agent(*, thread_id: str, **params: Any) -> str:
+    """Publish live events for a direct run and return its notification text."""
+    response = ""
+    failure: Exception | None = None
+
+    async def stream(**stream_params):
+        nonlocal response, failure
+        try:
+            async with aclosing(run_agent_protocol_stream(**stream_params)) as events:
+                async for event in events:
+                    projected = application_event(event)
+                    if projected and projected.get("type") == "final":
+                        response = str(projected.get("content") or "")
+                    yield event
+        except Exception as exc:
+            failure = exc
+            raise
+
+    session = await get_chat_stream_manager().start_if_idle(
+        thread_id, {"thread_id": thread_id, **params}, run_fn=stream,
+    )
+    if session is None:
+        raise RuntimeError("The scheduled conversation is already running.")
+    await session.task
+    # Run history needs the same failure that the stream manager delivers to subscribers.
+    if failure is not None:
+        raise failure
+    return response
+
+
 async def execute_scheduled_task(
     platform: str,
     user_id: str,
@@ -239,7 +271,7 @@ async def execute_scheduled_task(
 
         try:
             with background_scope(run_id, "Scheduler", background_thread_id):
-                response_text = await run_agent_full(
+                response_text = await _run_scheduled_agent(
                     user_input=task,
                     thread_id=background_thread_id,
                     agent_name=AGENT_NAME,

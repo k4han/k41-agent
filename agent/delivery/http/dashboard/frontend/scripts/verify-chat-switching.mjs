@@ -61,6 +61,8 @@ let holdHistory = false;
 let workspaceResolution;
 let holdSessions = false;
 const delayedSessions = [];
+let scheduledSession;
+let sessionEvents;
 const acpProbes = [];
 const acpStatus = { display_name: 'OpenCode', auth: { signed_in: true, config_options: [
   { id: 'model', name: 'Model', category: 'model', current_value: 'model-b',
@@ -125,7 +127,13 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === '/dashboard-api/sessions/events') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-    res.write('event: snapshot\ndata: {"sessions":[]}\n\n');
+    sessionEvents = res;
+    res.write(`event: snapshot\ndata: ${JSON.stringify({ sessions: scheduledSession ? [scheduledSession] : [] })}\n\n`);
+    return;
+  }
+  if (url.pathname === '/scheduler/runs') {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ runs: [], total: 0 }));
     return;
   }
   if (url.pathname === '/dashboard-api/background-task-events') {
@@ -157,7 +165,9 @@ const server = http.createServer(async (req, res) => {
     res.flushHeaders();
     protocolFixture(res, payload.thread_id);
     responses.set(payload.thread_id || 'pending', res);
-    if (payload.thread_id) res.write(JSON.stringify({ type: 'message', content: `${payload.thread_id} live response` }) + '\n');
+    if (payload.thread_id && payload.thread_id !== 'scheduled') {
+      res.write(JSON.stringify({ type: 'message', content: `${payload.thread_id} live response` }) + '\n');
+    }
     return;
   }
   if (url.pathname === '/dashboard-api/workspace/resolve') {
@@ -173,6 +183,10 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('X-CSRF-Token', 'switching-test-csrf');
     if (holdSessions && url.pathname === '/dashboard-api/sessions') {
       delayedSessions.push(res);
+      return;
+    }
+    if (url.pathname === '/dashboard-api/sessions') {
+      res.end(JSON.stringify({ sessions: scheduledSession ? [scheduledSession] : [] }));
       return;
     }
     const thread = history[url.pathname.slice('/dashboard-api/chat-history/'.length)];
@@ -881,8 +895,39 @@ try {
   await reload();
   assert.equal(await deliveredCount(), 1, 'checkpoint reload contains the delivered message once');
 
+  history.scheduled = { ...history.first, thread_id: 'scheduled', kind: 'scheduled', platform: 'bg',
+    title: 'Scheduled conversation', messages: [{ id: 'scheduled-task', role: 'user', content: 'Run a scheduled task' }] };
+  fixtures['/dashboard-api/scheduler'] = { jobs: [], identities: [], scheduler_timezone: 'UTC' };
+  scheduledSession = { thread_id: 'scheduled', session_id: 'scheduled-session', platform: 'bg',
+    agent_name: 'default', started_at: Date.now() / 1000, current_step: 'thinking', tools_called: [], elapsed_display: '1s' };
+  await navigate('/scheduler');
+  sessionEvents.write(`event: session_started\ndata: ${JSON.stringify(scheduledSession)}\n\n`);
+  const openScheduled = `document.querySelector('.scheduler-live-panel a[href="/c/scheduled"]')`;
+  await until(() => js(`!!${openScheduled}`), 'scheduler offers to open the active conversation');
+  await js(`${openScheduled}.click()`);
+  const scheduledTranscript = text => js(`document.querySelector('.transcript')?.textContent.includes(${JSON.stringify(text)})`);
+  await until(() => responses.has('scheduled'), 'opening the scheduled conversation reconnects to its stream');
+  await until(() => js('document.querySelector(".chat-thread-badges .badge-warning")?.textContent === "running"'), 'scheduled run shows activity before the first token');
+  const scheduledResponse = responses.get('scheduled');
+  scheduledResponse.write(JSON.stringify({ type: 'message', content: 'Scheduled result' }) + '\n');
+  await until(() => scheduledTranscript('Scheduled result'), 'scheduled stream renders before execution finishes');
+  scheduledResponse.write(JSON.stringify({ type: 'message', content: ' continues' }) + '\n');
+  await until(() => scheduledTranscript('Scheduled result continues'), 'scheduled stream renders further chunks without closing');
+  assert.equal(scheduledResponse.writableEnded, false);
+  await typePrompt('Next message draft');
+  assert.equal(await js(`!!document.querySelector('button[aria-label="Queue message"]')`), false);
+  const stoppedSession = scheduledSession;
+  scheduledSession = undefined;
+  history.scheduled.messages.push({ id: 'scheduled-answer', role: 'assistant', content: 'Scheduled result continues' });
+  scheduledResponse.end();
+  responses.delete('scheduled');
+  sessionEvents.write(`event: session_stopped\ndata: ${JSON.stringify(stoppedSession)}\n\n`);
+  await until(() => js('!document.querySelector(".chat-composer-stop")'), 'scheduled run stops after completing');
+  assert.equal(await scheduledTranscript('Scheduled result continues'), true);
+  assert.equal(reconnects.filter(request => request.thread_id === 'scheduled').length, 1);
+
   assert.equal(exceptions.length, 0, JSON.stringify(exceptions));
-  console.log('PASS: chat switching, model preferences, branching, OpenCode options, and message queue actions through a reload.');
+  console.log('PASS: chat switching, model preferences, branching, OpenCode options, message queue actions through a reload, and live scheduler output.');
 } finally {
   pendingQueueResponse?.end();
   for (const response of responses.values()) response.end();

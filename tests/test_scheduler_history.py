@@ -36,12 +36,13 @@ async def history_db(tmp_path, request, monkeypatch):
 
 def _patch_execution(monkeypatch, *, response: str | None = "done", error: Exception | None = None):
     import agent.modules.conversations as conversations_module
+    from agent.modules.agent_runtime.protocol import protocol_event
     from agent.modules.scheduler import service as scheduler_service
 
-    async def fake_run_agent_full(**kwargs):
+    async def fake_stream(**kwargs):
         if error is not None:
             raise error
-        return response
+        yield protocol_event("custom:k41", {"type": "final", "content": response, "projection": "ui"})
 
     async def fake_noop(*args, **kwargs):
         return None
@@ -49,7 +50,7 @@ def _patch_execution(monkeypatch, *, response: str | None = "done", error: Excep
     async def fake_send_notification(*args, **kwargs):
         return True
 
-    monkeypatch.setattr(scheduler_service, "run_agent_full", fake_run_agent_full)
+    monkeypatch.setattr(scheduler_service, "run_agent_protocol_stream", fake_stream)
     monkeypatch.setattr(scheduler_service, "_send_notification", fake_send_notification)
     monkeypatch.setattr(
         scheduler_service,
@@ -108,7 +109,7 @@ async def test_repeated_runs_have_private_workspaces_and_do_not_touch_user_threa
         (root / "result.txt").write_text(str(len(calls)), encoding="utf-8")
         return f"result-{len(calls)}"
 
-    monkeypatch.setattr(service, "run_agent_full", run)
+    monkeypatch.setattr(service, "_run_scheduled_agent", run)
     for source in ("schedule", "manual"):
         await service.execute_scheduled_task("telegram", "123", "same task", scheduler_job_id="job", trigger_source=source)
     runs = (await list_runs(job_id="job"))["runs"]
@@ -215,7 +216,7 @@ async def test_unavailable_project_fails_without_fallback(scheduled_projects, mo
         await service.resolve_scheduled_project(project_id)
     _patch_execution(monkeypatch)
     run = AsyncMock()
-    monkeypatch.setattr(service, "run_agent_full", run)
+    monkeypatch.setattr(service, "_run_scheduled_agent", run)
     await service.execute_scheduled_task("telegram", "123", "task", project_id=project_id)
     run.assert_not_awaited()
     record = (await list_runs())["runs"][0]
@@ -259,7 +260,7 @@ async def test_workspace_preparation_failure_is_recorded(history_db, monkeypatch
     _patch_execution(monkeypatch)
     monkeypatch.setattr(workspaces, operation, AsyncMock(side_effect=OSError("storage offline")))
     run = AsyncMock()
-    monkeypatch.setattr(service, "run_agent_full", run)
+    monkeypatch.setattr(service, "_run_scheduled_agent", run)
     await service.execute_scheduled_task("telegram", "123", "task")
     run.assert_not_awaited()
     record = (await list_runs())["runs"][0]

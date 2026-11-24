@@ -390,7 +390,7 @@ async def test_execute_scheduled_task_uses_scheduled_thread_for_usage(monkeypatc
     captured: dict = {"upserts": []}
     workspace = workspaces_module.WorkspaceRef(locator=str(tmp_path), metadata={"no_workspace": True})
 
-    async def fake_run_agent_full(**kwargs):
+    async def fake_run(**kwargs):
         captured["run"] = kwargs
         return "done"
 
@@ -401,7 +401,7 @@ async def test_execute_scheduled_task_uses_scheduled_thread_for_usage(monkeypatc
         captured["notification"] = {"args": args, "kwargs": kwargs}
         return True
 
-    monkeypatch.setattr(scheduler_service, "run_agent_full", fake_run_agent_full)
+    monkeypatch.setattr(scheduler_service, "_run_scheduled_agent", fake_run)
     monkeypatch.setattr(scheduler_service, "_record_run_start", AsyncMock(return_value=False))
     create = AsyncMock(return_value=workspace)
     remember = AsyncMock()
@@ -446,11 +446,11 @@ async def _run_scheduled_task(monkeypatch, tmp_path, platform: str, **task_kwarg
     captured: dict = {}
     workspace = workspaces_module.WorkspaceRef(locator=str(tmp_path), metadata={"no_workspace": True})
 
-    async def fake_run_agent_full(**kwargs):
+    async def fake_run(**kwargs):
         captured.update(kwargs)
         return "done"
 
-    monkeypatch.setattr(scheduler_service, "run_agent_full", fake_run_agent_full)
+    monkeypatch.setattr(scheduler_service, "_run_scheduled_agent", fake_run)
     monkeypatch.setattr(scheduler_service, "_record_run_start", AsyncMock(return_value=False))
     monkeypatch.setattr(scheduler_service, "_send_notification", AsyncMock(return_value=True))
     monkeypatch.setattr(workspaces_module, "create_no_workspace", AsyncMock(return_value=workspace))

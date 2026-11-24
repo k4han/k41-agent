@@ -482,7 +482,7 @@ async def test_scheduled_run_retains_browser_unless_cancelled(browser, monkeypat
     finish = AsyncMock(side_effect=assert_retained)
     notify = AsyncMock(side_effect=assert_retained)
     workspace = workspaces.WorkspaceRef(locator=str(browser.root.parent), metadata={"no_workspace": True})
-    monkeypatch.setattr(scheduler, "run_agent_full", run)
+    monkeypatch.setattr(scheduler, "_run_scheduled_agent", run)
     monkeypatch.setattr(scheduler, "_record_run_start", AsyncMock(return_value=True))
     monkeypatch.setattr(scheduler, "_record_run_finish", finish)
     monkeypatch.setattr(scheduler, "_send_notification", notify)

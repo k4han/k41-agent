@@ -131,6 +131,78 @@ async def test_scheduler_thread_loads_while_run_is_active(scheduled, monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("managed", [False, True], ids=["direct", "queued"])
+async def test_scheduler_reconnect_streams_while_model_is_running(scheduled, monkeypatch, tmp_path, managed):
+    from contextlib import aclosing
+
+    from fastapi import Request
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+    from agent.delivery.http.api.events_v2 import reconnect
+    from agent.delivery.http.api.schemas import ReconnectRequest
+    from agent.modules.agent_runtime.protocol import application_event
+    from agent.modules.scheduler.service import execute_scheduled_task
+
+    f = scheduled
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class PausingModel(FakeListChatModel):
+        async def _astream(self, messages, **kwargs):
+            async for chunk in super()._astream(messages, **kwargs):
+                yield chunk
+                started.set()
+                await release.wait()
+
+    model = PausingModel(responses=["Ready"])
+
+    async def work(state):
+        return {"messages": [await model.ainvoke(state["messages"])]}
+
+    builder = StateGraph(BaseState, context_schema=WorkflowContext)
+    builder.add_node("work", work)
+    builder.add_edge(START, "work")
+    builder.add_edge("work", END)
+    f.env.current_graph[0] = builder.compile(checkpointer=InMemorySaver())
+    if managed:
+        await f.admit()
+        job = await f.env.repository.claim("run-1", "worker")
+        assert job
+        execution = asyncio.create_task(f.env.service._execute(job))
+    else:
+        monkeypatch.setattr("agent.modules.workspaces.create_no_workspace",
+                            AsyncMock(return_value=WorkspaceRef(locator=str(tmp_path))))
+        execution = asyncio.create_task(execute_scheduled_task("telegram", "1", "Generate a result"))
+
+    async def receive():
+        await asyncio.Future()
+
+    try:
+        async with asyncio.timeout(5):
+            await started.wait()
+            [active] = f.env.container.active_session_registry.list_active()
+            assert active["platform"] == "bg"
+            response = await reconnect(ReconnectRequest(thread_id=active["thread_id"]),
+                                       Request({"type": "http"}, receive))
+            async with aclosing(response.body_iterator) as chunks:
+                async for line in chunks:
+                    event = application_event(json.loads(line)) if line.strip() else None
+                    if event and event["type"] == "message":
+                        assert event["content"] == "R"
+                        assert not execution.done()
+                        break
+                else:
+                    pytest.fail("The scheduled stream closed before delivering model output.")
+    finally:
+        release.set()
+        await asyncio.wait_for(execution, timeout=5)
+
+    [record] = (await list_runs())["runs"]
+    assert record["status"] == "completed"
+    assert record["response"] == "Ready"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("decision", ["return", "cancel"])
 async def test_scheduled_browser_waits_and_resumes_exact_execution(scheduled, decision):
     f = scheduled

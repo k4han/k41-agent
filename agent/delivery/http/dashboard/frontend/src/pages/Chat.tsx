@@ -982,8 +982,7 @@ export function ChatPage() {
       : "Start a conversation with No workspace. Files stay in a private session folder, or you can select a project."
   ));
   const isBackgroundThread = createMemo(() => threadData()?.kind === "background");
-  // Background and scheduled runs execute outside the chat stream manager, so there is no stream to rejoin.
-  const canReconnectStream = createMemo(() => !isBackgroundThread() && threadData()?.kind !== "scheduled");
+  const supportsMessageQueue = createMemo(() => !isBackgroundThread() && threadData()?.kind !== "scheduled");
   const backgroundTaskActive = createMemo(() => {
     const task = backgroundTask();
     return Boolean(task && ACTIVE_TASK_STATUSES.has(task.status));
@@ -1012,13 +1011,13 @@ export function ChatPage() {
     },
   });
   const queueing = createMemo(() => {
-    if (inputDisabled() || earlierMessagesLoading() || forking() || !canReconnectStream()) return false;
+    if (inputDisabled() || earlierMessagesLoading() || forking() || !supportsMessageQueue()) return false;
     if (searchParams.checkpoint_id && !streaming()) return false;
     const stream = persistedStreams.get(currentStreamThreadId() || "");
     return Boolean(viewedQueueRun() || (streaming() && stream?.acceptsQueuedMessages));
   });
   const canSendQueuedMessage = createMemo(() => {
-    if (inputDisabled() || forking() || !canReconnectStream() || queue.state()?.status === "waiting") return false;
+    if (inputDisabled() || forking() || !supportsMessageQueue() || queue.state()?.status === "waiting") return false;
     return viewedQueueRun() ? Boolean(queue.state()?.can_insert) : !conversationBusy();
   });
   const queueSendLabel = () => {
@@ -1571,6 +1570,7 @@ export function ChatPage() {
     }
 
     const currentItems = items();
+    const supportsQueue = supportsMessageQueue();
 
     const streamThreadIdRef: StreamThreadIdRef = { id: threadId, message: "" };
     getOrCreateStreamSignals(streamThreadIdRef.id, items()).selection = rememberSelection();
@@ -1598,7 +1598,7 @@ export function ChatPage() {
       if (!response.body) {
         throw new Error("Streaming response is not available.");
       }
-      bindQueueResponse(response, streamThreadIdRef);
+      if (supportsQueue) bindQueueResponse(response, streamThreadIdRef);
 
       const handleEvent = makeEventHandler(assistantIdRef, streamedRef, streamThreadIdRef, currentItems);
       await readNDJSONStream(response.body, (event) => {
@@ -1629,7 +1629,7 @@ export function ChatPage() {
       window.dispatchEvent(new CustomEvent(CUSTOM_DOM_EVENTS.THREADS_CHANGED));
       if (finishedTid && !isUnmounting && currentThreadId() === finishedTid) {
         void refreshThread(finishedTid);
-        void queue.refresh(finishedTid);
+        if (supportsQueue) void queue.refresh(finishedTid);
       }
     }
     return eventCount;
@@ -2081,7 +2081,8 @@ export function ChatPage() {
   // an empty stream; retrying them on every session update would loop until the run ends.
   const streamlessSessionIds = new Set<string>();
   const reconnectToSession = async (session: ActiveSession) => {
-    if (streaming() || !threadData() || !canReconnectStream() || streamlessSessionIds.has(session.session_id)) {
+    if (streaming() || threadData()?.thread_id !== session.thread_id || isBackgroundThread()
+      || searchParams.checkpoint_id || streamlessSessionIds.has(session.session_id)) {
       return;
     }
     const eventCount = await reconnectStream(session.thread_id);
@@ -2113,7 +2114,7 @@ export function ChatPage() {
 
   // A memo so refreshing the same thread's payload does not refetch sessions.
   const readyThreadId = createMemo(() => threadData()?.thread_id || "");
-  createEffect(on([currentThreadId, canReconnectStream, () => searchParams.checkpoint_id], ([threadId, supported, checkpoint]) => {
+  createEffect(on([readyThreadId, supportsMessageQueue, () => searchParams.checkpoint_id], ([threadId, supported, checkpoint]) => {
     if (!threadId || !supported || checkpoint) return;
     const controller = new AbortController();
     const refresh = () => void queue.refresh(threadId, controller.signal);
@@ -2161,8 +2162,8 @@ export function ChatPage() {
     onCleanup(() => cancelAnimationFrame(frame));
   }));
   createEffect(on(
-    [currentThreadId, readyThreadId, canReconnectStream],
-    ([threadId, readyThreadId]) => {
+    [currentThreadId, readyThreadId, threadLoading],
+    ([threadId, readyThreadId, loading]) => {
       let cancelled = false;
       const revision = sessionEventRevision;
       const requestController = new AbortController();
@@ -2170,7 +2171,7 @@ export function ChatPage() {
         cancelled = true;
         requestController.abort();
       });
-      if (threadId && readyThreadId === threadId) {
+      if (threadId && readyThreadId === threadId && !loading) {
         const fetchInitialSession = async () => {
           try {
             const payload = await apiFetch<{ sessions: ActiveSession[] }>("/dashboard-api/sessions", {

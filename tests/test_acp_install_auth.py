@@ -378,14 +378,14 @@ async def test_scheduled_task_keeps_the_acp_thread_and_skips_injection(isolated_
     from agent.modules.scheduler import service as scheduler_service
     from agent.shared.thread_ids import SessionManager
 
-    async def fake_run_agent_full(**_kwargs):
+    async def fake_run(**_kwargs):
         return "done"
 
     async def fake_send_notification(*_args, **_kwargs):
         return True
 
     await isolated_container.initialize_persistence()
-    monkeypatch.setattr(scheduler_service, "run_agent_full", fake_run_agent_full)
+    monkeypatch.setattr(scheduler_service, "_run_scheduled_agent", fake_run)
     monkeypatch.setattr(scheduler_service, "_send_notification", fake_send_notification)
     monkeypatch.setattr("agent.modules.workflows.get_workflow_graph", lambda _name: pytest.fail("The ACP thread must not be written to."))
     monkeypatch.setattr("agent.modules.agents.get_catalog_service", lambda: SimpleNamespace(get_agent=lambda _name: MODEL_CARD))
