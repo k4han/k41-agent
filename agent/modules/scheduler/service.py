@@ -11,8 +11,12 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from agent.modules.agent_runtime import SessionManager, get_chat_stream_manager
-from agent.modules.agent_runtime.protocol import application_event, run_agent_protocol_stream
+from agent.modules.agent_runtime import (
+    SessionManager,
+    application_event,
+    get_chat_stream_manager,
+    run_agent_protocol_stream,
+)
 from agent.modules.notifications import send_notification as _send_notification
 from agent.modules.workspaces import WorkspaceBinding
 from agent.shared.infrastructure.db.engine import (
