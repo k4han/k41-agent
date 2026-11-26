@@ -28,12 +28,20 @@ NEVER_EXECUTED_OUTPUT = "Tool call was approved but never executed."
 CANCELLED_NOTICE_TEXT = "The request was cancelled by the client."
 
 
-def mcp_call_arguments(fields: dict[str, Any]) -> Any:
+def mcp_call_arguments(fields: dict[str, Any], *, bridged_tool: str | None = None) -> Any:
     """Return a tool call's input. MCP calls also repeat each argument beside ``arguments``."""
     raw = fields.get("rawInput")
     meta = fields.get("_meta")
     is_mcp = isinstance(meta, dict) and meta.get("is_mcp_tool_call")
-    return raw["arguments"] if is_mcp and isinstance(raw, dict) and "arguments" in raw else raw
+    if not (is_mcp and isinstance(raw, dict) and "arguments" in raw):
+        return raw
+    nested = raw["arguments"]
+    if bridged_tool == "execute_tool" and "tool_name" in raw:
+        # Repeating the wrapper's arguments field can overwrite the nested copy.
+        if not (isinstance(nested, dict) and nested.keys() == {"tool_name", "arguments"}
+                and nested["tool_name"] == raw["tool_name"]):
+            return {"tool_name": raw["tool_name"], "arguments": nested}
+    return nested
 
 
 def _clip(text: str, limit: int) -> str:
@@ -101,8 +109,10 @@ class ToolItem:
     status: str = "pending"
     raw_input: Any = None
     raw_output: Any = None
+    discovery_tool: str | None = None
     # What a K41 tool really returned, which the agent's own report does not carry.
     bridged_output: str | None = None
+    bridged_failed: bool = False
     content: Any = None
     locations: list[Any] = field(default_factory=list)
     announced: bool = False
@@ -122,7 +132,7 @@ class TurnTranscript:
 
     # Update translation ------------------------------------------------------
 
-    def apply(self, update: dict[str, Any]) -> list[dict[str, Any]]:
+    def apply(self, update: dict[str, Any], *, bridged_tool: str | None = None) -> list[dict[str, Any]]:
         """Merge an update and return the stream events it produces."""
         kind = update.get("sessionUpdate")
         if kind == "agent_message_chunk":
@@ -130,7 +140,7 @@ class TurnTranscript:
         if kind == "agent_thought_chunk":
             return self._apply_thinking(update)
         if kind in {"tool_call", "tool_call_update"}:
-            return self._apply_tool(update)
+            return self._apply_tool(update, bridged_tool=bridged_tool)
         if kind == "usage_update":
             return self._apply_usage(update)
         return []
@@ -172,7 +182,9 @@ class TurnTranscript:
             self.items.append(item)
         return item
 
-    def merge_tool(self, item: ToolItem, fields: dict[str, Any]) -> None:
+    def merge_tool(self, item: ToolItem, fields: dict[str, Any], *, bridged_tool: str | None = None) -> None:
+        if bridged_tool in {"search_tools", "execute_tool"}:
+            item.discovery_tool = bridged_tool
         if fields.get("title"):
             item.title = str(fields["title"])
         if fields.get("kind"):
@@ -180,7 +192,16 @@ class TurnTranscript:
         if fields.get("status"):
             item.status = str(fields["status"])
         if fields.get("rawInput") is not None:
-            item.raw_input = _clip_value(mcp_call_arguments(fields))
+            raw_input = mcp_call_arguments(fields, bridged_tool=item.discovery_tool)
+            if item.discovery_tool == "execute_tool" and isinstance(raw_input, dict) and isinstance(raw_input.get("tool_name"), str):
+                item.raw_input = {
+                    "tool_name": _clip(raw_input["tool_name"], MAX_TOOL_INPUT_CHARS),
+                    "arguments": _clip_value(raw_input.get("arguments")),
+                }
+            elif item.discovery_tool == "search_tools" and isinstance(raw_input, dict) and isinstance(raw_input.get("query"), str):
+                item.raw_input = {"query": _clip(raw_input["query"], MAX_TOOL_INPUT_CHARS)}
+            else:
+                item.raw_input = _clip_value(raw_input)
         if fields.get("rawOutput") is not None:
             item.raw_output = fields["rawOutput"]
         if fields.get("content") is not None:
@@ -188,12 +209,12 @@ class TurnTranscript:
         if isinstance(fields.get("locations"), list):
             item.locations = fields["locations"]
 
-    def _apply_tool(self, update: dict[str, Any]) -> list[dict[str, Any]]:
+    def _apply_tool(self, update: dict[str, Any], *, bridged_tool: str | None) -> list[dict[str, Any]]:
         tool_call_id = str(update.get("toolCallId") or "")
         if not tool_call_id:
             return []
         item = self.tool_item(tool_call_id)
-        self.merge_tool(item, update)
+        self.merge_tool(item, update, bridged_tool=bridged_tool)
         return self._tool_events(item)
 
     def _tool_events(self, item: ToolItem) -> list[dict[str, Any]]:
@@ -243,12 +264,16 @@ class TurnTranscript:
 
     @staticmethod
     def tool_name(item: ToolItem) -> str:
+        if item.discovery_tool:
+            return item.discovery_tool
         # A prefix keeps agent-chosen names away from names the UI reserves.
         return f"acp_{item.kind or 'other'}"
 
     # Rendering ---------------------------------------------------------------
 
     def _tool_args(self, item: ToolItem) -> dict[str, Any]:
+        if item.discovery_tool and isinstance(item.raw_input, dict):
+            return item.raw_input
         args: dict[str, Any] = {"title": item.title}
         if item.raw_input is not None:
             args["input"] = item.raw_input
@@ -263,8 +288,15 @@ class TurnTranscript:
     @staticmethod
     def tool_output(item: ToolItem) -> str:
         if item.bridged_output is not None:
+            if item.discovery_tool == "search_tools" and not item.bridged_failed:
+                # Keep the complete list of names for the dashboard.
+                return item.bridged_output
             return _clip(item.bridged_output, MAX_TOOL_TEXT_CHARS)
         return _clip(_output_text(item.raw_output) or _content_text(item.content) or item.status, MAX_TOOL_TEXT_CHARS)
+
+    @staticmethod
+    def tool_status(item: ToolItem) -> str:
+        return "error" if item.status == "failed" or item.bridged_failed else "success"
 
     def _tool_result_event(self, item: ToolItem) -> dict[str, Any]:
         return {
@@ -272,6 +304,7 @@ class TurnTranscript:
             "tool_call_id": self.public_tool_id(item),
             "name": self.tool_name(item),
             "content": self.tool_output(item),
+            "status": self.tool_status(item),
         }
 
     @property
@@ -319,7 +352,7 @@ class TurnTranscript:
                     id=self._stable_id(f"result:{item.tool_call_id}"),
                     tool_call_id=public_id,
                     name=self.tool_name(item),
-                    status="error" if item.status == "failed" else "success",
+                    status=self.tool_status(item),
                     additional_kwargs=flags,
                 ))
         if notice:

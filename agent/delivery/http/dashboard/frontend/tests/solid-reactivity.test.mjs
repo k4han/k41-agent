@@ -1074,6 +1074,7 @@ function loadWorkspaceGroups() {
     '@/lib/generatedImages': {},
     '@/lib/workspaceConstants': { NO_WORKSPACE_KEY: 'none', NO_WORKSPACE_LABEL: 'No workspace' },
     '@/lib/thinkingDurations': loadModule('../src/lib/thinkingDurations.ts'),
+    '@/lib/toolCallDisplay': loadModule('../src/lib/toolCallDisplay.ts'),
     '@/lib/workspace': { isNoWorkspace: workspace => workspace?.execution?.metadata?.no_workspace === true || workspace?.execution?.metadata?.temp === true },
   });
   return loadModule('../src/lib/useThreadWorkspaceGroups.ts', {

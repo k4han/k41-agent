@@ -129,6 +129,8 @@ def parse_agent_file_with_error(
 
 def serialize_agent_config(config: AgentConfig) -> str:
     """Serialize an AgentConfig to canonical Markdown with YAML frontmatter."""
+    from agent.modules.tools import DISCOVERY_TOOL_NAMES
+
     data: dict[str, object] = {
         "name": config.name,
         "display_name": config.display_name,
@@ -142,10 +144,11 @@ def serialize_agent_config(config: AgentConfig) -> str:
         "tools": list(config.tools),
         "context_compact_threshold": config.context_compact_threshold,
     }
+    discovery = DISCOVERY_TOOL_NAMES.issubset(config.tools)
     tool_configs = {
         name: dict(values)
         for name, values in config.tool_configs.items()
-        if name in config.tools and values
+        if values and (discovery or name in config.tools)
     }
     if tool_configs:
         data["tool_configs"] = tool_configs

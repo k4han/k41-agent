@@ -776,6 +776,8 @@ def _config_with_checkpoint(config: dict[str, Any], checkpoint_id: str | None) -
 def _tool_result_event(message: ToolMessage) -> dict[str, Any]:
     event = {"type": "tool_result", "tool_call_id": message.tool_call_id,
              "name": message.name, "content": extract_tool_display_content(message)}
+    if message.status == "error":
+        event["status"] = "error"
     if isinstance(message.artifact, dict) and message.artifact.get("browser"):
         event["browser_artifact"] = message.artifact["browser"]
     if isinstance(message.artifact, dict) and message.artifact.get("subagent"):
@@ -958,13 +960,29 @@ def _find_tool_call_id(
         for tool_call in tool_calls:
             if not isinstance(tool_call, dict):
                 continue
-            if tool_call.get("name") == tool_name:
-                return str(tool_call.get("id") or fallback)
+            name = tool_call.get("name")
+            if name == "execute_tool":
+                name = (tool_call.get("args") or {}).get("tool_name")
+            if name == tool_name:
+                call_id = str(tool_call.get("id") or "")
+                if not fallback or call_id == fallback:
+                    return call_id or fallback
     return fallback
 
 
 def _find_plan_tool_call_id(messages: list[Any], fallback: str = "") -> str:
     return _find_tool_call_id(messages, PLAN_MODE_TOOL_NAME, fallback)
+
+
+def _allow_pending_control_resume(config, snapshot) -> None:
+    call_ids = []
+    for pending in getattr(snapshot, "interrupts", ()):
+        value = _interrupt_value(pending)
+        if isinstance(value, dict) and value.get("type") in {PLAN_REVIEW_INTERRUPT_TYPE, ASK_USER_INTERRUPT_TYPE}:
+            if call_id := value.get("tool_call_id"):
+                call_ids.append(call_id)
+    if call_ids:
+        config["configurable"]["pending_control_tool_call_ids"] = call_ids
 
 
 def _plan_review_events_from_value_event(event: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1264,6 +1282,11 @@ async def run_agent(
     notifications, notification_context = await _notification_context(context, resolved_workflow, usage_context, config)
     if notifications and not resume:
         await notifications.prepare_new_run(thread_id)
+    if isinstance(normalized_resume_payload, (PlanModeResumePayload, AskUserAnswerResumePayload)):
+        try:
+            _allow_pending_control_resume(config, await graph.aget_state(config))
+        except Exception as exc:
+            logger.debug("Could not read pending control tools for thread '%s': %s", thread_id, exc)
     if normalized_resume_payload is not None and normalized_resume_payload.action == "approve":
         await _update_thread_agent(thread_id, agent_name, graph_family_for(resolved_workflow))
     elif not resume and not checkpoint_id:
@@ -1482,6 +1505,8 @@ async def run_agent_stream(
     if resume or _execution is not None:
         try:
             state = await graph.aget_state(config)
+            if resume:
+                _allow_pending_control_resume(config, state)
             if state and state.values and "messages" in state.values:
                 for msg in state.values["messages"]:
                     msg_id = _message_id(msg)

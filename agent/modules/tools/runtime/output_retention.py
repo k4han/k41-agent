@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 async def retain_message(message: ToolMessage, runtime) -> ToolMessage:
     artifact = message.artifact if isinstance(message.artifact, dict) else {}
+    if message.name == "search_tools" and artifact.get("kind") == "tool_discovery":
+        return message
     if (message.name == "skill" and message.status != "error" and artifact.get("kind") == "skill_activation"
             and artifact.get("action") == "load"):
         return message

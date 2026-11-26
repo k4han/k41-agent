@@ -1,6 +1,7 @@
 import type { ContentBlockDelta, Event as ProtocolEvent } from "@langchain/protocol";
 import type { SubagentActivity, TranscriptItem } from "@/components/Transcript";
 import type { ChatQueueSnapshot } from "@/lib/useChatMessageQueue";
+import { EXECUTE_TOOL_NAME, SEARCH_TOOLS_NAME, toolCallDisplay } from "@/lib/toolCallDisplay";
 import {
   applyApplicationEvent,
   mergeToolActivity,
@@ -15,7 +16,7 @@ type Scope = {
   refs: AssistantIdRef;
   streamed: StreamedRef;
   callbacks: StreamCallbacks;
-  tools: Set<string>;
+  tools: Map<string, { name: string; dispatched?: true }>;
   wakeups: Set<string>;
   items: Array<TranscriptItem & { id: number }>;
   descriptor?: SubagentActivity;
@@ -40,7 +41,7 @@ function childScope(parent: Scope, descriptor: SubagentActivity, thread: StreamT
   let timer: ReturnType<typeof setTimeout> | undefined;
   const scope: Scope = {
     refs: { id: null }, streamed: { received: false }, callbacks: parent.callbacks,
-    tools: new Set(), wakeups: new Set(), items: [], descriptor, currentMessage: "", messages: new Map(),
+    tools: new Map(), wakeups: new Set(), items: [], descriptor, currentMessage: "", messages: new Map(),
     toolBlocks: new Map(), outputDeltas: new Map(),
     commit: () => {
       if (timer !== undefined) clearTimeout(timer);
@@ -98,7 +99,7 @@ export function handleProtocolEvent(
   const runId = eventId.split(":")[0];
   let state = refs.protocol;
   if (!state || (runId && state.runId && state.runId !== runId)) {
-    const root: Scope = { refs, streamed, callbacks, tools: new Set(), wakeups: new Set(), items: [],
+    const root: Scope = { refs, streamed, callbacks, tools: new Map(), wakeups: new Set(), items: [],
       currentMessage: "", messages: new Map(), toolBlocks: new Map(), outputDeltas: new Map(), commit: () => {} };
     refs.protocol = state = { runId, seq: 0, scopes: new Map([["[]", root]]) };
   }
@@ -111,7 +112,7 @@ export function handleProtocolEvent(
     scope = state.scopes.get(JSON.stringify(namespace.slice(0, depth)));
   }
   scope ??= state.scopes.get("[]")!;
-  const dispatch = (data: Record<string, unknown>, target = scope!) => {
+  const dispatch = (data: Record<string, unknown>, target = scope!, argsState: "streaming" | "complete" | "invalid" = "complete") => {
     if (data.type === "async_wakeup") {
       const id = String(data.wakeup_id || "");
       if (target.wakeups.has(id)) return;
@@ -119,16 +120,27 @@ export function handleProtocolEvent(
     }
     if (data.type === "tool_call") {
       const id = String(data.id || "");
-      if (target.tools.has(id)) {
-        target.callbacks.updateToolActivity?.(id, { args: data.args, name: String(data.name || "unknown") }, thread.id);
+      const name = String(data.name || "unknown");
+      const call = argsState === "invalid" ? { name, args: data.args } : toolCallDisplay(name, data.args);
+      const previous = target.tools.get(id);
+      if (call.name === EXECUTE_TOOL_NAME && (argsState === "streaming"
+        || (argsState === "complete" && previous?.dispatched))) return;
+      const dispatched = argsState === "invalid" ? undefined : call.dispatched ?? previous?.dispatched;
+      target.tools.set(id, { name: call.name, dispatched });
+      if (previous) {
+        target.callbacks.updateToolActivity?.(id, { ...call, dispatched }, thread.id);
         return;
       }
-      target.tools.add(id);
+      data = { ...data, ...call };
+    } else if (data.type === "tool_result" && data.name === EXECUTE_TOOL_NAME) {
+      const call = target.tools.get(String(data.tool_call_id || ""));
+      if (call?.dispatched) data = { ...data, name: call.name };
     }
     applyApplicationEvent(data, target.refs, target.streamed, thread, target.callbacks);
   };
-  const ensureTool = (target: Scope, id: string, name: string, args: unknown) => {
-    dispatch({ type: "tool_call", id, name, args }, target);
+  const ensureTool = (target: Scope, id: string, name: string, args: unknown,
+    argsState?: "streaming" | "complete" | "invalid") => {
+    dispatch({ type: "tool_call", id, name, args }, target, argsState);
   };
   if (event.method === "lifecycle") {
     const data = object(params.data);
@@ -179,22 +191,40 @@ export function handleProtocolEvent(
     // Text and reasoning use the application's projection, which also handles
     // inline thinking tags, provider quirks, and non-streaming model results.
     // Native blocks supply invocation boundaries and live tool-call arguments.
-    if (data.event === "content-block-start" || data.event === "content-block-finish") {
+    const blockKey = `${id}:${data.index}`;
+    if (data.event === "content-block-start") {
       const content = object(data.content);
-      if (content.type === "tool_call" && content.id) {
+      if ((content.type === "tool_call" || content.type === "tool_call_chunk") && content.id) {
         const call = { id: String(content.id), name: String(content.name || "unknown"),
           args: typeof content.args === "string" ? content.args : "" };
-        scope.toolBlocks.set(`${id}:${data.index}`, call);
-        ensureTool(scope, call.id, call.name, content.args || "");
+        scope.toolBlocks.set(blockKey, call);
+        ensureTool(scope, call.id, call.name, content.args ?? "", "streaming");
       }
+    }
+    if (data.event === "content-block-finish") {
+      const content = object(data.content);
+      const previous = scope.toolBlocks.get(blockKey);
+      const callId = String(content.id || previous?.id || "");
+      const name = String(content.name || previous?.name || "unknown");
+      const args = content.args ?? previous?.args ?? "";
+      if (callId && content.type === "tool_call") {
+        ensureTool(scope, callId, name, args);
+      } else if (callId && content.type === "invalid_tool_call" && name === EXECUTE_TOOL_NAME) {
+        ensureTool(scope, callId, name, args, "invalid");
+        scope.callbacks.updateToolActivity?.(callId, { executionStatus: "failed" }, thread.id);
+        if (typeof content.error === "string" && content.error) {
+          scope.callbacks.updateToolResult(callId, name, content.error, thread.id);
+        }
+      }
+      scope.toolBlocks.delete(blockKey);
     }
     if (data.event === "content-block-delta") {
       const delta = object(data.delta) as Partial<ContentBlockDelta> & Record<string, unknown>;
       if (delta.type === "tool-call-delta") {
-        const call = scope.toolBlocks.get(`${id}:${data.index}`);
+        const call = scope.toolBlocks.get(blockKey);
         if (call) {
           call.args += String(delta.args || "");
-          ensureTool(scope, call.id, call.name, call.args);
+          ensureTool(scope, call.id, call.name, call.args, "streaming");
         }
       }
     }
@@ -216,6 +246,9 @@ export function handleProtocolEvent(
       scope.callbacks.updateToolActivity?.(id, {
         executionStatus: data.event === "tool-error" || output.status === "error" ? "failed" : "completed",
       }, thread.id);
+      if (data.event === "tool-error" && scope.tools.get(id)?.name === SEARCH_TOOLS_NAME && typeof data.message === "string") {
+        scope.callbacks.updateToolResult(id, SEARCH_TOOLS_NAME, data.message, thread.id);
+      }
     }
     return;
   }

@@ -26,6 +26,7 @@ const { formatToolGroupSummary, getToolCategory, isToolFailed } = loadModule(
   '../src/lib/toolGroupSummary.ts',
   {
     '@/lib/toolCallStatus': toolCallStatus,
+    '@/lib/toolCallDisplay': loadModule('../src/lib/toolCallDisplay.ts'),
     '@/lib/shellToolResult': shellToolResult,
   },
 );
@@ -47,6 +48,16 @@ test('failure detection handles shell and generic errors', () => {
   assert.equal(isToolFailed({ name: 'bash', result: 'error\n\nCommand exited with code 1.', resultReceived: true }), true);
   assert.equal(isToolFailed({ name: 'read_file', result: '[error] not_found: file does not exist', resultReceived: true }), true);
   assert.equal(isToolFailed({ name: 'custom', result: { status: 'error', message: 'fail' }, resultReceived: true }), true);
+});
+
+test('tool searches count as ordinary tool calls', () => {
+  const summary = formatToolGroupSummary([
+    { name: 'search_tools', result: '[]' },
+    { name: 'search_tools', result: 'Error: permission denied' },
+    { name: 'web_fetch', result: 'Page content' },
+  ]);
+  assert.equal(summary.fullLabel, '3 tools: 1 web, 2 tool searches (1 failed) · 1 failed');
+  assert.equal(summary.totalFailed, 1);
 });
 
 test('stopped processes do not count as failed commands in existing transcripts', () => {

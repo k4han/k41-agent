@@ -25,6 +25,8 @@ from agent.shared.async_subagents import ASYNC_TOOL_NAMES, DELEGATION_TOOL_NAMES
 
 logger = logging.getLogger(__name__)
 
+DISCOVERY_TOOL_NAMES = frozenset({"search_tools", "execute_tool"})
+
 # ACP agents call tools outside any graph run. These need one: they interrupt for a
 # person, or their result updates graph state the agent never reads. browser_handoff
 # is absent because it can also wait on the ACP turn.

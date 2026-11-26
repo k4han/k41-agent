@@ -29,7 +29,7 @@ from agent.modules.tools.config import (
     serialize_tool_config_schemas,
     ToolConfigService,
 )
-from agent.modules.tools.policy import ACP_UNAVAILABLE_TOOL_NAMES, ToolPolicy, browser_batch_error, is_browser_tool, tools_for_run
+from agent.modules.tools.policy import ACP_UNAVAILABLE_TOOL_NAMES, DISCOVERY_TOOL_NAMES, ToolPolicy, browser_batch_error, is_browser_tool, tools_for_run
 from agent.modules.tools.coding.names import TOOL_ALIASES, canonical_tool_names
 from agent.modules.tools.sources.builtin import BuiltinToolSource
 from agent.modules.tools.registry_service import (
@@ -38,7 +38,8 @@ from agent.modules.tools.registry_service import (
     get_registry_service,
     reload_mcp_descriptors,
 )
-from agent.modules.tools.resolver import ToolResolver
+from agent.modules.tools.resolver import ToolResolver, discovery_catalog
+from agent.modules.tools.builtin.discovery import resolve_dispatched_calls
 from agent.modules.tools.catalog_context import bind_tool_catalogs, build_tool_catalogs
 from agent.modules.tools.result import (
     ToolError,
@@ -228,6 +229,9 @@ __all__ = [
     "is_browser_tool",
     "ToolRegistryService",
     "ToolResolver",
+    "DISCOVERY_TOOL_NAMES",
+    "discovery_catalog",
+    "resolve_dispatched_calls",
     "ToolSource",
     "TOOL_ALIASES",
     "canonical_tool_names",

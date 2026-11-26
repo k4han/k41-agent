@@ -1879,8 +1879,7 @@ async def test_legacy_handoff_without_expiry_does_not_permanently_block_thread(b
 
 @pytest.mark.asyncio
 async def test_expired_handoff_can_resume_after_service_restart_and_agent_switch(browser, monkeypatch):
-    from langchain_core.messages import AIMessage
-    from agent.modules.workflows.nodes.tool import _include_resumed_browser_handoff
+    from agent.modules.workflows.nodes.tool import _resumed_browser_handoff_targets
 
     async def node(state):
         return {"result": await browser.container.browser_service.handoff(
@@ -1904,10 +1903,14 @@ async def test_expired_handoff_can_resume_after_service_restart_and_agent_switch
     monkeypatch.setattr(browser.container, "_persistence_ready", True)
     try:
         assert (await restored.owned_handoff("chat", "admin:1"))["expired"]
-        state = {"messages": [AIMessage(content="", tool_calls=[{
-            "id": "handoff", "name": "browser_handoff", "args": {"reason": "Please sign in"}}])]}
-        tools = await _include_resumed_browser_handoff(state, [], config)
-        assert [tool.name for tool in tools] == ["browser_handoff"]
+        arguments = {"reason": "Please sign in"}
+        for name, args in (("browser_handoff", arguments), ("execute_tool", {
+            "tool_name": "browser_handoff", "arguments": arguments,
+        })):
+            call = {"id": "handoff", "name": name, "args": args}
+            fresh_call = {**call, "id": "uncatalogued"}
+            targets = await _resumed_browser_handoff_targets([call, fresh_call], [], config)
+            assert {call_id: tool.name for call_id, tool in targets.items()} == {"handoff": "browser_handoff"}
         result = await graph.ainvoke(Command(resume={"action": "browser_handoff",
             "handoff_id": payload["handoff_id"], "decision": "return"}), config)
         assert result["result"]["handoff_status"] == "expired"
@@ -1935,11 +1938,6 @@ def test_batch_rejection_and_resume_schema():
     assert browser_batch_error([{"name": "browser_handoff"}, {"name": "bash"}])
     assert browser_batch_error([{"name": "browser_run"}, {"name": "read"}]) is None
     assert BrowserHandoffResume(action="browser_handoff", handoff_id="id", decision="return")
-    from langchain_core.messages import AIMessage
-    from agent.modules.workflows.nodes.tool import _include_pending_control_tools
-    state = {"messages": [AIMessage(content="", tool_calls=[{
-        "id": "uncatalogued", "name": "browser_handoff", "args": {"reason": "Sign in"}}])]}
-    assert _include_pending_control_tools(state, []) == []
 
 
 def test_batch_guard_uses_browser_registration(monkeypatch):

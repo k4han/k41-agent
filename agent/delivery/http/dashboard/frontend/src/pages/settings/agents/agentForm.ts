@@ -47,6 +47,15 @@ export function isAgentTab(value: string | undefined): value is AgentTab {
 export const DEFAULT_CONTEXT_COMPACT_THRESHOLD = 75;
 
 const ACP_TOOL_PREFIX = "acp:";
+const discoveryTools = ["search_tools", "execute_tool"];
+
+export function isDiscoveryTool(name: string): boolean {
+  return discoveryTools.includes(name);
+}
+
+export function hasToolDiscovery(tools: readonly string[]): boolean {
+  return discoveryTools.every((name) => tools.includes(name));
+}
 
 export function acpToolName(tool: string): string | undefined {
   return tool.startsWith(ACP_TOOL_PREFIX) ? tool.slice(ACP_TOOL_PREFIX.length) : undefined;
@@ -72,14 +81,19 @@ export function isToolSelected(form: AgentForm, tool: string, payload: Pick<Agen
 
 export function setToolSelection(form: AgentForm, tools: string[], checked: boolean, payload: Pick<AgentsPayload, "acp_tools">): AgentForm {
   const native = tools.map(acpToolName).filter((name): name is string => name !== undefined);
-  const manual = tools.filter((tool) => acpToolName(tool) === undefined);
+  const manual = new Set(tools.filter((tool) => acpToolName(tool) === undefined));
+  if (discoveryTools.some((name) => manual.has(name))) {
+    discoveryTools.forEach((name) => manual.add(name));
+  }
   const selected = new Set(form.tools);
   const tool_configs = { ...form.tool_configs };
   for (const tool of manual) {
     if (checked) selected.add(tool);
-    else {
-      selected.delete(tool);
-      delete tool_configs[tool];
+    else selected.delete(tool);
+  }
+  if (!hasToolDiscovery([...selected])) {
+    for (const tool of Object.keys(tool_configs)) {
+      if (!selected.has(tool)) delete tool_configs[tool];
     }
   }
   let acp = form.acp;
@@ -133,7 +147,7 @@ export function agentFormPayload(form: AgentForm): AgentForm {
     tools,
     tool_configs: Object.fromEntries(
       Object.entries(form.tool_configs).filter(
-        ([name, fields]) => tools.includes(name) && Object.keys(fields).length > 0,
+        ([name, fields]) => (tools.includes(name) || hasToolDiscovery(tools)) && Object.keys(fields).length > 0,
       ),
     ),
   };

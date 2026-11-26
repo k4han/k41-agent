@@ -280,7 +280,8 @@ class AcpTurn:
 
     def on_update(self, update: dict[str, Any]) -> None:
         with self._lock:
-            self._events.extend(self.transcript.apply(update))
+            bridged = bridged_tool_name(update, self.tools.names) if self.tools is not None else None
+            self._events.extend(self.transcript.apply(update, bridged_tool=bridged))
         self._notify()
 
     def _native_policy(self, tool_call):
@@ -326,8 +327,11 @@ class AcpTurn:
         with self._lock:
             tool_id = str(tool_call.get("toolCallId") or "")
             if tool_id:
-                self.transcript.merge_tool(self.transcript.tool_item(tool_id),
-                                           {key: value for key, value in tool_call.items() if key != "status"})
+                self.transcript.merge_tool(
+                    self.transcript.tool_item(tool_id),
+                    {key: value for key, value in tool_call.items() if key != "status"},
+                    bridged_tool=bridged,
+                )
             cancelled = self.transcript.cancel_requested
             if not cancelled and effect == "ask":
                 identifier = hashlib.sha256(f"{self.turn_id}\0{rpc_id}".encode()).hexdigest()[:32]
@@ -452,10 +456,12 @@ class AcpTurn:
             self._events.append(event)
         self._notify()
 
-    def record_tool_output(self, tool_call_id: str, text: str) -> None:
+    def record_tool_output(self, tool_call_id: str, text: str, *, is_error: bool = False) -> None:
         """Keep what a K41 tool returned. The agent reports the call as finished after this."""
         with self._lock:
-            self.transcript.tool_item(tool_call_id).bridged_output = text
+            item = self.transcript.tool_item(tool_call_id)
+            item.bridged_output = text
+            item.bridged_failed = is_error
 
     async def wait_for_progress(self) -> None:
         """Block until new events, a pending request, or the end of the turn."""

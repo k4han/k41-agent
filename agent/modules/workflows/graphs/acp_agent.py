@@ -53,7 +53,7 @@ from agent.modules.tools import (
 from agent.modules.workflows.checkpoint import get_checkpointer
 from agent.modules.workflows.constants import ACP_AGENT_GRAPH_TYPE
 from agent.modules.workflows.nodes.tool import tool_node
-from agent.modules.workflows.prompt_builders import resolve_prompt_variables, with_browser_reporting_rules
+from agent.modules.workflows.prompt_builders import prompt_tool_names, resolve_prompt_variables, with_browser_reporting_rules
 from agent.modules.workflows.registry import GraphRegistry
 from agent.modules.workflows.run_config import WorkflowContext
 from agent.modules.workflows.state.acp import AcpState
@@ -151,8 +151,9 @@ class CardToolProvider:
             self._tools = list(resolver.for_workspace(tools, self._context.get_workspace()))
         return self._tools
 
-    async def tool_names(self) -> frozenset[str]:
-        return frozenset(tool.name for tool in await self._resolve())
+    async def tool_names(self, *, for_prompt: bool = False) -> frozenset[str]:
+        tools = await self._resolve()
+        return frozenset(prompt_tool_names(tools) if for_prompt else (tool.name for tool in tools))
 
     async def list_tools(self) -> list[dict[str, Any]]:
         return [
@@ -168,9 +169,10 @@ class CardToolProvider:
         # Checked here because the node restores control tools named by a pending call.
         if name not in await self.tool_names():
             return ToolOutput(f"Tool '{name}' is not available to this agent.", is_error=True)
-        if name == "browser_handoff" and not self._can_interrupt:
+        target = arguments.get("tool_name") if name == "execute_tool" else name
+        if target == "browser_handoff" and not self._can_interrupt:
             return ToolOutput("Nobody can take over the browser from this surface. Use a dashboard conversation.", is_error=True)
-        if not is_browser_tool(name):
+        if not isinstance(target, str) or not is_browser_tool(target):
             return await self._invoke(name, arguments)
         # One browser call at a time, as tool_node enforces for a model's batch.
         async with self._browser_lock:
@@ -178,7 +180,7 @@ class CardToolProvider:
                 return await self._invoke(name, arguments)
             finally:
                 turn = get_acp_service().turn(self._turn_id)
-                if name == "browser_handoff" and turn is not None:
+                if target == "browser_handoff" and turn is not None:
                     # The transcript names this call acp_other, so the dashboard cannot recognise its result.
                     turn.add_event({"type": "browser_handoff_settled"})
 
@@ -206,7 +208,8 @@ class CardToolProvider:
                 "action": "permission", "request_id": payload["request_id"], "decision": decision,
             }}), self._config, context=self._context)
         message = coding_message_for_model(result["messages"][-1])
-        return tool_output(message.content, is_error=message.status == "error")
+        display = message.artifact.get("display_content") if name == "search_tools" and isinstance(message.artifact, dict) else None
+        return tool_output(message.content, is_error=message.status == "error", display_text=display)
 
 
 async def acp_prepare_node(state: AcpState, config: RunnableConfig, runtime: Runtime[WorkflowContext]) -> dict[str, Any]:
@@ -260,7 +263,7 @@ async def _start_turn(state: AcpState, config: RunnableConfig, runtime: Runtime[
         if template.strip():
             prompt = resolve_prompt_variables(template, await get_runtime_prompt_variable_values(workspace, thread_id=thread_id))
         try:
-            tool_names = await tools.tool_names() if tools else frozenset()
+            tool_names = await tools.tool_names(for_prompt=True) if tools else frozenset()
         except Exception:
             # The service already tells the user when the tools cannot be offered.
             tool_names = frozenset()

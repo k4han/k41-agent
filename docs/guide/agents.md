@@ -40,9 +40,24 @@ Use the project's root `AGENTS.md` for project-wide conventions and
 The agent's capabilities determine what work it can perform. Enable the file,
 coding, connection, or browser tools needed for the intended task.
 
-Manually selected tools use an explicit allow-list. An empty manual tool list
+By default, manually selected tools use an explicit allow-list. An empty manual tool list
 does not enable all tools. A skill's instructions do not grant additional tool
 permissions.
+
+To enable on-demand tools, select `search_tools` or `execute_tool` in the agent's
+tool picker. The picker toggles the pair together. Keep frequently used tools
+checked to preload them. Other eligible tools can be discovered and used with
+their saved settings. MCP tools must belong to a server enabled for that agent.
+Tools that ask for user input, request plan review, update the todo list, or
+hand off the browser must be selected on the card. If a run supplies a custom
+tool allow-list, the agent can only use tools allowed by both the card and the run.
+
+For example, a card with `tools: [web_search, search_tools, execute_tool]`
+can call `web_search` directly. Calling `search_tools("web_fetch")` returns
+the usage instructions and input schema in a tool message. The agent can then
+call `execute_tool("web_fetch", {"url": "https://example.org"})`. A known tool
+name also works without a prior search. The target's permissions and the run's
+tool restrictions apply to every call.
 
 For website tasks, follow [browser setup](./browser). For external tools, add a
 [connection](./connections) and make it available to the intended agent.

@@ -1,4 +1,5 @@
 import { hasToolCallResult } from "@/lib/toolCallStatus";
+import { SEARCH_TOOLS_NAME } from "@/lib/toolCallDisplay";
 import { isShellTool, shellToolResult } from "@/lib/shellToolResult";
 
 export interface ToolGroupItem {
@@ -105,6 +106,7 @@ export function isToolFailed(tool: ToolGroupItem): boolean {
 
 export function getToolCategory(name: string | null | undefined): ToolCategoryInfo {
   const raw = (name || "").toLowerCase().trim();
+  if (raw === SEARCH_TOOLS_NAME) return { key: "tool search", labelSingular: "tool search", labelPlural: "tool searches" };
   if (raw.startsWith("browser_")) return { key: "browser", labelSingular: "browser", labelPlural: "browser" };
   if (raw.startsWith("mcp__")) {
     const parts = raw.split("__");

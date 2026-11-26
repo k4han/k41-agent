@@ -697,6 +697,8 @@ def _serialize_thread_messages(
             entry["name"] = getattr(msg, "name", None)
             entry["tool_call_id"] = getattr(msg, "tool_call_id", None)
             entry["content"] = extract_tool_display_content(msg) or ""
+            if msg.status == "error":
+                entry["status"] = "error"
             if isinstance(msg.artifact, dict) and msg.artifact.get("browser"):
                 entry["browser_artifact"] = msg.artifact["browser"]
             if isinstance(msg.artifact, dict) and msg.artifact.get("subagent"):

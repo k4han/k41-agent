@@ -22,10 +22,10 @@ function loadModule(path, dependencies = {}) {
 
 const transcriptStub = {
   PLAN_MODE_TOOL_NAME: 'plan_mode',
-  createTranscriptTool: ({ toolCallId, name, args = null, result = null }) => ({
-    type: 'tool', tool_call_id: toolCallId || null, name: name || 'unknown', args, result,
+  createTranscriptTool: ({ toolCallId, name, args = null, result = null, dispatched }) => ({
+    type: 'tool', tool_call_id: toolCallId || null, name: name || 'unknown', args, result, dispatched,
   }),
-  findTranscriptToolTarget: () => undefined,
+  findTranscriptToolTarget: (items, id) => items.find(item => item.type === 'tool' && item.tool_call_id === id),
   findTranscriptPlanReviewTarget: () => undefined,
   findTranscriptUserInputRequestTarget: () => undefined,
 };
@@ -46,8 +46,27 @@ const threads = loadModule('../src/lib/chatThreads.ts', {
   '@/lib/userInputRequest': { ASK_USER_TOOL_NAME: 'ask_user' },
   '@/lib/generatedImages': { GENERATE_IMAGE_TOOL_NAME: 'generate_image' },
   '@/lib/thinkingDurations': durations,
+  '@/lib/toolCallDisplay': loadModule('../src/lib/toolCallDisplay.ts'),
   '@/lib/workspaceConstants': { NO_WORKSPACE_KEY: 'no-workspace', NO_WORKSPACE_LABEL: 'No workspace' },
   '@/lib/workspace': { isNoWorkspace: () => false },
+});
+
+test('history shows a rejected dispatched question as a failed tool call', () => {
+  const args = { title: 'Choose a color', questions: [] };
+  const error = '[error] permission_denied: Tool is unavailable to this agent.';
+  const [item, ...rest] = threads.toThreadTranscript([
+    { role: 'assistant', content: '', tool_calls: [
+      { id: 'question', name: 'execute_tool', args: { tool_name: 'ask_user', arguments: args } },
+    ] },
+    { role: 'tool', tool_call_id: 'question', name: 'execute_tool', status: 'error', content: error },
+  ]);
+  assert.equal(rest.length, 0);
+  assert.equal(item.type, 'tool');
+  assert.equal(item.name, 'ask_user');
+  assert.equal(item.dispatched, true);
+  assert.equal(item.args, args);
+  assert.equal(item.executionStatus, 'failed');
+  assert.equal(item.result, error);
 });
 
 test('internal async completion notifications do not become transcript messages', () => {

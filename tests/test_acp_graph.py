@@ -934,6 +934,46 @@ async def test_approved_call_runs_and_the_transcript_shows_the_real_result(env, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cli_format", [False, True])
+async def test_dispatched_tool_keeps_its_target_and_result_in_live_and_saved_acp_activity(env, cli_format):
+    use_card_tools(env, "search_tools", "execute_tool")
+    if cli_format:
+        env.flags.append("--mcp-cli")
+    arguments = {"tool_name": "get_current_time", "arguments": {}}
+    invocation = json.dumps({"name": "execute_tool", "arguments": arguments})
+    events = await env.collect(f"scenario:mcp_tool input:{invocation}")
+    call = next(event for event in events if event["type"] == "tool_call")
+    result = next(event for event in events if event["type"] == "tool_result")
+    assert call["name"] == "execute_tool" and call["args"] == arguments
+    assert result["tool_call_id"] == call["id"] and result["content"][:4].isdigit()
+    stored_call = next(
+        tool_call for message in await env.messages() if isinstance(message, AIMessage)
+        for tool_call in message.tool_calls
+    )
+    assert stored_call["name"] == call["name"] and stored_call["args"] == arguments
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cli_format", [False, True])
+async def test_acp_search_tools_displays_only_names_in_live_and_saved_activity(env, cli_format):
+    use_card_tools(env, "search_tools", "execute_tool")
+    if cli_format:
+        env.flags.append("--mcp-cli")
+    arguments = {"query": "get_current_time"}
+    invocation = json.dumps({"name": "search_tools", "arguments": arguments})
+    events = await env.collect(f"scenario:mcp_tool input:{invocation}")
+    call = next(event for event in events if event["type"] == "tool_call")
+    result = next(event for event in events if event["type"] == "tool_result")
+    assert call["name"] == "search_tools" and call["args"] == arguments
+    assert result["tool_call_id"] == call["id"] and result["status"] == "success"
+    assert result["content"] == "get_current_time"
+    [definition] = json.loads(texts(events))
+    assert definition["description"] and "parameters" in definition
+    [stored] = [message for message in await env.messages() if isinstance(message, ToolMessage)]
+    assert stored.name == "search_tools" and stored.content == result["content"]
+
+
+@pytest.mark.asyncio
 async def test_duplicated_mcp_arguments_are_not_shown_twice(env):
     use_card_tools(env, "get_current_time")
     env.agent.tool_permissions = [{"action": "get_current_time", "effect": "ask"}]

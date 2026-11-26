@@ -310,6 +310,7 @@ export function applyApplicationEvent(
         toolCallId: String(event.id || ""),
         name: toolName,
         args: event.args ?? null,
+        dispatched: event.dispatched === true,
       }),
       "bottom",
       streamThreadIdRef.id,
@@ -334,31 +335,36 @@ export function applyApplicationEvent(
 
   if (event.type === STREAM_EVENTS.TOOL_RESULT) {
     const toolName = String(event.name || "unknown");
+    const toolCallId = String(event.tool_call_id || "");
+    const failed = event.status === "error";
     if (toolName === "browser_handoff") {
       callbacks.onBrowserHandoffChange?.(false, streamThreadIdRef.id);
     }
-    if (toolName === PLAN_MODE_TOOL_NAME || toolName === "plan_mode_respond") {
+    if (!failed && (toolName === PLAN_MODE_TOOL_NAME || toolName === "plan_mode_respond")) {
       callbacks.updatePlanReviewResult(
-        String(event.tool_call_id || ""),
+        toolCallId,
         event.content ?? null,
         streamThreadIdRef.id,
       );
       return;
     }
-    if (toolName === ASK_USER_TOOL_NAME) {
+    if (!failed && toolName === ASK_USER_TOOL_NAME) {
       callbacks.updateUserInputRequestResult(
-        String(event.tool_call_id || ""),
+        toolCallId,
         event.content ?? null,
         streamThreadIdRef.id,
       );
       return;
     }
     callbacks.updateToolResult(
-      String(event.tool_call_id || ""),
+      toolCallId,
       toolName,
       event.content ?? null,
       streamThreadIdRef.id,
     );
+    if (failed) {
+      callbacks.updateToolActivity?.(toolCallId, { executionStatus: "failed" }, streamThreadIdRef.id);
+    }
     // Refresh the workspace only when the agent runs file-modifying tools.
     // Read-only tools (e.g. read, grep, glob, web search) are filtered out,
     // and external writes or long-running processes are covered by fallback polling.

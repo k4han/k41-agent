@@ -47,6 +47,7 @@ try {
           import { ToastProvider } from '@/components/Toast';
           import { useChatScroll } from '@/lib/useChatScroll';
           import { createTranscriptItems } from '@/lib/chatStreamStore';
+          import { toThreadTranscript } from '@/lib/chatThreads';
           import { CHAT_PANEL_MIN_WIDTH, WORKSPACE_EXPLORER_MIN_WIDTH } from '@/lib/chatTypes';
           import { highlightCode } from '@/lib/codeHighlight';
           import tokenStyles from '@/styles/tokens.css?inline';
@@ -79,6 +80,8 @@ try {
             const [thread, setThread] = createSignal('large');
             const [streaming, setStreaming] = createSignal(false);
             Object.assign(window, { scroll, setItems, setThread, setStreaming, items });
+            window.showHistory = messages => setItems(toThreadTranscript(messages, thread())
+              .map((item, id) => ({ ...item, id })));
             return <ChatTranscript
               setTranscriptRef={el => { element = el; window.transcript = el; scroll.observeTranscript(el); }}
               onScroll={scroll.handleTranscriptScroll} onUserScroll={scroll.handleUserScroll}
@@ -274,6 +277,72 @@ try {
   await until(() => js('Math.abs(document.querySelector(".transcript-virtual-row").getBoundingClientRect().width - 960) < 1'), 'HTML preview restores the shared column');
   await js('document.querySelectorAll("[data-layout-case], .tool-html-preview").forEach(element => element.remove())');
   console.log('PASS: New components, extra wrappers and standalone status rows share one centered column across four widths and both workspace states; HTML previews can expand and restore.');
+
+  await js(`showHistory(${JSON.stringify([
+    { id: 'assistant', role: 'assistant', content: '', tool_calls: [
+      { id: 'search', name: 'search_tools', args: { query: 'web' } },
+      { id: 'fetch', name: 'execute_tool', args: { tool_name: 'web_fetch', arguments: { url: 'https://example.test' } } },
+      { id: 'read', name: 'read', args: { path: 'notes.txt' } },
+    ] },
+    { id: 'search-result', role: 'tool', tool_call_id: 'search', name: 'search_tools', content: JSON.stringify([
+      { name: 'web_fetch', description: 'Fetch a URL.\nDetailed instructions', parameters: { type: 'object' } },
+      { name: 'web_search', description: 'Search the web.' },
+    ]) },
+    { id: 'fetch-result', role: 'tool', tool_call_id: 'fetch', name: 'web_fetch', content: 'Fetched' },
+    { id: 'read-result', role: 'tool', tool_call_id: 'read', name: 'read', content: 'Notes' },
+    { id: 'separate', role: 'user', content: 'Find another tool.' },
+    { id: 'another-search', role: 'assistant', content: '', tool_calls: [
+      { id: 'empty', name: 'search_tools', args: { query: 'unavailable category' } },
+      { id: 'error', name: 'search_tools', args: { query: 'restricted tools' } },
+    ] },
+    { id: 'empty-result', role: 'tool', tool_call_id: 'empty', name: 'search_tools', content: 'No matching on-demand tools.' },
+    { id: 'error-result', role: 'tool', tool_call_id: 'error', name: 'search_tools', status: 'error', content: 'Access denied by tool policy.' },
+  ])})`);
+  await until(() => js('document.querySelectorAll(".activity-group-toggle[aria-expanded=false]").length === 2'), 'collapsed tool groups');
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('.activity-group-toggle'), group => group.textContent.trim())`), [
+    '3 tools: 1 read, 1 web, 1 tool search', '2 tools: 2 tool searches (1 failed) · 1 failed',
+  ]);
+  await js('document.querySelector(".activity-group-toggle").click()');
+  await until(() => js('document.querySelectorAll(".tool-call > summary").length === 3'), 'saved tool rows');
+  const toolRows = await js(`Array.from(document.querySelectorAll('.tool-call > summary'), summary => ({
+    text: summary.textContent.trim(),
+    description: summary.getAttribute('aria-description'),
+    chevron: getComputedStyle(summary, '::before').maskImage,
+  }))`);
+  assert.deepEqual(toolRows.map(({ text, description }) => [text, description]), [
+    ['search_tools web', null], ['web_fetch https://example.test', 'Called through execute_tool'], ['read notes.txt', null],
+  ]);
+  assert.deepEqual(toolRows.map(({ chevron }) => decodeURIComponent(chevron).match(/<path\b/g)?.length), [1, 2, 1]);
+  await js('document.querySelector(".tool-call.is-dispatched > summary").click()');
+  await until(() => js('document.querySelectorAll(".tool-call.is-dispatched pre").length === 2'), 'expanded dispatched tool');
+  const chevronTransform = () => js('getComputedStyle(document.querySelector(".tool-call.is-dispatched > summary"), "::before").transform');
+  await until(async () => await chevronTransform() === 'matrix(0, 1, -1, 0, 0, 0)', 'double chevron points down');
+  const [parameters, result] = await js('Array.from(document.querySelectorAll(".tool-call.is-dispatched pre"), pre => pre.textContent)');
+  assert.deepEqual(JSON.parse(parameters), { url: 'https://example.test' });
+  assert.equal(result, 'Fetched');
+  await js('document.querySelector(".tool-call.is-dispatched > summary").click()');
+  await until(async () => await chevronTransform() === 'none', 'double chevron points right');
+  console.log('PASS: On-demand tools use a double chevron that rotates with their details.');
+
+  await js('document.querySelector(".tool-call > summary").click()');
+  await until(() => js('document.querySelectorAll(".tool-call:first-child pre").length === 2'), 'expanded search tool');
+  const [query, discovery] = await js('Array.from(document.querySelectorAll(".tool-call:first-child pre"), pre => pre.textContent)');
+  assert.deepEqual(JSON.parse(query), { query: 'web' });
+  assert.equal(discovery, 'web_fetch\nweb_search');
+  await js('document.querySelectorAll(".activity-group-toggle")[1].click()');
+  await js('document.querySelectorAll(".activity-group")[1].querySelectorAll(".tool-call > summary").forEach(summary => summary.click())');
+  await until(() => js('document.querySelectorAll(".activity-group")[1].querySelectorAll(".tool-call pre").length === 4'), 'expanded empty and failed searches');
+  assert.deepEqual(await js(`Array.from(document.querySelectorAll('.activity-group')[1].querySelectorAll('.tool-call pre:last-child'), pre => pre.textContent)`), [
+    'No matching on-demand tools.', 'Access denied by tool policy.',
+  ]);
+
+  await js(`setStreaming(true); setItems([{ id: 3000, type: 'tool', name: 'search_tools', args: { query: 'web' }, result: null }])`);
+  await until(() => js('document.querySelector(".activity-group-toggle[aria-expanded=true] .activity-group-detail")?.textContent === "search_tools web"'), 'live search tool');
+  await js('document.querySelector(".tool-call > summary").click()');
+  await js('setItems(current => current.map(item => ({ ...item, result: "web_fetch" })))');
+  await until(() => js('document.querySelector(".tool-call pre:last-child")?.textContent === "web_fetch"'), 'live search names');
+  await js('setStreaming(false)');
+  console.log('PASS: Search tools use ordinary tool rows and display only names for successful matches.');
 
   await js('setItems([])');
   await until(() => js('document.querySelectorAll(".transcript-virtual-row").length === 0'), 'empty history');

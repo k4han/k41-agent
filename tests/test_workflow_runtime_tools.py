@@ -377,7 +377,7 @@ async def test_tool_node_allows_pending_plan_mode_tool_after_agent_switch(monkey
 
     result = await invoke_checkpointed_tool_node(
         state,
-        config={"configurable": {"thread_id": "thread-1"}},
+        config={"configurable": {"thread_id": "thread-1", "pending_control_tool_call_ids": ["call-plan"]}},
         runtime=SimpleNamespace(
             context={
                 "agent_name": "worker",
@@ -439,7 +439,7 @@ async def test_tool_node_allows_pending_ask_user_tool_after_agent_switch(monkeyp
 
     result = await invoke_checkpointed_tool_node(
         state,
-        config={"configurable": {"thread_id": "thread-1"}},
+        config={"configurable": {"thread_id": "thread-1", "pending_control_tool_call_ids": ["call-ask"]}},
         runtime=SimpleNamespace(
             context={
                 "agent_name": "worker",
@@ -847,6 +847,7 @@ async def test_tool_node_rejects_parallel_write_todos_calls():
                         "args": {"todos": [{"content": "Two", "status": "pending"}]},
                         "id": "call-2",
                     },
+                    {"name": "get_current_time", "args": {}, "id": "call-3"},
                 ],
             )
         ]
@@ -859,8 +860,9 @@ async def test_tool_node_rejects_parallel_write_todos_calls():
     )
 
     messages = result["messages"]
-    assert [message.tool_call_id for message in messages] == ["call-1", "call-2"]
-    assert [message.status for message in messages] == ["error", "error"]
+    assert [message.tool_call_id for message in messages] == ["call-1", "call-2", "call-3"]
+    assert [message.name for message in messages] == ["write_todos", "write_todos", "get_current_time"]
+    assert all(message.status == "error" for message in messages)
 
 
 @pytest.mark.asyncio

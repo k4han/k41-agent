@@ -239,12 +239,18 @@ def normalize_messages_for_chat_model(messages: list[BaseMessage]) -> list[BaseM
     """Normalize persisted message history before sending it to chat providers."""
     normalized_messages: list[BaseMessage] = []
     stale_screenshots = _stale_screenshot_indexes(messages)
+    dispatched_ids = set()
 
     for index, message in enumerate(messages):
+        if isinstance(message, AIMessage):
+            dispatched_ids = {call["id"] for call in message.tool_calls if call["name"] == "execute_tool"}
         if isinstance(message, ToolMessage):
             from agent.modules.tools import coding_message_for_model
 
             message = coding_message_for_model(message)
+            if message.tool_call_id in dispatched_ids:
+                # Function responses must name the function in the provider's original call.
+                message = message.model_copy(update={"name": "execute_tool"})
         content = getattr(message, "content", None)
         if isinstance(message, HumanMessage) and isinstance(content, list):
             text_content, handled = _human_text_from_content_list(content)

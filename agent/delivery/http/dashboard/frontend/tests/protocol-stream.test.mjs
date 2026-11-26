@@ -19,8 +19,9 @@ function load(path, dependencies, globals = {}) {
 const handler = load('../src/lib/chatStreamHandler.ts', {
   '@/components/Transcript': {
     PLAN_MODE_TOOL_NAME: 'request_plan_review',
-    createTranscriptTool: ({ toolCallId, name, args = null, result = null }) => ({
+    createTranscriptTool: ({ toolCallId, name, args = null, result = null, dispatched }) => ({
       type: 'tool', tool_call_id: toolCallId, name, args, result,
+      ...(dispatched ? { dispatched } : {}),
     }),
   },
   '@/lib/eventConstants': load('../src/lib/eventConstants.ts', {}),
@@ -30,6 +31,7 @@ const handler = load('../src/lib/chatStreamHandler.ts', {
 });
 const protocol = load('../src/lib/protocolStreamHandler.ts', {
   '@/lib/chatStreamHandler': handler,
+  '@/lib/toolCallDisplay': load('../src/lib/toolCallDisplay.ts', {}),
 });
 const replay = load('../src/lib/chatStreamReplay.ts', {
   '@/lib/asyncSubagents': load('../src/lib/asyncSubagents.ts', { '@/lib/userInputRequest': {} }),
@@ -46,7 +48,9 @@ function fixture(previous = [], replaying = false) {
     removeItem: (id) => { const index = items.findIndex((item) => item.id === id); if (index >= 0) items.splice(index, 1); },
     finishThinking: () => {},
     updateToolResult: (id, name, result) => {
-      Object.assign(items.find((item) => item.tool_call_id === id), { result, resultReceived: true });
+      const item = items.find((row) => row.type === 'tool' && row.tool_call_id === id);
+      if (item) Object.assign(item, { result, resultReceived: true });
+      else callbacks.appendItem({ type: 'tool', tool_call_id: id, name, result, resultReceived: true });
     },
     updateToolActivity: (id, changes) => {
       const item = items.find((row) => row.tool_call_id === id);
@@ -314,6 +318,81 @@ test('native tool argument and output deltas accumulate without extra rows', () 
   assert.equal(tools.length, 1);
   assert.equal(tools[0].args.path, 'file');
   assert.equal(tools[0].outputDelta, 'onetwo');
+});
+
+test('a dispatched tool keeps its target, arguments and marker across stream events', () => {
+  const f = fixture();
+  const call = { id: 'fetch', name: 'execute_tool' };
+  const args = { url: 'https://example.test' };
+  const request = { tool_name: 'web_fetch', arguments: args };
+  const metadata = { run_id: 'message' };
+  f.send('messages', [{ event: 'content-block-start', index: 0,
+    content: { ...call, type: 'tool_call_chunk', args: '' } }, metadata]);
+  f.send('messages', [{ event: 'content-block-delta', index: 0,
+    delta: { type: 'tool-call-delta', args: '{"tool_name":"web_fetch",' } }, metadata]);
+  assert.equal(f.items.filter(item => item.type === 'tool').length, 0);
+  f.send('messages', [{ event: 'content-block-delta', index: 0,
+    delta: { type: 'tool-call-delta', args: `"arguments":${JSON.stringify(args)}}` } }, metadata]);
+  const row = f.items.find(item => item.type === 'tool');
+  assert.equal(row.name, 'web_fetch');
+  assert.equal(row.args.url, args.url);
+  f.send('messages', [{ event: 'content-block-finish', index: 0,
+    content: { ...call, type: 'tool_call', args: request } }, metadata]);
+  f.send('custom:k41', { type: 'tool_call', ...call, args: request, projection: 'ui' });
+  f.send('tools', { event: 'tool-started', tool_call_id: call.id, tool_name: 'web_fetch', input: args });
+  f.send('custom:k41', { type: 'tool_result', tool_call_id: call.id, name: 'web_fetch',
+    content: 'Fetched', projection: 'ui' });
+  assert.deepEqual(f.items.map(item => [item.name, item.dispatched, item.result]), [['web_fetch', true, 'Fetched']]);
+  assert.deepEqual(row.args, args);
+
+  f.send('custom:k41', { type: 'tool_call', id: 'direct', name: 'web_fetch', args, projection: 'ui' });
+  assert.equal(f.items.at(-1).dispatched, undefined);
+});
+
+test('a discovery tool error preserves the reason from the native stream', () => {
+  const f = fixture();
+  f.send('tools', { event: 'tool-started', tool_call_id: 'discover', tool_name: 'search_tools', input: { query: 'web' } });
+  f.send('tools', { event: 'tool-error', tool_call_id: 'discover', message: 'Discovery service timed out' });
+  const row = f.items.find(item => item.tool_call_id === 'discover');
+  assert.equal(row.executionStatus, 'failed');
+  assert.equal(row.result, 'Discovery service timed out');
+  assert.equal(row.resultReceived, true);
+});
+
+test('a malformed dispatch gets a transcript row with the raw arguments at block finish', () => {
+  const f = fixture();
+  const call = { id: 'invalid-dispatch', name: 'execute_tool' };
+  const metadata = { run_id: 'message' };
+  const args = '{"tool_name":"web_fetch","arguments":';
+  f.send('messages', [{ event: 'content-block-start', index: 0,
+    content: { ...call, type: 'tool_call_chunk', args: '' } }, metadata]);
+  f.send('messages', [{ event: 'content-block-delta', index: 0,
+    delta: { type: 'tool-call-delta', args } }, metadata]);
+  assert.equal(f.items.filter(item => item.type === 'tool').length, 0);
+  f.send('messages', [{ event: 'content-block-finish', index: 0,
+    content: { ...call, type: 'invalid_tool_call', args: null, error: 'Malformed arguments' } }, metadata]);
+  f.send('custom:k41', { type: 'tool_result', tool_call_id: call.id, name: call.name,
+    status: 'error', content: 'Invalid tool input', projection: 'ui' });
+  const [row] = f.items.filter(item => item.type === 'tool');
+  assert.equal(f.items.filter(item => item.type === 'tool').length, 1);
+  assert.equal(row.name, call.name);
+  assert.equal(row.args, args);
+  assert.equal(row.executionStatus, 'failed');
+  assert.equal(row.result, 'Invalid tool input');
+});
+
+test('a rejected dispatched question shows its error in the live transcript', () => {
+  const f = fixture();
+  const error = '[error] permission_denied: Tool is unavailable to this agent.';
+  f.send('custom:k41', { type: 'tool_call', id: 'question', name: 'execute_tool',
+    args: { tool_name: 'ask_user', arguments: {} }, projection: 'ui' });
+  f.send('custom:k41', { type: 'tool_result', tool_call_id: 'question', name: 'execute_tool',
+    status: 'error', content: error, projection: 'ui' });
+  const [item] = f.items.filter(row => row.tool_call_id === 'question');
+  assert.equal(item.type, 'tool');
+  assert.equal(item.name, 'ask_user');
+  assert.equal(item.executionStatus, 'failed');
+  assert.equal(item.result, error);
 });
 
 test('interleaved model invocations retain their message identity', () => {

@@ -55,12 +55,13 @@ class ToolOutput:
     text: str
     images: tuple[tuple[str, str], ...] = ()  # (base64 data, mime type)
     is_error: bool = False
+    display_text: str | None = None
 
 
-def tool_output(content: Any, *, is_error: bool = False) -> ToolOutput:
+def tool_output(content: Any, *, is_error: bool = False, display_text: str | None = None) -> ToolOutput:
     """Convert LangChain tool message content."""
     if isinstance(content, str):
-        return ToolOutput(content, is_error=is_error)
+        return ToolOutput(content, is_error=is_error, display_text=display_text)
     texts: list[str] = []
     images: list[tuple[str, str]] = []
     for block in content if isinstance(content, list) else []:
@@ -70,7 +71,7 @@ def tool_output(content: Any, *, is_error: bool = False) -> ToolOutput:
             texts.append(str(block.get("text") or ""))
         elif isinstance(block, dict) and block.get("type") == "image" and block.get("base64"):
             images.append((str(block["base64"]), str(block.get("mime_type") or "image/png")))
-    return ToolOutput("\n".join(texts), tuple(images), is_error)
+    return ToolOutput("\n".join(texts), tuple(images), is_error, display_text)
 
 
 class ToolProvider(Protocol):
@@ -142,7 +143,7 @@ class SessionTools:
 
     def approve(self, tool_call: dict[str, Any], tool: str) -> None:
         # rawInput is optional in ACP, while an MCP call always carries an arguments object.
-        arguments = mcp_call_arguments(tool_call)
+        arguments = mcp_call_arguments(tool_call, bridged_tool=tool)
         matches = {_canonical({} if arguments is None else arguments)}
         if tool_call.get("name") == f"mcp_{BRIDGE_SERVER_NAME}_{tool}" and isinstance(arguments, dict) and "toolSummary" in arguments:
             # agy adds this display field to ACP input, then removes it before MCP execution.
@@ -289,7 +290,8 @@ class ToolBridge:
             logger.exception("K41 tool %s failed for an ACP agent.", name)
             output = ToolOutput(f"The tool failed: {exc}", is_error=True)
         if tool_call_id:
-            turn.record_tool_output(tool_call_id, output.text)
+            display = output.display_text if output.display_text is not None else output.text
+            turn.record_tool_output(tool_call_id, display, is_error=output.is_error)
         return _call_result(output)
 
     def _build_app(self) -> Starlette:

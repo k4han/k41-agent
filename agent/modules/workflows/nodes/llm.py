@@ -18,13 +18,14 @@ from agent.modules.workflows.model_context import emit_reported_context_usage, p
 from agent.modules.workflows.decision_context import bind_decision_context_tool, restore_legacy_decision_context
 from agent.modules.workflows.prompt_builders import (
     build_llm_system_prompt,
+    prompt_tool_names,
 )
 from agent.modules.workflows.system_prompt_cache import (
     build_system_prompt_cache_key,
     get_cached_system_prompt,
     store_system_prompt,
 )
-from agent.modules.tools import ToolResolver, bind_tool_catalogs, get_thread_id
+from agent.modules.tools import ToolResolver, bind_tool_catalogs, discovery_catalog, get_thread_id
 
 if TYPE_CHECKING:
     from langgraph.runtime import Runtime
@@ -95,7 +96,7 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
         agent_name=agent_name,
         working_dir=working_dir,
         workspace_label=workspace.display_label(),
-        tool_names=[getattr(tool, "name", "") for tool in tools],
+        tool_names=prompt_tool_names(tools),
         allowed_skill_names=ctx.get_allowed_skill_names(),
         thread_id=thread_id,
         workspace=workspace,
@@ -136,6 +137,9 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
     from agent.modules.skills import active_context, skill_commands
 
     pool_tools = tools
+    discovery = discovery_catalog(tools)
+    deferred = discovery.deferred_for_run(workspace, config) if discovery else {}
+    skill_tools = [*tools, deferred["skill"]] if "skill" in deferred else tools
     initial_trim_applied = getattr(ctx, "channel_trim_applied", False)
     queue_turn = getattr(ctx, "chat_queue_turn", None)
     insertions = []
@@ -158,12 +162,12 @@ async def llm_node(state, config: RunnableConfig, runtime: Runtime[WorkflowConte
                 if active_skills or any(commands for commands, _ in command_groups):
                     history, active_skills, processed_skill_messages = await active_context(
                         model_state, workspace=workspace, thread_id=thread_id or "", agent_name=agent_name,
-                        names=ctx.get_allowed_skill_names(), tools=pool_tools, command_groups=command_groups,
+                        names=ctx.get_allowed_skill_names(), tools=skill_tools, command_groups=command_groups,
                     )
             except (PermissionError, FileNotFoundError, ValueError) as exc:
                 return {
                     "messages": [*insertions, AIMessage(content=f"Unable to use the requested skill: {exc}")],
-                    "active_skills": active_skills if any(tool.name == "skill" for tool in pool_tools) else {},
+                    "active_skills": active_skills if any(tool.name == "skill" for tool in skill_tools) else {},
                 }
             history, decision_updates = await restore_legacy_decision_context(model_state, history, working_dir)
             history_context = history, active_skills, processed_skill_messages, decision_updates

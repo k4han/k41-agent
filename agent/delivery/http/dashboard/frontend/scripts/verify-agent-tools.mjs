@@ -34,7 +34,7 @@ const toolGroups = [
   },
   { category: 'web', tools: ['web_search', 'web_fetch'] },
   { category: 'image', tools: ['generate_image'] },
-  { category: 'utility', tools: ['get_current_time'] },
+  { category: 'utility', tools: ['get_current_time', 'search_tools', 'execute_tool'] },
 ];
 const toolNames = toolGroups.flatMap((group) => group.tools);
 const acpTools = [
@@ -193,8 +193,9 @@ const server = await createServer({
           if (req.method !== 'GET')
             writes.push({ method: req.method, path: url.pathname, body });
           let payload = {};
-          if (req.method === 'PUT' && url.pathname === '/agents/cards/acp') {
-            const saved = cards.find(item => item.name === 'acp');
+          if (req.method === 'PUT' && url.pathname.startsWith('/agents/cards/')) {
+            const saved = cards.find(item => item.name === decodeURIComponent(url.pathname.split('/').at(-1)));
+            assert.ok(saved);
             Object.assign(saved, body);
             payload = { status: 'ok', card: saved };
           }
@@ -500,7 +501,7 @@ try {
     () => count('.agent-tools-inspector').then((value) => value === 1),
     'Inline inspector',
   );
-  assert.equal(await count('.agent-tools-row'), 14);
+  assert.equal(await count('.agent-tools-row'), toolNames.length);
   assert.equal(await count('[role="tablist"]'), 1);
   assert.equal(await count('.agent-editor-navigation [role="tab"]'), 6);
   assert.equal(
@@ -742,6 +743,36 @@ try {
   console.log(
     'PASS: MCP success/failure/empty states, draft preservation, stable permission editing, delegation and exact save payload.',
   );
+
+  await navigate('research-assistant');
+  const selectUtility = 'input[aria-label="Select all utility tools"]';
+  await click(selectUtility);
+  assert.equal(await property('input[aria-label="Enable get_current_time"]', 'checked'), true);
+  assert.equal(await property('input[aria-label="Enable search_tools"]', 'checked'), false);
+  assert.equal(await property('input[aria-label="Enable execute_tool"]', 'checked'), false);
+  await click('input[aria-label="Enable search_tools"]');
+  assert.equal(await property('input[aria-label="Enable execute_tool"]', 'checked'), true);
+  await click(selectUtility);
+  assert.equal(await property('input[aria-label="Enable get_current_time"]', 'checked'), false);
+  assert.equal(await property('input[aria-label="Enable search_tools"]', 'checked'), true);
+  assert.equal(await property('input[aria-label="Enable execute_tool"]', 'checked'), true);
+  await click('input[aria-label="Enable web_search"]');
+  await click('button[aria-label="Configure web_search"]');
+  assert.equal(await property('#agent-tool-web_search-result_limit', 'value'), '7');
+  await input('#agent-tool-web_search-result_limit', '6');
+  await buttonText('.settings-topbar-actions button', 'Save');
+  await until(() => js('location.pathname === "/settings/agents"'), 'Discovery card save');
+  await navigate('research-assistant');
+  assert.equal(await property('input[aria-label="Enable web_search"]', 'checked'), false);
+  await click('button[aria-label="Configure web_search"]');
+  assert.equal(await property('#agent-tool-web_search-result_limit', 'value'), '6');
+  await click('input[aria-label="Enable execute_tool"]');
+  assert.equal(await property('input[aria-label="Enable search_tools"]', 'checked'), false);
+  assert.equal(await count('#agent-tool-web_search-result_limit'), 0);
+  await click('input[aria-label="Enable web_search"]');
+  await buttonText('.settings-topbar-actions button', 'Save');
+  await until(() => js('location.pathname === "/settings/agents"'), 'Discovery disabled save');
+  console.log('PASS: discovery pair selection and on-demand configuration round trip.');
 
   await navigate('builtin');
   assert.equal(await count('.agent-tools-row-check input:not(:disabled)'), 0);

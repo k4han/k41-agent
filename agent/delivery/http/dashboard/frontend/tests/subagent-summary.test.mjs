@@ -19,8 +19,10 @@ function load(path, dependencies = {}) {
 }
 
 const toolCallStatus = load('../src/lib/toolCallStatus.ts');
+const toolCallDisplay = load('../src/lib/toolCallDisplay.ts');
 const toolGroupSummary = load('../src/lib/toolGroupSummary.ts', {
   '@/lib/toolCallStatus': toolCallStatus,
+  '@/lib/toolCallDisplay': toolCallDisplay,
   '@/lib/shellToolResult': load('../src/lib/shellToolResult.ts'),
 });
 const { summarizeSubagent } = load('../src/lib/subagentSummary.ts', {

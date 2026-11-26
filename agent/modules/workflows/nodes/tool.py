@@ -1,20 +1,29 @@
 import asyncio
+from types import SimpleNamespace
 
 from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
+from langgraph._internal._constants import NS_SEP
+from langgraph.checkpoint.serde.types import INTERRUPT
+from langgraph.constants import CONFIG_KEY_CHECKPOINTER
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
-from types import SimpleNamespace
 
 from agent.modules.tools import (
+    ASK_USER_INTERRUPT_TYPE,
     ASK_USER_TOOL_NAME,
     PLAN_MODE_TOOL_NAME,
+    PLAN_REVIEW_INTERRUPT_TYPE,
     ToolResolver,
+    ToolError,
+    ToolErrorCode,
+    browser_batch_error,
     get_runtime_context_value,
     get_tool_by_name,
     prepare_tool_batch,
     retain_tool_messages,
+    resolve_dispatched_calls,
 )
 from agent.modules.workflows.run_config import WorkflowContext
 from agent.modules.tools import coding_authorization_scope
@@ -50,12 +59,7 @@ def make_tool_node(tools: list[BaseTool]) -> ToolNode:
     return ToolNode(tools)
 
 
-def _parallel_named_tool_error(state, tool_name: str, message: str) -> dict | None:
-    messages = state.get("messages", []) if isinstance(state, dict) else []
-    if not messages:
-        return None
-
-    tool_calls = getattr(messages[-1], "tool_calls", None) or []
+def _parallel_named_tool_error(tool_calls, tool_name: str, message: str) -> dict | None:
     matching_calls = [
         call
         for call in tool_calls
@@ -68,17 +72,18 @@ def _parallel_named_tool_error(state, tool_name: str, message: str) -> dict | No
         "messages": [
             ToolMessage(
                 content=message,
+                name=call.get("name"),
                 tool_call_id=str(call.get("id", "")),
                 status="error",
             )
-            for call in matching_calls
+            for call in tool_calls
         ]
     }
 
 
-def _parallel_control_tool_error(state) -> dict | None:
+def _parallel_control_tool_error(calls) -> dict | None:
     return _parallel_named_tool_error(
-        state,
+        calls,
         "write_todos",
         (
             "Error: The write_todos tool should not be called multiple "
@@ -86,7 +91,7 @@ def _parallel_control_tool_error(state) -> dict | None:
             "complete updated todo list."
         ),
     ) or _parallel_named_tool_error(
-        state,
+        calls,
         ASK_USER_TOOL_NAME,
         (
             "Error: The ask_user tool should not be called multiple times "
@@ -95,58 +100,64 @@ def _parallel_control_tool_error(state) -> dict | None:
     )
 
 
-def _last_tool_call_names(state) -> set[str]:
-    messages = state.get("messages", []) if isinstance(state, dict) else []
-    if not messages:
+async def _pending_control_tool_ids(config: RunnableConfig, runtime: Runtime) -> set[str]:
+    configurable = config.get("configurable", {})
+    if pending_ids := configurable.get("pending_control_tool_call_ids"):
+        return set(pending_ids)
+
+    # Direct graph resumes and retries can omit the runner's list of pending IDs.
+    # Read the interrupt writes for this node in the checkpoint it is replaying.
+    checkpointer = configurable.get(CONFIG_KEY_CHECKPOINTER)
+    execution = getattr(runtime, "execution_info", None)
+    if checkpointer is None or execution is None or not execution.thread_id or not execution.checkpoint_id:
         return set()
-    tool_calls = getattr(messages[-1], "tool_calls", None) or []
+    saved = await checkpointer.aget_tuple({"configurable": {
+        "thread_id": execution.thread_id,
+        "checkpoint_id": execution.checkpoint_id,
+        "checkpoint_ns": execution.checkpoint_ns.rpartition(NS_SEP)[0],
+    }})
+    pending_writes = saved.pending_writes if saved else None
     return {
-        str(call.get("name") or "")
-        for call in tool_calls
-        if isinstance(call, dict) and call.get("name")
+        pending.value["tool_call_id"]
+        for task_id, channel, interrupts in pending_writes or ()
+        if task_id == execution.task_id and channel == INTERRUPT
+        for pending in interrupts
+        if isinstance(pending.value, dict)
+        and pending.value.get("type") in (PLAN_REVIEW_INTERRUPT_TYPE, ASK_USER_INTERRUPT_TYPE)
+        and pending.value.get("tool_call_id")
     }
 
 
-def _include_pending_control_tools(state, tools: list[BaseTool]) -> list[BaseTool]:
-    """Allow resumed control tools to finish even after switching agents."""
-    pending_names = _last_tool_call_names(state)
-    control_names = {PLAN_MODE_TOOL_NAME, ASK_USER_TOOL_NAME}
-    pending_control_names = pending_names.intersection(control_names)
-    if not pending_control_names:
-        return tools
-    existing_names = {getattr(tool, "name", "") for tool in tools}
-    next_tools = list(tools)
-    for name in sorted(pending_control_names):
-        if name in existing_names:
-            continue
-        pending_tool = get_tool_by_name(name)
-        if pending_tool is not None:
-            next_tools.append(pending_tool)
-    return next_tools
+def _call_target_name(call):
+    return call["args"].get("tool_name") if call["name"] == "execute_tool" else call["name"]
 
 
-async def _include_resumed_browser_handoff(state, tools, config):
-    """Only restore a browser control tool that previously entered a handoff."""
-    if any(tool.name == "browser_handoff" for tool in tools):
-        return tools
-    calls = getattr(state.get("messages", [])[-1], "tool_calls", []) if state.get("messages") else []
-    calls = [call for call in calls if call.get("name") == "browser_handoff"]
+async def _resumed_browser_handoff_targets(calls, tools, config):
+    """Restore only calls with a recorded handoff, including old dispatches."""
+    has_browser_handoff = any(tool.name == "browser_handoff" for tool in tools)
+    calls = [
+        call for call in calls if _call_target_name(call) == "browser_handoff"
+        and (not has_browser_handoff or call["name"] == "execute_tool")
+        and call.get("id")
+    ]
     if not calls:
-        return tools
+        return {}
     from agent.bootstrap.container import require_active_container
 
     container = require_active_container()
     thread_id = config.get("configurable", {}).get("thread_id")
     if not container.persistence_ready or not thread_id:
-        return tools
+        return {}
+    pending_tool = get_tool_by_name("browser_handoff")
+    if pending_tool is None:
+        return {}
     browser = container.browser_service
+    targets = {}
     for call in calls:
         prior = await browser.repository.invocation(browser.canonical(thread_id), call["id"])
         if prior is not None and prior.status in {"handoff", "expired", "completed"}:
-            pending_tool = get_tool_by_name("browser_handoff")
-            if pending_tool is not None:
-                return [*tools, pending_tool]
-    return tools
+            targets[call["id"]] = pending_tool
+    return targets
 
 
 async def tool_node(
@@ -156,19 +167,9 @@ async def tool_node(
 ):
     """Resolve the executable tool set at runtime to match llm_node bindings."""
     import logging
+    from langgraph.func import task
 
     logger = logging.getLogger(__name__)
-    control_error = _parallel_control_tool_error(state)
-    if control_error is not None:
-        return control_error
-
-    from agent.modules.tools import browser_batch_error
-    pending = getattr(state.get("messages", [])[-1], "tool_calls", []) if state.get("messages") else []
-    browser_error = browser_batch_error(pending)
-    if browser_error:
-        return {"messages": [ToolMessage(content=browser_error, tool_call_id=call["id"],
-                                         name=call["name"], status="error") for call in pending]}
-
     allowed_tool_names = get_runtime_context_value(
         runtime.context,
         "allowed_tool_names",
@@ -179,6 +180,27 @@ async def tool_node(
         "agent_name",
         "default",
     )
+    calls = getattr(state.get("messages", [])[-1], "tool_calls", []) if state.get("messages") else []
+    control_calls = {}
+    for call in calls:
+        name = _call_target_name(call)
+        if name in (PLAN_MODE_TOOL_NAME, ASK_USER_TOOL_NAME):
+            control_calls[call.get("id")] = name
+    dispatched_plan_ids = {
+        call.get("id") for call in calls
+        if call["name"] == "execute_tool" and control_calls.get(call.get("id")) == PLAN_MODE_TOOL_NAME
+    }
+    pending_ids = await _pending_control_tool_ids(config, runtime) if control_calls else set()
+    plan_handoff = False
+    if dispatched_plan_ids:
+        # Keep this as the first LangGraph task for dispatched plans. Its position
+        # and the execution task positions below are part of existing checkpoints.
+        @task
+        async def plan_dispatch_scope(name, allowed_names):
+            return name, allowed_names
+
+        planner, _ = await plan_dispatch_scope(agent_name, allowed_tool_names)
+        plan_handoff = planner != agent_name and bool(dispatched_plan_ids & pending_ids)
     # Fall back to "default" like llm_node so bindings and execution agree
     # when the requested agent was deleted or renamed mid-run.
     try:
@@ -203,40 +225,78 @@ async def tool_node(
         tools = ToolResolver().for_workspace(tools, workspace)
     from agent.modules.workflows.decision_context import bind_decision_context_tool
     tools = bind_decision_context_tool(tools, state)
-    tools = _include_pending_control_tools(state, tools)
-    tools = await _include_resumed_browser_handoff(state, tools, config)
-    calls = getattr(state.get("messages", [])[-1], "tool_calls", []) if state.get("messages") else []
+    pending_controls = {}
+    for call_id, name in control_calls.items():
+        if call_id in pending_ids and (not plan_handoff or name == PLAN_MODE_TOOL_NAME):
+            if pending_tool := get_tool_by_name(name):
+                pending_controls[call_id] = pending_tool
+    targets = dict(pending_controls)
+    if not plan_handoff:
+        targets.update(await _resumed_browser_handoff_targets(calls, tools, config))
+    if targets:
+        calls = [
+            {**call, "name": targets[call["id"]].name, "args": call["args"].get("arguments", {})}
+            if call["id"] in targets and call["name"] == "execute_tool" else call
+            for call in calls
+        ]
+    cancel_reason = (
+        "This tool call was cancelled because plan approval switched agents." if plan_handoff else ""
+    )
+    batch_tools = [*tools, *targets.values()]
     original_active = state.get("active_skills", {})
     state = {**state, "active_skills": dict(original_active)}
     next_config = {**config, "configurable": dict(config.get("configurable", {}))}
     with coding_authorization_scope():
         if calls:
             next_config["configurable"]["coding_message_id"] = str(getattr(state["messages"][-1], "id", "") or "")
+        if calls and not cancel_reason:
             from agent.modules.tools import prepare_permissions
-            from agent.modules.tools import ToolError
             try:
-                await prepare_permissions(tools, calls, SimpleNamespace(
+                if any(call["name"] == "execute_tool" for call in calls):
+                    calls, dispatched = resolve_dispatched_calls(
+                        calls, tools, workspace, config, restored_ids=targets.keys(),
+                    )
+                    targets.update(dispatched)
+                    batch_tools = [*tools, *targets.values()]
+                control_error = _parallel_control_tool_error(calls)
+                if control_error:
+                    return control_error
+                browser_error = browser_batch_error(calls)
+                if browser_error:
+                    return {"messages": [ToolMessage(content=browser_error, tool_call_id=call["id"],
+                                                     name=call["name"], status="error") for call in calls]}
+                await prepare_permissions(batch_tools, calls, SimpleNamespace(
                     context=runtime.context, state=state, config=next_config))
             except (ToolError, ValueError, OSError, KeyError, TypeError) as exc:
-                code = exc.code.value if isinstance(exc, ToolError) else "invalid_input"
-                return {"messages": [ToolMessage(content=f"[error] {code}: Batch stopped before execution: {exc}",
-                        artifact={"error": {"code": code, "message": str(exc)}, "batch_stopped_before_execution": True},
-                        name=call["name"], tool_call_id=call["id"], status="error") for call in calls]}
-            failure = await prepare_tool_batch(tools, calls, SimpleNamespace(
-                context=runtime.context, state=state, config=next_config,
-            ))
-            if failure is not None:
-                return await retain_tool_messages({"messages": [ToolMessage(
-                    content=failure.content, artifact=failure.model_dump(exclude={"content"}),
-                    name=call["name"], tool_call_id=call["id"], status="error",
-                ) for call in calls]}, SimpleNamespace(context=runtime.context, config=next_config))
-        from langgraph.func import task
+                if pending_controls and isinstance(exc, ToolError) and exc.code is ToolErrorCode.PERMISSION_DENIED:
+                    cancel_reason = f"This tool call was cancelled after tool access changed: {exc}"
+                    targets = pending_controls
+                else:
+                    code = exc.code.value if isinstance(exc, ToolError) else "invalid_input"
+                    return {"messages": [ToolMessage(content=f"[error] {code}: Batch stopped before execution: {exc}",
+                            artifact={"error": {"code": code, "message": str(exc)}, "batch_stopped_before_execution": True},
+                            name=call["name"], tool_call_id=call["id"], status="error") for call in calls]}
+            if not cancel_reason:
+                failure = await prepare_tool_batch(tools, calls, SimpleNamespace(
+                    context=runtime.context, state=state, config=next_config,
+                ), dispatched=targets)
+                if failure is not None:
+                    return await retain_tool_messages({"messages": [ToolMessage(
+                        content=failure.content, artifact=failure.model_dump(exclude={"content"}),
+                        name=call["name"], tool_call_id=call["id"], status="error",
+                    ) for call in calls]}, SimpleNamespace(context=runtime.context, config=next_config))
         from agent.modules.tools import permission_execution
 
         @task
         async def execute_tool_call(call):
             # Each completed call has a durable result. Later interrupts replay only
             # their own call, including business interrupts such as ask_user.
+            target = targets.get(call["id"])
+            if cancel_reason and target is None:
+                return {"messages": [ToolMessage(
+                    content=cancel_reason,
+                    name=call["name"], tool_call_id=call["id"], status="error",
+                )]}
             single = {**state, "messages": [*state["messages"][:-1],
                       state["messages"][-1].model_copy(update={"tool_calls": [call]})]}
             from langgraph.config import get_config
@@ -246,13 +306,14 @@ async def tool_node(
                 "coding_message_id": next_config["configurable"].get("coding_message_id", ""),
             }}
             with permission_execution():
-                return await ToolNode(tools).ainvoke(single, config=task_config, runtime=runtime)
+                available = [*tools, target] if target is not None else tools
+                return await ToolNode(available).ainvoke(single, config=task_config, runtime=runtime)
 
         from langgraph.types import Command
         result = []
-        for batch in _execution_batches(calls, tools):
-            # Schedule durable tasks in model order so interrupt replay uses the
-            # same task positions. Gather also preserves tool-result order.
+        for batch in _execution_batches(calls, [] if cancel_reason else batch_tools):
+            # Keep task positions stable on replay, including completed siblings
+            # and siblings cancelled after a handoff or a policy change.
             values = await asyncio.gather(*(execute_tool_call(call) for call in batch))
             for value in values:
                 parts = value if isinstance(value, list) else [value]

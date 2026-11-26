@@ -46,6 +46,7 @@ import { useToast } from "@/components/Toast";
 import { isChatStatusText } from "@/lib/chatStatus";
 import { getSharedDarkMode } from "@/lib/theme";
 import { toolCallSummary } from "@/lib/toolCallSummary";
+import { toolResultDisplay } from "@/lib/toolCallDisplay";
 import { hasToolCallResult } from "@/lib/toolCallStatus";
 import { isShellTool, shellToolResult } from "@/lib/shellToolResult";
 import { CUSTOM_DOM_EVENTS } from "@/lib/eventConstants";
@@ -148,6 +149,7 @@ export type TranscriptTool = {
   tool_call_id?: string | null;
   name?: string | null;
   args: unknown;
+  dispatched?: boolean;
   result: unknown;
   resultReceived?: boolean;
   subagent?: SubagentActivity;
@@ -215,6 +217,7 @@ export function createTranscriptTool(options: {
   toolCallId?: string | null;
   name?: string | null;
   args?: unknown;
+  dispatched?: boolean;
   result?: unknown;
 }): TranscriptTool {
   return {
@@ -222,6 +225,7 @@ export function createTranscriptTool(options: {
     tool_call_id: options.toolCallId || null,
     name: options.name || "unknown",
     args: options.args ?? null,
+    ...(options.dispatched ? { dispatched: true } : {}),
     result: options.result ?? null,
     resultReceived: "result" in options,
   };
@@ -965,6 +969,7 @@ export function PlanReviewView(props: {
 export function ToolCallDetail(props: {
   name?: string | null;
   args: unknown;
+  dispatched?: boolean;
   result: unknown;
   resultReceived?: boolean;
   defaultOpen?: boolean;
@@ -972,6 +977,8 @@ export function ToolCallDetail(props: {
   threadId?: string | null;
 }) {
   const summary = createMemo(() => toolCallSummary(props.name, props.args));
+  const dispatchDescription = () => props.dispatched ? "Called through execute_tool" : undefined;
+  const resultText = () => formatValue(toolResultDisplay(props.name, props.result));
   const [visited, setVisited] = createSignal(props.defaultOpen ?? false);
   const shell = createMemo(() => isShellTool(props.name));
   const shellResult = createMemo(() => visited() && shell() ? shellToolResult(props.result, props.name) : null);
@@ -1009,11 +1016,15 @@ export function ToolCallDetail(props: {
       fallback={
         <details
           class="tool-call"
+          classList={{ "is-dispatched": props.dispatched }}
           open={props.defaultOpen ?? false}
           data-transcript-item-id={props.itemId}
           onToggle={handleToggle}
         >
-          <summary title={summary()}>
+          <summary
+            title={dispatchDescription() ? `${summary()} · ${dispatchDescription()}` : summary()}
+            aria-description={dispatchDescription()}
+          >
             <span class="mono tool-call-summary">{summary()}</span>
           </summary>
           <Show when={visited()}>
@@ -1042,7 +1053,7 @@ export function ToolCallDetail(props: {
                 </a>}
               </Show>
               <Show when={shellResult()} fallback={
-                <pre>{!hasToolCallResult(props) ? (props.name === "skill" ? "Preparing skill resources and runtimes in the workspace..." : "Waiting for tool result...") : formatValue(props.result)}</pre>
+                <pre>{!hasToolCallResult(props) ? (props.name === "skill" ? "Preparing skill resources and runtimes in the workspace..." : "Waiting for tool result...") : resultText()}</pre>
               }>
                 {(result) => <>
                   <pre>{result().output}</pre>
@@ -1830,6 +1841,7 @@ export function TranscriptItemView(props: TranscriptItemViewProps) {
         <ToolCallDetail
           name={props.item.name}
           args={props.item.args}
+          dispatched={props.item.dispatched}
           result={props.item.result}
           resultReceived={props.item.resultReceived}
           itemId={props.itemId}

@@ -155,13 +155,14 @@ def coding_message_for_model(message: ToolMessage) -> ToolMessage:
     return message.model_copy(update={"content": content, "artifact": None})
 
 
-async def prepare_tool_batch(tools, calls, runtime) -> ToolResult | None:
+async def prepare_tool_batch(tools, calls, runtime, *, dispatched=None) -> ToolResult | None:
     """Translate graph calls into coding invocations without exposing storage."""
     from types import SimpleNamespace
 
-    definitions = {tool.name: getattr(tool, "coding_definition", None) for tool in tools}
-    targeted = {tool.name: bool(getattr(tool, "coding_targeted", False)) for tool in tools}
-    if not any(definitions.get(call["name"]) for call in calls):
+    by_name = {tool.name: tool for tool in tools}
+    dispatched = dispatched or {}
+    planned = [(call, dispatched.get(call.get("id"), by_name.get(call["name"]))) for call in calls]
+    if not any(getattr(tool, "coding_definition", None) for _, tool in planned):
         return None
     service = get_coding_service()
     invocations = []
@@ -180,11 +181,11 @@ async def prepare_tool_batch(tools, calls, runtime) -> ToolResult | None:
                     active[key] = await packages.restore(entry, workspace=tool_context.workspace_or_dir,
                                                          thread_id=tool_context.thread_id or "")
             state["active_skills"] = active
-        for call in calls:
-            definition = definitions.get(call["name"])
+        for call, tool in planned:
+            definition = getattr(tool, "coding_definition", None)
             if definition is not None:
                 args = dict(call["args"] or {})
-                target = args.pop("target", None) if targeted.get(call["name"]) else None
+                target = args.pop("target", None) if getattr(tool, "coding_targeted", False) else None
                 context = await targeted_context(SimpleNamespace(
                     context=runtime.context, state=runtime.state,
                     config=runtime.config, tool_call_id=call["id"],

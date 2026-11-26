@@ -41,7 +41,10 @@ const streamHelpers = load('../src/lib/chatStreamHandler.ts', {
   '@/lib/userInputRequest': { ASK_USER_TOOL_NAME: 'ask_user' },
   '@/types': { parseContextBreakdown: () => undefined },
 });
-const protocol = load('../src/lib/protocolStreamHandler.ts', { '@/lib/chatStreamHandler': streamHelpers });
+const protocol = load('../src/lib/protocolStreamHandler.ts', {
+  '@/lib/chatStreamHandler': streamHelpers,
+  '@/lib/toolCallDisplay': load('../src/lib/toolCallDisplay.ts'),
+});
 
 test('an old SSE event or snapshot cannot replace a newer task state', () => {
   const completed = { version: 5, status: 'completed', result: 'Done' };

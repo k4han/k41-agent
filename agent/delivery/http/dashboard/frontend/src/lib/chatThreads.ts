@@ -19,6 +19,7 @@ import {
   generatedImageAttachmentFromToolResult,
 } from "@/lib/generatedImages";
 import { thinkingDurationFor } from "@/lib/thinkingDurations";
+import { EXECUTE_TOOL_NAME, toolCallDisplay } from "@/lib/toolCallDisplay";
 import { NO_WORKSPACE_KEY, NO_WORKSPACE_LABEL } from "@/lib/workspaceConstants";
 import { isNoWorkspace } from "@/lib/workspace";
 import type { ProjectSummary, WorkspaceBinding, WorkspaceRef } from "@/types";
@@ -74,6 +75,7 @@ export type ThreadMessage = {
   branch?: ThreadMessageBranch;
   name?: string;
   tool_call_id?: string;
+  status?: "error";
   tool_calls?: Array<{ id: string; name: string; args: unknown; subagent?: SubagentActivity }>;
   attachments?: TranscriptAttachment[];
   subagent?: SubagentActivity;
@@ -233,6 +235,10 @@ export function toThreadTranscript(
 ): ThreadTranscriptItem[] {
   const items: ThreadTranscriptItem[] = [];
   const wakeups = new Set<string>();
+  const dispatchedTools = new Map<string, string>();
+  const failedCalls = new Set(messages.flatMap((msg) =>
+    msg.role === "tool" && msg.status === "error" && msg.tool_call_id ? [msg.tool_call_id] : [],
+  ));
 
   messages.forEach((msg, index) => {
     // Keep fallback keys stable when older pages are prepended.
@@ -248,7 +254,10 @@ export function toThreadTranscript(
       return;
     }
     if (msg.role === "tool") {
-      if (msg.name === GENERATE_IMAGE_TOOL_NAME) {
+      const name = msg.name === EXECUTE_TOOL_NAME && msg.tool_call_id
+        ? dispatchedTools.get(msg.tool_call_id) ?? msg.name
+        : msg.name;
+      if (name === GENERATE_IMAGE_TOOL_NAME) {
         const attachment = generatedImageAttachmentFromToolResult(msg.content, threadId);
         if (attachment) {
           items.push({
@@ -262,7 +271,7 @@ export function toThreadTranscript(
         return;
       }
 
-      if (msg.name === ASK_USER_TOOL_NAME) {
+      if (msg.status !== "error" && name === ASK_USER_TOOL_NAME) {
         const parsed = parseUserInputRequestToolResult(msg.content);
         if (!parsed.valid) {
           return;
@@ -293,7 +302,7 @@ export function toThreadTranscript(
         return;
       }
 
-      if (msg.name === PLAN_MODE_TOOL_NAME || msg.name === "plan_mode_respond") {
+      if (msg.status !== "error" && (name === PLAN_MODE_TOOL_NAME || name === "plan_mode_respond")) {
         const planTarget = findTranscriptPlanReviewTarget(items, msg.tool_call_id);
         if (planTarget) {
           Object.assign(planTarget, parsePlanReviewToolResult(msg.content));
@@ -309,24 +318,27 @@ export function toThreadTranscript(
         return;
       }
 
-      const target = findTranscriptToolTarget(items, msg.tool_call_id, msg.name);
+      const target = findTranscriptToolTarget(items, msg.tool_call_id, name);
+      const failure = msg.status === "error" ? { executionStatus: "failed" as const } : {};
 
       if (target) {
+        Object.assign(target, failure);
         if (msg.subagent) target.subagent = msg.subagent;
         target.result = msg.content;
         target.resultReceived = true;
         target.tool_call_id = target.tool_call_id || msg.tool_call_id || null;
-        target.name = target.name || msg.name || "unknown";
+        target.name = target.name || name || "unknown";
         return;
       }
 
       items.push({
-        key: `tool-result-${messageIndex}-${msg.tool_call_id || msg.name || "unknown"}`,
+        key: `tool-result-${messageIndex}-${msg.tool_call_id || name || "unknown"}`,
         ...createTranscriptTool({
           toolCallId: msg.tool_call_id,
-          name: msg.name,
+          name,
           result: msg.content,
         }),
+        ...failure,
         subagent: msg.subagent,
       });
       return;
@@ -365,11 +377,14 @@ export function toThreadTranscript(
 
     if (msg.tool_calls?.length) {
       msg.tool_calls.forEach((toolCall, toolCallIndex) => {
-        if (toolCall.name === GENERATE_IMAGE_TOOL_NAME) {
+        const call = toolCallDisplay(toolCall.name, toolCall.args);
+        if (call.dispatched && toolCall.id) dispatchedTools.set(toolCall.id, call.name);
+        if (call.name === GENERATE_IMAGE_TOOL_NAME) {
           return;
         }
-        if (toolCall.name === ASK_USER_TOOL_NAME) {
-          const args = toolCall.args as { title?: unknown; questions?: unknown; submit_label?: unknown } | null;
+        const failed = failedCalls.has(toolCall.id);
+        if (!failed && call.name === ASK_USER_TOOL_NAME) {
+          const args = call.args as { title?: unknown; questions?: unknown; submit_label?: unknown } | null;
           const questions = Array.isArray(args?.questions)
             ? args.questions
                 .map(normalizeUserQuestion)
@@ -396,8 +411,8 @@ export function toThreadTranscript(
           });
           return;
         }
-        if (toolCall.name === PLAN_MODE_TOOL_NAME || toolCall.name === "plan_mode_respond") {
-          const args = toolCall.args as { plan?: unknown } | null;
+        if (!failed && (call.name === PLAN_MODE_TOOL_NAME || call.name === "plan_mode_respond")) {
+          const args = call.args as { plan?: unknown } | null;
           const existingPlanReview = findTranscriptPlanReviewTarget(items, toolCall.id);
           if (existingPlanReview) {
             if (!existingPlanReview.plan && typeof args?.plan === "string") {
@@ -418,9 +433,8 @@ export function toThreadTranscript(
           key: `tool-call-${messageIndex}-${toolCallIndex}-${toolCall.id || "unknown"}`,
           subagent: toolCall.subagent,
           ...createTranscriptTool({
+            ...call,
             toolCallId: toolCall.id,
-            name: toolCall.name,
-            args: toolCall.args,
           }),
         });
       });

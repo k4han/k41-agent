@@ -7,7 +7,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 
 from agent.modules.skills import get_skills_catalog_xml
-from agent.modules.tools import build_tool_catalogs, is_browser_tool
+from agent.modules.tools import build_tool_catalogs, discovery_catalog, is_browser_tool
 from agent.modules.workspaces import build_workspace_context
 
 _WORKSPACE_STORAGE_TOOL_NAMES = frozenset(
@@ -27,6 +27,15 @@ def with_browser_reporting_rules(prompt: str, tool_names: Iterable[str]) -> str:
     if not any(is_browser_tool(name) for name in tool_names):
         return prompt
     return f"{prompt}\n\n{BROWSER_REPORTING_RULES}" if prompt.strip() else BROWSER_REPORTING_RULES
+
+
+def prompt_tool_names(tools: Sequence | None) -> list[str]:
+    """Include on-demand browser capabilities when selecting and caching prompt rules."""
+    names = [getattr(tool, "name", "") for tool in tools or ()]
+    catalog = discovery_catalog(tools or ())
+    if catalog:
+        names.extend(name for name in catalog.descriptors if name not in catalog.preloaded and is_browser_tool(name))
+    return names
 
 
 def _has_workspace_storage_tool(tools: Sequence[object] | None) -> bool:
@@ -123,7 +132,7 @@ def build_llm_system_prompt(
             skills_catalog_xml=skills_xml or "<available_skills/>",
         ))
 
-    system_prompt = with_browser_reporting_rules(system_prompt, (getattr(tool, "name", "") for tool in tools or ()))
+    system_prompt = with_browser_reporting_rules(system_prompt, prompt_tool_names(tools))
 
     if _has_workspace_storage_tool(tools):
         system_prompt += "\n\n" + build_workspace_context(scratchpad_path)

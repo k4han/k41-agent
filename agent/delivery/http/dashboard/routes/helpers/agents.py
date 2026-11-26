@@ -379,10 +379,11 @@ def handle_prompt_variable_error(exc: Exception) -> HTTPException:
 
 
 def agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
-    from agent.modules.tools import TOOL_ALIASES, canonical_tool_names
+    from agent.modules.tools import DISCOVERY_TOOL_NAMES, TOOL_ALIASES, canonical_tool_names
 
     canonical_tools = canonical_tool_names(list(body.tools))
     allowed = set(canonical_tools)
+    discovery = DISCOVERY_TOOL_NAMES.issubset(allowed)
     return AgentConfig(
         name=body.name.strip(),
         display_name=body.display_name.strip(),
@@ -397,7 +398,7 @@ def agent_config_from_body(body: "AgentCardBody") -> AgentConfig:
         tool_configs={
             TOOL_ALIASES.get(str(name), str(name)): dict(values)
             for name, values in body.tool_configs.items()
-            if TOOL_ALIASES.get(str(name), str(name)) in allowed and isinstance(values, dict)
+            if isinstance(values, dict) and (discovery or TOOL_ALIASES.get(str(name), str(name)) in allowed)
         },
         sub_agents=list(body.sub_agents) if body.sub_agents is not None else None,
         plan_approval_targets=list(body.plan_approval_targets),

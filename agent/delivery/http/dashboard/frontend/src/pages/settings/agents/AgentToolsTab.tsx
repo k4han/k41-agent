@@ -37,7 +37,7 @@ import { PermissionModePicker } from "@/components/PermissionModePicker";
 import { isAcpCard } from "@/lib/acp";
 import type { AgentMcpInstall, AgentsPayload, ToolConfigSchema } from "@/types";
 import { AgentToolConfig } from "./AgentToolConfig";
-import { acpToolName, isToolSelected } from "./agentForm";
+import { acpToolName, hasToolDiscovery, isDiscoveryTool, isToolSelected } from "./agentForm";
 import type {
   AgentCapabilityTab,
   AgentForm,
@@ -132,6 +132,7 @@ export function AgentToolsTab(props: {
   );
   const nativeTool = (tool: string) => props.payload.acp_tools?.find((item) => item.name === acpToolName(tool));
   const isSelected = (tool: string) => isToolSelected(props.form, tool, props.payload);
+  const discovery = () => hasToolDiscovery(props.form.tools);
   const isRequired = (tool: string) => Boolean(nativeTool(tool)?.always_enabled);
   const selectedBuiltIns = createMemo(() =>
     availableTools().filter(isSelected),
@@ -279,7 +280,8 @@ export function AgentToolsTab(props: {
           </div>
           <label class="agent-tool-enable">
             <span>
-              {isRequired(tool) ? "Always enabled by AGY" : isSelected(tool)
+              {isRequired(tool) ? "Always enabled by AGY" : discovery() && !nativeTool(tool)
+                ? (isSelected(tool) ? "Preloaded" : "Available on demand") : isSelected(tool)
                 ? "Enabled for this agent"
                 : "Enable for this agent"}
             </span>
@@ -300,7 +302,7 @@ export function AgentToolsTab(props: {
             />
           </label>
           <Show
-            when={isSelected(tool)}
+            when={isSelected(tool) || (discovery() && !nativeTool(tool))}
             fallback={
               <p class="agent-tool-notice">
                 Enable this tool to configure it for this agent.
@@ -339,7 +341,7 @@ export function AgentToolsTab(props: {
           </Show>
           <p class="agent-tool-permission-note">
             <ShieldCheck size={14} />
-            Selected tools follow the agent’s permission mode.
+            Tool calls follow the agent’s permission mode.
           </p>
         </div>
       )}
@@ -409,7 +411,9 @@ export function AgentToolsTab(props: {
         <div class="agent-tools-heading">
           <div>
             <h3>Built-in tools</h3>
-            <p>Choose tools for this agent. Select a tool to configure it.</p>
+            <p>{discovery()
+              ? "Checked built-in tools are preloaded. The agent can find unchecked tools with search_tools and call them with execute_tool."
+              : "Choose tools for this agent. Enable search_tools and execute_tool together to make unchecked tools available on demand."}</p>
           </div>
           <span class="agent-tools-badge">
             {selectedBuiltIns().length}/{props.totalBuiltInTools} selected
@@ -541,7 +545,8 @@ export function AgentToolsTab(props: {
                 {(group) => {
                   const checkedCount = () =>
                     group.tools.filter(isSelected).length;
-                  const selectableTools = () => group.tools.filter((tool) => !isRequired(tool));
+                  const selectableTools = () =>
+                    group.tools.filter((tool) => !isRequired(tool) && !isDiscoveryTool(tool));
                   const allChecked = () =>
                     selectableTools().length > 0 && selectableTools().every(isSelected);
                   return (
@@ -550,7 +555,7 @@ export function AgentToolsTab(props: {
                       aria-label={`${formatCategory(group.category)} tools`}
                     >
                       <div class="agent-tools-group-heading">
-                        <label title="Select or clear this entire category, including tools hidden by search">
+                        <label title="Select or clear tools in this category, including tools hidden by search">
                           <input
                             type="checkbox"
                             checked={allChecked()}
@@ -564,7 +569,7 @@ export function AgentToolsTab(props: {
                             aria-label={`Select all ${formatCategory(group.category).toLowerCase()} tools`}
                             onChange={(event) =>
                               props.onToggleToolGroup(
-                                group.tools,
+                                selectableTools(),
                                 event.currentTarget.checked,
                               )
                             }
@@ -656,8 +661,9 @@ export function AgentToolsTab(props: {
             <div class="agent-tools-subheading">
               <h3>Connect external tools</h3>
               <p>
-                Enable a server, then choose which of its tools this agent can
-                use.
+                {discovery()
+                  ? "On enabled servers, checked tools are preloaded and unchecked tools are available on demand."
+                  : "Enable a server, then choose which of its tools this agent can use."}
               </p>
             </div>
             <Show when={!props.canManageMcp}>
