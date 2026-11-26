@@ -1,5 +1,8 @@
-"""Read-only ACP CLI status, dashboard routes, and non-model guards."""
+"""ACP dashboard status, management routes, and non-model guards."""
 
+import threading
+import time
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +13,10 @@ from agent.modules.acp.agents import ANTIGRAVITY_CLI_AGENT_ID, OPENCODE_AGENT_ID
 from agent.modules.acp.auth import AcpAuthManager
 from agent.modules.acp.service import AcpService
 from agent.modules.agents.models import AgentConfig
+from agent.shared.infrastructure.csrf_protection import (
+    CSRF_HEADER_NAME,
+    CSRFProtectionMiddleware,
+)
 
 AGENT = ANTIGRAVITY_CLI_AGENT_ID
 
@@ -20,13 +27,22 @@ def client(tmp_path, monkeypatch, isolated_container):
     from agent.modules.admin_auth import get_current_admin
 
     monkeypatch.setattr(routes, "get_app_container", lambda _request: isolated_container)
-    monkeypatch.setattr("agent.modules.acp.launcher.shutil.which", lambda _name: None)
+    monkeypatch.setenv("K41_AGENT_HOME", str(tmp_path))
+    monkeypatch.setattr("agent.modules.acp.installations.shutil.which", lambda _name: None)
     isolated_container._acp_service = AcpService(command_resolver=lambda _agent: pytest.fail("must not start"))
     isolated_container._acp_auth_manager = AcpAuthManager(isolated_container._acp_service)
-    app = FastAPI()
+    @asynccontextmanager
+    async def lifespan(_app):
+        yield
+        if isolated_container._acp_install_manager is not None:
+            await isolated_container._acp_install_manager.close()
+
+    app = FastAPI(lifespan=lifespan)
+    app.add_middleware(CSRFProtectionMiddleware)
     app.include_router(routes.router)
     app.dependency_overrides[get_current_admin] = lambda: "admin"
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client
 
 
 def test_routes_require_admin():
@@ -37,6 +53,9 @@ def test_routes_require_admin():
     client = TestClient(app)
     assert client.get("/dashboard-api/acp/agents").status_code == 401
     assert client.get(f"/dashboard-api/acp/agents/{AGENT}").status_code == 401
+    assert client.post(f"/dashboard-api/acp/agents/{AGENT}/install").status_code == 401
+    assert client.post(f"/dashboard-api/acp/agents/{AGENT}/update").status_code == 401
+    assert client.delete(f"/dashboard-api/acp/agents/{AGENT}").status_code == 401
 
 
 def test_list_reports_only_cli_and_missing_installation(client):
@@ -64,7 +83,8 @@ def test_unknown_and_removed_runtimes_are_not_found(client, agent_id):
 
 
 def test_cli_status_forwards_agent_workspace_and_refresh(client, monkeypatch, isolated_container, tmp_path):
-    from agent.delivery.http.dashboard.routes import acp as routes
+    from agent.modules.acp import launcher
+    from agent.modules.acp.installations import managed_executable
 
     calls = []
 
@@ -72,9 +92,10 @@ def test_cli_status_forwards_agent_workspace_and_refresh(client, monkeypatch, is
         calls.append((agent_id, kwargs))
         return {"signed_in": True, "state": "signed_in", "config_options": []}
 
-    monkeypatch.setattr(routes, "cli_details", lambda **_kw: {
-        "executable_path": "C:/Program Files/agy/agy.exe", "version": "1.5.10", "error": None,
-    })
+    executable = managed_executable(AGENT)
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    monkeypatch.setattr(launcher, "inspect_executable", lambda *_args, **_kwargs: ("1.5.10", None))
     monkeypatch.setattr(isolated_container._acp_auth_manager, "status", status)
     response = client.get(f"/dashboard-api/acp/agents/{AGENT}", params={
         "agent_name": " reviewer ", "cwd": str(tmp_path), "refresh": True,
@@ -85,13 +106,152 @@ def test_cli_status_forwards_agent_workspace_and_refresh(client, monkeypatch, is
 
 
 @pytest.mark.parametrize("method,path", [
-    ("post", "/install"), ("delete", ""), ("post", "/sign-in"),
+    ("post", "/sign-in"),
     ("post", "/sign-in/attempt/complete"), ("post", "/sign-in/attempt/cancel"),
     ("post", "/api-key"), ("post", "/sign-out"),
 ])
-def test_management_routes_are_removed(client, method, path):
-    response = getattr(client, method)(f"/dashboard-api/acp/agents/{AGENT}{path}")
-    assert response.status_code == (405 if method == "delete" else 404)
+def test_credential_routes_are_removed(client, method, path):
+    status = client.get(f"/dashboard-api/acp/agents/{AGENT}")
+    response = getattr(client, method)(f"/dashboard-api/acp/agents/{AGENT}{path}", headers={
+        CSRF_HEADER_NAME: status.headers[CSRF_HEADER_NAME],
+    })
+    assert response.status_code == 404
+
+
+def _management_status(client, url):
+    response = client.get(url)
+    response.raise_for_status()
+    agent = response.json()
+    return agent, {CSRF_HEADER_NAME: response.headers[CSRF_HEADER_NAME], "If-Match": agent["installation_revision"]}
+
+
+def _wait_for_operation(client, url):
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        agent, headers = _management_status(client, url)
+        if agent["operation"]["state"] != "running":
+            return agent, headers
+        time.sleep(0.01)
+    pytest.fail("ACP operation did not finish")
+
+
+@pytest.mark.parametrize("replace_during", ["version", "auth"])
+def test_status_retries_when_executable_is_replaced(client, monkeypatch, isolated_container, replace_during):
+    from agent.modules.acp import launcher
+    from agent.modules.acp.installations import discover_installation, managed_executable
+
+    path = managed_executable(AGENT)
+    path.parent.mkdir(parents=True)
+    path.write_text("1.5.10", encoding="utf-8")
+    replacement = path.with_name("replacement")
+
+    def inspect(_agent_id, executable, **_kwargs):
+        version = executable.read_text(encoding="utf-8")
+        if replace_during == "version" and replacement.exists():
+            replacement.replace(path)
+        return version, None
+
+    async def status(_agent_id, **_kwargs):
+        if replace_during == "auth" and replacement.exists():
+            replacement.replace(path)
+        return {"signed_in": False, "state": "signed_out", "config_options": []}
+
+    monkeypatch.setattr(launcher, "inspect_executable", inspect)
+    monkeypatch.setattr(isolated_container._acp_auth_manager, "status", status)
+    url = f"/dashboard-api/acp/agents/{AGENT}"
+    initial, stale_headers = _management_status(client, url)
+    assert initial["version"] == "1.5.10"
+
+    replacement.write_text("1.5.11", encoding="utf-8")
+    updated, _ = _management_status(client, url)
+    assert updated["version"] == "1.5.11"
+    assert updated["installation_revision"] == discover_installation(AGENT).revision()
+    assert client.delete(url, headers=stale_headers).status_code == 409
+    assert path.is_file()
+
+
+def test_managed_install_update_uninstall(client, monkeypatch, isolated_container):
+    from agent.modules.acp import launcher, management
+    from agent.modules.acp.installations import managed_executable
+
+    version = "1.5.10"
+    download_started = threading.Event()
+    release_download = threading.Event()
+    fail_download = False
+
+    def download(release, candidate, stop):
+        download_started.set()
+        assert release_download.wait(3)
+        assert not stop.is_set()
+        candidate.write_text(release.version, encoding="utf-8")
+        if fail_download:
+            raise management.AcpError("The download failed its checksum verification.")
+
+    def inspect(_agent_id, executable, **_kwargs):
+        return executable.read_text(encoding="utf-8"), None
+
+    async def auth_status(_agent_id, **_kwargs):
+        return {"signed_in": False, "state": "signed_out", "config_options": []}
+
+    monkeypatch.setattr(management, "latest_release", lambda _agent_id: SimpleNamespace(version=version))
+    monkeypatch.setattr(management, "download_executable", download)
+    monkeypatch.setattr(management, "inspect_executable", inspect)
+    monkeypatch.setattr(launcher, "inspect_executable", inspect)
+    monkeypatch.setattr(isolated_container._acp_auth_manager, "status", auth_status)
+    path = managed_executable(AGENT)
+    url = f"/dashboard-api/acp/agents/{AGENT}"
+
+    missing, headers = _management_status(client, url)
+    assert missing["actions"] == {"install": True, "update": False, "uninstall": False}
+    assert client.post(f"{url}/install", headers={"If-Match": missing["installation_revision"]}).status_code == 403
+    assert client.post(f"{url}/install", headers={CSRF_HEADER_NAME: headers[CSRF_HEADER_NAME]}).status_code == 428
+    response = client.post(f"{url}/install", headers=headers)
+    assert response.status_code == 202 and response.headers["cache-control"] == "no-store"
+    assert download_started.wait(3)
+    pending, _ = _management_status(client, url)
+    assert pending["operation"] == response.json()["operation"]
+    assert not path.exists()
+    assert client.post(f"{url}/install", headers=headers).status_code == 409
+    release_download.set()
+
+    installed, installed_headers = _wait_for_operation(client, url)
+    assert installed["operation"]["state"] == "succeeded"
+    assert installed["management_source"] == "managed" and installed["version"] == version
+    assert installed["latest_version"] == version
+    assert str(path) in installed["login_command"] and installed["login_command"].endswith("acp --login")
+    assert launcher.resolve_cli_command(AGENT, cwd=str(path.parent)).argv[0] == str(path)
+    assert client.delete(url, headers=headers).status_code == 409
+
+    turn = SimpleNamespace(agent_id=AGENT, has_unresolved_work=lambda: True)
+    service = isolated_container._acp_service
+    service._turns["pending-approval"] = turn
+    try:
+        assert client.post(f"{url}/update", headers=installed_headers).status_code == 409
+        assert client.delete(url, headers=installed_headers).status_code == 409
+    finally:
+        del service._turns["pending-approval"]
+
+    version = "1.5.12"
+    fail_download = True
+    assert client.post(f"{url}/update", headers=installed_headers).status_code == 202
+    failed, retry_headers = _wait_for_operation(client, url)
+    assert failed["version"] == "1.5.10" and "checksum" in failed["operation"]["error"]
+    assert list(path.parent.iterdir()) == [path]
+
+    fail_download = False
+    assert client.post(f"{url}/update", headers=retry_headers).status_code == 202
+    updated, updated_headers = _wait_for_operation(client, url)
+    assert updated["version"] == version and updated["operation"]["state"] == "succeeded"
+
+    external = path.parent / "external-agy"
+    external.write_text("1.5.8", encoding="utf-8")
+    monkeypatch.setattr("agent.modules.acp.installations.shutil.which", lambda name: str(external) if name == "agy" else None)
+    assert client.delete(url, headers=updated_headers).status_code == 202
+    uninstalled, external_headers = _wait_for_operation(client, url)
+    assert uninstalled["operation"]["state"] == "succeeded" and not path.exists()
+    assert uninstalled["management_source"] == "unknown" and uninstalled["version"] == "1.5.8"
+    assert client.delete(url, headers=external_headers).status_code == 422
+    assert external.is_file()
 
 
 def test_status_rejects_invalid_agent_name_parameters(client):
@@ -102,7 +262,7 @@ def test_status_rejects_invalid_agent_name_parameters(client):
 def test_dashboard_onboarding_recognizes_cli_on_path(monkeypatch, executable):
     from agent.delivery.http.dashboard.routes import dashboard
 
-    monkeypatch.setattr(dashboard, "which", lambda _name: executable)
+    monkeypatch.setattr("agent.modules.acp.installations.shutil.which", lambda _name: executable)
     onboarding = dashboard._build_onboarding(services=[], providers=[], agents_total=1)
     assert onboarding["needs_provider"] is (executable is None)
 

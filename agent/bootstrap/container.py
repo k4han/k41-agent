@@ -176,6 +176,7 @@ class AppContainer:
     _coding_service: Any = field(default=None, repr=False)
     _acp_service: Any = field(default=None, repr=False)
     _acp_auth_manager: Any = field(default=None, repr=False)
+    _acp_install_manager: Any = field(default=None, repr=False)
     _project_workspace_service: Any = field(default=None, repr=False)
     _instabox_service: Any = field(default=None, repr=False)
     _computer_control: Any = field(default=None, repr=False)
@@ -750,6 +751,8 @@ class AppContainer:
 
         if self._chatgpt_auth_manager is not None:
             await asyncio.to_thread(self._chatgpt_auth_manager.close)
+        if self._acp_install_manager is not None:
+            await self._acp_install_manager.close()
         if self._acp_service is not None:
             await self._acp_service.close()
         if self._mcp_load_task is not None:

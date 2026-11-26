@@ -5,16 +5,16 @@ Agent cards use `graph_type: acp_agent` and the runtime identifier `opencode`.
 
 ## Setup
 
-1. Install OpenCode CLI on the machine running K41 and put `opencode` on `PATH`
-   (e.g., via `npm i -g @opencode/cli@latest` or package manager).
-2. Check `opencode --version` and `opencode acp --help`.
-3. Sign in or authenticate providers on that machine with `opencode auth login`.
-4. Open **Settings > ACP Agents** and choose **Refresh** to check the executable,
-   version, and status.
-5. Select the built-in **OpenCode** card in Chat, or create a custom ACP card with `acp.agent: opencode`.
+1. Open **Settings > ACP Agents** and choose **Download and install** for OpenCode.
+   K41 also detects an `opencode` executable already on `PATH`.
+2. Run the displayed sign-in command on the machine running K41, then choose
+   **Refresh** to check the version and account status.
+3. Select the built-in **OpenCode** card in Chat, or create a custom ACP card with `acp.agent: opencode`.
 
-Installation, updates, and provider credentials happen outside K41. The dashboard
-provides read-only status.
+The dashboard shows the current and latest available versions. **Update** and
+**Uninstall** support K41 installations and verified global npm and pnpm packages.
+Updates use the same package and major version. Use the original installer for
+other sources. Uninstalling preserves provider credentials, configuration and conversations.
 
 ~~~markdown
 ---

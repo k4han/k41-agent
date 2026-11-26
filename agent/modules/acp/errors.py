@@ -32,3 +32,7 @@ class AcpRpcError(AcpError):
 
 class AcpNotInstalled(AcpError):
     """The agent binary has not been installed."""
+
+
+class AcpConflict(AcpError):
+    """A busy agent or a changed installation prevented an operation."""

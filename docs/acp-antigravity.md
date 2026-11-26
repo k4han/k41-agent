@@ -5,19 +5,20 @@ Agent cards use `graph_type: acp_agent` and the runtime identifier `antigravity-
 
 ## Setup
 
-1. Install Antigravity CLI on the machine running K41 and put `agy` on `PATH`.
-2. Check `agy --version` and `agy acp --help`. The CLI must support `--agent`
-   and `--process-per-session`, and be version 1.3.3 or newer. Update it with
-   `agy update` when necessary.
-3. Sign in on that machine with `agy acp --login`.
-4. Open **Settings > ACP Agents** and choose **Refresh** to check the executable,
-   version and account status.
-5. Select the built-in **Antigravity** card in Chat, or create your own ACP card.
+1. Open **Settings > ACP Agents** and choose **Download and install** for Antigravity.
+   K41 also detects an `agy` executable already on `PATH`.
+2. Run the displayed sign-in command on the machine running K41, then choose
+   **Refresh** to check the version and account status.
+3. Select the built-in **Antigravity** card in Chat, or create your own ACP card.
 
 K41 uses the CLI's existing credentials and an explicit `GEMINI_HOME`. Each card
-runs with a K41-managed profile for its prompt and native tool selection.
-Installation, updates and account management happen outside K41.
-The dashboard provides read-only status; it has no installer, API-key form or sign-in relay.
+runs with a K41-managed profile for its prompt and native tool selection. The CLI
+must be version 1.3.3 or newer and support `--agent` and `--process-per-session`.
+
+The dashboard shows the current and latest available versions. **Update** and
+**Uninstall** support K41 installations and binaries in Google's default installer
+location. For a custom location, use its original installer. Uninstalling removes
+the executable while preserving credentials, configuration and conversations.
 
 ~~~markdown
 ---
@@ -163,13 +164,18 @@ configured K41 provider.
 
 The administrator-only endpoints are:
 
-- `GET /dashboard-api/acp/agents`: returns the single CLI runtime.
+- `GET /dashboard-api/acp/agents` returns the supported runtimes.
 - `GET /dashboard-api/acp/agents/antigravity-cli`: accepts optional `cwd` and
   `refresh` query parameters. The deprecated `agent_name` parameter is accepted
   but does not select an external profile.
 
-Responses use `Cache-Control: no-store` and expose installation discovery,
-authentication status, plan and selectable configuration options. Refresh invalidates
-cached probes and restarts idle CLI processes, while active turns keep running.
-The old runtime identifier returns 404. Installation, removal, sign-in, callback,
-API-key and sign-out endpoints have been removed.
+Add `check_updates=true` to either status endpoint to check the current release
+source. Responses use `Cache-Control: no-store` and expose the installation source,
+versions, authentication, configuration options and latest installation operation.
+Refresh invalidates cached probes and restarts idle CLI processes, while active
+turns keep running. The old runtime identifier returns 404.
+
+To manage an installation, use `POST /dashboard-api/acp/agents/{id}/install`,
+`POST /dashboard-api/acp/agents/{id}/update`, or `DELETE /dashboard-api/acp/agents/{id}`.
+Send the current `installation_revision` as `If-Match` and poll the agent status
+for the operation result. Busy agents and stale revisions return `409`.

@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import contextvars
 import logging
-import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
@@ -16,7 +15,8 @@ from typing import Any
 
 from agent.modules.acp.agents import get_agent_definition
 from agent.modules.acp.client import AcpClient
-from agent.modules.acp.errors import AcpError, AcpNotInstalled, AcpRpcError
+from agent.modules.acp.errors import AcpConflict, AcpError, AcpNotInstalled, AcpRpcError
+from agent.modules.acp.installations import acp_data_root
 from agent.modules.acp.launcher import resolve_cli_command, runtime_key
 from agent.modules.acp.process import AgentCommand
 from agent.modules.acp.tool_bridge import SessionTools, ToolBridge, ToolProvider
@@ -31,11 +31,6 @@ SUPERSEDE_TIMEOUT_SECONDS = 10.0
 SESSION_LOST_NOTICE = "The earlier agent session could not be restored, so this one starts without earlier context."
 
 CommandResolver = Callable[[str], AgentCommand]
-
-
-def acp_data_root() -> Path:
-    home = os.environ.get("K41_AGENT_HOME") or os.environ.get("AGENT_HOME") or str(Path.home() / ".k41-agent")
-    return Path(home) / "acp"
 
 
 @dataclass
@@ -85,6 +80,8 @@ class AcpService:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._idle_handles: dict[str, asyncio.TimerHandle] = {}
         self._holds: dict[str, int] = {}
+        self._inspections: dict[str, int] = {}
+        self._maintenance: set[str] = set()
         self._applied_options: dict[tuple[str, str], dict[str, str]] = {}
         self._option_categories: dict[tuple[str, str], dict[str, str]] = {}
         self._tool_bridge = ToolBridge()
@@ -94,6 +91,7 @@ class AcpService:
     # Client lifetime --------------------------------------------------------
 
     async def client_for(self, agent_id: str, *, cwd: str | None = None, native_tools: list[str] | None = None) -> AcpClient:
+        self.require_available(agent_id)
         self._loop = asyncio.get_running_loop()
         key = runtime_key(agent_id, cwd, native_tools=native_tools)
         self._client_agents[key] = agent_id
@@ -140,6 +138,28 @@ class AcpService:
         if any(count and self._client_agents.get(key, key) == agent_id for key, count in self._holds.items()):
             return True
         return any(turn.agent_id == agent_id and turn.has_unresolved_work() for turn in self._turns.values())
+
+    def require_available(self, agent_id: str) -> None:
+        if agent_id in self._maintenance:
+            raise AcpConflict("ACP maintenance is in progress. Try again when it finishes.")
+
+    @contextlib.contextmanager
+    def inspect_agent(self, agent_id: str) -> Iterator[None]:
+        self.require_available(agent_id)
+        self._inspections[agent_id] = self._inspections.get(agent_id, 0) + 1
+        try:
+            yield
+        finally:
+            self._inspections[agent_id] -= 1
+
+    def begin_maintenance(self, agent_id: str) -> None:
+        self.require_available(agent_id)
+        if self._inspections.get(agent_id) or self.agent_is_busy(agent_id):
+            raise AcpConflict("The ACP agent is in use. Try again after its current work finishes.")
+        self._maintenance.add(agent_id)
+
+    def end_maintenance(self, agent_id: str) -> None:
+        self._maintenance.discard(agent_id)
 
     def hold(self, agent_id: str) -> None:
         """Keep an agent process alive while something outside a turn uses it."""
@@ -218,10 +238,12 @@ class AcpService:
 
     async def begin_turn(self, request: TurnRequest) -> AcpTurn:
         """Prepare a session and send the prompt exactly once."""
+        self.require_available(request.agent_id)
         self._prune_finished()
         # Recorded before any I/O: a failure part-way must not allow a re-send.
         self._started_turn_ids.add(request.turn_id)
         key = runtime_key(request.agent_id, request.cwd, native_tools=request.native_tools)
+        self._client_agents[key] = request.agent_id
         self.hold(key)
         try:
             client = await self.client_for(request.agent_id, cwd=request.cwd, native_tools=request.native_tools)
@@ -524,7 +546,7 @@ def peek_acp_service() -> AcpService | None:
 def not_installed_notice(agent_id: str) -> str:
     definition = get_agent_definition(agent_id)
     name = definition.display_name if definition else agent_id
-    return f"{name} is not installed. Install agy on the machine running K41 and add it to PATH, then retry."
+    return f"{name} is not installed. Install it in Settings > ACP Agents, then retry."
 
 
 __all__ = [

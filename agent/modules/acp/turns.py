@@ -47,8 +47,8 @@ _STOP_NOTICES = {
     "max_turn_requests": "The agent stopped because it reached its request limit for one turn.",
     "refusal": "The agent declined to continue.",
 }
-SIGN_IN_NOTICE = "Antigravity CLI is not signed in. Run agy acp --login on the machine running K41, refresh ACP settings, then retry."
-OPENCODE_SIGN_IN_NOTICE = "OpenCode is not signed in. Run opencode auth login on the machine running K41, refresh ACP settings, then retry."
+SIGN_IN_NOTICE = "Antigravity CLI is not signed in. Run the sign-in command from Settings > ACP Agents on the machine running K41, then refresh and retry."
+OPENCODE_SIGN_IN_NOTICE = "OpenCode is not signed in. Run the sign-in command from Settings > ACP Agents on the machine running K41, then refresh and retry."
 NO_FINAL_TEXT_NOTICE = "The agent finished without a final message."
 
 

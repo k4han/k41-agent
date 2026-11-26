@@ -1,23 +1,22 @@
-"""Resolve external CLI launches without managing their installation or credentials."""
+"""Inspect ACP executables and resolve commands for local workspaces."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-import re
-import shutil
 import subprocess
 import tempfile
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from agent.modules.acp.agents import ANTIGRAVITY_CLI_AGENT_ID, OPENCODE_AGENT_ID
 from agent.modules.acp.errors import AcpError, AcpNotInstalled
+from agent.modules.acp.installations import acp_data_root, find_cli, version_number
 from agent.modules.acp.native_tools import effective_native_tools
 from agent.modules.acp.process import AgentCommand, build_agent_env
 from agent.shared.infrastructure.subprocess_utils import hidden_subprocess_kwargs
-
 
 PROMPT_POLICY_VERSION = 2
 
@@ -41,79 +40,93 @@ def runtime_key(agent_id: str, cwd: str | None = None, *, native_tools: list[str
     return f"{agent_id}:{digest}"
 
 
-def cli_environment() -> dict[str, str]:
+def cli_environment(*, disable_agy_update: bool = False) -> dict[str, str]:
     """Retain the user's explicit configuration root without inheriting unrelated secrets."""
-    return {"GEMINI_HOME": os.environ["GEMINI_HOME"]} if os.environ.get("GEMINI_HOME") else {}
+    env = {"GEMINI_HOME": os.environ["GEMINI_HOME"]} if os.environ.get("GEMINI_HOME") else {}
+    if disable_agy_update:
+        env["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true"
+    return env
 
 
 @lru_cache(maxsize=16)
-def _inspect_cli(executable: str, mtime_ns: int, size: int) -> tuple[str | None, str | None]:
+def _inspect_cli(executable: str, identity: tuple[int, int, int, int]) -> tuple[str | None, str | None]:
+    reported = None
     try:
         options = dict(
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            env=build_agent_env(cli_environment()), timeout=10, **hidden_subprocess_kwargs(),
+            env=build_agent_env(cli_environment(disable_agy_update=True)), timeout=10, **hidden_subprocess_kwargs(),
         )
-        version = subprocess.run([executable, "--version"], **options)
-        help_result = subprocess.run([executable, "acp", "--help"], **options)
+        version = subprocess.run([executable, "--version"], check=False, **options)
+        if version.returncode == 0:
+            reported = version.stdout.decode("utf-8", "replace").strip()[:128] or None
+        help_result = subprocess.run([executable, "acp", "--help"], check=False, **options)
         help_text = help_result.stdout.decode("utf-8", "replace") + help_result.stderr.decode("utf-8", "replace")
         if version.returncode or help_result.returncode or not all(
             flag in help_text for flag in ("--agent", "--process-per-session")
         ):
-            return None, "The installed agy does not support the required ACP flags. Run agy update, then refresh."
-        return version.stdout.decode("utf-8", "replace").strip()[:128] or None, None
+            return reported, "The installed agy does not support the required ACP flags. Run agy update, then refresh."
+        return reported, None
     except (OSError, subprocess.TimeoutExpired):
-        return None, "Could not check agy. Confirm that agy acp --help works on the machine running K41, then refresh."
+        return reported, "Could not check agy. Confirm that agy acp --help works on the machine running K41, then refresh."
 
 
 @lru_cache(maxsize=16)
-def _inspect_opencode_cli(executable: str, mtime_ns: int, size: int) -> tuple[str | None, str | None]:
+def _inspect_opencode_cli(executable: str, identity: tuple[int, int, int, int]) -> tuple[str | None, str | None]:
+    reported = None
     try:
         options = dict(
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=build_agent_env(cli_environment()), timeout=10, **hidden_subprocess_kwargs(),
         )
-        version = subprocess.run([executable, "--version"], **options)
-        help_result = subprocess.run([executable, "acp", "--help"], **options)
-        help_text = help_result.stdout.decode("utf-8", "replace") + help_result.stderr.decode("utf-8", "replace")
-        if version.returncode != 0 or (help_result.returncode != 0 and "acp" not in help_text.lower()):
-            return None, "The installed opencode does not support the ACP command. Update opencode, then refresh."
-        return version.stdout.decode("utf-8", "replace").strip()[:128] or None, None
+        version = subprocess.run([executable, "--version"], check=False, **options)
+        if version.returncode == 0:
+            reported = version.stdout.decode("utf-8", "replace").strip()[:128] or None
+        help_result = subprocess.run([executable, "acp", "--help"], check=False, **options)
+        if version.returncode or help_result.returncode:
+            return reported, "The installed opencode does not support the ACP command. Update opencode, then refresh."
+        return reported, None
     except (OSError, subprocess.TimeoutExpired):
-        return None, "Could not check opencode. Confirm that opencode acp --help works on the machine running K41, then refresh."
+        return reported, "Could not check opencode. Confirm that opencode acp --help works on the machine running K41, then refresh."
 
 
-def cli_details(*args: Any, agent_id: str = ANTIGRAVITY_CLI_AGENT_ID, refresh: bool = False, **kwargs: Any) -> dict:
-    if args:
-        agent_id = args[0]
+def invalidate_cli_details() -> None:
+    _inspect_cli.cache_clear()
+    _inspect_opencode_cli.cache_clear()
+
+
+def inspect_executable(agent_id: str, executable: Path, *, refresh: bool = False) -> tuple[str | None, str | None]:
     if agent_id == ANTIGRAVITY_CLI_AGENT_ID:
-        binary_name = "agy"
         inspect_fn = _inspect_cli
         missing_msg = "The agy executable is no longer available. Check PATH, then refresh."
     elif agent_id == OPENCODE_AGENT_ID:
-        binary_name = "opencode"
         inspect_fn = _inspect_opencode_cli
         missing_msg = "The opencode executable is no longer available. Check PATH, then refresh."
     else:
         raise AcpError(f"Unknown ACP agent: {agent_id}.")
 
-    executable = shutil.which(binary_name)
-    if not executable:
-        return {"executable_path": None, "version": None, "error": None}
-    executable = str(Path(executable).resolve())
     if refresh:
         inspect_fn.cache_clear()
     try:
-        info = Path(executable).stat()
-        version, error = inspect_fn(executable, info.st_mtime_ns, info.st_size)
+        info = executable.stat()
+        return inspect_fn(str(executable), (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_size))
     except OSError:
-        version, error = None, missing_msg
-    return {"executable_path": executable, "version": version, "error": error}
+        return None, missing_msg
+
+
+def cli_details(agent_id: str = ANTIGRAVITY_CLI_AGENT_ID, *, refresh: bool = False) -> dict[str, Any]:
+    try:
+        path, managed = find_cli(agent_id)
+    except KeyError:
+        raise AcpError(f"Unknown ACP agent: {agent_id}.") from None
+    if path is None:
+        return {"executable_path": None, "version": None, "error": None}
+    executable = path.resolve()
+    version, error = inspect_executable(agent_id, executable, refresh=refresh)
+    return {"executable_path": str(executable), "version": version, "error": error, "managed": managed}
 
 
 def managed_profile(native_tools: list[str] | None = None) -> Path:
     """Publish a K41-owned profile without changing the user's AGY configuration."""
-    from agent.modules.acp.service import acp_data_root
-
     root = (acp_data_root() / ANTIGRAVITY_CLI_AGENT_ID / "profiles").resolve()
     tools = effective_native_tools(native_tools)
     identity = json.dumps([str(root), PROMPT_POLICY_VERSION, tools])
@@ -142,11 +155,11 @@ def resolve_cli_command(agent_id: str = ANTIGRAVITY_CLI_AGENT_ID, *, cwd: str | 
     if agent_id == ANTIGRAVITY_CLI_AGENT_ID:
         details = cli_details()
         if not details["executable_path"]:
-            raise AcpNotInstalled("Antigravity CLI is not installed. Install agy on the machine running K41 and add it to PATH, then retry.")
+            raise AcpNotInstalled("Antigravity CLI is not installed. Install it in Settings > ACP Agents or add agy to PATH, then retry.")
         if details["error"]:
             raise AcpError(details["error"])
-        version = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", details.get("version") or "")
-        if version is None or tuple(map(int, version.groups())) < (1, 3, 3):
+        version = version_number(details.get("version"))
+        if version is None or version[:3] < (1, 3, 3):
             raise AcpError("Managed ACP prompts and tools require agy 1.3.3 or newer. Run agy update, then refresh.")
         workspace = Path(cwd or Path.home()).resolve()
         if not workspace.is_dir():
@@ -154,11 +167,11 @@ def resolve_cli_command(agent_id: str = ANTIGRAVITY_CLI_AGENT_ID, *, cwd: str | 
         argv = [details["executable_path"], "acp", "--process-per-session"]
         profile = managed_profile(native_tools)
         argv.extend(["--agent", profile.stem, "--add-dir", str(profile.parent.parent.parent), "--include-default-customizations=false"])
-        return AgentCommand(argv=argv, cwd=workspace, env=cli_environment())
+        return AgentCommand(argv=argv, cwd=workspace, env=cli_environment(disable_agy_update=bool(details.get("managed"))))
     elif agent_id == OPENCODE_AGENT_ID:
         details = cli_details(OPENCODE_AGENT_ID)
         if not details["executable_path"]:
-            raise AcpNotInstalled("OpenCode CLI is not installed. Install opencode on the machine running K41 and add it to PATH, then retry.")
+            raise AcpNotInstalled("OpenCode CLI is not installed. Install it in Settings > ACP Agents or add opencode to PATH, then retry.")
         if details["error"]:
             raise AcpError(details["error"])
         workspace = Path(cwd or Path.home()).resolve()

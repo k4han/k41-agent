@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from shutil import which
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -28,7 +27,7 @@ from agent.delivery.http.dashboard.routes.helpers.sse import (
     SSE_HEARTBEAT_SECONDS,
     sse_event,
 )
-from agent.modules.acp import peek_acp_service
+from agent.modules.acp import any_acp_cli_installed, peek_acp_service
 from agent.modules.agent_runtime import (
     get_active_session_registry,
     get_background_task_manager,
@@ -198,7 +197,7 @@ def _build_onboarding(
 ) -> dict[str, bool]:
     running_channels = sum(1 for s in services if s.get("status") == "running")
     ready_providers = sum(1 for p in providers if p.get("ready"))
-    has_acp_cli = which("agy") is not None or which("opencode") is not None
+    has_acp_cli = any_acp_cli_installed()
     # An installed ACP agent can answer chats without any provider configured.
     needs_provider = ready_providers == 0 and not has_acp_cli
     needs_channel = running_channels == 0
@@ -307,7 +306,7 @@ async def get_dashboard_home(request: Request) -> dict[str, Any]:
         tasks_failed=tasks_failed,
         jobs_total=len(jobs),
         sessions_active=sessions_active,
-        providers_configured=ready_providers + int(which("agy") is not None or which("opencode") is not None),
+        providers_configured=ready_providers + int(any_acp_cli_installed()),
         mcp_connected=mcp_connected,
     )
 

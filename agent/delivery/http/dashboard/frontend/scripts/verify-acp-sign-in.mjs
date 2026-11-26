@@ -17,15 +17,22 @@ assert.ok(executable, 'Set BROWSER_EXECUTABLE to run browser checks.');
 
 let polls = 0;
 let installed = false;
+let version = "1.5.10";
 let signedIn = false;
 let authError = "";
 let failNext = false;
 let refreshes = 0;
+let operation = null;
 const mutations = [];
+const revision = () => installed ? `managed-${version}` : "missing";
 const agent = () => ({
   id: "antigravity-cli", display_name: "Google Antigravity (agy acp)",
-  installed, version: installed ? "1.5.10" : null,
-  executable_path: installed ? "C:/Program Files/agy/agy.exe" : null,
+  installed, version: installed ? version : null,
+  latest_version: "1.5.12", management_source: installed ? "managed" : null,
+  installation_revision: revision(), operation,
+  actions: { install: !installed, update: installed, uninstall: installed },
+  executable_path: installed ? "C:/K41/acp/agy.exe" : null,
+  login_command: "agy acp --login",
   auth: {
     signed_in: signedIn, state: authError ? "error" : !installed ? "not_installed" : signedIn ? "signed_in" : "signed_out",
     plan: signedIn ? "Pro" : "", error: authError, config_options: [],
@@ -43,7 +50,14 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.startsWith('/dashboard-api') || url.pathname === '/health') {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('X-CSRF-Token', 'test-csrf');
-    if (req.method !== "GET") mutations.push(req.url);
+    if (req.method !== "GET" && url.pathname.startsWith('/dashboard-api/acp/agents/')) {
+      const action = req.method === "DELETE" ? "uninstall" : url.pathname.split("/").at(-1);
+      mutations.push({ action, csrf: req.headers["x-csrf-token"], revision: req.headers["if-match"] });
+      operation = { id: `operation-${mutations.length}`, action, state: "running", error: null };
+      res.writeHead(202);
+      res.end(JSON.stringify({ operation }));
+      return;
+    }
     if (url.pathname === '/dashboard-api/acp/agents') {
       polls++;
       if (url.searchParams.get("refresh") === "true") refreshes++;
@@ -120,13 +134,25 @@ try {
   };
   const panel = 'document.querySelector("section.panel")';
   const refresh = 'document.querySelector("section button")';
+  const button = (name, scope = "section.panel") =>
+    `([...document.querySelectorAll(${JSON.stringify(scope + " button")})].find(button => button.textContent.trim() === ${JSON.stringify(name)}))`;
+  const shows = (text) => js(`document.body.textContent.includes(${JSON.stringify(text)})`);
   await call('Page.navigate', { url: base + '/settings/acp' });
-  await until(() => js("document.body.textContent.includes('Not installed')"), "missing CLI");
+  await until(() => shows('Not installed'), "missing CLI");
   assert.equal(await js("document.querySelectorAll('section.panel').length"), 1);
   assert.equal(await js("document.querySelectorAll('section input, section textarea').length"), 0);
-  assert.equal(await js("document.body.textContent.includes('agy acp --login')"), true);
-  assert.equal(await js("document.body.textContent.includes('agy update')"), true);
-  assert.equal(await js("document.querySelectorAll('section button').length"), 1);
+  assert.equal(await shows('Latest available: 1.5.12'), true);
+  await js(button("Download and install") + ".click()");
+  await until(() => shows("Downloading and installing…"), "installation progress");
+  assert.equal(await js(button("Download and install") + ".disabled"), true);
+  await call('Page.reload');
+  await until(() => shows("Downloading and installing…"), "installation progress after reload");
+  installed = true;
+  operation = { ...operation, state: "succeeded" };
+  await until(() => shows("Version 1.5.10, not signed in"), "installed CLI after polling");
+  assert.equal(await shows('C:/K41/acp/agy.exe'), true);
+  assert.equal(await shows('Installation source: K41'), true);
+  assert.equal(await shows('agy acp --login'), true);
 
   const refreshStatus = async (expected) => {
     const before = refreshes;
@@ -134,9 +160,6 @@ try {
     await until(() => refreshes > before, "refresh query");
     await until(() => js("!" + refresh + ".disabled && document.body.textContent.includes(" + JSON.stringify(expected) + ")"), expected);
   };
-  installed = true;
-  await refreshStatus("Version 1.5.10, not signed in");
-  assert.equal(await js("document.body.textContent.includes('C:/Program Files/agy/agy.exe')"), true);
   signedIn = true;
   await refreshStatus("Version 1.5.10, signed in (Pro)");
   signedIn = false;
@@ -147,12 +170,39 @@ try {
   await refreshStatus("CLI status unavailable.");
   authError = "";
   await refreshStatus("Version 1.5.10, not signed in");
+
+  await js(button("Update") + ".click()");
+  await until(() => shows("Updating…"), "update progress");
+  operation = { ...operation, state: "failed", error: "The download failed its checksum verification." };
+  await until(() => shows("checksum verification"), "update error");
+  assert.equal(await shows("Version 1.5.10, not signed in"), true);
+  await js(button("Update") + ".click()");
+  await until(() => shows("Updating…"), "retry progress");
+  version = "1.5.12";
+  operation = { ...operation, state: "succeeded" };
+  await until(() => shows("Version 1.5.12, not signed in"), "updated CLI version");
+
+  await js(button("Uninstall") + ".click()");
+  await until(() => shows("Uninstall ACP agent?"), "uninstall confirmation");
+  await js(button("Cancel", '[role="dialog"]') + ".click()");
+  assert.equal(mutations.length, 3);
+  await js(button("Uninstall") + ".click()");
+  await js(button("Uninstall", '[role="dialog"]') + ".click()");
+  await until(() => shows("Uninstalling…"), "uninstall progress");
+  installed = false;
+  operation = { ...operation, state: "succeeded" };
+  await until(() => shows("Not installed"), "uninstalled CLI");
   const before = polls;
   await delay(1700);
-  assert.equal(polls, before, "Read-only CLI status must not poll installation or sign-in jobs");
-  assert.deepEqual(mutations, []);
+  assert.equal(polls, before, "Polling stops when all operations are finished");
+  assert.deepEqual(mutations, [
+    { action: "install", csrf: "test-csrf", revision: '"missing"' },
+    { action: "update", csrf: "test-csrf", revision: '"managed-1.5.10"' },
+    { action: "update", csrf: "test-csrf", revision: '"managed-1.5.10"' },
+    { action: "uninstall", csrf: "test-csrf", revision: '"managed-1.5.12"' },
+  ]);
   assert.deepEqual(exceptions, []);
-  console.log("PASS: CLI setup, status, refresh, errors and recovery work without managed installation or sign-in.");
+  console.log("PASS: ACP installs, updates, uninstall confirmation, refresh and operation recovery work.");
 } finally {
   if (call && ws?.readyState === WebSocket.OPEN) await Promise.race([call('Browser.close'), delay(2000)]).catch(() => {});
   ws?.close();

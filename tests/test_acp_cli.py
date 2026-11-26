@@ -191,7 +191,7 @@ def test_cli_keeps_user_profiles_and_selects_its_managed_profile(tmp_path, monke
 
 
 def test_missing_or_incompatible_cli_is_reported(tmp_path, monkeypatch):
-    monkeypatch.setattr(launcher.shutil, "which", lambda _name: None)
+    monkeypatch.setattr("agent.modules.acp.installations.shutil.which", lambda _name: None)
     with pytest.raises(AcpNotInstalled, match="PATH"):
         launcher.resolve_cli_command(cwd=str(tmp_path))
     monkeypatch.setattr(launcher, "cli_details", lambda: {"executable_path": "agy", "error": "Run agy update"})
@@ -202,7 +202,7 @@ def test_missing_or_incompatible_cli_is_reported(tmp_path, monkeypatch):
 def test_cli_capability_check_is_cached_and_invalidated_on_update(tmp_path, monkeypatch):
     executable = tmp_path / "agy.exe"
     executable.write_bytes(b"fake")
-    monkeypatch.setattr(launcher.shutil, "which", lambda _name: str(executable))
+    monkeypatch.setattr("agent.modules.acp.installations.shutil.which", lambda _name: str(executable))
     calls = []
 
     def run(argv, **kwargs):
@@ -216,15 +216,21 @@ def test_cli_capability_check_is_cached_and_invalidated_on_update(tmp_path, monk
     assert launcher.cli_details()["error"] is None and len(calls) == 2
     executable.write_bytes(b"updated executable")
     assert launcher.cli_details()["version"] == "1.5.9" and len(calls) == 4
+    original = executable.stat()
+    replacement = executable.with_name("replacement")
+    replacement.write_bytes(b"another executable")
+    os.utime(replacement, ns=(original.st_atime_ns, original.st_mtime_ns))
+    replacement.replace(executable)
+    assert launcher.cli_details()["version"] == "1.5.9" and len(calls) == 6
     launcher.cli_details(refresh=True)
-    assert len(calls) == 6
+    assert len(calls) == 8
     launcher._inspect_cli.cache_clear()
 
 
 def test_cli_without_required_acp_flags_is_incompatible(tmp_path, monkeypatch):
     executable = tmp_path / "old-agy.exe"
     executable.write_bytes(b"old")
-    monkeypatch.setattr(launcher.shutil, "which", lambda _name: str(executable))
+    monkeypatch.setattr("agent.modules.acp.installations.shutil.which", lambda _name: str(executable))
     monkeypatch.setattr(launcher.subprocess, "run", lambda argv, **_kw: subprocess.CompletedProcess(
         argv, 0, stdout=b"--agent", stderr=b"",
     ))

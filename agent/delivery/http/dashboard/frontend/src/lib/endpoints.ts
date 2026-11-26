@@ -2,6 +2,8 @@ export const API_PATHS = {
   logs: "/dashboard-api/logs",
   logContent: (source: string) => `/dashboard-api/logs/${encodeURIComponent(source)}`,
   acpAgents: "/dashboard-api/acp/agents",
+  acpInstall: (agentId: string) => `/dashboard-api/acp/agents/${encodeURIComponent(agentId)}/install`,
+  acpUpdate: (agentId: string) => `/dashboard-api/acp/agents/${encodeURIComponent(agentId)}/update`,
   acpAgent: (agentId: string, agentName?: string | null, cwd?: string) => {
     const query = new URLSearchParams();
     if (agentName?.trim()) query.set("agent_name", agentName.trim());
